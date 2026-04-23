@@ -1,0 +1,471 @@
+=======================================================================
+  KUBO DEVDOCS — CHEAT SHEET DE COMANDOS
+=======================================================================
+Credenciales de prueba:
+  email:    admin@kubo.pe
+  password: Admin123*
+
+URLs:
+  Backend API:       http://localhost:3003/api/v1
+  Swagger docs:      http://localhost:3003/docs
+  Web (Vite):        http://localhost:5173
+
+IP de tu PC en LAN (para el móvil físico):  192.168.68.104
+  -> ajusta si cambia. Obtenerla: ipconfig -> "Wireless LAN adapter Wi-Fi"
+
+
+=======================================================================
+  1) BACKEND (NestJS) — puerto 3000
+=======================================================================
+Abrir una terminal en:
+  c:\Repositorio\Aprendizaje\Claude\proyecto\kubo_documentacion\backend
+
+Primera vez (instalar dependencias):
+  npm install
+
+Levantar en modo dev con hot reload:
+  npm run start:dev
+
+Verificar que responde:
+  - En el PC:     http://localhost:3000/docs
+  - Desde el cel: http://192.168.68.104:3000/docs
+
+Nota: main.ts ya hace listen('0.0.0.0') para que el celular lo alcance.
+
+Si es la primera vez y el celular NO alcanza al backend:
+  Regla de firewall (PowerShell como administrador, 1 vez):
+    New-NetFirewallRule -DisplayName "Kubo Backend 3000" -Direction Inbound `
+      -Protocol TCP -LocalPort 3000 -Action Allow -Profile Private
+
+Requisitos externos que deben estar corriendo:
+  - MySQL  en localhost:3306 (user=root, pass=root, db=kubo_devdocs)
+  - Redis  en localhost:6380
+
+
+=======================================================================
+  2) WEB (React + Vite) — puerto 5173
+=======================================================================
+Abrir otra terminal en:
+  c:\Repositorio\Aprendizaje\Claude\proyecto\kubo_documentacion\web
+
+Primera vez:
+  npm install
+
+Levantar en dev:
+  npm run dev
+
+Abrir en el navegador:
+  http://localhost:5173
+
+Si editas código: Vite recarga solo (HMR). No necesitas hacer nada.
+
+
+=======================================================================
+  3) MÓVIL (Flutter) — celular físico Android por USB
+=======================================================================
+Pre-requisitos (una sola vez):
+  - Depuración USB activada en el teléfono
+  - Cable conectado, autorizar el PC cuando aparezca el popup
+  - Confirmar que Flutter lo ve:
+      flutter devices
+
+Abrir otra terminal en:
+  c:\Repositorio\Aprendizaje\Claude\proyecto\kubo_documentacion\mobile
+
+Primera vez o si tocaste pubspec.yaml:
+  flutter clean
+  flutter pub get
+
+Levantar en el celular apuntando al backend por LAN:
+  flutter run --dart-define=API_BASE_URL=http://192.168.68.104:3000/api/v1
+
+  (si cambia tu IP, reemplazar 192.168.68.104 por la nueva)
+
+Teclas útiles mientras corre 'flutter run':
+  r   Hot reload  (cambios de UI sin estado nuevo)
+  R   Hot restart (reinicia la app — usar cuando tocas api_client, main, router, singletons)
+  q   Quit
+
+Emulador Android (si no tienes celular físico):
+  flutter run --dart-define=API_BASE_URL=http://10.0.2.2:3000/api/v1
+
+Chrome / desktop para pruebas:
+  flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:3000/api/v1
+
+-----------------------------------------------------------------------
+  BUILD APK PARA PRODUCCIÓN (docs.kuboti.com)
+-----------------------------------------------------------------------
+IMPORTANTE: sin el --dart-define el APK queda apuntando a localhost:3000
+y el login devolverá "credenciales inválidas" desde el celular.
+
+  flutter build apk --release --dart-define=API_BASE_URL=https://docs.kuboti.com/api/v1
+
+Salida: build/app/outputs/flutter-apk/app-release.apk
+Instalar encima del APK anterior (sin desinstalar) para conservar
+grabaciones locales y cache.
+
+
+=======================================================================
+  ORDEN RECOMENDADO PARA ARRANCAR UN DÍA DE TRABAJO
+=======================================================================
+Terminal 1 — backend:
+  cd backend
+  npm run start:dev
+
+Terminal 2 — web:
+  cd web
+  npm run dev
+
+Terminal 3 — móvil (opcional, solo si vas a probar la app):
+  cd mobile
+  flutter run --dart-define=API_BASE_URL=http://192.168.68.104:3000/api/v1
+
+Luego abrir en el navegador: http://localhost:5173
+
+
+=======================================================================
+  REQUISITOS Y PASO A PASO PARA ARRANCAR DESDE CERO
+=======================================================================
+
+-----------------------------------------------------------------------
+  BACKEND — NestJS  (puerto 3000)
+-----------------------------------------------------------------------
+Requisitos en la máquina:
+  - Node.js 20+         (node -v)
+  - npm                 (npm -v)
+  - Docker Desktop      (para MySQL y Redis)  -> docker -v
+  - MySQL en localhost:3306  (usuario=root, pass=root, db=kubo_devdocs)
+  - Redis en localhost:6380
+
+Paso 1) Levantar Redis (si no existe el contenedor):
+  docker run -d --name kubo-redis -p 6380:6379 redis:7-alpine
+
+  Si ya existe y solo está detenido:
+    docker start kubo-redis
+
+Paso 2) Levantar MySQL (contenedor: mysql-local):
+  Si ya existe y solo está detenido:
+    docker start mysql-local
+
+  Si no existe (crear desde cero):
+    docker run -d --name mysql-local -p 3306:3306 `
+      -e MYSQL_ROOT_PASSWORD=root `
+      -e MYSQL_DATABASE=kubo_devdocs `
+      mysql:8.0
+
+    Y aplicar el schema + seed inicial (crea tablas y el usuario admin):
+      docker exec -i mysql-local mysql -uroot -proot kubo_devdocs ^
+        < c:\Repositorio\Aprendizaje\Claude\proyecto\kubo_documentacion\backend\sql\schema.sql
+
+Paso 3) Verificar que ambos están arriba:
+  docker ps
+  (deben aparecer kubo-redis y mysql-local en la lista)
+
+  Verificar que el usuario admin existe:
+    docker exec -it mysql-local mysql -uroot -proot kubo_devdocs ^
+      -e "SELECT id,email,role FROM users;"
+    (debe listar admin@kubo.pe con role ADMIN)
+
+Paso 4) Instalar dependencias (solo la primera vez):
+  cd backend
+  npm install
+
+Paso 5) Verificar el archivo backend/.env:
+  DB_HOST=localhost
+  DB_PORT=3306
+  DB_USER=root
+  DB_PASS=root
+  DB_NAME=kubo_devdocs
+  REDIS_HOST=localhost
+  REDIS_PORT=6380
+  JWT_ACCESS_SECRET=...
+  JWT_REFRESH_SECRET=...
+
+Paso 6) Levantar el backend:
+  cd backend
+  npm run start:dev
+
+Paso 7) Verificar:
+  http://localhost:3000/docs   (Swagger)
+
+  Si abre un 404 que dice "This page could not be found" NO es el
+  backend Kubo — es otra app Node (probablemente Next.js) ocupando
+  el puerto 3000. Ver la sección "PUERTO 3000 OCUPADO" abajo.
+
+-----------------------------------------------------------------------
+  PUERTO 3000 OCUPADO  (conflicto con otro proyecto)
+-----------------------------------------------------------------------
+Ojo: el proyecto "pichanga" (Next.js) también corre en el puerto 3000.
+Si está levantado, Kubo NO puede arrancar su backend.
+
+Paso 1) Ver qué procesos escuchan en 3000:
+  netstat -ano | findstr :3000
+  -> última columna = PID
+
+Paso 2) Identificar qué está corriendo cada PID:
+  Get-CimInstance Win32_Process -Filter "ProcessId=<PID>" `
+    | Select ProcessId, CommandLine | Format-List
+
+Paso 3) Matar los procesos que no sean el backend Kubo actual:
+  Stop-Process -Id <PID1>,<PID2> -Force
+
+Paso 4) Confirmar que el puerto quedó libre:
+  netstat -ano | findstr :3000
+  (no debe devolver nada)
+
+Paso 5) Relanzar el backend Kubo:
+  cd backend
+  npm run start:dev
+
+Regla práctica: NO trabajar con Kubo y pichanga al mismo tiempo, o
+cambiar uno de los dos a otro puerto.
+
+-----------------------------------------------------------------------
+  WEB — React + Vite  (puerto 5173)
+-----------------------------------------------------------------------
+Requisitos en la máquina:
+  - Node.js 20+         (node -v)
+  - npm                 (npm -v)
+  - El BACKEND corriendo en http://localhost:3000
+
+Paso 1) Instalar dependencias (solo la primera vez):
+  cd web
+  npm install
+
+Paso 2) Verificar el archivo web/.env (o .env.local):
+  VITE_API_BASE_URL=http://localhost:3000/api/v1
+
+Paso 3) Levantar el front:
+  cd web
+  npm run dev
+
+Paso 4) Abrir en el navegador:
+  http://localhost:5173
+
+Nota: si editas tailwind.config.js, debes parar (Ctrl+C) y volver
+a ejecutar 'npm run dev'. El resto de cambios recargan solos.
+
+-----------------------------------------------------------------------
+  MÓVIL — Flutter (Android físico o emulador)
+-----------------------------------------------------------------------
+Requisitos en la máquina:
+  - Flutter SDK         (flutter --version)
+  - Android Studio o SDK tools instalados
+  - El BACKEND corriendo y alcanzable desde el dispositivo
+
+Para celular físico (USB):
+  - Depuración USB activada en el teléfono
+  - Cable conectado, "permitir depuración" aceptado
+  - PC y celular en la MISMA red Wi-Fi
+  - Regla de firewall abierta en puerto 3000 (ver sección BACKEND arriba)
+
+Paso 1) Verificar que Flutter ve el dispositivo:
+  flutter devices
+
+Paso 2) Instalar dependencias (primera vez o al tocar pubspec.yaml):
+  cd mobile
+  flutter clean
+  flutter pub get
+
+Paso 3) Obtener tu IP LAN:
+  ipconfig
+  (buscar "Wireless LAN adapter Wi-Fi" -> "Dirección IPv4")
+
+Paso 4) Levantar la app apuntando al backend:
+
+  Celular físico (reemplazar IP por la tuya):
+    flutter run --dart-define=API_BASE_URL=http://192.168.68.104:3000/api/v1
+
+  Emulador Android:
+    flutter run --dart-define=API_BASE_URL=http://10.0.2.2:3000/api/v1
+
+  Chrome (pruebas rápidas):
+    flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:3000/api/v1
+
+Paso 5) Mientras corre 'flutter run':
+  r   Hot reload  (cambios de UI)
+  R   Hot restart (cuando tocas rutas, singletons, api_client, main)
+  q   Salir
+
+
+
+=======================================================================
+  #ANOTACIONES AAPAZA — PRUEBAS MANUALES DEL REGISTRO DE USUARIOS
+=======================================================================
+Antes de empezar, deben estar corriendo (en terminales separadas):
+  1) Docker con los contenedores kubo-redis y kubo-mysql (docker ps)
+  2) Backend:
+       cd backend
+       npm run start:dev
+     -> esperar a ver "Nest application successfully started"
+     -> http://localhost:3000/docs debe abrir el Swagger
+
+-----------------------------------------------------------------------
+  PRUEBA EN LA WEB
+-----------------------------------------------------------------------
+Paso 1) En OTRA terminal, levantar el front:
+  cd web
+  npm run dev
+  -> esperar a ver:  Local:   http://localhost:5173/
+
+Paso 2) Abrir en el navegador:
+  http://localhost:5173
+  -> debería redirigir a /login
+
+  Si NO redirige (muestra /projects) es porque ya hay sesión.
+  Abrir DevTools (F12) -> Console y ejecutar:
+    localStorage.clear(); location.reload();
+
+Paso 3) Click en "Regístrate" (abajo del formulario)
+  -> te lleva a /register
+
+Paso 4) Completar el formulario:
+  Nombre:              Juan Prueba
+  Email:               juan@test.pe
+  Contraseña:          Test1234      (mínimo 8 caracteres)
+  Confirmar:           Test1234
+
+Paso 5) Click "Crear cuenta"
+  -> debe autenticarte y mandarte a /projects
+
+Paso 6) Cerrar sesión y volver a entrar:
+  -> ingresar en /login con juan@test.pe / Test1234
+  -> confirma que la cuenta quedó guardada
+
+-----------------------------------------------------------------------
+  PRUEBA EN EL MÓVIL
+-----------------------------------------------------------------------
+Paso 1) Con el celular conectado por USB:
+  cd mobile
+  flutter run --dart-define=API_BASE_URL=http://192.168.68.104:3000/api/v1
+  (usa tu IP LAN actual; confirma con ipconfig)
+
+Paso 2) Si la app ya estaba corriendo:
+  Presionar  R  (mayúscula = hot restart) en la terminal de flutter
+  -> necesario para cargar la nueva ruta /register
+
+Paso 3) En la pantalla de login del celular:
+  Tocar "Regístrate"
+
+Paso 4) Completar con otro email distinto (para no chocar con el web):
+  Nombre:      Maria Prueba
+  Email:       maria@test.pe
+  Contraseña:  Test1234
+  Confirmar:   Test1234
+
+Paso 5) Tocar "Crear cuenta"
+  -> debe ir directo a /meetings
+
+-----------------------------------------------------------------------
+  VALIDACIONES A PROBAR (web y móvil)
+-----------------------------------------------------------------------
+  - Email repetido          -> backend devuelve 409,
+                               mensaje "No se pudo crear la cuenta"
+  - Contraseña < 8          -> error inline en el campo
+  - Confirmar distinta      -> error inline "Las contraseñas no coinciden"
+  - Email mal formado       -> error inline "Email inválido"
+
+-----------------------------------------------------------------------
+  VERIFICAR EN LA BASE DE DATOS (opcional)
+-----------------------------------------------------------------------
+  docker exec -it kubo-mysql mysql -uroot -proot kubo_devdocs -e ^
+    "SELECT id,email,full_name,role FROM users ORDER BY id DESC LIMIT 5;"
+
+  Los nuevos registros deben salir con role = MEMBER.
+
+=======================================================================
+  PUBLICAR NUEVA VERSIÓN EN PRODUCCIÓN  (docs.kuboti.com)
+=======================================================================
+Stack en el VPS: docker compose (mysql + redis + backend + web + caddy)
+Ruta en el servidor:  ~/kubo/
+Las credenciales del VPS y los secretos están en SECRETS.local.txt
+(ese archivo NO se sube a GitHub ni se incluye en el .tar.gz).
+
+-----------------------------------------------------------------------
+  PASO 1 — EMPAQUETAR EL PROYECTO (en tu PC)
+-----------------------------------------------------------------------
+Desde la raíz del proyecto:
+  c:\Repositorio\Aprendizaje\Claude\proyecto\kubo_documentacion
+
+En Git Bash / WSL / PowerShell con tar:
+  tar --exclude='node_modules' --exclude='dist' --exclude='build' ^
+      --exclude='.env' --exclude='.env.local' ^
+      --exclude='SECRETS.local.txt' --exclude='kubo.tar.gz' ^
+      --exclude='mobile/build' --exclude='mobile/.dart_tool' ^
+      --exclude='*.log' ^
+      -czf kubo.tar.gz backend web docs docker-compose.yml Caddyfile
+
+Verificar tamaño (debe ser pequeño, MB, no GB):
+  dir kubo.tar.gz    (Windows)
+  ls -lh kubo.tar.gz (bash)
+
+-----------------------------------------------------------------------
+  PASO 2 — SUBIR AL VPS
+-----------------------------------------------------------------------
+  scp -i ~/.ssh/id_ed25519 kubo.tar.gz kubo@194.238.24.82:~/
+
+-----------------------------------------------------------------------
+  PASO 3 — DESPLEGAR EN EL VPS
+-----------------------------------------------------------------------
+Conectarse:
+  ssh -i ~/.ssh/id_ed25519 kubo@194.238.24.82
+
+Ya dentro del servidor:
+  cd ~/kubo
+
+  # Backup rápido del .env.production antes de sobreescribir archivos
+  cp .env.production .env.production.bak
+
+  # Extraer el nuevo código encima (mantiene .env.production)
+  tar -xzf ~/kubo.tar.gz
+
+  # Reconstruir y relanzar contenedores
+  docker compose build
+  docker compose up -d
+
+  # Ver que todo quedó arriba
+  docker compose ps
+
+-----------------------------------------------------------------------
+  PASO 4 — VERIFICAR
+-----------------------------------------------------------------------
+Desde tu PC:
+  https://docs.kuboti.com          -> web
+  https://docs.kuboti.com/docs     -> Swagger del backend
+  https://docs.kuboti.com/api/v1   -> API
+
+Ver logs en vivo (en el VPS):
+  docker compose logs -f backend
+  docker compose logs -f web
+  docker compose logs -f caddy
+  (Ctrl+C para salir de los logs; los contenedores siguen corriendo)
+
+-----------------------------------------------------------------------
+  SI ALGO FALLA  (rollback rápido)
+-----------------------------------------------------------------------
+  cd ~/kubo
+  docker compose logs --tail=200 backend   # ver el error
+  docker compose down                       # bajar todo
+  # restaurar el .env si se tocó:
+  cp .env.production.bak .env.production
+  docker compose up -d
+
+-----------------------------------------------------------------------
+  SI CAMBIASTE pubspec.yaml DEL MÓVIL — REGENERAR APK
+-----------------------------------------------------------------------
+En tu PC, desde mobile/:
+  flutter build apk --release ^
+    --dart-define=API_BASE_URL=https://docs.kuboti.com/api/v1
+
+El APK queda en:
+  mobile/build/app/outputs/flutter-apk/app-release.apk
+
+Instalar encima del anterior (NO desinstalar, así conserva caché local).
+
+
+-----------------------------------------------------------------------
+  NOTA DE SEGURIDAD
+-----------------------------------------------------------------------
+Las credenciales del servidor, la llave SSH y los secretos de producción
+viven en SECRETS.local.txt (en esta misma carpeta). Ese archivo no debe
+subirse a GitHub — agregarlo al .gitignore antes de inicializar el repo.

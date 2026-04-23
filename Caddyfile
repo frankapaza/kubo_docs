@@ -1,0 +1,16 @@
+docs.kuboti.com {
+    encode zstd gzip
+
+    @api {
+        path /api/*
+        path /docs
+        path /docs/*
+    }
+    handle @api {
+        reverse_proxy backend:3000
+    }
+
+    handle {
+        reverse_proxy web:80
+    }
+}

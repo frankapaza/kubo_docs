@@ -1,0 +1,103 @@
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./backend/sql/schema.sql:/docker-entrypoint-initdb.d/000_schema.sql:ro
+      - ./backend/sql/migrations/003_ai_providers_and_signatures.sql:/docker-entrypoint-initdb.d/003_ai_providers_and_signatures.sql:ro
+      - ./backend/sql/migrations/004_client_requests.sql:/docker-entrypoint-initdb.d/004_client_requests.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - internal
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      API_PREFIX: api/v1
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: ${DB_ROOT_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_ACCESS_EXPIRES_IN: 15m
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_REFRESH_EXPIRES_IN: 7d
+      CRYPTO_SECRET: ${CRYPTO_SECRET}
+      STORAGE_DRIVER: local
+      STORAGE_LOCAL_PATH: /app/uploads
+      AUDIO_MAX_SIZE_MB: 100
+      TRANSCRIPTION_PROVIDER: whisper-api
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      WHISPER_API_BASE_URL: ${WHISPER_API_BASE_URL}
+      WHISPER_MODEL: ${WHISPER_MODEL}
+      WHISPER_LANGUAGE: ${WHISPER_LANGUAGE}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+    volumes:
+      - backend_uploads:/app/uploads
+    networks:
+      - internal
+
+  web:
+    build:
+      context: ./web
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+    restart: unless-stopped
+    networks:
+      - internal
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - web
+    networks:
+      - internal
+
+networks:
+  internal:
+
+volumes:
+  mysql_data:
+  redis_data:
+  backend_uploads:
+  caddy_data:
+  caddy_config:

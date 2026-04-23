@@ -1,0 +1,23 @@
+# Secretos y credenciales — NUNCA subir
+SECRETS.local.txt
+.env
+.env.production
+.env.local
+.env.*.local
+
+# Dependencias
+node_modules/
+
+# Build outputs
+backend/dist/
+backend/uploads/
+
+# Artefactos de deploy
+kubo.tar.gz
+
+# Claude Code
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
