@@ -42,7 +42,6 @@ export default function ClientDetailPage() {
   const { clientId } = useParams();
   const id = Number(clientId);
   const navigate = useNavigate();
-  const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>('summary');
 
   if (!Number.isFinite(id) || id <= 0) return <Navigate to="/clients" replace />;

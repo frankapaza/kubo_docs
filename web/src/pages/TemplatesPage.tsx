@@ -5,7 +5,6 @@ import { templatesApi, UpsertTemplateBody } from '../api/documents.api';
 import {
   DOCUMENT_TYPES,
   DOCUMENT_TYPE_LABELS,
-  type DocumentTemplate,
   type DocumentType,
   type TemplateVariable,
 } from '../api/types';

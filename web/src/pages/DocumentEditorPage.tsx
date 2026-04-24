@@ -6,7 +6,6 @@ import { documentsApi, templatesApi } from '../api/documents.api';
 import {
   COMMERCIAL_DOCUMENT_STATUS_LABELS,
   DOCUMENT_TYPE_LABELS,
-  type DocumentTemplate,
   type TemplateVariable,
 } from '../api/types';
 import { Button } from '../components/ui/Button';
@@ -35,19 +34,12 @@ import { askConfirm } from '../ui/ConfirmDialog';
  */
 export default function DocumentEditorPage() {
   const { documentId } = useParams();
-  const [searchParams] = useSearchParams();
   const isNew = documentId === 'new';
   const docIdNum = !isNew && documentId ? Number(documentId) : null;
 
   if (isNew) return <CreateDocumentFlow />;
   if (docIdNum) return <EditExistingDocument id={docIdNum} />;
   return <Navigate to="/clients" replace />;
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  function _hint() {
-    // silence unused import
-    return searchParams;
-  }
 }
 
 function CreateDocumentFlow() {
@@ -281,7 +273,6 @@ function CreateDocumentFlow() {
 }
 
 function EditExistingDocument({ id }: { id: number }) {
-  const navigate = useNavigate();
   const qc = useQueryClient();
   const [mode, setMode] = useState<'preview' | 'edit'>('preview');
   const [contentMarkdown, setContentMarkdown] = useState('');
@@ -487,10 +478,6 @@ function EditExistingDocument({ id }: { id: number }) {
     </div>
   );
 
-  // Reference to avoid navigate unused warning during tree-shaking
-  function _ensureUsed() {
-    return navigate;
-  }
 }
 
 function EmailModal({
