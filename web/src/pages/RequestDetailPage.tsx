@@ -232,16 +232,23 @@ export default function RequestDetailPage() {
         projects={projects}
       />
 
-      {request.status === 'SENT' && (
+      {(request.status === 'INBOX' ||
+        request.status === 'STRUCTURED' ||
+        request.status === 'SENT') && (
         <Card className="border-2 border-emerald-100">
           <CardBody className="flex items-center justify-between gap-4 flex-wrap py-4">
             <div className="flex items-start gap-3">
               <CheckIcon size={20} className="text-emerald-600 mt-0.5 shrink-0" />
               <div>
-                <p className="font-semibold text-slate-900 text-sm">Solicitud resuelta en Jira</p>
+                <p className="font-semibold text-slate-900 text-sm">
+                  {request.status === 'SENT'
+                    ? 'Solicitud resuelta en Jira'
+                    : 'Completar atención'}
+                </p>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Al marcarla como completada se genera automáticamente un documento de cierre para
-                  enviárselo al cliente.
+                  {request.status === 'SENT'
+                    ? 'Se generará automáticamente un documento de cierre.'
+                    : 'Marca esta atención como resuelta sin pasar por Jira. Se genera documento de cierre si tiene cliente asignado.'}
                 </p>
               </div>
             </div>
@@ -250,17 +257,16 @@ export default function RequestDetailPage() {
               icon={<CheckIcon size={15} />}
               loading={complete.isPending}
               onClick={async () => {
-                const { askConfirm } = await import('../ui/ConfirmDialog');
                 const ok = await askConfirm({
-                  title: 'Marcar como completada',
-                  message: `¿Confirmas que la solicitud "${request.title ?? 'esta solicitud'}" fue resuelta y deseas generar el documento de cierre?`,
+                  title: 'Completar atención',
+                  message: `¿Confirmas que la atención "${request.title ?? 'esta solicitud'}" fue resuelta?`,
                   confirmText: 'Sí, completar',
                   tone: 'info',
                 });
                 if (ok) complete.mutate();
               }}
             >
-              Marcar como completada
+              Completar atención
             </Button>
           </CardBody>
         </Card>

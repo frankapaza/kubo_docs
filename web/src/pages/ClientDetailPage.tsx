@@ -142,6 +142,7 @@ export default function ClientDetailPage() {
           onNew={() => navigate(`/documents/new?clientId=${id}`)}
           onOpen={(docId) => navigate(`/documents/${docId}`)}
           onNewDevReport={() => navigate(`/clients/${id}/dev-report/new`)}
+          onMonthlyReport={() => navigate(`/clients/${id}/monthly-report`)}
         />
       )}
     </div>
@@ -442,11 +443,13 @@ function DocumentsTab({
   onNew,
   onOpen,
   onNewDevReport,
+  onMonthlyReport,
 }: {
   documents: CommercialDocument[];
   onNew: () => void;
   onOpen: (id: number) => void;
   onNewDevReport: () => void;
+  onMonthlyReport: () => void;
 }) {
   return (
     <Card>
@@ -456,6 +459,15 @@ function DocumentsTab({
         subtitle="NDAs, cotizaciones, contratos e informes generados para este cliente"
         action={
           <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<FileTextIcon size={14} />}
+              onClick={onMonthlyReport}
+              title="Reporte mensual de atención — tickets del mes por categoría"
+            >
+              Reporte mensual
+            </Button>
             <Button
               size="sm"
               variant="secondary"

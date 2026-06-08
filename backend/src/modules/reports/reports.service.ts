@@ -6,12 +6,49 @@ import { JiraService, JiraMonthlyReport } from '../integrations/jira.service';
 import { LLMService } from '../ai/llm.service';
 import { DocumentsService } from '../documents/documents.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
+import { ClientRequestsRepository } from '../client-requests/client-requests.repository';
+import { ClientRequest, SERVICE_CATEGORIES, ServiceCategory } from '../client-requests/entities/client-request.entity';
 
 export interface MultiJiraReportSource {
   integrationId: number;
   projectKey: string;
   integrationLabel: string;
   report: JiraMonthlyReport;
+}
+
+export interface MonthlyTicketRow {
+  id: number;
+  title: string | null;
+  rawText: string;
+  requestType: string | null;
+  status: string;
+  priority: string | null;
+  scheduledAt: Date | null;
+  completedAt: Date | null;
+  durationMinutes: number | null;
+  createdAt: Date;
+}
+
+export interface MonthlyAttentionCategoryGroup {
+  category: ServiceCategory | 'SIN_CATEGORIA';
+  label: string;
+  count: number;
+  completedCount: number;
+  totalMinutes: number;
+  tickets: MonthlyTicketRow[];
+}
+
+export interface MonthlyAttentionReport {
+  clientId: number;
+  clientName: string;
+  range: { from: string; to: string };
+  totals: {
+    total: number;
+    completed: number;
+    pending: number;
+    totalMinutes: number;
+  };
+  byCategory: MonthlyAttentionCategoryGroup[];
 }
 
 export interface MultiJiraReport {
@@ -30,6 +67,17 @@ export interface MultiJiraReport {
   };
 }
 
+const CATEGORY_LABELS: Record<string, string> = {
+  SOFTWARE: 'Atención de sistemas',
+  SOPORTE: 'Atención de soporte',
+  CAPACITACION: 'Capacitación',
+  CONSULTA: 'Consultas',
+  ASESORIA: 'Apoyo en asesoría',
+  VISITA_SITIO: 'Visita en sitio',
+  OTRO: 'Otro',
+  SIN_CATEGORIA: 'Sin categoría',
+};
+
 @Injectable()
 export class ReportsService {
   private readonly logger = new Logger(ReportsService.name);
@@ -41,6 +89,7 @@ export class ReportsService {
     private readonly jira: JiraService,
     private readonly llm: LLMService,
     private readonly documents: DocumentsService,
+    private readonly clientRequestsRepo: ClientRequestsRepository,
   ) {}
 
   /**
@@ -453,6 +502,223 @@ export class ReportsService {
     }
 
     return lines.join('\n');
+  }
+
+  // ==================== REPORTE MENSUAL DE ATENCIÓN ====================
+
+  async getMonthlyAttentionReport(
+    clientId: number,
+    from: string,
+    to: string,
+  ): Promise<MonthlyAttentionReport> {
+    const client = await this.clients.findByIdOrFail(clientId);
+
+    const fromDate = new Date(from);
+    const toDate = new Date(to);
+    toDate.setDate(toDate.getDate() + 1); // incluir el día `to` completo
+
+    const tickets = await this.clientRequestsRepo.listByClientAndRange({
+      clientId,
+      from: fromDate,
+      to: toDate,
+    });
+
+    const grouped = this.groupByCategory(tickets);
+
+    const total = tickets.length;
+    const completed = tickets.filter((t) => t.status === 'COMPLETED').length;
+    const totalMinutes = tickets.reduce((sum, t) => sum + (t.durationMinutes ?? 0), 0);
+
+    return {
+      clientId,
+      clientName: client.razonSocial,
+      range: { from, to },
+      totals: { total, completed, pending: total - completed, totalMinutes },
+      byCategory: grouped,
+    };
+  }
+
+  async generateMonthlyAttentionDocument(
+    userId: number,
+    clientId: number,
+    from: string,
+    to: string,
+    additionalContext?: string,
+  ): Promise<{ documentId: number }> {
+    const report = await this.getMonthlyAttentionReport(clientId, from, to);
+
+    if (report.totals.total === 0) {
+      throw new BadRequestException({
+        code: 'BAD_REQUEST',
+        message: 'No hay tickets registrados en el periodo seleccionado.',
+      });
+    }
+
+    const monthLabel = new Date(from).toLocaleDateString('es-PE', {
+      month: 'long',
+      year: 'numeric',
+    });
+
+    const systemPrompt = [
+      'Eres un especialista de soporte redactando un REPORTE MENSUAL DE ATENCIÓN para un cliente.',
+      'Recibes datos estructurados de tickets/solicitudes atendidas en el mes y redactas un informe profesional en español (Perú).',
+      '',
+      'Estructura del informe:',
+      '1. Resumen ejecutivo (2-3 líneas destacando lo más relevante del mes)',
+      '2. Atenciones del mes por categoría (narrativa corta por cada categoría con actividad)',
+      '3. Indicadores clave (tablas de totales, horas, estados)',
+      '4. Observaciones y recomendaciones (si aplica)',
+      '',
+      'Reglas:',
+      '- Usa markdown con ##, ###, listas y tablas.',
+      '- NO inventes números. Solo usa los proporcionados.',
+      '- Tono profesional pero cercano, dirigido al cliente.',
+      '- Si no hubo actividad en una categoría, omítela.',
+      '- Máximo 1000 palabras.',
+    ].join('\n');
+
+    const dataSummary = this.buildAttentionSummary(report);
+    let userPrompt = `Datos de atención del cliente "${report.clientName}" del ${from} al ${to}:\n\n${dataSummary}`;
+    if (additionalContext?.trim()) {
+      userPrompt += `\n\nCONTEXTO ADICIONAL:\n${additionalContext}`;
+    }
+
+    this.logger.log(
+      `generateMonthlyAttentionDocument: cliente=${report.clientName} ${report.totals.total} tickets, ${report.totals.totalMinutes}min`,
+    );
+
+    const narrative = await this.llm.chat(systemPrompt, [{ role: 'user', content: userPrompt }]);
+    const markdown = this.assembleAttentionMarkdown(report, monthLabel, narrative);
+    const title = `Reporte mensual de atención — ${report.clientName} — ${monthLabel}`;
+
+    const doc = await this.documents.createDocumentRaw(userId, {
+      clientId,
+      title,
+      type: 'OTHER',
+      contentMarkdown: markdown,
+      variablesValues: {
+        periodo_desde: from,
+        periodo_hasta: to,
+        total_tickets: report.totals.total,
+        tickets_completados: report.totals.completed,
+        horas_totales: +(report.totals.totalMinutes / 60).toFixed(1),
+      },
+    });
+
+    return { documentId: doc.id };
+  }
+
+  private groupByCategory(tickets: ClientRequest[]): MonthlyAttentionCategoryGroup[] {
+    const map = new Map<string, ClientRequest[]>();
+
+    for (const t of tickets) {
+      const key = t.serviceCategory ?? 'SIN_CATEGORIA';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(t);
+    }
+
+    // Orden: categorías definidas primero, SIN_CATEGORIA al final
+    const order = [...(SERVICE_CATEGORIES as string[]), 'SIN_CATEGORIA'];
+    const groups: MonthlyAttentionCategoryGroup[] = [];
+
+    for (const cat of order) {
+      const items = map.get(cat);
+      if (!items || items.length === 0) continue;
+      groups.push({
+        category: cat as ServiceCategory,
+        label: CATEGORY_LABELS[cat] ?? cat,
+        count: items.length,
+        completedCount: items.filter((t) => t.status === 'COMPLETED').length,
+        totalMinutes: items.reduce((s, t) => s + (t.durationMinutes ?? 0), 0),
+        tickets: items.map((t) => ({
+          id: t.id,
+          title: t.title,
+          rawText: t.rawText,
+          requestType: t.requestType,
+          status: t.status,
+          priority: t.priority,
+          scheduledAt: t.scheduledAt,
+          completedAt: t.completedAt,
+          durationMinutes: t.durationMinutes,
+          createdAt: t.createdAt,
+        })),
+      });
+    }
+
+    return groups;
+  }
+
+  private buildAttentionSummary(r: MonthlyAttentionReport): string {
+    const lines: string[] = [];
+    lines.push(`### Totales del periodo`);
+    lines.push(`- Total de atenciones: ${r.totals.total}`);
+    lines.push(`- Completadas: ${r.totals.completed}`);
+    lines.push(`- Pendientes: ${r.totals.pending}`);
+    lines.push(`- Horas totales invertidas: ${(r.totals.totalMinutes / 60).toFixed(1)}h`);
+    lines.push('');
+
+    for (const grp of r.byCategory) {
+      lines.push(`### ${grp.label} (${grp.count} atenciones)`);
+      lines.push(`- Completadas: ${grp.completedCount} / ${grp.count}`);
+      if (grp.totalMinutes > 0) {
+        lines.push(`- Horas invertidas: ${(grp.totalMinutes / 60).toFixed(1)}h`);
+      }
+      grp.tickets.slice(0, 10).forEach((t) => {
+        const label = t.title ?? t.rawText.slice(0, 80);
+        const status = t.status === 'COMPLETED' ? '✓' : '○';
+        lines.push(`  ${status} ${label}`);
+      });
+      lines.push('');
+    }
+
+    return lines.join('\n');
+  }
+
+  private assembleAttentionMarkdown(
+    r: MonthlyAttentionReport,
+    monthLabel: string,
+    narrative: string,
+  ): string {
+    const parts: string[] = [];
+
+    parts.push(`**{{emisor_razon_social}}**`);
+    parts.push(`RUC {{emisor_ruc}} · {{emisor_direccion}}\n📱 {{emisor_telefono}} · 📧 {{emisor_email}} · 🌐 {{emisor_website}}`);
+    parts.push('\n---\n');
+
+    parts.push(`# Reporte Mensual de Atención`);
+    parts.push(`**Cliente:** ${r.clientName}  \n**Periodo:** ${monthLabel}`);
+    parts.push('\n---\n');
+
+    parts.push(narrative);
+    parts.push('\n---\n');
+
+    parts.push(`## Anexo A — Resumen de atenciones`);
+    parts.push('');
+    parts.push('| Categoría | Atenciones | Completadas | Horas |');
+    parts.push('|---|---|---|---|');
+    for (const grp of r.byCategory) {
+      const hrs = grp.totalMinutes > 0 ? `${(grp.totalMinutes / 60).toFixed(1)}h` : '—';
+      parts.push(`| ${grp.label} | ${grp.count} | ${grp.completedCount} | ${hrs} |`);
+    }
+    parts.push(`| **TOTAL** | **${r.totals.total}** | **${r.totals.completed}** | **${(r.totals.totalMinutes / 60).toFixed(1)}h** |`);
+    parts.push('');
+
+    for (const grp of r.byCategory) {
+      parts.push(`## ${grp.label}`);
+      parts.push('');
+      parts.push('| # | Descripción | Tipo | Estado | Fecha |');
+      parts.push('|---|---|---|---|---|');
+      grp.tickets.forEach((t, i) => {
+        const desc = (t.title ?? t.rawText).slice(0, 80);
+        const tipo = t.requestType ?? '—';
+        const estado = t.status === 'COMPLETED' ? 'Completado' : t.status === 'SENT' ? 'En Jira' : 'Pendiente';
+        const fecha = new Date(t.createdAt).toLocaleDateString('es-PE');
+        parts.push(`| ${i + 1} | ${desc} | ${tipo} | ${estado} | ${fecha} |`);
+      });
+      parts.push('');
+    }
+
+    return parts.join('\n');
   }
 
   private assembleMultiMarkdown(

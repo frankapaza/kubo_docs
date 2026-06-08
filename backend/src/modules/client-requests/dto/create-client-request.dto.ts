@@ -1,5 +1,20 @@
-import { IsEnum, IsInt, IsOptional, IsString, MaxLength, Min, MinLength } from 'class-validator';
-import { CLIENT_REQUEST_SOURCES, ClientRequestSource } from '../entities/client-request.entity';
+import {
+  IsDateString,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+} from 'class-validator';
+import {
+  CLIENT_REQUEST_SOURCES,
+  ClientRequestSource,
+  SERVICE_CATEGORIES,
+  ServiceCategory,
+} from '../entities/client-request.entity';
 
 export class CreateClientRequestDto {
   @IsString()
@@ -30,4 +45,18 @@ export class CreateClientRequestDto {
   @IsString()
   @MaxLength(255)
   rawAudioFilename?: string;
+
+  @IsOptional()
+  @IsEnum(SERVICE_CATEGORIES)
+  serviceCategory?: ServiceCategory;
+
+  @IsOptional()
+  @IsDateString()
+  scheduledAt?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(9999)
+  durationMinutes?: number;
 }

@@ -4,6 +4,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { ReportsService } from './reports.service';
 import { JiraReportDto, MultiJiraReportDto } from './dto/jira-report.dto';
+import { MonthlyAttentionReportDto } from './dto/monthly-attention-report.dto';
 
 @Controller('reports')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -57,5 +58,32 @@ export class ReportsController {
       title: dto.title,
       additionalContext: dto.additionalContext,
     });
+  }
+
+  /**
+   * Retorna el reporte mensual de atención estructurado (datos de tickets).
+   */
+  @Post('attention/monthly')
+  @HttpCode(200)
+  monthlyAttention(@Body() dto: MonthlyAttentionReportDto) {
+    return this.service.getMonthlyAttentionReport(dto.clientId, dto.from, dto.to);
+  }
+
+  /**
+   * Genera un documento editable con narrativa IA del reporte mensual de atención.
+   */
+  @Post('attention/monthly/generate-document')
+  @HttpCode(201)
+  generateMonthlyAttention(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: MonthlyAttentionReportDto,
+  ) {
+    return this.service.generateMonthlyAttentionDocument(
+      user.id,
+      dto.clientId,
+      dto.from,
+      dto.to,
+      dto.additionalContext,
+    );
   }
 }

@@ -14,6 +14,7 @@ import {
   ClientRequestPriority,
   ClientRequestStatus,
   ClientRequestType,
+  ServiceCategory,
 } from './entities/client-request.entity';
 import { CreateClientRequestDto } from './dto/create-client-request.dto';
 import { UpdateClientRequestDto } from './dto/update-client-request.dto';
@@ -72,6 +73,7 @@ export class ClientRequestsService {
     status?: ClientRequestStatus;
     clientId?: number;
     projectId?: number;
+    serviceCategory?: ServiceCategory;
     q?: string;
   }): Promise<ClientRequest[]> {
     return this.repo.list(params);
@@ -90,6 +92,9 @@ export class ClientRequestsService {
       clientId: dto.clientId ?? null,
       projectId: dto.projectId ?? null,
       meetingId: dto.meetingId ?? null,
+      serviceCategory: dto.serviceCategory ?? null,
+      scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
+      durationMinutes: dto.durationMinutes ?? null,
       createdBy: userId,
     });
   }
@@ -317,10 +322,10 @@ export class ClientRequestsService {
     userId: number,
   ): Promise<{ request: ClientRequest; documentId: number | null }> {
     const req = await this.findByIdOrFail(id);
-    if (req.status !== 'SENT') {
+    if (req.status === 'COMPLETED' || req.status === 'ARCHIVED') {
       throw new BadRequestException({
         code: 'BAD_INPUT',
-        message: 'Solo se pueden completar solicitudes que ya fueron enviadas a Jira.',
+        message: 'La solicitud ya está completada o archivada.',
       });
     }
 

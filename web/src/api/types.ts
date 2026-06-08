@@ -116,6 +116,35 @@ export const CLIENT_REQUEST_PRIORITY_LABELS: Record<ClientRequestPriority, strin
   HIGH: 'Alta',
 };
 
+export type ServiceCategory =
+  | 'SOFTWARE'
+  | 'SOPORTE'
+  | 'CAPACITACION'
+  | 'CONSULTA'
+  | 'ASESORIA'
+  | 'VISITA_SITIO'
+  | 'OTRO';
+
+export const SERVICE_CATEGORIES: ServiceCategory[] = [
+  'SOFTWARE',
+  'SOPORTE',
+  'CAPACITACION',
+  'CONSULTA',
+  'ASESORIA',
+  'VISITA_SITIO',
+  'OTRO',
+];
+
+export const SERVICE_CATEGORY_LABELS: Record<ServiceCategory, string> = {
+  SOFTWARE: 'Atención de sistemas',
+  SOPORTE: 'Atención de soporte',
+  CAPACITACION: 'Capacitación',
+  CONSULTA: 'Consultas',
+  ASESORIA: 'Apoyo en asesoría',
+  VISITA_SITIO: 'Visita en sitio',
+  OTRO: 'Otro',
+};
+
 export interface ClientRequest {
   id: number;
   clientId: number | null;
@@ -144,9 +173,47 @@ export interface ClientRequest {
   sentAt: string | null;
   completedAt: string | null;
   closureDocumentId: number | null;
+  serviceCategory: ServiceCategory | null;
+  scheduledAt: string | null;
+  durationMinutes: number | null;
   createdBy: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface MonthlyTicketRow {
+  id: number;
+  title: string | null;
+  rawText: string;
+  requestType: string | null;
+  status: string;
+  priority: string | null;
+  scheduledAt: string | null;
+  completedAt: string | null;
+  durationMinutes: number | null;
+  createdAt: string;
+}
+
+export interface MonthlyAttentionCategoryGroup {
+  category: ServiceCategory | 'SIN_CATEGORIA';
+  label: string;
+  count: number;
+  completedCount: number;
+  totalMinutes: number;
+  tickets: MonthlyTicketRow[];
+}
+
+export interface MonthlyAttentionReport {
+  clientId: number;
+  clientName: string;
+  range: { from: string; to: string };
+  totals: {
+    total: number;
+    completed: number;
+    pending: number;
+    totalMinutes: number;
+  };
+  byCategory: MonthlyAttentionCategoryGroup[];
 }
 
 export type MeetingStatus =

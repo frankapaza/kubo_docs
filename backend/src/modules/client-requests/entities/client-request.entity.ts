@@ -21,6 +21,25 @@ export type ClientRequestType = 'MEJORA' | 'FEATURE' | 'AJUSTE' | 'BUG';
 
 export type ClientRequestPriority = 'LOW' | 'MEDIUM' | 'HIGH';
 
+export type ServiceCategory =
+  | 'SOFTWARE'
+  | 'SOPORTE'
+  | 'CAPACITACION'
+  | 'CONSULTA'
+  | 'ASESORIA'
+  | 'VISITA_SITIO'
+  | 'OTRO';
+
+export const SERVICE_CATEGORIES: ServiceCategory[] = [
+  'SOFTWARE',
+  'SOPORTE',
+  'CAPACITACION',
+  'CONSULTA',
+  'ASESORIA',
+  'VISITA_SITIO',
+  'OTRO',
+];
+
 export const CLIENT_REQUEST_SOURCES: ClientRequestSource[] = [
   'WHATSAPP_TEXT',
   'WHATSAPP_AUDIO',
@@ -88,6 +107,15 @@ export class ClientRequest {
 
   @Column({ name: 'request_type', type: 'enum', enum: CLIENT_REQUEST_TYPES, nullable: true })
   requestType!: ClientRequestType | null;
+
+  @Column({ name: 'service_category', type: 'enum', enum: SERVICE_CATEGORIES, nullable: true })
+  serviceCategory!: ServiceCategory | null;
+
+  @Column({ name: 'scheduled_at', type: 'datetime', nullable: true })
+  scheduledAt!: Date | null;
+
+  @Column({ name: 'duration_minutes', type: 'int', unsigned: true, nullable: true })
+  durationMinutes!: number | null;
 
   @Column({ type: 'enum', enum: CLIENT_REQUEST_PRIORITIES, nullable: true })
   priority!: ClientRequestPriority | null;

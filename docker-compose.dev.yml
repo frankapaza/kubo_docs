@@ -1,0 +1,62 @@
+# Stack de desarrollo local: solo MySQL + Redis expuestos al host.
+# El backend y el frontend corren en modo dev fuera de Docker.
+#
+# Uso:
+#   docker compose -f docker-compose.dev.yml up -d
+#   cd backend && npm run start:dev
+#   cd web    && npm run dev
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: kubo-mysql-dev
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: kubo_devdocs
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql_dev_data:/var/lib/mysql
+      # Schema base
+      - ./backend/sql/schema.sql:/docker-entrypoint-initdb.d/000_schema.sql:ro
+      # Tablas adicionales (orden por dependencias)
+      - ./backend/sql/add_clients_table.sql:/docker-entrypoint-initdb.d/001_add_clients.sql:ro
+      - ./backend/sql/add_integrations_table.sql:/docker-entrypoint-initdb.d/002_add_integrations.sql:ro
+      - ./backend/sql/add_meeting_type.sql:/docker-entrypoint-initdb.d/003_add_meeting_type.sql:ro
+      - ./backend/sql/add_project_jira_mapping.sql:/docker-entrypoint-initdb.d/004_add_project_jira_mapping.sql:ro
+      - ./backend/sql/add_documents_tables.sql:/docker-entrypoint-initdb.d/005_add_documents.sql:ro
+      - ./backend/sql/add_workspace_settings.sql:/docker-entrypoint-initdb.d/006_add_workspace_settings.sql:ro
+      - ./backend/sql/add_workspace_smtp_and_session.sql:/docker-entrypoint-initdb.d/007_add_workspace_smtp.sql:ro
+      - ./backend/sql/add_workspace_audio_retention.sql:/docker-entrypoint-initdb.d/008_add_workspace_audio.sql:ro
+      # Migraciones numeradas
+      - ./backend/sql/migrations/001_scrum_roles.sql:/docker-entrypoint-initdb.d/010_mig_001.sql:ro
+      - ./backend/sql/migrations/002_participants_and_members.sql:/docker-entrypoint-initdb.d/011_mig_002.sql:ro
+      - ./backend/sql/migrations/003_ai_providers_and_signatures.sql:/docker-entrypoint-initdb.d/012_mig_003.sql:ro
+      - ./backend/sql/migrations/004_client_requests.sql:/docker-entrypoint-initdb.d/013_mig_004.sql:ro
+      - ./backend/sql/migrations/005_complete_status.sql:/docker-entrypoint-initdb.d/014_mig_005.sql:ro
+      - ./backend/sql/migrations/006_document_signatories.sql:/docker-entrypoint-initdb.d/015_mig_006.sql:ro
+      - ./backend/sql/migrations/007_signature_tokens.sql:/docker-entrypoint-initdb.d/016_mig_007.sql:ro
+      - ./backend/sql/migrations/008_service_categories.sql:/docker-entrypoint-initdb.d/017_mig_008.sql:ro
+      # Seeds
+      - ./backend/sql/seed_document_templates.sql:/docker-entrypoint-initdb.d/020_seed_templates.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: kubo-redis-dev
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redis_dev_data:/data
+
+volumes:
+  mysql_dev_data:
+  redis_dev_data:

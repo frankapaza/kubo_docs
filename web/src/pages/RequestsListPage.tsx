@@ -10,6 +10,7 @@ import {
   RequestPriorityBadge,
   RequestStatusBadge,
   RequestTypeBadge,
+  ServiceCategoryBadge,
 } from '../components/ui/Badge';
 import {
   CLIENT_REQUEST_SOURCE_LABELS,
@@ -17,6 +18,9 @@ import {
   CLIENT_REQUEST_STATUS_LABELS,
   ClientRequestSource,
   ClientRequestStatus,
+  SERVICE_CATEGORIES,
+  SERVICE_CATEGORY_LABELS,
+  ServiceCategory,
 } from '../api/types';
 import {
   InboxIcon,
@@ -35,6 +39,7 @@ export default function RequestsListPage() {
   const [showForm, setShowForm] = useState(false);
   const [filterStatus, setFilterStatus] = useState<ClientRequestStatus | ''>('');
   const [filterClient, setFilterClient] = useState<number | ''>('');
+  const [filterCategory, setFilterCategory] = useState<ServiceCategory | ''>('');
   const [search, setSearch] = useState('');
 
   const { data: clients } = useQuery({
@@ -43,11 +48,12 @@ export default function RequestsListPage() {
     staleTime: 60_000,
   });
   const { data, isLoading } = useQuery({
-    queryKey: ['client-requests', { filterStatus, filterClient, search }],
+    queryKey: ['client-requests', { filterStatus, filterClient, filterCategory, search }],
     queryFn: () =>
       clientRequestsApi.list({
         status: filterStatus || undefined,
         clientId: filterClient === '' ? undefined : Number(filterClient),
+        serviceCategory: filterCategory || undefined,
         q: search || undefined,
       }),
   });
@@ -123,6 +129,18 @@ export default function RequestsListPage() {
               </option>
             ))}
           </select>
+          <select
+            className="input w-48"
+            value={filterCategory}
+            onChange={(e) => setFilterCategory((e.target.value as ServiceCategory) || '')}
+          >
+            <option value="">Todas las categorías</option>
+            {SERVICE_CATEGORIES.map((cat) => (
+              <option key={cat} value={cat}>
+                {SERVICE_CATEGORY_LABELS[cat]}
+              </option>
+            ))}
+          </select>
         </CardBody>
       </Card>
 
@@ -160,6 +178,7 @@ export default function RequestsListPage() {
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                      <ServiceCategoryBadge category={r.serviceCategory} />
                       <RequestStatusBadge status={r.status} />
                       <RequestTypeBadge type={r.requestType} />
                       <RequestPriorityBadge priority={r.priority} />
@@ -211,6 +230,9 @@ function NewRequestCard({ onCreated }: { onCreated: () => void }) {
   const [clientId, setClientId] = useState<number | ''>('');
   const [projectId, setProjectId] = useState<number | ''>('');
   const [audioFilename, setAudioFilename] = useState<string | null>(null);
+  const [serviceCategory, setServiceCategory] = useState<ServiceCategory | ''>('');
+  const [scheduledAt, setScheduledAt] = useState('');
+  const [durationMinutes, setDurationMinutes] = useState('');
 
   const { data: clients } = useQuery({
     queryKey: ['clients-simple'],
@@ -240,6 +262,9 @@ function NewRequestCard({ onCreated }: { onCreated: () => void }) {
       clientId: clientId === '' ? undefined : Number(clientId),
       projectId: projectId === '' ? undefined : Number(projectId),
       rawAudioFilename: audioFilename ?? undefined,
+      serviceCategory: serviceCategory || undefined,
+      scheduledAt: scheduledAt || undefined,
+      durationMinutes: durationMinutes ? Number(durationMinutes) : undefined,
     });
   };
 
@@ -311,7 +336,67 @@ function NewRequestCard({ onCreated }: { onCreated: () => void }) {
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="label">Categoría *</label>
+              <select
+                className="input"
+                value={serviceCategory}
+                onChange={(e) => setServiceCategory((e.target.value as ServiceCategory) || '')}
+                required
+              >
+                <option value="">(seleccionar categoría)</option>
+                {SERVICE_CATEGORIES.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {SERVICE_CATEGORY_LABELS[cat]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="label">Fuente</label>
+              <select
+                className="input"
+                value={source}
+                onChange={(e) => setSource(e.target.value as ClientRequestSource)}
+              >
+                <option value="NOTE">Nota rápida</option>
+                <option value="WHATSAPP_TEXT">WhatsApp (texto)</option>
+                <option value="WHATSAPP_AUDIO">WhatsApp (audio)</option>
+                <option value="VOICE_LIVE">Dictado en vivo</option>
+                <option value="MEETING">Reunión</option>
+                <option value="OTHER">Otra</option>
+              </select>
+            </div>
+          </div>
+
+          {(serviceCategory === 'CAPACITACION' || serviceCategory === 'VISITA_SITIO') && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-lg bg-slate-50 border border-slate-200">
+              <div>
+                <label className="label">Fecha y hora pactada</label>
+                <input
+                  type="datetime-local"
+                  className="input"
+                  value={scheduledAt}
+                  onChange={(e) => setScheduledAt(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="label">Duración estimada (minutos)</label>
+                <input
+                  type="number"
+                  className="input"
+                  placeholder="Ej: 90"
+                  min={1}
+                  max={9999}
+                  value={durationMinutes}
+                  onChange={(e) => setDurationMinutes(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="label">Cliente</label>
               <select
@@ -332,21 +417,6 @@ function NewRequestCard({ onCreated }: { onCreated: () => void }) {
               value={projectId}
               onChange={setProjectId}
             />
-            <div>
-              <label className="label">Fuente</label>
-              <select
-                className="input"
-                value={source}
-                onChange={(e) => setSource(e.target.value as ClientRequestSource)}
-              >
-                <option value="NOTE">Nota rápida</option>
-                <option value="WHATSAPP_TEXT">WhatsApp (texto)</option>
-                <option value="WHATSAPP_AUDIO">WhatsApp (audio)</option>
-                <option value="VOICE_LIVE">Dictado en vivo</option>
-                <option value="MEETING">Reunión</option>
-                <option value="OTHER">Otra</option>
-              </select>
-            </div>
           </div>
 
           <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-600 flex items-start gap-2">

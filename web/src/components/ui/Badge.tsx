@@ -219,6 +219,35 @@ export function RequestTypeBadge({ type }: { type: string | null }) {
   );
 }
 
+const serviceCategoryTones: Record<string, Tone> = {
+  SOFTWARE: 'primary',
+  SOPORTE: 'info',
+  CAPACITACION: 'success',
+  CONSULTA: 'warning',
+  ASESORIA: 'purple',
+  VISITA_SITIO: 'danger',
+  OTRO: 'neutral',
+};
+
+const serviceCategoryLabels: Record<string, string> = {
+  SOFTWARE: 'Sistemas',
+  SOPORTE: 'Soporte',
+  CAPACITACION: 'Capacitación',
+  CONSULTA: 'Consulta',
+  ASESORIA: 'Asesoría',
+  VISITA_SITIO: 'Visita en sitio',
+  OTRO: 'Otro',
+};
+
+export function ServiceCategoryBadge({ category }: { category: string | null }) {
+  if (!category) return null;
+  return (
+    <Badge tone={serviceCategoryTones[category] ?? 'neutral'} dot>
+      {serviceCategoryLabels[category] ?? category}
+    </Badge>
+  );
+}
+
 const requestPriorityTones: Record<string, Tone> = {
   LOW: 'neutral',
   MEDIUM: 'info',

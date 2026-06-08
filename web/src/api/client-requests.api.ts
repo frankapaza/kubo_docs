@@ -5,6 +5,7 @@ import type {
   ClientRequestSource,
   ClientRequestStatus,
   ClientRequestType,
+  ServiceCategory,
 } from './types';
 
 export interface CreateClientRequestBody {
@@ -14,6 +15,9 @@ export interface CreateClientRequestBody {
   projectId?: number;
   meetingId?: number;
   rawAudioFilename?: string;
+  serviceCategory?: ServiceCategory;
+  scheduledAt?: string;
+  durationMinutes?: number;
 }
 
 export interface UpdateClientRequestBody {
@@ -31,6 +35,9 @@ export interface UpdateClientRequestBody {
   descriptionMd?: string | null;
   acceptanceCriteria?: string[] | null;
   labels?: string[] | null;
+  serviceCategory?: ServiceCategory | null;
+  scheduledAt?: string | null;
+  durationMinutes?: number | null;
 }
 
 export const clientRequestsApi = {
@@ -38,6 +45,7 @@ export const clientRequestsApi = {
     status?: ClientRequestStatus;
     clientId?: number;
     projectId?: number;
+    serviceCategory?: ServiceCategory;
     q?: string;
   }) => api.get<ClientRequest[]>('/client-requests', { params }).then((r) => r.data),
 

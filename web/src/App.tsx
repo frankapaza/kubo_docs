@@ -21,6 +21,7 @@ import AgentsPage from './pages/AgentsPage';
 import AgentChatPage from './pages/AgentChatPage';
 import RequestsListPage from './pages/RequestsListPage';
 import RequestDetailPage from './pages/RequestDetailPage';
+import MonthlyReportPage from './pages/MonthlyReportPage';
 import SignaturePage from './pages/SignaturePage';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import AppLayout from './layout/AppLayout';
@@ -36,6 +37,7 @@ export default function App() {
           <Route path="/clients" element={<ClientsListPage />} />
           <Route path="/clients/:clientId" element={<ClientDetailPage />} />
           <Route path="/clients/:clientId/dev-report/new" element={<DevReportBuilderPage />} />
+          <Route path="/clients/:clientId/monthly-report" element={<MonthlyReportPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/projects/:projectId/members" element={<ProjectMembersPage />} />
           <Route path="/projects/:projectId/meetings" element={<MeetingsListPage />} />

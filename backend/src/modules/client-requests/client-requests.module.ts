@@ -23,5 +23,6 @@ import { DocumentsModule } from '../documents/documents.module';
   ],
   providers: [ClientRequestsRepository, ClientRequestsService],
   controllers: [ClientRequestsController],
+  exports: [ClientRequestsRepository],
 })
 export class ClientRequestsModule {}

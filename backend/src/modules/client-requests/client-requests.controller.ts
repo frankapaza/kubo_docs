@@ -20,7 +20,7 @@ import { CurrentUser, AuthUser } from '../../common/decorators/current-user.deco
 import { ClientRequestsService } from './client-requests.service';
 import { CreateClientRequestDto } from './dto/create-client-request.dto';
 import { UpdateClientRequestDto } from './dto/update-client-request.dto';
-import { ClientRequestStatus } from './entities/client-request.entity';
+import { ClientRequestStatus, ServiceCategory } from './entities/client-request.entity';
 
 const TRANSCRIBE_MAX_MB = 25;
 
@@ -34,12 +34,14 @@ export class ClientRequestsController {
     @Query('status') status?: ClientRequestStatus,
     @Query('clientId') clientId?: string,
     @Query('projectId') projectId?: string,
+    @Query('serviceCategory') serviceCategory?: ServiceCategory,
     @Query('q') q?: string,
   ) {
     return this.service.list({
       status,
       clientId: clientId ? Number(clientId) : undefined,
       projectId: projectId ? Number(projectId) : undefined,
+      serviceCategory,
       q,
     });
   }

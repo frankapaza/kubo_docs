@@ -1,9 +1,11 @@
 import {
   IsArray,
+  IsDateString,
   IsEnum,
   IsInt,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -14,6 +16,8 @@ import {
   ClientRequestPriority,
   ClientRequestStatus,
   ClientRequestType,
+  SERVICE_CATEGORIES,
+  ServiceCategory,
 } from '../entities/client-request.entity';
 
 export class UpdateClientRequestDto {
@@ -83,4 +87,18 @@ export class UpdateClientRequestDto {
   @IsArray()
   @IsString({ each: true })
   labels?: string[] | null;
+
+  @IsOptional()
+  @IsEnum(SERVICE_CATEGORIES)
+  serviceCategory?: ServiceCategory | null;
+
+  @IsOptional()
+  @IsDateString()
+  scheduledAt?: string | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(9999)
+  durationMinutes?: number | null;
 }

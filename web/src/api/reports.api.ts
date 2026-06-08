@@ -1,4 +1,5 @@
 import { api } from './client';
+import type { MonthlyAttentionReport } from './types';
 
 export interface JiraIssueSummary {
   key: string;
@@ -84,4 +85,19 @@ export const reportsApi = {
 
   generateMultiDocument: (body: MultiJiraReportBody): Promise<{ documentId: number }> =>
     api.post('/reports/jira/multi/generate-document', body).then((r) => r.data),
+
+  monthlyAttention: (params: {
+    clientId: number;
+    from: string;
+    to: string;
+  }): Promise<MonthlyAttentionReport> =>
+    api.post('/reports/attention/monthly', params).then((r) => r.data),
+
+  generateMonthlyAttentionDocument: (params: {
+    clientId: number;
+    from: string;
+    to: string;
+    additionalContext?: string;
+  }): Promise<{ documentId: number }> =>
+    api.post('/reports/attention/monthly/generate-document', params).then((r) => r.data),
 };
