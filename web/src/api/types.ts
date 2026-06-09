@@ -172,6 +172,7 @@ export interface ClientRequest {
   jiraIssueUrl: string | null;
   sentAt: string | null;
   completedAt: string | null;
+  attendedAt: string | null;
   closureDocumentId: number | null;
   serviceCategory: ServiceCategory | null;
   scheduledAt: string | null;
@@ -190,6 +191,8 @@ export interface MonthlyTicketRow {
   priority: string | null;
   scheduledAt: string | null;
   completedAt: string | null;
+  attendedAt: string | null;
+  capturedAt: string;
   durationMinutes: number | null;
   createdAt: string;
 }

@@ -23,6 +23,19 @@ export class CreateClientRequestDto {
   rawText!: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(240)
+  title?: string;
+
+  @IsOptional()
+  @IsDateString()
+  capturedAt?: string;
+
+  @IsOptional()
+  @IsDateString()
+  attendedAt?: string;
+
+  @IsOptional()
   @IsEnum(CLIENT_REQUEST_SOURCES)
   source?: ClientRequestSource;
 

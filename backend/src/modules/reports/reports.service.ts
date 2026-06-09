@@ -25,6 +25,8 @@ export interface MonthlyTicketRow {
   priority: string | null;
   scheduledAt: Date | null;
   completedAt: Date | null;
+  attendedAt: Date | null;
+  capturedAt: Date;
   durationMinutes: number | null;
   createdAt: Date;
 }
@@ -639,6 +641,8 @@ export class ReportsService {
           priority: t.priority,
           scheduledAt: t.scheduledAt,
           completedAt: t.completedAt,
+          attendedAt: t.attendedAt,
+          capturedAt: t.capturedAt,
           durationMinutes: t.durationMinutes,
           createdAt: t.createdAt,
         })),

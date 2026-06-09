@@ -87,7 +87,8 @@ export class ClientRequestsService {
       source: dto.source ?? 'NOTE',
       rawText: dto.rawText.trim(),
       rawAudioFilename: dto.rawAudioFilename ?? null,
-      capturedAt: new Date(),
+      capturedAt: dto.capturedAt ? new Date(dto.capturedAt) : new Date(),
+      title: dto.title?.trim() || null,
       status: 'INBOX',
       clientId: dto.clientId ?? null,
       projectId: dto.projectId ?? null,
@@ -95,6 +96,7 @@ export class ClientRequestsService {
       serviceCategory: dto.serviceCategory ?? null,
       scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
       durationMinutes: dto.durationMinutes ?? null,
+      attendedAt: dto.attendedAt ? new Date(dto.attendedAt) : null,
       createdBy: userId,
     });
   }

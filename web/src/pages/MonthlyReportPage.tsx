@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { reportsApi } from '../api/reports.api';
 import { clientsApi } from '../api/clients.api';
 import { Button } from '../components/ui/Button';
@@ -15,7 +17,120 @@ import {
   SparklesIcon,
 } from '../components/ui/Icon';
 import { toast } from '../ui/Toast';
-import type { MonthlyAttentionReport, MonthlyAttentionCategoryGroup } from '../api/types';
+import type { MonthlyAttentionReport, MonthlyAttentionCategoryGroup, MonthlyTicketRow } from '../api/types';
+
+// ---------------------------------------------------------------------------
+// Exportación
+// ---------------------------------------------------------------------------
+
+export interface ReportColumn {
+  key: string;
+  label: string;
+  defaultOn: boolean;
+}
+
+export const REPORT_COLUMNS: ReportColumn[] = [
+  { key: 'num',           label: '#',               defaultOn: true  },
+  { key: 'title',         label: 'Nombre',           defaultOn: true  },
+  { key: 'category',      label: 'Categoría',        defaultOn: true  },
+  { key: 'requestType',   label: 'Tipo',             defaultOn: false },
+  { key: 'status',        label: 'Estado',           defaultOn: true  },
+  { key: 'capturedAt',    label: 'Fecha inicio',     defaultOn: true  },
+  { key: 'attendedAt',    label: 'Fecha atención',   defaultOn: true  },
+  { key: 'durationMinutes', label: 'Duración (min)', defaultOn: false },
+  { key: 'priority',      label: 'Prioridad',        defaultOn: false },
+];
+
+const STATUS_LABELS: Record<string, string> = {
+  INBOX: 'En bandeja', STRUCTURED: 'Estructurado',
+  SENT: 'En Jira', COMPLETED: 'Completado', ARCHIVED: 'Archivado',
+};
+const PRIORITY_LABELS: Record<string, string> = {
+  LOW: 'Baja', MEDIUM: 'Media', HIGH: 'Alta',
+};
+const CATEGORY_LABELS: Record<string, string> = {
+  SOFTWARE: 'Sistemas', SOPORTE: 'Soporte', CAPACITACION: 'Capacitación',
+  CONSULTA: 'Consulta', ASESORIA: 'Asesoría', VISITA_SITIO: 'Visita en sitio',
+  OTRO: 'Otro', SIN_CATEGORIA: 'Sin categoría',
+};
+const TYPE_LABELS: Record<string, string> = {
+  BUG: 'Bug', MEJORA: 'Mejora', FEATURE: 'Feature', AJUSTE: 'Ajuste',
+};
+
+function fmtDate(val: string | null | undefined): string {
+  if (!val) return '—';
+  return new Date(val).toLocaleDateString('es-PE');
+}
+
+function getCellValue(col: string, ticket: MonthlyTicketRow, num: number, category: string): string {
+  switch (col) {
+    case 'num':             return String(num);
+    case 'title':           return ticket.title ?? ticket.rawText.slice(0, 80);
+    case 'category':        return CATEGORY_LABELS[category] ?? category;
+    case 'requestType':     return ticket.requestType ? (TYPE_LABELS[ticket.requestType] ?? ticket.requestType) : '—';
+    case 'status':          return STATUS_LABELS[ticket.status] ?? ticket.status;
+    case 'capturedAt':      return fmtDate(ticket.capturedAt);
+    case 'attendedAt':      return fmtDate(ticket.attendedAt);
+    case 'durationMinutes': return ticket.durationMinutes ? `${ticket.durationMinutes} min` : '—';
+    case 'priority':        return ticket.priority ? (PRIORITY_LABELS[ticket.priority] ?? ticket.priority) : '—';
+    default:                return '—';
+  }
+}
+
+function buildRows(report: MonthlyAttentionReport, activeCols: string[]) {
+  const rows: string[][] = [];
+  let num = 1;
+  for (const grp of report.byCategory) {
+    for (const t of grp.tickets) {
+      rows.push(activeCols.map((col) => getCellValue(col, t, num, grp.category)));
+      num++;
+    }
+  }
+  return rows;
+}
+
+function exportCsv(report: MonthlyAttentionReport, activeCols: string[], monthLabel: string) {
+  const headers = activeCols.map((k) => REPORT_COLUMNS.find((c) => c.key === k)!.label);
+  const rows = buildRows(report, activeCols);
+  const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  const lines = [headers.map(escape).join(','), ...rows.map((r) => r.map(escape).join(','))];
+  const bom = '﻿';
+  const blob = new Blob([bom + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Reporte_${report.clientName.replace(/\s+/g, '_')}_${monthLabel}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportPdf(report: MonthlyAttentionReport, activeCols: string[], monthLabel: string) {
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const headers = activeCols.map((k) => REPORT_COLUMNS.find((c) => c.key === k)!.label);
+  const rows = buildRows(report, activeCols);
+
+  doc.setFontSize(14);
+  doc.text(`Reporte mensual de atención — ${monthLabel}`, 14, 16);
+  doc.setFontSize(10);
+  doc.text(`Cliente: ${report.clientName}`, 14, 23);
+  doc.text(
+    `Total: ${report.totals.total}  |  Completadas: ${report.totals.completed}  |  Pendientes: ${report.totals.pending}`,
+    14, 29,
+  );
+
+  autoTable(doc, {
+    head: [headers],
+    body: rows,
+    startY: 34,
+    styles: { fontSize: 8, cellPadding: 2 },
+    headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [245, 247, 250] },
+  });
+
+  doc.save(`Reporte_${report.clientName.replace(/\s+/g, '_')}_${monthLabel}.pdf`);
+}
+
+// ---------------------------------------------------------------------------
 
 function currentYearMonth(): string {
   const d = new Date();
@@ -53,6 +168,10 @@ export default function MonthlyReportPage() {
   const [yearMonth, setYearMonth] = useState(currentYearMonth);
   const [report, setReport] = useState<MonthlyAttentionReport | null>(null);
   const [additionalContext, setAdditionalContext] = useState('');
+  const [activeCols, setActiveCols] = useState<string[]>(
+    () => REPORT_COLUMNS.filter((c) => c.defaultOn).map((c) => c.key),
+  );
+  const [showExport, setShowExport] = useState(false);
 
   const { data: client } = useQuery({
     queryKey: ['client', id],
@@ -150,6 +269,65 @@ export default function MonthlyReportPage() {
               tone="info"
             />
           </div>
+
+          {/* Exportar */}
+          {report.totals.total > 0 && (
+            <Card>
+              <CardBody>
+                <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+                  <p className="text-sm font-medium text-slate-700">Exportar reporte</p>
+                  <button
+                    type="button"
+                    className="text-xs text-kubo-primary hover:underline"
+                    onClick={() => setShowExport((v) => !v)}
+                  >
+                    {showExport ? 'Ocultar columnas ▲' : 'Seleccionar columnas ▼'}
+                  </button>
+                </div>
+
+                {showExport && (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                    {REPORT_COLUMNS.map((col) => (
+                      <label key={col.key} className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="rounded"
+                          checked={activeCols.includes(col.key)}
+                          onChange={(e) =>
+                            setActiveCols((prev) =>
+                              e.target.checked
+                                ? [...prev, col.key]
+                                : prev.filter((k) => k !== col.key),
+                            )
+                          }
+                        />
+                        <span className="text-slate-700">{col.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex gap-2 flex-wrap">
+                  <Button
+                    variant="secondary"
+                    icon={<FileTextIcon size={15} />}
+                    disabled={activeCols.length === 0}
+                    onClick={() => exportCsv(report, activeCols, monthLabel)}
+                  >
+                    Descargar Excel (.csv)
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    icon={<FileTextIcon size={15} />}
+                    disabled={activeCols.length === 0}
+                    onClick={() => exportPdf(report, activeCols, monthLabel)}
+                  >
+                    Descargar PDF
+                  </Button>
+                </div>
+              </CardBody>
+            </Card>
+          )}
 
           {/* Resumen por categoría */}
           <Card>

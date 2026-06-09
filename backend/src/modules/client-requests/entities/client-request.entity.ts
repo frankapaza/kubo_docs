@@ -162,6 +162,9 @@ export class ClientRequest {
   @Column({ name: 'completed_at', type: 'datetime', nullable: true })
   completedAt!: Date | null;
 
+  @Column({ name: 'attended_at', type: 'datetime', nullable: true })
+  attendedAt!: Date | null;
+
   @Column({ name: 'closure_document_id', type: 'bigint', unsigned: true, nullable: true })
   closureDocumentId!: number | null;
 

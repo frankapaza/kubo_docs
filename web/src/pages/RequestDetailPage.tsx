@@ -185,6 +185,13 @@ export default function RequestDetailPage() {
         </CardBody>
       </Card>
 
+      <InfoCard
+        request={request}
+        locked={request.status === 'COMPLETED' || request.status === 'ARCHIVED'}
+        onSave={(patch) => update.mutate(patch)}
+        saving={update.isPending}
+      />
+
       {request.status === 'INBOX' ? (
         <Card className="border-2 border-indigo-100">
           <CardBody className="text-center py-8">
@@ -299,6 +306,123 @@ export default function RequestDetailPage() {
         </Card>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Información general (nombre + fechas)
+// ---------------------------------------------------------------------------
+
+function toDateInput(val: string | null | undefined): string {
+  if (!val) return '';
+  return val.slice(0, 10);
+}
+
+function InfoCard({
+  request,
+  locked,
+  onSave,
+  saving,
+}: {
+  request: ClientRequest;
+  locked: boolean;
+  onSave: (patch: UpdateClientRequestBody) => void;
+  saving: boolean;
+}) {
+  const [title, setTitle] = useState(request.title ?? '');
+  const [capturedAt, setCapturedAt] = useState(() => toDateInput(request.capturedAt));
+  const [attendedAt, setAttendedAt] = useState(() => toDateInput(request.attendedAt));
+
+  useEffect(() => {
+    setTitle(request.title ?? '');
+    setCapturedAt(toDateInput(request.capturedAt));
+    setAttendedAt(toDateInput(request.attendedAt));
+  }, [request]);
+
+  const original = {
+    title: request.title ?? '',
+    capturedAt: toDateInput(request.capturedAt),
+    attendedAt: toDateInput(request.attendedAt),
+  };
+  const changed =
+    title !== original.title ||
+    capturedAt !== original.capturedAt ||
+    attendedAt !== original.attendedAt;
+
+  const handleSave = () => {
+    onSave({
+      title: title.trim() || null,
+      capturedAt: capturedAt ? `${capturedAt}T00:00:00` : undefined,
+      attendedAt: attendedAt ? `${attendedAt}T00:00:00` : null,
+    });
+  };
+
+  return (
+    <Card>
+      <CardHeader icon={<FileTextIcon size={18} />} title="Información de la atención" />
+      <CardBody className="space-y-3">
+        <div>
+          <label className="label">Nombre</label>
+          <input
+            type="text"
+            className="input"
+            disabled={locked}
+            placeholder="Nombre descriptivo de la atención"
+            maxLength={240}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="label">Fecha de inicio</label>
+            <input
+              type="date"
+              className="input"
+              disabled={locked}
+              value={capturedAt}
+              onChange={(e) => setCapturedAt(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="label">Fecha de atención</label>
+            <input
+              type="date"
+              className="input"
+              disabled={locked}
+              value={attendedAt}
+              onChange={(e) => setAttendedAt(e.target.value)}
+            />
+          </div>
+        </div>
+        {!locked && (
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!changed || saving}
+              onClick={() => {
+                setTitle(original.title);
+                setCapturedAt(original.capturedAt);
+                setAttendedAt(original.attendedAt);
+              }}
+            >
+              Descartar
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              icon={<CheckIcon size={14} />}
+              disabled={!changed || saving}
+              loading={saving}
+              onClick={handleSave}
+            >
+              Guardar
+            </Button>
+          </div>
+        )}
+      </CardBody>
+    </Card>
   );
 }
 

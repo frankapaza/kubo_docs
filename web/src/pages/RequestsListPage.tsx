@@ -223,9 +223,16 @@ function truncate(s: string, max: number) {
 // Formulario de captura (texto / audio / grabación en vivo)
 // ---------------------------------------------------------------------------
 
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function NewRequestCard({ onCreated }: { onCreated: () => void }) {
   const [mode, setMode] = useState<CaptureMode>('text');
+  const [title, setTitle] = useState('');
   const [rawText, setRawText] = useState('');
+  const [capturedAt, setCapturedAt] = useState(todayIso);
+  const [attendedAt, setAttendedAt] = useState(todayIso);
   const [source, setSource] = useState<ClientRequestSource>('NOTE');
   const [clientId, setClientId] = useState<number | ''>('');
   const [projectId, setProjectId] = useState<number | ''>('');
@@ -258,6 +265,9 @@ function NewRequestCard({ onCreated }: { onCreated: () => void }) {
     }
     create.mutate({
       rawText,
+      title: title.trim() || undefined,
+      capturedAt: capturedAt ? `${capturedAt}T00:00:00` : undefined,
+      attendedAt: attendedAt ? `${attendedAt}T00:00:00` : undefined,
       source,
       clientId: clientId === '' ? undefined : Number(clientId),
       projectId: projectId === '' ? undefined : Number(projectId),
@@ -296,6 +306,40 @@ function NewRequestCard({ onCreated }: { onCreated: () => void }) {
         </div>
 
         <form onSubmit={submit} className="space-y-4">
+          {/* Nombre y fechas */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="sm:col-span-3">
+              <label className="label">Nombre de la atención (opcional)</label>
+              <input
+                type="text"
+                className="input"
+                placeholder="Ej: Capacitación módulo cobranza — equipo Lima"
+                maxLength={240}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="label">Fecha de inicio</label>
+              <input
+                type="date"
+                className="input"
+                value={capturedAt}
+                max={todayIso()}
+                onChange={(e) => setCapturedAt(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="label">Fecha de atención</label>
+              <input
+                type="date"
+                className="input"
+                value={attendedAt}
+                onChange={(e) => setAttendedAt(e.target.value)}
+              />
+            </div>
+          </div>
+
           {mode === 'audio' && (
             <AudioFileCapture
               onTranscribed={(text, filename) => {

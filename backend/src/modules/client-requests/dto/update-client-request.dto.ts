@@ -94,6 +94,14 @@ export class UpdateClientRequestDto {
 
   @IsOptional()
   @IsDateString()
+  capturedAt?: string | null;
+
+  @IsOptional()
+  @IsDateString()
+  attendedAt?: string | null;
+
+  @IsOptional()
+  @IsDateString()
   scheduledAt?: string | null;
 
   @IsOptional()

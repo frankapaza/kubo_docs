@@ -10,6 +10,9 @@ import type {
 
 export interface CreateClientRequestBody {
   rawText: string;
+  title?: string;
+  capturedAt?: string;
+  attendedAt?: string;
   source?: ClientRequestSource;
   clientId?: number;
   projectId?: number;
@@ -22,6 +25,9 @@ export interface CreateClientRequestBody {
 
 export interface UpdateClientRequestBody {
   rawText?: string;
+  title?: string | null;
+  capturedAt?: string | null;
+  attendedAt?: string | null;
   status?: ClientRequestStatus;
   requestType?: ClientRequestType | null;
   priority?: ClientRequestPriority | null;
@@ -31,7 +37,6 @@ export interface UpdateClientRequestBody {
   moduleName?: string | null;
   screenName?: string | null;
   flowContext?: string | null;
-  title?: string | null;
   descriptionMd?: string | null;
   acceptanceCriteria?: string[] | null;
   labels?: string[] | null;
