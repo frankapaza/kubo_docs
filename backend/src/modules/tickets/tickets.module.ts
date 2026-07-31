@@ -13,10 +13,13 @@ import { SlaPoliciesRepository } from './sla-policies.repository';
 import { SupportAgentsRepository } from './support-agents.repository';
 import { ClientSystemsRepository } from './client-systems.repository';
 import { TicketEventsService } from './ticket-events.service';
+import { SlaService } from './sla.service';
+import { ClientsModule } from '../clients/clients.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Ticket, TicketEvent, SlaPolicy, SupportAgent, ClientSystem]),
+    ClientsModule,
   ],
   providers: [
     TicketsRepository,
@@ -25,6 +28,7 @@ import { TicketEventsService } from './ticket-events.service';
     SupportAgentsRepository,
     ClientSystemsRepository,
     TicketEventsService,
+    SlaService,
   ],
   exports: [
     TicketsRepository,
@@ -33,6 +37,7 @@ import { TicketEventsService } from './ticket-events.service';
     SupportAgentsRepository,
     ClientSystemsRepository,
     TicketEventsService,
+    SlaService,
   ],
 })
 export class TicketsModule {}
