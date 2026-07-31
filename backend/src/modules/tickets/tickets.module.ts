@@ -17,15 +17,21 @@ import { SlaService } from './sla.service';
 import { TicketsService } from './tickets.service';
 import { TicketTransitionsService } from './ticket-transitions.service';
 import { TicketAssignmentService } from './ticket-assignment.service';
+import { ClientSystemsService } from './client-systems.service';
+import { SupportAgentsService } from './support-agents.service';
 import { TicketsController } from './tickets.controller';
+import { ClientSystemsController } from './client-systems.controller';
+import { SupportAgentsController } from './support-agents.controller';
 import { ClientsModule } from '../clients/clients.module';
 import { ProjectsModule } from '../projects/projects.module';
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Ticket, TicketEvent, SlaPolicy, SupportAgent, ClientSystem]),
     ClientsModule,
     ProjectsModule,
+    UsersModule,
   ],
   providers: [
     TicketsRepository,
@@ -38,8 +44,10 @@ import { ProjectsModule } from '../projects/projects.module';
     TicketsService,
     TicketTransitionsService,
     TicketAssignmentService,
+    ClientSystemsService,
+    SupportAgentsService,
   ],
-  controllers: [TicketsController],
+  controllers: [TicketsController, ClientSystemsController, SupportAgentsController],
   exports: [
     TicketsRepository,
     TicketEventsRepository,
@@ -51,6 +59,8 @@ import { ProjectsModule } from '../projects/projects.module';
     TicketsService,
     TicketTransitionsService,
     TicketAssignmentService,
+    ClientSystemsService,
+    SupportAgentsService,
   ],
 })
 export class TicketsModule {}
