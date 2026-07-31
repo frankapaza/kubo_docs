@@ -10,6 +10,7 @@ import { RefreshIcon, UsersIcon } from '../components/ui/Icon';
 import { EmptyState } from '../components/ui/EmptyState';
 import { toast } from '../ui/Toast';
 import { askConfirm } from '../ui/ConfirmDialog';
+import SupportAgentsSection from './tickets/SupportAgentsSection';
 
 export default function UsersPage() {
   const { user: current } = useAuth();
@@ -110,6 +111,15 @@ export default function UsersPage() {
           </div>
         )}
       </Card>
+
+      <div>
+        <h2 className="text-lg font-semibold text-slate-900">Técnicos de la mesa</h2>
+        <p className="text-sm text-slate-500 mt-1">
+          Usuarios registrados como técnicos de soporte, su nivel, especialidades y la carga de
+          tickets abiertos que alimenta la sugerencia automática de asignatario.
+        </p>
+      </div>
+      <SupportAgentsSection />
     </div>
   );
 }

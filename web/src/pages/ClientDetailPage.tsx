@@ -25,12 +25,14 @@ import {
   PenIcon,
   PlusIcon,
   SaveIcon,
+  SettingsIcon,
   UsersIcon,
   XIcon,
 } from '../components/ui/Icon';
 import { toast } from '../ui/Toast';
+import ClientSystemsTab from './tickets/ClientSystemsTab';
 
-type Tab = 'summary' | 'projects' | 'documents';
+type Tab = 'summary' | 'projects' | 'documents' | 'systems';
 
 const STATUS_TONE: Record<ClientStatus, 'neutral' | 'success' | 'info'> = {
   PROSPECT: 'info',
@@ -111,6 +113,7 @@ export default function ClientDetailPage() {
               { key: 'summary', label: 'Resumen' },
               { key: 'projects', label: `Proyectos${projects.length ? ` (${projects.length})` : ''}` },
               { key: 'documents', label: `Documentos${documentsList.length ? ` (${documentsList.length})` : ''}` },
+              { key: 'systems', label: 'Sistemas' },
             ] as { key: Tab; label: string }[]
           ).map((t) => (
             <button
@@ -144,6 +147,18 @@ export default function ClientDetailPage() {
           onNewDevReport={() => navigate(`/clients/${id}/dev-report/new`)}
           onMonthlyReport={() => navigate(`/clients/${id}/monthly-report`)}
         />
+      )}
+      {tab === 'systems' && (
+        <Card>
+          <CardHeader
+            icon={<SettingsIcon size={18} />}
+            title="Sistemas del cliente"
+            subtitle="Catálogo de sistemas para clasificar y agrupar los tickets de este cliente"
+          />
+          <CardBody>
+            <ClientSystemsTab clientId={id} />
+          </CardBody>
+        </Card>
       )}
     </div>
   );
