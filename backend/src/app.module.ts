@@ -47,6 +47,10 @@ import { EmailModule } from './modules/email/email.module';
         autoLoadEntities: true,
         synchronize: false,
         charset: 'utf8mb4',
+        // mysql2 convierte los Date de JS usando la zona local del proceso.
+        // Con 'Z' lee y escribe los DATETIME en UTC, de modo que DATETIME y
+        // TIMESTAMP round-trip de forma coherente y la aritmetica de SLA cuadra.
+        timezone: 'Z',
         // BIGINT se convierte a number si es seguro (< 2^53); strings si es más grande.
         // Esto evita comparaciones fallidas en el frontend (t.id === selectedId).
         supportBigNumbers: true,
