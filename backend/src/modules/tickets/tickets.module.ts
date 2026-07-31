@@ -12,6 +12,7 @@ import { TicketEventsRepository } from './ticket-events.repository';
 import { SlaPoliciesRepository } from './sla-policies.repository';
 import { SupportAgentsRepository } from './support-agents.repository';
 import { ClientSystemsRepository } from './client-systems.repository';
+import { TicketEventsService } from './ticket-events.service';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { ClientSystemsRepository } from './client-systems.repository';
     SlaPoliciesRepository,
     SupportAgentsRepository,
     ClientSystemsRepository,
+    TicketEventsService,
   ],
   exports: [
     TicketsRepository,
@@ -30,6 +32,7 @@ import { ClientSystemsRepository } from './client-systems.repository';
     SlaPoliciesRepository,
     SupportAgentsRepository,
     ClientSystemsRepository,
+    TicketEventsService,
   ],
 })
 export class TicketsModule {}
