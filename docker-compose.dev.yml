@@ -39,8 +39,11 @@ services:
       - ./backend/sql/migrations/006_document_signatories.sql:/docker-entrypoint-initdb.d/015_mig_006.sql:ro
       - ./backend/sql/migrations/007_signature_tokens.sql:/docker-entrypoint-initdb.d/016_mig_007.sql:ro
       - ./backend/sql/migrations/008_service_categories.sql:/docker-entrypoint-initdb.d/017_mig_008.sql:ro
+      - ./backend/sql/migrations/009_attended_at.sql:/docker-entrypoint-initdb.d/018_mig_009.sql:ro
+      - ./backend/sql/migrations/010_service_desk.sql:/docker-entrypoint-initdb.d/019_mig_010.sql:ro
+      - ./backend/sql/migrations/011_drop_client_requests.sql:/docker-entrypoint-initdb.d/020_mig_011.sql:ro
       # Seeds
-      - ./backend/sql/seed_document_templates.sql:/docker-entrypoint-initdb.d/020_seed_templates.sql:ro
+      - ./backend/sql/seed_document_templates.sql:/docker-entrypoint-initdb.d/021_seed_templates.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s
