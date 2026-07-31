@@ -152,14 +152,9 @@ export class TicketsService {
     if (dto.capturedAt) patch.capturedAt = new Date(dto.capturedAt);
     if (dto.scheduledAt) patch.scheduledAt = new Date(dto.scheduledAt);
 
-    // Cambiar impacto o urgencia recalcula la prioridad, salvo override manual.
-    const touchesMatrix = dto.impact !== undefined || dto.urgency !== undefined;
-    if (touchesMatrix && current.priorityOverridden === 0) {
-      patch.priority = derivePriority(
-        (dto.impact ?? current.impact) ?? null,
-        (dto.urgency ?? current.urgency) ?? null,
-      );
-    }
+    // impact/urgency (y por lo tanto priority) no están en UpdateTicketDto:
+    // solo se mueven por POST /tickets/:id/priority, que además deja rastro
+    // en el timeline (PRIORITY_OVERRIDDEN). Ver docblock de UpdateTicketDto.
 
     const updated = await this.repo.update(id, patch);
     return updated!;
