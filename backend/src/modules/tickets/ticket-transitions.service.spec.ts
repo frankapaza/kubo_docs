@@ -193,6 +193,50 @@ describe('transition', () => {
     expect(patch.resolutionMd).toBeUndefined();
   });
 
+  it('resolver desde ESPERA_CLIENTE desplaza vencimientos y sella la evidencia a la vez', async () => {
+    const { service, ticketRepoStub, sla } = makeService(
+      ticketRow({ status: 'ESPERA_CLIENTE', pausedAt: new Date('2026-07-31T09:00:00.000Z') }),
+    );
+    await service.transition({
+      ticketId: 1,
+      actorUserId: 5,
+      toStatus: 'RESUELTO',
+      resolutionMd: 'Se amplio el pool a 120',
+      rootCause: 'Configuracion insuficiente para el crecimiento',
+      correctiveAction: 'CHG-061: alerta al 70% de saturacion',
+    });
+    expect(sla.applyPause).toHaveBeenCalled();
+    const patch = ticketRepoStub.update.mock.calls[0][1];
+    // Lado de la pausa: se reanuda el reloj.
+    expect(patch.pausedAt).toBeNull();
+    expect(patch.pausedTotalSeconds).toBe(1800);
+    expect(patch.slaResponseDueAt).toEqual(new Date('2026-07-31T08:45:00.000Z'));
+    expect(patch.slaResolutionDueAt).toEqual(new Date('2026-07-31T12:30:00.000Z'));
+    // Lado de la resolucion: la evidencia se sella igual que resolviendo desde EN_ATENCION.
+    expect(patch.status).toBe('RESUELTO');
+    expect(patch.resolvedAt).toBeInstanceOf(Date);
+    expect(patch.resolutionMd).toBe('Se amplio el pool a 120');
+    expect(patch.rootCause).toBe('Configuracion insuficiente para el crecimiento');
+    expect(patch.correctiveAction).toBe('CHG-061: alerta al 70% de saturacion');
+  });
+
+  it('acepta RESUELTO sin evidencia en el body si el ticket ya la tenia', async () => {
+    const { service, ticketRepoStub } = makeService(
+      ticketRow({
+        resolutionMd: 'Se amplio el pool a 120',
+        rootCause: 'Configuracion insuficiente para el crecimiento',
+        correctiveAction: 'CHG-061: alerta al 70% de saturacion',
+      } as Partial<Ticket>),
+    );
+    await service.transition({ ticketId: 1, actorUserId: 5, toStatus: 'RESUELTO' });
+    const patch = ticketRepoStub.update.mock.calls[0][1];
+    expect(patch.status).toBe('RESUELTO');
+    expect(patch.resolvedAt).toBeInstanceOf(Date);
+    expect(patch.resolutionMd).toBe('Se amplio el pool a 120');
+    expect(patch.rootCause).toBe('Configuracion insuficiente para el crecimiento');
+    expect(patch.correctiveAction).toBe('CHG-061: alerta al 70% de saturacion');
+  });
+
   it('escribe el estado y el evento dentro de la misma transaccion', async () => {
     const { service, repo, ticketRepoStub, eventRepoStub } = makeService(ticketRow());
     await service.transition({
