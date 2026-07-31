@@ -643,7 +643,7 @@ export class ReportsService {
           status: t.status,
           priority: t.priority,
           scheduledAt: t.scheduledAt,
-          completedAt: t.closedAt ?? t.resolvedAt,
+          completedAt: t.resolvedAt ?? t.closedAt,
           attendedAt: t.attendedAt,
           capturedAt: t.capturedAt,
           durationMinutes: t.durationMinutes,
