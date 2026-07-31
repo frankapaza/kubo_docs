@@ -19,6 +19,7 @@ import { TicketTransitionsService } from './ticket-transitions.service';
 import { TicketAssignmentService } from './ticket-assignment.service';
 import { ClientSystemsService } from './client-systems.service';
 import { SupportAgentsService } from './support-agents.service';
+import { SlaRiskScheduler } from './sla-risk.scheduler';
 import { TicketsController } from './tickets.controller';
 import { ClientSystemsController } from './client-systems.controller';
 import { SupportAgentsController } from './support-agents.controller';
@@ -46,6 +47,7 @@ import { UsersModule } from '../users/users.module';
     TicketAssignmentService,
     ClientSystemsService,
     SupportAgentsService,
+    SlaRiskScheduler,
   ],
   controllers: [TicketsController, ClientSystemsController, SupportAgentsController],
   exports: [
