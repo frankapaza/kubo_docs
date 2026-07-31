@@ -97,11 +97,11 @@ export default function AppLayout() {
             Proyectos
           </NavLink>
           <NavLink
-            to="/requests"
+            to="/tickets"
             className={({ isActive }) => `${navItem} ${isActive ? navActive : navIdle}`}
           >
             <InboxIcon size={18} />
-            Solicitudes
+            Tickets
           </NavLink>
 
           <p className="px-3 py-1 mt-4 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">

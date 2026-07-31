@@ -19,7 +19,7 @@ import DevReportBuilderPage from './pages/DevReportBuilderPage';
 import BrowserRecorderPage from './pages/BrowserRecorderPage';
 import AgentsPage from './pages/AgentsPage';
 import AgentChatPage from './pages/AgentChatPage';
-import RequestsListPage from './pages/RequestsListPage';
+import TicketsListPage from './pages/TicketsListPage';
 import RequestDetailPage from './pages/RequestDetailPage';
 import MonthlyReportPage from './pages/MonthlyReportPage';
 import SignaturePage from './pages/SignaturePage';
@@ -45,7 +45,7 @@ export default function App() {
           <Route path="/meetings/:meetingId" element={<MeetingDetailPage />} />
           <Route path="/meetings/:meetingId/record-web" element={<BrowserRecorderPage />} />
           <Route path="/actas/:actaId" element={<ActaEditorPage />} />
-          <Route path="/requests" element={<RequestsListPage />} />
+          <Route path="/tickets" element={<TicketsListPage />} />
           <Route path="/requests/:requestId" element={<RequestDetailPage />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agents/:type" element={<AgentChatPage />} />
