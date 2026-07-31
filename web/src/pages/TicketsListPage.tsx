@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 
 import { ticketsApi } from '../api/tickets.api';
 import { usersApi } from '../api/users.api';
@@ -15,10 +15,12 @@ const chipLabel = (c: Chip): string =>
     ? c
     : STATUS_LABELS[c];
 
+const SEARCH_DEBOUNCE_MS = 280;
+
 export default function TicketsListPage() {
-  const navigate = useNavigate();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [filter, setFilter] = useState<Chip>('Todos');
+  const [qInput, setQInput] = useState('');
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -26,19 +28,33 @@ export default function TicketsListPage() {
 
   // Resuelve assigneeUserId -> nombre. GET /users está restringido por rol
   // (ADMIN, PRODUCT_OWNER, SCRUM_MASTER); si el usuario logueado no tiene
-  // acceso, la llamada falla en silencio y la columna cae al id crudo.
+  // acceso, la llamada falla y la columna cae al id crudo. Se avisa por
+  // consola para poder distinguir "sin permiso" de un fallo real (red, 500,
+  // contrato roto) que de otro modo pasaría inadvertido.
   useEffect(() => {
     usersApi
       .list()
       .then((list) => setUsersById(new Map(list.map((u) => [u.id, u.fullName]))))
-      .catch(() => {
-        /* Sin permiso para listar usuarios: se muestra el id crudo. */
+      .catch((e) => {
+        console.warn(
+          '[TicketsListPage] No se pudo cargar la lista de usuarios; la columna "Asignado" mostrará el id crudo.',
+          e,
+        );
       });
   }, []);
 
+  // Debounce de la búsqueda: cada tecleo no debe disparar un request.
+  useEffect(() => {
+    const t = setTimeout(() => setQ(qInput.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [qInput]);
+
   // El filtrado va al backend: es donde vive la definición de "abierto" y de
   // "en riesgo", y así la bandeja no diverge del informe.
+  // `cancelled` evita que una respuesta lenta y ya obsoleta (de un filtro o
+  // búsqueda anteriores) pise el resultado de una más reciente.
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setError(null);
     ticketsApi
@@ -49,11 +65,20 @@ export default function TicketsListPage() {
         status: ['DERIVADO', 'ESPERA_CLIENTE', 'RESUELTO'].includes(filter as string)
           ? (filter as TicketStatus)
           : undefined,
-        q: q.trim() || undefined,
+        q: q || undefined,
       })
-      .then(setTickets)
-      .catch((e) => setError(e?.response?.data?.message ?? 'No se pudo cargar la bandeja'))
-      .finally(() => setLoading(false));
+      .then((data) => {
+        if (!cancelled) setTickets(data);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e?.response?.data?.message ?? 'No se pudo cargar la bandeja');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [filter, q]);
 
   const count = useMemo(() => tickets.length, [tickets]);
@@ -66,6 +91,7 @@ export default function TicketsListPage() {
             <button
               key={c}
               onClick={() => setFilter(c)}
+              aria-pressed={filter === c}
               style={{
                 cursor: 'pointer', fontSize: 12, fontWeight: 500, padding: '6px 12px',
                 borderRadius: 16,
@@ -78,9 +104,10 @@ export default function TicketsListPage() {
             </button>
           ))}
           <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
+            value={qInput}
+            onChange={(e) => setQInput(e.target.value)}
             placeholder="Buscar por código, asunto o texto"
+            aria-label="Buscar tickets por código, asunto o texto"
             style={{ marginLeft: 'auto', fontSize: 12, padding: '6px 10px', border: '1px solid #dfe3e4', borderRadius: 6, minWidth: 240 }}
           />
           <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: '#6d7577' }}>
@@ -108,10 +135,10 @@ export default function TicketsListPage() {
             ? usersById.get(t.assigneeUserId) ?? String(t.assigneeUserId)
             : '—';
           return (
-            <div
+            <Link
               key={t.id}
-              onClick={() => navigate(`/tickets/${t.id}`)}
-              style={{ display: 'grid', gridTemplateColumns: '82px 1fr 118px 96px 116px 110px 130px', gap: 12, alignItems: 'center', padding: '13px 18px', borderBottom: '1px solid #f1f3f3', cursor: 'pointer' }}
+              to={`/tickets/${t.id}`}
+              style={{ display: 'grid', gridTemplateColumns: '82px 1fr 118px 96px 116px 110px 130px', gap: 12, alignItems: 'center', padding: '13px 18px', borderBottom: '1px solid #f1f3f3', cursor: 'pointer', color: 'inherit', textDecoration: 'none' }}
             >
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: '#6d7577' }}>{t.code}</span>
               <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -131,7 +158,7 @@ export default function TicketsListPage() {
                 </div>
                 <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: '#6d7577' }}>{t.slaLabel}</span>
               </div>
-            </div>
+            </Link>
           );
         })}
       </section>
