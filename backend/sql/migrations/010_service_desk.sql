@@ -49,10 +49,42 @@ INSERT INTO sla_policies
 SELECT 'Estándar', 1, 15, 240, 30, 360, 60, 720, 240, 1440
 WHERE NOT EXISTS (SELECT 1 FROM sla_policies WHERE name = 'Estándar');
 
--- Política de SLA por cliente (NULL => se usa la marcada is_default)
-ALTER TABLE clients
-  ADD COLUMN sla_policy_id BIGINT UNSIGNED NULL AFTER jira_code,
-  ADD INDEX idx_clients_sla_policy (sla_policy_id);
+-- Política de SLA por cliente (NULL => se usa la marcada is_default).
+-- MySQL 8.0 no tiene ADD COLUMN/INDEX IF NOT EXISTS: se guarda con el patrón
+-- estándar de sentencia condicional armada desde information_schema y
+-- ejecutada con prepared statement, para que una segunda corrida de esta
+-- migración sea un no-op en vez de un `Duplicate column name` que aborte el
+-- resto del fichero (ver 002_participants_and_members.sql:16 para el mismo
+-- defecto sin guardar).
+SET @col_exists = (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'clients'
+    AND COLUMN_NAME = 'sla_policy_id'
+);
+SET @sql = IF(
+  @col_exists = 0,
+  'ALTER TABLE clients ADD COLUMN sla_policy_id BIGINT UNSIGNED NULL AFTER jira_code',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @idx_exists = (
+  SELECT COUNT(*) FROM information_schema.STATISTICS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'clients'
+    AND INDEX_NAME = 'idx_clients_sla_policy'
+);
+SET @sql = IF(
+  @idx_exists = 0,
+  'ALTER TABLE clients ADD INDEX idx_clients_sla_policy (sla_policy_id)',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- -------------------------------------------------------------------------
 -- 2) Sistemas bajo soporte
