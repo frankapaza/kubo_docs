@@ -1,7 +1,7 @@
 import { api } from './client';
 import type {
   Ticket, TicketDetail, TicketStatus, TicketPriority, TicketImpact, TicketUrgency,
-  TicketOrigin, TicketRequestType, ServiceCategory, ClientSystem, SupportAgent, AgentLevel,
+  TicketOrigin, TicketRequestType, ServiceCategory, ClientSystem, SupportAgent, SupportAgentView, AgentLevel,
 } from './types';
 
 export interface CreateTicketBody {
@@ -18,6 +18,10 @@ export interface CreateTicketBody {
   capturedAt?: string;
   scheduledAt?: string;
   durationMinutes?: number;
+  acceptanceCriteria?: string[];
+  moduleName?: string;
+  screenName?: string;
+  flowContext?: string;
 }
 
 export interface TicketListParams {
@@ -99,7 +103,7 @@ export const clientSystemsApi = {
 };
 
 export const supportAgentsApi = {
-  list: () => api.get<SupportAgent[]>('/support-agents').then((r) => r.data),
+  list: () => api.get<SupportAgentView[]>('/support-agents').then((r) => r.data),
   create: (body: { userId: number; level: AgentLevel; specialties?: ServiceCategory[] }) =>
     api.post<SupportAgent>('/support-agents', body).then((r) => r.data),
   update: (id: number, body: { level?: AgentLevel; specialties?: ServiceCategory[]; isActive?: boolean }) =>

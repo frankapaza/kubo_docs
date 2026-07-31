@@ -654,6 +654,9 @@ export interface SupportAgent {
   level: AgentLevel;
   specialties: ServiceCategory[] | null;
   isActive: number;
+}
+
+export interface SupportAgentView extends SupportAgent {
   fullName: string;
   email: string;
   openTickets: number;
