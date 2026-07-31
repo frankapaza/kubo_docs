@@ -53,7 +53,15 @@ export class TicketEventsService {
     });
   }
 
-  private typeForTransition(from: TicketStatus, to: TicketStatus): TicketEventType {
+  /**
+   * No es privado: `TicketTransitionsService` necesita este mismo mapeo para
+   * construir el evento dentro de su propia transacción (mismo
+   * EntityManager que el cambio de estado). No puede llamar a `record`/
+   * `recordStatusChange` para eso porque este servicio escribe con su propia
+   * conexión y no participaría del commit/rollback — ver el comentario en
+   * ticket-transitions.service.ts.
+   */
+  typeForTransition(from: TicketStatus, to: TicketStatus): TicketEventType {
     if (to === 'DERIVADO') return 'ESCALATED';
     if (to === 'RESUELTO') return 'RESOLVED';
     if (to === 'CERRADO') return 'CLOSED';

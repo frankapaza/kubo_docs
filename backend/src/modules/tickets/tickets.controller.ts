@@ -14,8 +14,10 @@ import {
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { TicketsService } from './tickets.service';
+import { TicketTransitionsService } from './ticket-transitions.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
+import { TransitionTicketDto } from './dto/transition-ticket.dto';
 import { ServiceCategory } from './entities/ticket.entity';
 import { TicketStatus } from './domain/ticket-state-machine';
 import { TicketPriority } from './domain/ticket-priority';
@@ -23,7 +25,10 @@ import { TicketPriority } from './domain/ticket-priority';
 @Controller('tickets')
 @UseGuards(JwtAuthGuard)
 export class TicketsController {
-  constructor(private readonly service: TicketsService) {}
+  constructor(
+    private readonly service: TicketsService,
+    private readonly transitions: TicketTransitionsService,
+  ) {}
 
   @Get()
   list(
@@ -71,5 +76,22 @@ export class TicketsController {
   async remove(@Param('id', ParseIntPipe) id: number): Promise<{ ok: true }> {
     await this.service.remove(id);
     return { ok: true };
+  }
+
+  @Post(':id/transition')
+  transition(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: TransitionTicketDto,
+  ) {
+    return this.transitions.transition({
+      ticketId: id,
+      actorUserId: user.id,
+      toStatus: dto.toStatus,
+      reason: dto.reason,
+      resolutionMd: dto.resolutionMd,
+      rootCause: dto.rootCause,
+      correctiveAction: dto.correctiveAction,
+    });
   }
 }
