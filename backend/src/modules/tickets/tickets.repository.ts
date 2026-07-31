@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 
 import { Ticket, ServiceCategory } from './entities/ticket.entity';
 import { TicketStatus, OPEN_STATUSES } from './domain/ticket-state-machine';
@@ -21,7 +21,21 @@ export interface TicketListFilters {
 
 @Injectable()
 export class TicketsRepository {
-  constructor(@InjectRepository(Ticket) private readonly repo: Repository<Ticket>) {}
+  constructor(
+    @InjectRepository(Ticket) private readonly repo: Repository<Ticket>,
+    private readonly dataSource: DataSource,
+  ) {}
+
+  /**
+   * Ejecuta `work` dentro de una única transacción de base de datos. Quien
+   * llame debe hacer todas sus escrituras a través del `EntityManager` que
+   * recibe (por ejemplo `manager.getRepository(Ticket)`), no de los
+   * repositorios inyectados por Nest, para que compartan la misma conexión
+   * y confirmen o reviertan juntas.
+   */
+  runInTransaction<T>(work: (manager: EntityManager) => Promise<T>): Promise<T> {
+    return this.dataSource.transaction(work);
+  }
 
   async list(filters: TicketListFilters): Promise<Ticket[]> {
     const qb = this.repo.createQueryBuilder('t');

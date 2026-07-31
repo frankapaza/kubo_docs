@@ -75,43 +75,58 @@ export class TicketsService {
       priority,
     });
 
-    const ticket = await this.repo.create({
-      clientId: dto.clientId ?? null,
-      projectId: dto.projectId ?? null,
-      systemId: dto.systemId ?? null,
-      meetingId: dto.meetingId ?? null,
-      origin: dto.origin ?? 'NOTE',
-      requestType: dto.requestType ?? null,
-      serviceCategory: dto.serviceCategory ?? null,
-      subject: dto.subject?.trim() || null,
-      rawText: dto.rawText.trim(),
-      rawAudioFilename: dto.rawAudioFilename ?? null,
-      labels: dto.labels ?? null,
-      impact: dto.impact ?? null,
-      urgency: dto.urgency ?? null,
-      priority,
-      status: 'NUEVO',
-      capturedAt: dto.capturedAt ? new Date(dto.capturedAt) : createdAt,
-      scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
-      durationMinutes: dto.durationMinutes ?? null,
-      slaPolicyId: slaInit.slaPolicyId,
-      slaResponseDueAt: slaInit.slaResponseDueAt,
-      slaResolutionDueAt: slaInit.slaResolutionDueAt,
-      createdBy: userId,
+    // El alta, la asignación del código y el evento CREATED tienen que
+    // confirmarse juntos: si el código o el evento fallaran fuera de una
+    // transacción, el ticket quedaría sin código o sin timeline, rompiendo
+    // el invariante de "exactamente un evento CREATED" que asume el detalle.
+    return this.repo.runInTransaction(async (manager) => {
+      const ticketRepo = manager.getRepository(Ticket);
+      const eventRepo = manager.getRepository(TicketEvent);
+
+      const ticket = await ticketRepo.save(
+        ticketRepo.create({
+          clientId: dto.clientId ?? null,
+          projectId: dto.projectId ?? null,
+          systemId: dto.systemId ?? null,
+          meetingId: dto.meetingId ?? null,
+          origin: dto.origin ?? 'NOTE',
+          requestType: dto.requestType ?? null,
+          serviceCategory: dto.serviceCategory ?? null,
+          subject: dto.subject?.trim() || null,
+          rawText: dto.rawText.trim(),
+          rawAudioFilename: dto.rawAudioFilename ?? null,
+          labels: dto.labels ?? null,
+          impact: dto.impact ?? null,
+          urgency: dto.urgency ?? null,
+          priority,
+          status: 'NUEVO',
+          capturedAt: dto.capturedAt ? new Date(dto.capturedAt) : createdAt,
+          scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
+          durationMinutes: dto.durationMinutes ?? null,
+          slaPolicyId: slaInit.slaPolicyId,
+          slaResponseDueAt: slaInit.slaResponseDueAt,
+          slaResolutionDueAt: slaInit.slaResolutionDueAt,
+          createdBy: userId,
+        }),
+      );
+
+      // El código legible depende del id autoincremental, así que se asigna después.
+      await ticketRepo.update(ticket.id, { code: this.buildCode(ticket.id) });
+
+      await eventRepo.save(
+        eventRepo.create({
+          ticketId: ticket.id,
+          type: 'CREATED',
+          actorUserId: userId,
+          fromStatus: null,
+          toStatus: 'NUEVO',
+          reason: null,
+          payload: { origin: ticket.origin, priority: ticket.priority },
+        }),
+      );
+
+      return (await ticketRepo.findOneBy({ id: ticket.id }))!;
     });
-
-    // El código legible depende del id autoincremental, así que se asigna después.
-    const withCode = await this.repo.update(ticket.id, { code: this.buildCode(ticket.id) });
-
-    await this.events.record({
-      ticketId: ticket.id,
-      type: 'CREATED',
-      actorUserId: userId,
-      toStatus: 'NUEVO',
-      payload: { origin: ticket.origin, priority: ticket.priority },
-    });
-
-    return withCode!;
   }
 
   private buildCode(id: number): string {
@@ -126,6 +141,12 @@ export class TicketsService {
         message: 'Un ticket cerrado no admite modificaciones.',
       });
     }
+
+    // No hay FK en la tabla: sin esta validación, un id inexistente se
+    // guardaría igual y el ticket fallaría con 404 en cascada más adelante,
+    // cuando algo intente resolver su cliente o proyecto.
+    if (dto.clientId !== undefined) await this.clients.findByIdOrFail(dto.clientId);
+    if (dto.projectId !== undefined) await this.projects.findById(dto.projectId);
 
     const patch: Partial<Ticket> = { ...dto } as Partial<Ticket>;
     if (dto.capturedAt) patch.capturedAt = new Date(dto.capturedAt);
