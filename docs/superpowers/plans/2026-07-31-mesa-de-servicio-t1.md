@@ -4104,7 +4104,10 @@ git commit -m "refactor(tickets): cutover — eliminar client_requests y reapunt
 **Files:**
 - Create: `web/src/api/tickets.api.ts`
 - Modify: `web/src/api/types.ts`
-- Delete: `web/src/api/client-requests.api.ts`
+
+`client-requests.api.ts` **no** se borra aquí: las páginas viejas todavía lo
+importan y el build debe quedar verde al final de cada tarea. Se elimina en la
+Tarea 17, junto con la última página que lo consume.
 
 **Interfaces:**
 - Consumes: `api` de `./client`.
@@ -4112,7 +4115,8 @@ git commit -m "refactor(tickets): cutover — eliminar client_requests y reapunt
 
 - [ ] **Step 1: Añadir los tipos**
 
-En `web/src/api/types.ts`, eliminar los tipos `ClientRequest*` y añadir:
+En `web/src/api/types.ts`, **añadir** los tipos siguientes. Los `ClientRequest*`
+se conservan por ahora — los borra la Tarea 17, cuando ya nadie los importe:
 
 ```ts
 export type TicketStatus =
@@ -4324,13 +4328,11 @@ export const supportAgentsApi = {
 };
 ```
 
-- [ ] **Step 3: Eliminar el cliente viejo**
+- [ ] **Step 3: Verificar que compila**
 
-```bash
-git rm web/src/api/client-requests.api.ts
-```
-
-La compilación quedará rota hasta la Tarea 17 (las páginas viejas siguen importándolo). Es esperado: las tareas 16 y 17 lo resuelven.
+Run: `cd web; npm run build`
+Expected: sin errores. Esta tarea solo añade código nuevo: las páginas viejas
+siguen intactas y funcionando.
 
 - [ ] **Step 4: Commit**
 
@@ -4580,7 +4582,9 @@ git commit -m "feat(web): bandeja de tickets con filtros y barra de SLA"
 - Create: `web/src/pages/tickets/TicketSlaClock.tsx`
 - Create: `web/src/pages/tickets/ResolveDialog.tsx`
 - Delete: `web/src/pages/RequestDetailPage.tsx`
+- Delete: `web/src/api/client-requests.api.ts`
 - Modify: `web/src/App.tsx`
+- Modify: `web/src/api/types.ts` (eliminar los tipos `ClientRequest*`)
 
 **Interfaces:**
 - Consumes: `ticketsApi.findOne/transition/take/escalate/triage`, `STATUS_STYLES`, `PRIORITY_STYLES`, `STATUS_LABELS`, `slaBarColor`.
@@ -4793,11 +4797,15 @@ Cada botón llama a `act(...)` con la operación correspondiente: `take`, `trans
 
 - [ ] **Step 5: Actualizar el enrutado y eliminar la página vieja**
 
-En `App.tsx`, añadir `<Route path="/tickets/:ticketId" element={<TicketDetailPage />} />` y quitar la ruta `/requests/:requestId`.
+En `App.tsx`, añadir `<Route path="/tickets/:ticketId" element={<TicketDetailPage />} />` y quitar la ruta `/requests/:requestId` junto con su import.
+
+Esta es la última página que consumía el modelo viejo, así que ahora sí se elimina por completo:
 
 ```bash
-git rm web/src/pages/RequestDetailPage.tsx
+git rm web/src/pages/RequestDetailPage.tsx web/src/api/client-requests.api.ts
 ```
+
+Y en `web/src/api/types.ts`, borrar los tipos `ClientRequest`, `ClientRequestStatus`, `ClientRequestType`, `ClientRequestPriority` y `ClientRequestSource`.
 
 - [ ] **Step 6: Verificar que compila**
 
