@@ -17,6 +17,7 @@ import { SlaService } from './sla.service';
 import { TicketsService } from './tickets.service';
 import { TicketTransitionsService } from './ticket-transitions.service';
 import { TicketAssignmentService } from './ticket-assignment.service';
+import { TicketAIService } from './ticket-ai.service';
 import { ClientSystemsService } from './client-systems.service';
 import { SupportAgentsService } from './support-agents.service';
 import { SlaRiskScheduler } from './sla-risk.scheduler';
@@ -26,6 +27,10 @@ import { SupportAgentsController } from './support-agents.controller';
 import { ClientsModule } from '../clients/clients.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { UsersModule } from '../users/users.module';
+import { IntegrationsModule } from '../integrations/integrations.module';
+import { AIModule } from '../ai/ai.module';
+import { TranscriptionsModule } from '../transcriptions/transcriptions.module';
+import { DocumentsModule } from '../documents/documents.module';
 
 @Module({
   imports: [
@@ -33,6 +38,10 @@ import { UsersModule } from '../users/users.module';
     ClientsModule,
     ProjectsModule,
     UsersModule,
+    IntegrationsModule,
+    AIModule,
+    TranscriptionsModule,
+    DocumentsModule,
   ],
   providers: [
     TicketsRepository,
@@ -45,6 +54,7 @@ import { UsersModule } from '../users/users.module';
     TicketsService,
     TicketTransitionsService,
     TicketAssignmentService,
+    TicketAIService,
     ClientSystemsService,
     SupportAgentsService,
     SlaRiskScheduler,

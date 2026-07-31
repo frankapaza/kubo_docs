@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -8,14 +9,18 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { TicketsService } from './tickets.service';
 import { TicketTransitionsService } from './ticket-transitions.service';
 import { TicketAssignmentService } from './ticket-assignment.service';
+import { TicketAIService } from './ticket-ai.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TransitionTicketDto } from './dto/transition-ticket.dto';
@@ -26,6 +31,8 @@ import { ServiceCategory } from './entities/ticket.entity';
 import { TicketStatus } from './domain/ticket-state-machine';
 import { TicketPriority } from './domain/ticket-priority';
 
+const TRANSCRIBE_MAX_MB = 25;
+
 @Controller('tickets')
 @UseGuards(JwtAuthGuard)
 export class TicketsController {
@@ -33,7 +40,31 @@ export class TicketsController {
     private readonly service: TicketsService,
     private readonly transitions: TicketTransitionsService,
     private readonly assignment: TicketAssignmentService,
+    private readonly ai: TicketAIService,
   ) {}
+
+  /**
+   * Transcribir un audio (WhatsApp voice note o grabación en vivo) y devolver
+   * el texto. El resultado no se guarda; el cliente lo usa para crear o
+   * completar un ticket con POST /tickets.
+   *
+   * Declarado antes de cualquier ruta `:id/...` a propósito: Nest resuelve
+   * las rutas en orden de declaración, y una ruta `POST :id/...` matchearía
+   * `/tickets/transcribe` interpretando "transcribe" como `:id` si se
+   * declarara después.
+   */
+  @Post('transcribe')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: TRANSCRIBE_MAX_MB * 1024 * 1024 },
+    }),
+  )
+  async transcribe(@UploadedFile() file: Express.Multer.File) {
+    if (!file) {
+      throw new BadRequestException({ code: 'BAD_INPUT', message: 'Falta el archivo "file"' });
+    }
+    return this.ai.transcribeAudioBuffer(file.buffer, file.mimetype);
+  }
 
   @Get()
   list(
@@ -153,5 +184,20 @@ export class TicketsController {
   @Get(':id/suggest-assignee')
   suggestAssignee(@Param('id', ParseIntPipe) id: number) {
     return this.assignment.suggestAssignee(id);
+  }
+
+  @Post(':id/triage')
+  triage(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number) {
+    return this.ai.triage(id, user.id);
+  }
+
+  @Post(':id/push-to-jira')
+  pushToJira(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number) {
+    return this.ai.pushToJira(id, user.id);
+  }
+
+  @Post(':id/closure-document')
+  closureDocument(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number) {
+    return this.ai.generateClosureDocument(id, user.id);
   }
 }

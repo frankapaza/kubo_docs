@@ -110,7 +110,7 @@ export class JiraService {
       descriptionMarkdown: string | null;
       acceptanceCriteria?: string[] | null;
       labels?: string[] | null;
-      priority?: 'Low' | 'Medium' | 'High' | null;
+      priority?: 'Highest' | 'High' | 'Medium' | 'Low' | null;
       // Por defecto Task; si no existe en el proyecto cae a Story.
       preferredType?: 'Task' | 'Story';
     },
