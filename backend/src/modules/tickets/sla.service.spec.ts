@@ -132,3 +132,107 @@ describe('evaluateRisk', () => {
     expect(service.evaluateRisk(ticket, new Date('2026-07-31T10:48:00.000Z'))).toBe(true);
   });
 });
+
+describe('remainingLabel', () => {
+  it('devuelve "sin SLA" cuando no hay plazo de resolucion', () => {
+    const { service } = makeService({});
+    const ticket = { slaResolutionDueAt: null } as Ticket;
+    expect(service.remainingLabel(ticket, new Date())).toBe('sin SLA');
+  });
+
+  it('devuelve "cumplido" cuando el status es RESUELTO', () => {
+    const { service } = makeService({});
+    const ticket = {
+      slaResolutionDueAt: new Date('2026-07-31T12:00:00.000Z'),
+      status: 'RESUELTO',
+      pausedAt: null,
+    } as Ticket;
+    expect(service.remainingLabel(ticket, new Date('2026-07-31T10:00:00.000Z'))).toBe('cumplido');
+  });
+
+  it('devuelve "cumplido" cuando el status es CERRADO', () => {
+    const { service } = makeService({});
+    const ticket = {
+      slaResolutionDueAt: new Date('2026-07-31T12:00:00.000Z'),
+      status: 'CERRADO',
+      pausedAt: null,
+    } as Ticket;
+    expect(service.remainingLabel(ticket, new Date('2026-07-31T10:00:00.000Z'))).toBe('cumplido');
+  });
+
+  it('devuelve "cumplido" cuando status es RESUELTO incluso con pausedAt no nulo', () => {
+    const { service } = makeService({});
+    const ticket = {
+      slaResolutionDueAt: new Date('2026-07-31T12:00:00.000Z'),
+      status: 'RESUELTO',
+      pausedAt: new Date('2026-07-31T09:00:00.000Z'),
+    } as Ticket;
+    expect(service.remainingLabel(ticket, new Date('2026-07-31T10:00:00.000Z'))).toBe('cumplido');
+  });
+
+  it('devuelve "en pausa" cuando el ticket esta pausado', () => {
+    const { service } = makeService({});
+    const ticket = {
+      slaResolutionDueAt: new Date('2026-07-31T12:00:00.000Z'),
+      status: 'EN_ATENCION',
+      pausedAt: new Date('2026-07-31T09:00:00.000Z'),
+    } as Ticket;
+    expect(service.remainingLabel(ticket, new Date('2026-07-31T10:00:00.000Z'))).toBe('en pausa');
+  });
+
+  it('devuelve "vencido" cuando el plazo ya paso', () => {
+    const { service } = makeService({});
+    const ticket = {
+      slaResolutionDueAt: new Date('2026-07-31T12:00:00.000Z'),
+      status: 'EN_ATENCION',
+      pausedAt: null,
+    } as Ticket;
+    expect(service.remainingLabel(ticket, new Date('2026-07-31T13:00:00.000Z'))).toBe('vencido');
+  });
+
+  it('devuelve formato "Xh Ym" cuando quedan horas', () => {
+    const { service } = makeService({});
+    const ticket = {
+      slaResolutionDueAt: new Date('2026-07-31T12:00:00.000Z'),
+      status: 'EN_ATENCION',
+      pausedAt: null,
+    } as Ticket;
+    // 1 hora 22 minutos = 82 minutos
+    const now = new Date('2026-07-31T10:38:00.000Z'); // 12:00 - 1:22
+    expect(service.remainingLabel(ticket, now)).toBe('1h 22m');
+  });
+
+  it('devuelve formato "Ym" cuando quedan minutos sin horas', () => {
+    const { service } = makeService({});
+    const ticket = {
+      slaResolutionDueAt: new Date('2026-07-31T12:00:00.000Z'),
+      status: 'EN_ATENCION',
+      pausedAt: null,
+    } as Ticket;
+    // 22 minutos
+    const now = new Date('2026-07-31T11:38:00.000Z');
+    expect(service.remainingLabel(ticket, now)).toBe('22m');
+  });
+});
+
+describe('consumed', () => {
+  it('devuelve el ratio consumido cuando hay plazo', () => {
+    const { service } = makeService({});
+    const ticket = {
+      createdAt: new Date('2026-07-31T08:00:00.000Z'),
+      slaResolutionDueAt: new Date('2026-07-31T12:00:00.000Z'), // 240 min
+      pausedTotalSeconds: 0,
+      pausedAt: null,
+    } as Ticket;
+    // A las 10:00 han pasado 120 min de 240, es decir 0.5
+    const ratio = service.consumed(ticket, new Date('2026-07-31T10:00:00.000Z'));
+    expect(ratio).toBe(0.5);
+  });
+
+  it('devuelve null cuando no hay plazo de resolucion', () => {
+    const { service } = makeService({});
+    const ticket = { slaResolutionDueAt: null } as Ticket;
+    const ratio = service.consumed(ticket, new Date());
+    expect(ratio).toBeNull();
+  });
+});

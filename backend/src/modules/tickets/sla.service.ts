@@ -124,8 +124,8 @@ export class SlaService {
   /** Etiqueta legible del reloj para la bandeja y el detalle: «1h 22m», «vencido». */
   remainingLabel(ticket: Ticket, now: Date): string {
     if (!ticket.slaResolutionDueAt) return 'sin SLA';
-    if (ticket.pausedAt) return 'en pausa';
     if (ticket.status === 'RESUELTO' || ticket.status === 'CERRADO') return 'cumplido';
+    if (ticket.pausedAt) return 'en pausa';
 
     const ms = ticket.slaResolutionDueAt.getTime() - now.getTime();
     if (ms <= 0) return 'vencido';
