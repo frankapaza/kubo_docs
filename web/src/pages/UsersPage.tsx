@@ -4,7 +4,7 @@ import { usersApi } from '../api/users.api';
 import { useAuth } from '../auth/AuthContext';
 import { canManageUsers, ROLE_OPTIONS } from '../auth/permissions';
 import type { UserRole } from '../api/types';
-import { Card } from '../components/ui/Card';
+import { Card, CardBody } from '../components/ui/Card';
 import { RoleBadge, roleLabels } from '../components/ui/Badge';
 import { RefreshIcon, UsersIcon } from '../components/ui/Icon';
 import { EmptyState } from '../components/ui/EmptyState';
@@ -119,7 +119,11 @@ export default function UsersPage() {
           tickets abiertos que alimenta la sugerencia automática de asignatario.
         </p>
       </div>
-      <SupportAgentsSection />
+      <Card>
+        <CardBody>
+          <SupportAgentsSection />
+        </CardBody>
+      </Card>
     </div>
   );
 }

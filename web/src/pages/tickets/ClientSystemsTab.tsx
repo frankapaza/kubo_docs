@@ -42,13 +42,26 @@ export default function ClientSystemsTab({ clientId }: { clientId: number }) {
     };
   }, [clientId]);
 
-  const reload = () =>
-    clientSystemsApi
-      .list(clientId)
-      .then((data) => setSystems(data))
-      .catch((e) => {
-        console.warn('[ClientSystemsTab] No se pudo recargar los sistemas del cliente.', e);
-      });
+  // Sin catch propio: una falla de refresco debe distinguirse de una falla de
+  // escritura (ver safeReload), así que se deja propagar.
+  const reload = () => clientSystemsApi.list(clientId).then((data) => setSystems(data));
+
+  const REFRESH_FAILED_MSG =
+    'La acción se guardó, pero la lista no se pudo actualizar. Recarga la página para verla al día.';
+
+  // La escritura (create/update) ya tuvo éxito cuando esto se llama: si el
+  // GET de refresco falla (red, 5xx transitorio), el checkbox/fila puede
+  // "rebotar" a su valor anterior aunque el cambio quedó guardado en el
+  // servidor. Sin este aviso separado, el usuario ve el estado divergir de
+  // lo que realmente pasó y no tiene ninguna pista de por qué.
+  const safeReload = async () => {
+    try {
+      await reload();
+    } catch (e) {
+      console.warn('[ClientSystemsTab] La acción se guardó, pero no se pudo refrescar la lista.', e);
+      setError(REFRESH_FAILED_MSG);
+    }
+  };
 
   const add = async () => {
     if (!name.trim()) return;
@@ -57,14 +70,15 @@ export default function ClientSystemsTab({ clientId }: { clientId: number }) {
     try {
       await clientSystemsApi.create(clientId, { name: name.trim() });
       setName('');
-      await reload();
     } catch (e: any) {
       // El backend responde 409 CONFLICT con { code, message } cuando el
       // nombre ya existe para este cliente; se muestra tal cual, no un error crudo.
       setError(e?.response?.data?.message ?? 'No se pudo crear el sistema');
-    } finally {
       setBusy(false);
+      return;
     }
+    await safeReload();
+    setBusy(false);
   };
 
   const toggle = async (s: ClientSystem) => {
@@ -72,13 +86,14 @@ export default function ClientSystemsTab({ clientId }: { clientId: number }) {
     setError(null);
     try {
       await clientSystemsApi.update(clientId, s.id, { isActive: s.isActive === 0 });
-      await reload();
     } catch (e: any) {
       console.warn('[ClientSystemsTab] No se pudo cambiar el estado del sistema.', e);
       setError(e?.response?.data?.message ?? 'No se pudo actualizar el sistema');
-    } finally {
       setBusy(false);
+      return;
     }
+    await safeReload();
+    setBusy(false);
   };
 
   return (
@@ -144,6 +159,7 @@ export default function ClientSystemsTab({ clientId }: { clientId: number }) {
               type="button"
               onClick={() => toggle(s)}
               disabled={busy}
+              aria-label={`${s.isActive ? 'Desactivar' : 'Activar'} sistema ${s.name}`}
               style={{ fontSize: 12, padding: '5px 10px', borderRadius: 5, background: '#fff', border: '1px solid #d8dcdd', cursor: busy ? 'not-allowed' : 'pointer' }}
             >
               {s.isActive ? 'Desactivar' : 'Activar'}
