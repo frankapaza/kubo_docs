@@ -1,13 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 
 import { TicketsRepository } from './tickets.repository';
-import { TicketEventsService } from './ticket-events.service';
 import { TicketTransitionsService } from './ticket-transitions.service';
 import { SupportAgentsRepository } from './support-agents.repository';
 
 import { Ticket, AgentLevel } from './entities/ticket.entity';
 import { TicketEvent } from './entities/ticket-event.entity';
 import { SupportAgent } from './entities/support-agent.entity';
+import { assertTransition } from './domain/ticket-state-machine';
 import {
   TicketImpact,
   TicketUrgency,
@@ -19,12 +19,6 @@ import {
 export class TicketAssignmentService {
   constructor(
     private readonly repo: TicketsRepository,
-    // No se llama directamente: assign() y overridePriority() escriben su
-    // evento con el EntityManager de su propia transacción (ver comentario
-    // ahí), no con este servicio, que usa su propia conexión y no
-    // participaría del commit/rollback. Se mantiene inyectado porque forma
-    // parte del contrato de dependencias del módulo (§ Interfaces).
-    private readonly events: TicketEventsService,
     private readonly transitions: TicketTransitionsService,
     private readonly agents: SupportAgentsRepository,
   ) {}
@@ -90,15 +84,30 @@ export class TicketAssignmentService {
     return updated;
   }
 
-  /** Regla 02: tomar el ticket lo pone en atención y arranca el reloj de respuesta. */
-  take(input: { ticketId: number; actorUserId: number }): Promise<Ticket> {
-    return this.repo.update(input.ticketId, { assigneeUserId: input.actorUserId }).then(() =>
-      this.transitions.transition({
-        ticketId: input.ticketId,
-        actorUserId: input.actorUserId,
-        toStatus: 'EN_ATENCION',
-      }),
-    );
+  /**
+   * Regla 02: tomar el ticket lo pone en atención y arranca el reloj de respuesta.
+   *
+   * `EN_ATENCION` solo es alcanzable desde `ASIGNADO`, `ESPERA_CLIENTE`,
+   * `DERIVADO` o `RESUELTO` (ver `domain/ticket-state-machine`). Se valida
+   * con `assertTransition` **antes** de escribir nada: si se tomara un
+   * ticket `NUEVO`/`TRIAJE`, el patch de `assigneeUserId` se confirmaría y
+   * la transición de abajo lanzaría después, dejando un assignee sin
+   * ningún cambio de estado y sin rastro en el timeline (`take` no escribe
+   * su propio evento; el único evento de esta operación lo escribe
+   * `transitions.transition`). La comprobación de aquí es de orden, no
+   * sustituye la que ya hace `transition()` — esta última la repite y es lo
+   * esperado.
+   */
+  async take(input: { ticketId: number; actorUserId: number }): Promise<Ticket> {
+    const current = await this.findOrFail(input.ticketId);
+    assertTransition(current.status, 'EN_ATENCION');
+
+    await this.repo.update(input.ticketId, { assigneeUserId: input.actorUserId });
+    return this.transitions.transition({
+      ticketId: input.ticketId,
+      actorUserId: input.actorUserId,
+      toStatus: 'EN_ATENCION',
+    });
   }
 
   /**
@@ -108,6 +117,12 @@ export class TicketAssignmentService {
    * idioma que assign()); el paso a DERIVADO y su evento ESCALATED los abre
    * TicketTransitionsService.transition() por separado, nunca anidada dentro
    * de la de arriba.
+   *
+   * `DERIVADO` solo es alcanzable desde `ASIGNADO` o `EN_ATENCION`. Igual que
+   * en `take()`, se valida con `assertTransition` antes de escribir el patch:
+   * si no, un ticket en cualquier otro estado se quedaría con
+   * `escalationLevel` cambiado y ninguna transición ni evento, porque
+   * `transition()` lanzaría después de que el patch ya hubiera confirmado.
    */
   async escalate(input: {
     ticketId: number;
@@ -116,7 +131,8 @@ export class TicketAssignmentService {
     reason: string;
     assigneeUserId?: number;
   }): Promise<Ticket> {
-    await this.findOrFail(input.ticketId);
+    const current = await this.findOrFail(input.ticketId);
+    assertTransition(current.status, 'DERIVADO');
 
     const patch: Partial<Ticket> = { escalationLevel: input.toLevel };
     if (input.assigneeUserId) patch.assigneeUserId = input.assigneeUserId;

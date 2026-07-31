@@ -45,13 +45,11 @@ const makeService = (current: Ticket, agents: any[] = []) => {
     countOpenByAssignee: jest.fn().mockResolvedValue(new Map([[10, 5], [11, 1]])),
     runInTransaction: jest.fn().mockImplementation((work: (m: unknown) => Promise<unknown>) => work(manager)),
   };
-  const events = { record: jest.fn().mockResolvedValue({}) };
   const transitions = { transition: jest.fn().mockResolvedValue(current) };
   const agentsRepo = { listActive: jest.fn().mockResolvedValue(agents) };
   return {
-    service: new TicketAssignmentService(repo as any, events as any, transitions as any, agentsRepo as any),
+    service: new TicketAssignmentService(repo as any, transitions as any, agentsRepo as any),
     repo,
-    events,
     transitions,
     ticketRepoStub,
     eventRepoStub,
@@ -75,6 +73,24 @@ describe('assign', () => {
   });
 });
 
+describe('take', () => {
+  it('toma el ticket y transiciona a EN_ATENCION desde ASIGNADO', async () => {
+    const { service, repo, transitions } = makeService(ticketRow({ status: 'ASIGNADO' }));
+    await service.take({ ticketId: 1, actorUserId: 5 });
+    expect(repo.update).toHaveBeenCalledWith(1, { assigneeUserId: 5 });
+    expect(transitions.transition).toHaveBeenCalledWith(
+      expect.objectContaining({ toStatus: 'EN_ATENCION' }),
+    );
+  });
+
+  it('rechaza tomar un ticket NUEVO y no escribe nada', async () => {
+    const { service, repo, transitions } = makeService(ticketRow({ status: 'NUEVO' }));
+    await expect(service.take({ ticketId: 1, actorUserId: 5 })).rejects.toThrow();
+    expect(repo.update).not.toHaveBeenCalled();
+    expect(transitions.transition).not.toHaveBeenCalled();
+  });
+});
+
 describe('escalate', () => {
   it('registra nivel destino y motivo, y transiciona a DERIVADO', async () => {
     const { service, ticketRepoStub, transitions } = makeService(ticketRow({ status: 'EN_ATENCION' }));
@@ -88,6 +104,15 @@ describe('escalate', () => {
     expect(transitions.transition).toHaveBeenCalledWith(
       expect.objectContaining({ toStatus: 'DERIVADO', reason: 'Requiere infraestructura' }),
     );
+  });
+
+  it('rechaza derivar un ticket RESUELTO y no escribe nada', async () => {
+    const { service, ticketRepoStub, transitions } = makeService(ticketRow({ status: 'RESUELTO' }));
+    await expect(
+      service.escalate({ ticketId: 1, actorUserId: 5, toLevel: 'N3', reason: 'Motivo valido' }),
+    ).rejects.toThrow();
+    expect(ticketRepoStub.update).not.toHaveBeenCalled();
+    expect(transitions.transition).not.toHaveBeenCalled();
   });
 });
 
