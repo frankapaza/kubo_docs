@@ -564,3 +564,97 @@ export interface CommercialDocument {
   createdAt: string;
   updatedAt: string;
 }
+
+// Ticket domain types
+export type TicketStatus =
+  | 'NUEVO' | 'TRIAJE' | 'ASIGNADO' | 'EN_ATENCION'
+  | 'ESPERA_CLIENTE' | 'DERIVADO' | 'RESUELTO' | 'CERRADO';
+
+export type TicketPriority = 'P1' | 'P2' | 'P3' | 'P4';
+export type TicketImpact = 'ALTO' | 'MEDIO' | 'BAJO';
+export type TicketUrgency = 'ALTA' | 'MEDIA' | 'BAJA';
+export type AgentLevel = 'N1' | 'N2' | 'N3';
+
+export type TicketOrigin =
+  | 'EMAIL' | 'WHATSAPP_TEXT' | 'WHATSAPP_AUDIO' | 'VOICE_LIVE'
+  | 'MEETING' | 'NOTE' | 'PORTAL';
+
+export type TicketRequestType = 'INCIDENCIA' | 'BUG' | 'MEJORA' | 'FEATURE' | 'AJUSTE';
+
+export type TicketEventType =
+  | 'CREATED' | 'TRIAGED' | 'ASSIGNED' | 'TAKEN' | 'STATUS_CHANGED'
+  | 'ESCALATED' | 'COMMENT' | 'RESOLVED' | 'CLOSED' | 'REOPENED'
+  | 'SLA_AT_RISK' | 'PRIORITY_OVERRIDDEN';
+
+export interface Ticket {
+  id: number;
+  code: string | null;
+  clientId: number | null;
+  projectId: number | null;
+  systemId: number | null;
+  origin: TicketOrigin;
+  requestType: TicketRequestType | null;
+  serviceCategory: ServiceCategory | null;
+  subject: string | null;
+  rawText: string;
+  descriptionMd: string | null;
+  impact: TicketImpact | null;
+  urgency: TicketUrgency | null;
+  priority: TicketPriority;
+  priorityOverridden: number;
+  status: TicketStatus;
+  assigneeUserId: number | null;
+  escalationLevel: AgentLevel | null;
+  slaResponseDueAt: string | null;
+  slaResolutionDueAt: string | null;
+  firstResponseAt: string | null;
+  pausedAt: string | null;
+  slaAtRisk: number;
+  resolvedAt: string | null;
+  closedAt: string | null;
+  resolutionMd: string | null;
+  rootCause: string | null;
+  correctiveAction: string | null;
+  jiraIssueKey: string | null;
+  jiraIssueUrl: string | null;
+  createdAt: string;
+  // Derivados que calcula el backend (TicketsService.decorate)
+  slaLabel: string;
+  slaPct: number | null;
+  slaOverdue: boolean;
+}
+
+export interface TicketEvent {
+  id: number;
+  ticketId: number;
+  type: TicketEventType;
+  fromStatus: TicketStatus | null;
+  toStatus: TicketStatus | null;
+  actorUserId: number | null;
+  reason: string | null;
+  payload: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface TicketDetail {
+  ticket: Ticket;
+  timeline: TicketEvent[];
+}
+
+export interface ClientSystem {
+  id: number;
+  clientId: number;
+  name: string;
+  isActive: number;
+}
+
+export interface SupportAgent {
+  id: number;
+  userId: number;
+  level: AgentLevel;
+  specialties: ServiceCategory[] | null;
+  isActive: number;
+  fullName: string;
+  email: string;
+  openTickets: number;
+}
