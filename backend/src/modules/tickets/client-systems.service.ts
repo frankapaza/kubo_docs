@@ -37,7 +37,17 @@ export class ClientSystemsService {
       throw new NotFoundException({ code: 'NOT_FOUND', message: 'Sistema no encontrado' });
     }
     const patch: Partial<ClientSystem> = {};
-    if (dto.name !== undefined) patch.name = dto.name.trim();
+    if (dto.name !== undefined) {
+      const name = dto.name.trim();
+      const existing = await this.repo.listByClient(current.clientId);
+      if (existing.some((s) => s.id !== id && s.name.toLowerCase() === name.toLowerCase())) {
+        throw new ConflictException({
+          code: 'CONFLICT',
+          message: `El cliente ya tiene un sistema llamado «${name}».`,
+        });
+      }
+      patch.name = name;
+    }
     if (dto.isActive !== undefined) patch.isActive = dto.isActive ? 1 : 0;
 
     const updated = await this.repo.update(id, patch);

@@ -36,6 +36,10 @@ export class UsersService {
     return u;
   }
 
+  findById(id: number): Promise<User | null> {
+    return this.repo.findById(id);
+  }
+
   async listAll(): Promise<UserResponseDto[]> {
     const users = await this.repo.listAll();
     return users.map(UserResponseDto.from);

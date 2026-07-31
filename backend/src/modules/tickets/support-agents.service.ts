@@ -2,7 +2,7 @@ import { ConflictException, Injectable, NotFoundException } from '@nestjs/common
 
 import { SupportAgentsRepository } from './support-agents.repository';
 import { TicketsRepository } from './tickets.repository';
-import { UsersRepository } from '../users/users.repository';
+import { UsersService } from '../users/users.service';
 import { SupportAgent } from './entities/support-agent.entity';
 import { CreateSupportAgentDto, UpdateSupportAgentDto } from './dto/support-agent.dto';
 
@@ -17,7 +17,7 @@ export class SupportAgentsService {
   constructor(
     private readonly repo: SupportAgentsRepository,
     private readonly tickets: TicketsRepository,
-    private readonly users: UsersRepository,
+    private readonly users: UsersService,
   ) {}
 
   /** Enriquecido con datos del usuario y carga actual, para la UI de equipo. */
