@@ -6,8 +6,8 @@ import { JiraService, JiraMonthlyReport } from '../integrations/jira.service';
 import { LLMService } from '../ai/llm.service';
 import { DocumentsService } from '../documents/documents.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
-import { ClientRequestsRepository } from '../client-requests/client-requests.repository';
-import { ClientRequest, SERVICE_CATEGORIES, ServiceCategory } from '../client-requests/entities/client-request.entity';
+import { TicketsRepository } from '../tickets/tickets.repository';
+import { Ticket, SERVICE_CATEGORIES, ServiceCategory } from '../tickets/entities/ticket.entity';
 
 export interface MultiJiraReportSource {
   integrationId: number;
@@ -69,6 +69,9 @@ export interface MultiJiraReport {
   };
 }
 
+/** «Atendido» en el modelo de tickets equivale a resuelto o cerrado. */
+const isCompleted = (status: string): boolean => status === 'RESUELTO' || status === 'CERRADO';
+
 const CATEGORY_LABELS: Record<string, string> = {
   SOFTWARE: 'Atención de sistemas',
   SOPORTE: 'Atención de soporte',
@@ -91,7 +94,7 @@ export class ReportsService {
     private readonly jira: JiraService,
     private readonly llm: LLMService,
     private readonly documents: DocumentsService,
-    private readonly clientRequestsRepo: ClientRequestsRepository,
+    private readonly ticketsRepo: TicketsRepository,
   ) {}
 
   /**
@@ -519,7 +522,7 @@ export class ReportsService {
     const toDate = new Date(to);
     toDate.setDate(toDate.getDate() + 1); // incluir el día `to` completo
 
-    const tickets = await this.clientRequestsRepo.listByClientAndRange({
+    const tickets = await this.ticketsRepo.listByClientAndRange({
       clientId,
       from: fromDate,
       to: toDate,
@@ -528,7 +531,7 @@ export class ReportsService {
     const grouped = this.groupByCategory(tickets);
 
     const total = tickets.length;
-    const completed = tickets.filter((t) => t.status === 'COMPLETED').length;
+    const completed = tickets.filter((t) => isCompleted(t.status)).length;
     const totalMinutes = tickets.reduce((sum, t) => sum + (t.durationMinutes ?? 0), 0);
 
     return {
@@ -610,8 +613,8 @@ export class ReportsService {
     return { documentId: doc.id };
   }
 
-  private groupByCategory(tickets: ClientRequest[]): MonthlyAttentionCategoryGroup[] {
-    const map = new Map<string, ClientRequest[]>();
+  private groupByCategory(tickets: Ticket[]): MonthlyAttentionCategoryGroup[] {
+    const map = new Map<string, Ticket[]>();
 
     for (const t of tickets) {
       const key = t.serviceCategory ?? 'SIN_CATEGORIA';
@@ -630,17 +633,17 @@ export class ReportsService {
         category: cat as ServiceCategory,
         label: CATEGORY_LABELS[cat] ?? cat,
         count: items.length,
-        completedCount: items.filter((t) => t.status === 'COMPLETED').length,
+        completedCount: items.filter((t) => isCompleted(t.status)).length,
         totalMinutes: items.reduce((s, t) => s + (t.durationMinutes ?? 0), 0),
         tickets: items.map((t) => ({
           id: t.id,
-          title: t.title,
+          title: t.subject,
           rawText: t.rawText,
           requestType: t.requestType,
           status: t.status,
           priority: t.priority,
           scheduledAt: t.scheduledAt,
-          completedAt: t.completedAt,
+          completedAt: t.closedAt ?? t.resolvedAt,
           attendedAt: t.attendedAt,
           capturedAt: t.capturedAt,
           durationMinutes: t.durationMinutes,
@@ -669,7 +672,7 @@ export class ReportsService {
       }
       grp.tickets.slice(0, 10).forEach((t) => {
         const label = t.title ?? t.rawText.slice(0, 80);
-        const status = t.status === 'COMPLETED' ? '✓' : '○';
+        const status = isCompleted(t.status) ? '✓' : '○';
         lines.push(`  ${status} ${label}`);
       });
       lines.push('');
@@ -715,7 +718,7 @@ export class ReportsService {
       grp.tickets.forEach((t, i) => {
         const desc = (t.title ?? t.rawText).slice(0, 80);
         const tipo = t.requestType ?? '—';
-        const estado = t.status === 'COMPLETED' ? 'Completado' : t.status === 'SENT' ? 'En Jira' : 'Pendiente';
+        const estado = isCompleted(t.status) ? 'Completado' : 'Pendiente';
         const fecha = new Date(t.createdAt).toLocaleDateString('es-PE');
         parts.push(`| ${i + 1} | ${desc} | ${tipo} | ${estado} | ${fecha} |`);
       });

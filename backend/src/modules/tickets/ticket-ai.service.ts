@@ -54,9 +54,8 @@ interface TriagePayload {
 }
 
 /**
- * Capacidades de IA/integraciones sobre un ticket, portadas de
- * `client-requests.service.ts` (Tarea 13). El módulo viejo sigue en pie
- * hasta la Tarea 14: no se toca desde aquí.
+ * Capacidades de IA/integraciones sobre un ticket, portadas del módulo de
+ * solicitudes antiguo (Tarea 13). Ese módulo se eliminó en la Tarea 14.
  */
 @Injectable()
 export class TicketAIService {

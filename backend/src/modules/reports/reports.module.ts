@@ -6,7 +6,7 @@ import { ClientsModule } from '../clients/clients.module';
 import { IntegrationsModule } from '../integrations/integrations.module';
 import { AIModule } from '../ai/ai.module';
 import { DocumentsModule } from '../documents/documents.module';
-import { ClientRequestsModule } from '../client-requests/client-requests.module';
+import { TicketsModule } from '../tickets/tickets.module';
 
 @Module({
   imports: [
@@ -15,7 +15,7 @@ import { ClientRequestsModule } from '../client-requests/client-requests.module'
     IntegrationsModule,
     AIModule,
     DocumentsModule,
-    ClientRequestsModule,
+    TicketsModule,
   ],
   providers: [ReportsService],
   controllers: [ReportsController],
