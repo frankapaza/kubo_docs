@@ -4,6 +4,8 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { TicketsRepository } from './tickets.repository';
 import { TicketEventsService } from './ticket-events.service';
 import { SlaService } from './sla.service';
+import { Ticket } from './entities/ticket.entity';
+import { TicketEvent } from './entities/ticket-event.entity';
 
 /**
  * Regla 04 del prototipo: al consumir el 70% del plazo de resolución sin
@@ -39,15 +41,29 @@ export class SlaRiskScheduler {
     for (const ticket of candidates) {
       if (!this.sla.evaluateRisk(ticket, now)) continue;
 
-      await this.repo.update(ticket.id, { slaAtRisk: 1 });
-      await this.events.record({
-        ticketId: ticket.id,
-        type: 'SLA_AT_RISK',
-        actorUserId: null, // el actor es el sistema
-        payload: {
-          priority: ticket.priority,
-          resolutionDueAt: ticket.slaResolutionDueAt?.toISOString() ?? null,
-        },
+      // Envolver la escritura de la bandera y el evento en una transacción, para que
+      // si el evento falla, la bandera no se escriba y el ticket se reseleccione en
+      // el próximo ciclo. El invariante es: si sla_at_risk = 1, hay un evento
+      // SLA_AT_RISK en el timeline.
+      await this.repo.runInTransaction(async (manager) => {
+        const ticketRepo = manager.getRepository(Ticket);
+        const eventRepo = manager.getRepository(TicketEvent);
+
+        await ticketRepo.update(ticket.id, { slaAtRisk: 1 });
+        await eventRepo.save(
+          eventRepo.create({
+            ticketId: ticket.id,
+            type: 'SLA_AT_RISK',
+            actorUserId: null, // el actor es el sistema
+            fromStatus: null,
+            toStatus: null,
+            reason: null,
+            payload: {
+              priority: ticket.priority,
+              resolutionDueAt: ticket.slaResolutionDueAt?.toISOString() ?? null,
+            },
+          }),
+        );
       });
       marked += 1;
     }
