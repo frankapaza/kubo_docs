@@ -14,12 +14,16 @@ import { SupportAgentsRepository } from './support-agents.repository';
 import { ClientSystemsRepository } from './client-systems.repository';
 import { TicketEventsService } from './ticket-events.service';
 import { SlaService } from './sla.service';
+import { TicketsService } from './tickets.service';
+import { TicketsController } from './tickets.controller';
 import { ClientsModule } from '../clients/clients.module';
+import { ProjectsModule } from '../projects/projects.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Ticket, TicketEvent, SlaPolicy, SupportAgent, ClientSystem]),
     ClientsModule,
+    ProjectsModule,
   ],
   providers: [
     TicketsRepository,
@@ -29,7 +33,9 @@ import { ClientsModule } from '../clients/clients.module';
     ClientSystemsRepository,
     TicketEventsService,
     SlaService,
+    TicketsService,
   ],
+  controllers: [TicketsController],
   exports: [
     TicketsRepository,
     TicketEventsRepository,
@@ -38,6 +44,7 @@ import { ClientsModule } from '../clients/clients.module';
     ClientSystemsRepository,
     TicketEventsService,
     SlaService,
+    TicketsService,
   ],
 })
 export class TicketsModule {}
