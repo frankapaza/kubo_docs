@@ -467,7 +467,7 @@ function CategorySection({ group }: { group: MonthlyAttentionCategoryGroup }) {
                   <td className="px-3 py-2 text-slate-400 text-xs">{i + 1}</td>
                   <td className="px-3 py-2">
                     <Link
-                      to={`/requests/${t.id}`}
+                      to={`/tickets/${t.id}`}
                       className="text-slate-800 hover:text-indigo-600 line-clamp-2"
                     >
                       {t.title ?? t.rawText.slice(0, 100)}

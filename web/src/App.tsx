@@ -20,7 +20,7 @@ import BrowserRecorderPage from './pages/BrowserRecorderPage';
 import AgentsPage from './pages/AgentsPage';
 import AgentChatPage from './pages/AgentChatPage';
 import TicketsListPage from './pages/TicketsListPage';
-import RequestDetailPage from './pages/RequestDetailPage';
+import TicketDetailPage from './pages/TicketDetailPage';
 import MonthlyReportPage from './pages/MonthlyReportPage';
 import SignaturePage from './pages/SignaturePage';
 import { ProtectedRoute } from './auth/ProtectedRoute';
@@ -46,7 +46,7 @@ export default function App() {
           <Route path="/meetings/:meetingId/record-web" element={<BrowserRecorderPage />} />
           <Route path="/actas/:actaId" element={<ActaEditorPage />} />
           <Route path="/tickets" element={<TicketsListPage />} />
-          <Route path="/requests/:requestId" element={<RequestDetailPage />} />
+          <Route path="/tickets/:ticketId" element={<TicketDetailPage />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agents/:type" element={<AgentChatPage />} />
           <Route path="/users" element={<UsersPage />} />

@@ -51,71 +51,6 @@ export interface Project {
   jiraProjectKey: string | null;
 }
 
-export type ClientRequestSource =
-  | 'WHATSAPP_TEXT'
-  | 'WHATSAPP_AUDIO'
-  | 'VOICE_LIVE'
-  | 'NOTE'
-  | 'MEETING'
-  | 'OTHER';
-
-export const CLIENT_REQUEST_SOURCES: ClientRequestSource[] = [
-  'WHATSAPP_TEXT',
-  'WHATSAPP_AUDIO',
-  'VOICE_LIVE',
-  'NOTE',
-  'MEETING',
-  'OTHER',
-];
-
-export const CLIENT_REQUEST_SOURCE_LABELS: Record<ClientRequestSource, string> = {
-  WHATSAPP_TEXT: 'WhatsApp (texto)',
-  WHATSAPP_AUDIO: 'WhatsApp (audio)',
-  VOICE_LIVE: 'Dictado en vivo',
-  NOTE: 'Nota rápida',
-  MEETING: 'Reunión / acta',
-  OTHER: 'Otra fuente',
-};
-
-export type ClientRequestStatus = 'INBOX' | 'STRUCTURED' | 'SENT' | 'ARCHIVED' | 'COMPLETED';
-
-export const CLIENT_REQUEST_STATUSES: ClientRequestStatus[] = [
-  'INBOX',
-  'STRUCTURED',
-  'SENT',
-  'ARCHIVED',
-  'COMPLETED',
-];
-
-export const CLIENT_REQUEST_STATUS_LABELS: Record<ClientRequestStatus, string> = {
-  INBOX: 'En bandeja',
-  STRUCTURED: 'Estructurada',
-  SENT: 'En Jira',
-  ARCHIVED: 'Archivada',
-  COMPLETED: 'Completada',
-};
-
-export type ClientRequestType = 'MEJORA' | 'FEATURE' | 'AJUSTE' | 'BUG';
-
-export const CLIENT_REQUEST_TYPES: ClientRequestType[] = ['MEJORA', 'FEATURE', 'AJUSTE', 'BUG'];
-
-export const CLIENT_REQUEST_TYPE_LABELS: Record<ClientRequestType, string> = {
-  MEJORA: 'Mejora',
-  FEATURE: 'Nueva funcionalidad',
-  AJUSTE: 'Ajuste',
-  BUG: 'Bug',
-};
-
-export type ClientRequestPriority = 'LOW' | 'MEDIUM' | 'HIGH';
-
-export const CLIENT_REQUEST_PRIORITIES: ClientRequestPriority[] = ['LOW', 'MEDIUM', 'HIGH'];
-
-export const CLIENT_REQUEST_PRIORITY_LABELS: Record<ClientRequestPriority, string> = {
-  LOW: 'Baja',
-  MEDIUM: 'Media',
-  HIGH: 'Alta',
-};
-
 export type ServiceCategory =
   | 'SOFTWARE'
   | 'SOPORTE'
@@ -144,43 +79,6 @@ export const SERVICE_CATEGORY_LABELS: Record<ServiceCategory, string> = {
   VISITA_SITIO: 'Visita en sitio',
   OTRO: 'Otro',
 };
-
-export interface ClientRequest {
-  id: number;
-  clientId: number | null;
-  projectId: number | null;
-  meetingId: number | null;
-  parentRequestId: number | null;
-  source: ClientRequestSource;
-  rawText: string;
-  rawAudioFilename: string | null;
-  capturedAt: string;
-  status: ClientRequestStatus;
-  requestType: ClientRequestType | null;
-  priority: ClientRequestPriority | null;
-  moduleName: string | null;
-  screenName: string | null;
-  flowContext: string | null;
-  title: string | null;
-  descriptionMd: string | null;
-  acceptanceCriteria: string[] | null;
-  labels: string[] | null;
-  assigneeUserId: number | null;
-  jiraIntegrationId: number | null;
-  jiraProjectKey: string | null;
-  jiraIssueKey: string | null;
-  jiraIssueUrl: string | null;
-  sentAt: string | null;
-  completedAt: string | null;
-  attendedAt: string | null;
-  closureDocumentId: number | null;
-  serviceCategory: ServiceCategory | null;
-  scheduledAt: string | null;
-  durationMinutes: number | null;
-  createdBy: number;
-  createdAt: string;
-  updatedAt: string;
-}
 
 export interface MonthlyTicketRow {
   id: number;
