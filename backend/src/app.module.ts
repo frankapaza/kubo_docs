@@ -23,6 +23,7 @@ import { AgentsModule } from './modules/agents/agents.module';
 import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { ClientsModule } from './modules/clients/clients.module';
 import { ClientRequestsModule } from './modules/client-requests/client-requests.module';
+import { TicketsModule } from './modules/tickets/tickets.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { DocumentSignatoriesModule } from './modules/document-signatories/document-signatories.module';
 import { WorkspaceModule } from './modules/workspace/workspace.module';
@@ -79,6 +80,7 @@ import { EmailModule } from './modules/email/email.module';
     IntegrationsModule,
     ClientsModule,
     ClientRequestsModule,
+    TicketsModule,
     DocumentsModule,
     DocumentSignatoriesModule,
     WorkspaceModule,

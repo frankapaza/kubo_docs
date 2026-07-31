@@ -27,6 +27,9 @@ export class Client {
   @Column({ name: 'jira_code', type: 'varchar', length: 10, nullable: true })
   jiraCode!: string | null;
 
+  @Column({ name: 'sla_policy_id', type: 'bigint', unsigned: true, nullable: true })
+  slaPolicyId!: number | null;
+
   @Column({ name: 'legal_rep_name', type: 'varchar', length: 180, nullable: true })
   legalRepName!: string | null;
 
