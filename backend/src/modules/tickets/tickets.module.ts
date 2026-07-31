@@ -16,6 +16,7 @@ import { TicketEventsService } from './ticket-events.service';
 import { SlaService } from './sla.service';
 import { TicketsService } from './tickets.service';
 import { TicketTransitionsService } from './ticket-transitions.service';
+import { TicketAssignmentService } from './ticket-assignment.service';
 import { TicketsController } from './tickets.controller';
 import { ClientsModule } from '../clients/clients.module';
 import { ProjectsModule } from '../projects/projects.module';
@@ -36,6 +37,7 @@ import { ProjectsModule } from '../projects/projects.module';
     SlaService,
     TicketsService,
     TicketTransitionsService,
+    TicketAssignmentService,
   ],
   controllers: [TicketsController],
   exports: [
@@ -48,6 +50,7 @@ import { ProjectsModule } from '../projects/projects.module';
     SlaService,
     TicketsService,
     TicketTransitionsService,
+    TicketAssignmentService,
   ],
 })
 export class TicketsModule {}

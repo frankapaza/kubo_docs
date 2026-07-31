@@ -15,9 +15,13 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { TicketsService } from './tickets.service';
 import { TicketTransitionsService } from './ticket-transitions.service';
+import { TicketAssignmentService } from './ticket-assignment.service';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { TransitionTicketDto } from './dto/transition-ticket.dto';
+import { AssignTicketDto } from './dto/assign-ticket.dto';
+import { EscalateTicketDto } from './dto/escalate-ticket.dto';
+import { OverridePriorityDto } from './dto/override-priority.dto';
 import { ServiceCategory } from './entities/ticket.entity';
 import { TicketStatus } from './domain/ticket-state-machine';
 import { TicketPriority } from './domain/ticket-priority';
@@ -28,6 +32,7 @@ export class TicketsController {
   constructor(
     private readonly service: TicketsService,
     private readonly transitions: TicketTransitionsService,
+    private readonly assignment: TicketAssignmentService,
   ) {}
 
   @Get()
@@ -93,5 +98,60 @@ export class TicketsController {
       rootCause: dto.rootCause,
       correctiveAction: dto.correctiveAction,
     });
+  }
+
+  @Post(':id/assign')
+  assign(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AssignTicketDto,
+  ) {
+    return this.assignment.assign({
+      ticketId: id,
+      actorUserId: user.id,
+      assigneeUserId: dto.assigneeUserId,
+      reason: dto.reason,
+    });
+  }
+
+  @Post(':id/take')
+  take(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number) {
+    return this.assignment.take({ ticketId: id, actorUserId: user.id });
+  }
+
+  @Post(':id/escalate')
+  escalate(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: EscalateTicketDto,
+  ) {
+    return this.assignment.escalate({
+      ticketId: id,
+      actorUserId: user.id,
+      toLevel: dto.toLevel,
+      reason: dto.reason,
+      assigneeUserId: dto.assigneeUserId,
+    });
+  }
+
+  @Post(':id/priority')
+  overridePriority(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: OverridePriorityDto,
+  ) {
+    return this.assignment.overridePriority({
+      ticketId: id,
+      actorUserId: user.id,
+      impact: dto.impact,
+      urgency: dto.urgency,
+      priority: dto.priority,
+      reason: dto.reason,
+    });
+  }
+
+  @Get(':id/suggest-assignee')
+  suggestAssignee(@Param('id', ParseIntPipe) id: number) {
+    return this.assignment.suggestAssignee(id);
   }
 }
