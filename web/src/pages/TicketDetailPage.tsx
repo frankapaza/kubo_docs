@@ -81,7 +81,14 @@ export default function TicketDetailPage() {
   // `cancelled` evita que una carga obsoleta (tras navegar rápido entre
   // tickets) pise el estado de la vista actual.
   useEffect(() => {
-    if (!Number.isFinite(id)) return;
+    if (!Number.isFinite(id)) {
+      // Id de ruta no numérico (URL manual, enlace obsoleto): sin este corte
+      // explícito `loading` se queda en `true` para siempre, porque nunca se
+      // dispara ni el `.then` ni el `.catch` de abajo.
+      setLoading(false);
+      setLoadError('Ticket no encontrado');
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setLoadError(null);

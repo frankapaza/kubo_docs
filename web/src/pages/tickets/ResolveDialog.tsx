@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 interface Props {
   open: boolean;
@@ -10,6 +10,18 @@ export default function ResolveDialog({ open, onCancel, onConfirm }: Props) {
   const [resolutionMd, setResolutionMd] = useState('');
   const [rootCause, setRootCause] = useState('');
   const [correctiveAction, setCorrectiveAction] = useState('');
+
+  // Cerrar con ESC, mismo idioma que web/src/ui/ConfirmDialog.tsx: un
+  // usuario de teclado espera el mismo comportamiento en todos los modales
+  // de la app, no solo en el de confirmación genérico.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onCancel]);
 
   if (!open) return null;
   const ready = resolutionMd.trim() && rootCause.trim() && correctiveAction.trim();
@@ -32,9 +44,13 @@ export default function ResolveDialog({ open, onCancel, onConfirm }: Props) {
       role="dialog"
       aria-modal="true"
       aria-labelledby="resolve-dialog-title"
+      onClick={onCancel}
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 }}
     >
-      <div style={{ background: '#fff', borderRadius: 10, padding: 22, width: 560, maxWidth: '92vw', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ background: '#fff', borderRadius: 10, padding: 22, width: 560, maxWidth: '92vw', display: 'flex', flexDirection: 'column', gap: 14 }}
+      >
         <h2 id="resolve-dialog-title" style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Marcar como resuelto</h2>
         <span style={{ fontSize: 12, color: '#6d7577', lineHeight: 1.5 }}>
           Los tres campos son obligatorios: sin ellos el ticket no se puede resolver.

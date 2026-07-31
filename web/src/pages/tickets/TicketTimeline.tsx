@@ -1,4 +1,5 @@
 import type { TicketEvent, TicketEventType } from '../../api/types';
+import { TIMELINE_EVENT_DOTS } from './ticket-ui';
 
 const EVENT_LABELS: Record<TicketEventType, string> = {
   CREATED: 'Ticket creado',
@@ -15,16 +16,6 @@ const EVENT_LABELS: Record<TicketEventType, string> = {
   PRIORITY_OVERRIDDEN: 'Prioridad ajustada',
 };
 
-const DOTS: Partial<Record<TicketEventType, string>> = {
-  CREATED: 'oklch(0.52 0.1 205)',
-  TRIAGED: 'oklch(0.45 0.13 290)',
-  ESCALATED: 'oklch(0.45 0.13 290)',
-  RESOLVED: 'oklch(0.45 0.11 150)',
-  CLOSED: '#4a5052',
-  SLA_AT_RISK: 'oklch(0.5 0.16 25)',
-  REOPENED: 'oklch(0.5 0.11 70)',
-};
-
 export default function TicketTimeline({ events }: { events: TicketEvent[] }) {
   if (events.length === 0) {
     return <span style={{ fontSize: 12, color: '#6d7577' }}>Sin eventos todavía.</span>;
@@ -35,7 +26,7 @@ export default function TicketTimeline({ events }: { events: TicketEvent[] }) {
       {events.map((e) => (
         <div key={e.id} style={{ display: 'grid', gridTemplateColumns: '14px 1fr', gap: 14 }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-            <span style={{ width: 9, height: 9, borderRadius: '50%', background: DOTS[e.type] ?? 'oklch(0.6 0.13 78)', marginTop: 5 }} />
+            <span style={{ width: 9, height: 9, borderRadius: '50%', background: TIMELINE_EVENT_DOTS[e.type] ?? 'oklch(0.6 0.13 78)', marginTop: 5 }} />
             <span style={{ flex: 1, width: 1, background: '#e6e9e9' }} />
           </div>
           <div style={{ paddingBottom: 16, display: 'flex', flexDirection: 'column', gap: 3 }}>

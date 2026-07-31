@@ -1,4 +1,4 @@
-import type { TicketPriority, TicketStatus } from '../../api/types';
+import type { TicketEventType, TicketPriority, TicketStatus } from '../../api/types';
 
 export interface Swatch {
   bg: string;
@@ -33,6 +33,17 @@ export const STATUS_LABELS: Record<TicketStatus, string> = {
   DERIVADO: 'Derivado',
   RESUELTO: 'Resuelto',
   CERRADO: 'Cerrado',
+};
+
+/** Color del punto de línea de tiempo por tipo de evento; sin entrada usa el color por defecto de TicketTimeline. */
+export const TIMELINE_EVENT_DOTS: Partial<Record<TicketEventType, string>> = {
+  CREATED: 'oklch(0.52 0.1 205)',
+  TRIAGED: 'oklch(0.45 0.13 290)',
+  ESCALATED: 'oklch(0.45 0.13 290)',
+  RESOLVED: 'oklch(0.45 0.11 150)',
+  CLOSED: '#4a5052',
+  SLA_AT_RISK: 'oklch(0.5 0.16 25)',
+  REOPENED: 'oklch(0.5 0.11 70)',
 };
 
 /** Verde con margen, ámbar acercándose al umbral, rojo pasado o vencido. */
