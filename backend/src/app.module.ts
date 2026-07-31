@@ -6,6 +6,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
+import { DbTimezoneInitializer } from './config/db-timezone.initializer';
 
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
@@ -91,6 +92,7 @@ import { EmailModule } from './modules/email/email.module';
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
+    DbTimezoneInitializer,
   ],
 })
 export class AppModule {}
