@@ -43,11 +43,23 @@ export class WorkItemsService {
     if (dto.projectId !== undefined) await this.projects.findById(dto.projectId);
 
     const priority: WorkItemPriority = dto.priority ?? DEFAULT_PRIORITY;
-    const pending = await this.repo.listColumn('PENDIENTE');
-    const index = insertionIndex(pending.map((w) => w.priority), priority);
 
     return this.repo.runInTransaction(async (manager) => {
       const itemRepo = manager.getRepository(WorkItem);
+
+      // La lectura que decide la posición debe ir dentro de la transacción,
+      // con el manager transaccional: si se leyera antes (fuera de la
+      // transacción, sin bloqueo), dos altas concurrentes en la misma banda
+      // de prioridad verían la misma foto, calcularían índices superpuestos
+      // y cada una renumeraría la columna en su propia transacción — la
+      // última en confirmar pisaría en silencio el orden de la otra. Mismo
+      // criterio de orden que WorkItemsRepository.listColumn, para que el
+      // comportamiento de la lectura no cambie, solo su alcance transaccional.
+      const pending = await itemRepo.find({
+        where: { status: 'PENDIENTE' },
+        order: { boardOrder: 'ASC', id: 'ASC' },
+      });
+      const index = insertionIndex(pending.map((w) => w.priority), priority);
 
       const saved = await itemRepo.save(
         itemRepo.create({

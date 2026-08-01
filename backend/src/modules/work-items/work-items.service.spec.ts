@@ -18,6 +18,10 @@ const makeService = (pendingColumn: WorkItem[] = []) => {
   const savedEvents: Partial<WorkItemEvent>[] = [];
 
   const itemRepoStub = {
+    // La lectura que decide la posición vive dentro de la transacción (ver
+    // work-items.service.ts), así que la columna pendiente se sirve aquí, no
+    // en repo.listColumn.
+    find: jest.fn().mockResolvedValue(pendingColumn),
     save: jest.fn().mockImplementation((e) => Promise.resolve({ ...created, ...e })),
     create: jest.fn().mockImplementation((e) => e),
     update: jest.fn().mockResolvedValue(undefined),
@@ -52,6 +56,7 @@ const makeService = (pendingColumn: WorkItem[] = []) => {
   return {
     service: new WorkItemsService(repo as any, events as any, clients as any, projects as any),
     repo, events, clients, projects, applied, savedEvents,
+    itemRepoFind: itemRepoStub.find,
   };
 };
 
@@ -116,5 +121,22 @@ describe('create', () => {
     const item = await service.create(5, { clientId: 1, title: 'Urgente', priority: 'ALTA' });
     expect(item.code).toBe('RQ-0099');
     expect(item.boardOrder).toBe(1);
+  });
+
+  it('lee la columna que decide la posicion dentro de la transaccion', async () => {
+    // Si esta lectura ocurriera antes de abrir la transacción (por ejemplo
+    // vía repo.listColumn, sin bloqueo), dos altas concurrentes en la misma
+    // banda de prioridad verían la misma foto y una pisaría en silencio el
+    // orden calculado por la otra. Por eso la posición se decide con
+    // manager.getRepository(WorkItem).find(...), no con repo.listColumn.
+    const { service, repo, itemRepoFind } = makeService(column(['ALTA', 'MEDIA', 'BAJA']));
+    await service.create(5, { clientId: 1, title: 'Urgente', priority: 'ALTA' });
+    expect(itemRepoFind).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { status: 'PENDIENTE' },
+        order: { boardOrder: 'ASC', id: 'ASC' },
+      }),
+    );
+    expect(repo.listColumn).not.toHaveBeenCalled();
   });
 });
