@@ -2,6 +2,15 @@ import { UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PortalAuthService } from './portal-auth.service';
 
+// bcrypt es un addon nativo: sus propiedades no son configurables, así que
+// `jest.spyOn(bcrypt, 'compare')` falla con "Cannot redefine property".
+// Se envuelve `compare` en un jest.fn que delega en la implementación real,
+// para poder comprobar que se invoca sin perder su comportamiento genuino.
+jest.mock('bcrypt', () => {
+  const actual = jest.requireActual('bcrypt');
+  return { ...actual, compare: jest.fn(actual.compare) };
+});
+
 const makeService = (user: unknown) => {
   const repo = {
     findByEmail: jest.fn().mockResolvedValue(user),
@@ -55,5 +64,12 @@ describe('login', () => {
     const { service, repo } = makeService({ id: 1, clientId: 7, email: 'a@x.com', passwordHash: hash, isActive: 1, isAdmin: 0 });
     await service.login('a@x.com', 'correcta');
     expect(repo.touchLastLogin).toHaveBeenCalledWith(1);
+  });
+
+  it('invoca bcrypt.compare tambien cuando el correo no existe, para no filtrar por tiempo', async () => {
+    (bcrypt.compare as jest.Mock).mockClear();
+    const { service } = makeService(null);
+    await service.login('nadie@x.com', 'x').catch(() => undefined);
+    expect(bcrypt.compare).toHaveBeenCalled();
   });
 });

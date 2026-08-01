@@ -29,6 +29,15 @@ function invalidCredentials(): UnauthorizedException {
   });
 }
 
+/**
+ * Hash bcrypt fijo (cost 10, sin contraseña real detrás) usado cuando el
+ * correo no existe. Sin él, esa rama no pagaría el coste de `bcrypt.compare`
+ * y un atacante podría enumerar correos dados de alta midiendo el tiempo de
+ * respuesta, aunque el mensaje de error sea idéntico. Se calcula una sola
+ * vez aquí, como constante del módulo, no en cada petición.
+ */
+const DECOY_PASSWORD_HASH = '$2b$10$0uJINUuWpJtynLqJh8R59OtA4TWmKftqsFWtUw2qsATrgOBnd.H9S';
+
 @Injectable()
 export class PortalAuthService {
   constructor(
@@ -39,12 +48,12 @@ export class PortalAuthService {
 
   async login(email: string, password: string): Promise<PortalAuthResponse> {
     const user = await this.clientUsers.findByEmail(email);
-    if (!user || !user.isActive) {
-      throw invalidCredentials();
-    }
-
-    const matches = await bcrypt.compare(password, user.passwordHash);
-    if (!matches) {
+    // `bcrypt.compare` se ejecuta siempre, exista o no el usuario, contra su
+    // hash real o el señuelo: las tres rutas de fallo (correo inexistente,
+    // contraseña incorrecta, cuenta desactivada) deben pagar el mismo coste
+    // para no filtrar por tiempo qué correos están dados de alta.
+    const matches = await bcrypt.compare(password, user?.passwordHash ?? DECOY_PASSWORD_HASH);
+    if (!user || !matches || !user.isActive) {
       throw invalidCredentials();
     }
 
