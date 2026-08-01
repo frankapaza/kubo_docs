@@ -1,4 +1,24 @@
-import type { TicketEventType, TicketPriority, TicketStatus } from '../../api/types';
+import type {
+  TicketEventType,
+  TicketImpact,
+  TicketOrigin,
+  TicketPriority,
+  TicketStatus,
+  TicketUrgency,
+} from '../../api/types';
+
+export const TICKET_IMPACTS: TicketImpact[] = ['ALTO', 'MEDIO', 'BAJO'];
+export const TICKET_URGENCIES: TicketUrgency[] = ['ALTA', 'MEDIA', 'BAJA'];
+
+export const ORIGIN_LABELS: Record<TicketOrigin, string> = {
+  EMAIL: 'Correo',
+  WHATSAPP_TEXT: 'WhatsApp (texto)',
+  WHATSAPP_AUDIO: 'WhatsApp (audio)',
+  VOICE_LIVE: 'Dictado en vivo',
+  MEETING: 'Reunión / acta',
+  NOTE: 'Nota rápida',
+  PORTAL: 'Portal',
+};
 
 export interface Swatch {
   bg: string;
@@ -53,4 +73,26 @@ export function slaBarColor(pct: number | null, overdue: boolean): string {
   if (pct >= 70) return 'oklch(0.5 0.16 25)';
   if (pct >= 45) return 'oklch(0.68 0.14 78)';
   return 'oklch(0.6 0.12 150)';
+}
+
+/**
+ * Espejo de backend/src/modules/tickets/domain/ticket-priority.ts#derivePriority.
+ * Uso exclusivo: previsualizar en el formulario de alta la prioridad que
+ * resultará ANTES de enviar. El backend vuelve a calcularla al crear el
+ * ticket y es la única fuente de verdad — esto no es lo mismo que
+ * recalcular el reloj de SLA (slaLabel/slaPct/slaOverdue), que nunca se
+ * toca en el navegador porque depende del instante actual.
+ */
+const PRIORITY_MATRIX: Record<TicketImpact, Record<TicketUrgency, TicketPriority>> = {
+  ALTO: { ALTA: 'P1', MEDIA: 'P2', BAJA: 'P3' },
+  MEDIO: { ALTA: 'P2', MEDIA: 'P3', BAJA: 'P3' },
+  BAJO: { ALTA: 'P3', MEDIA: 'P4', BAJA: 'P4' },
+};
+
+export function previewPriority(
+  impact: TicketImpact | '' | null,
+  urgency: TicketUrgency | '' | null,
+): TicketPriority {
+  if (!impact || !urgency) return 'P3';
+  return PRIORITY_MATRIX[impact][urgency];
 }

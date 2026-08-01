@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
-import { ticketsApi } from '../api/tickets.api';
-import { usersApi } from '../api/users.api';
+import { ticketsApi, supportAgentsApi } from '../api/tickets.api';
 import type { Ticket, TicketStatus } from '../api/types';
 import { STATUS_STYLES, PRIORITY_STYLES, STATUS_LABELS, slaBarColor } from './tickets/ticket-ui';
+import NewTicketDialog from './tickets/NewTicketDialog';
 
 type Chip = 'Todos' | 'Abiertos' | 'P1' | 'SLA en riesgo' | TicketStatus;
 
@@ -18,6 +18,7 @@ const chipLabel = (c: Chip): string =>
 const SEARCH_DEBOUNCE_MS = 280;
 
 export default function TicketsListPage() {
+  const navigate = useNavigate();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [filter, setFilter] = useState<Chip>('Todos');
   const [qInput, setQInput] = useState('');
@@ -25,19 +26,21 @@ export default function TicketsListPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [usersById, setUsersById] = useState<Map<number, string>>(new Map());
+  const [newTicketOpen, setNewTicketOpen] = useState(false);
 
-  // Resuelve assigneeUserId -> nombre. GET /users está restringido por rol
-  // (ADMIN, PRODUCT_OWNER, SCRUM_MASTER); si el usuario logueado no tiene
-  // acceso, la llamada falla y la columna cae al id crudo. Se avisa por
-  // consola para poder distinguir "sin permiso" de un fallo real (red, 500,
-  // contrato roto) que de otro modo pasaría inadvertido.
+  // Resuelve assigneeUserId -> nombre a partir de GET /support-agents, que
+  // no tiene restricción de rol (a diferencia de GET /users, reservado a
+  // ADMIN/PRODUCT_OWNER/SCRUM_MASTER — un técnico DEVELOPER, el usuario
+  // principal de la mesa de servicio, no podía verlo y la columna le caía
+  // siempre al id crudo). Todo assigneeUserId de un ticket es un técnico
+  // registrado, así que esta fuente cubre el mismo universo.
   useEffect(() => {
-    usersApi
+    supportAgentsApi
       .list()
-      .then((list) => setUsersById(new Map(list.map((u) => [u.id, u.fullName]))))
+      .then((list) => setUsersById(new Map(list.map((a) => [a.userId, a.fullName]))))
       .catch((e) => {
         console.warn(
-          '[TicketsListPage] No se pudo cargar la lista de usuarios; la columna "Asignado" mostrará el id crudo.',
+          '[TicketsListPage] No se pudo cargar la lista de técnicos; la columna "Asignado" mostrará el id crudo.',
           e,
         );
       });
@@ -85,6 +88,17 @@ export default function TicketsListPage() {
 
   return (
     <div style={{ padding: 26, display: 'flex', flexDirection: 'column', gap: 22 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <h1 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Mesa de servicio</h1>
+        <button
+          type="button"
+          onClick={() => setNewTicketOpen(true)}
+          style={{ fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: '#15191a', color: '#fff', border: 'none', cursor: 'pointer' }}
+        >
+          + Nuevo ticket
+        </button>
+      </div>
+
       <section style={{ background: '#fff', border: '1px solid #e2e5e6', borderRadius: 10, overflow: 'hidden' }}>
         <div style={{ padding: '13px 18px', borderBottom: '1px solid #eceeef', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {CHIPS.map((c) => (
@@ -162,6 +176,17 @@ export default function TicketsListPage() {
           );
         })}
       </section>
+
+      <NewTicketDialog
+        open={newTicketOpen}
+        onCancel={() => setNewTicketOpen(false)}
+        onCreated={(created) => {
+          setNewTicketOpen(false);
+          // Ir directo al detalle: es donde siguen el triaje, la asignación
+          // y el resto del ciclo de vida.
+          navigate(`/tickets/${created.id}`);
+        }}
+      />
     </div>
   );
 }
