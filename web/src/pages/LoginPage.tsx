@@ -32,7 +32,9 @@ export default function LoginPage() {
         <div className="flex flex-col items-center mb-8">
           <KuboLogo size={48} />
           <h1 className="text-2xl font-bold text-slate-900 mt-4">Kubo DevDocs</h1>
-          <p className="text-sm text-slate-500 mt-1">CRM de reuniones y actas</p>
+          <p className="text-sm text-slate-500 mt-1">
+            Reuniones, soporte y proyectos de tus clientes
+          </p>
         </div>
 
         <form
