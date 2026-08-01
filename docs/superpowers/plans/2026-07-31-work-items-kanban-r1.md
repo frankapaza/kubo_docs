@@ -1216,6 +1216,22 @@ Las tres escriben el cambio y su evento en una sola transacción. `move` renumer
 > repositorio de eventos transaccional, con stubs distintos por entidad en
 > `getRepository` — la Tarea 5 ya lo hizo así y sirve de referencia.
 
+> **Segunda corrección — la lectura de la columna va dentro de la transacción.**
+>
+> El código de ejemplo llama a `this.repo.listColumn(...)` **antes** de abrir
+> `runInTransaction`, y luego renumera esa columna dentro. Esa lectura no está
+> bloqueada: dos movimientos simultáneos sobre la misma columna leen la misma foto,
+> calculan órdenes solapados y el último en confirmar pisa al primero. Es una pérdida
+> de actualización silenciosa — el tablero queda desordenado sin que nadie vea un error.
+>
+> Mover las lecturas de `listColumn` **dentro** del callback, leyendo por
+> `manager.getRepository(WorkItem)` con el mismo criterio de orden
+> (`where: { status }, order: { boardOrder: 'ASC', id: 'ASC' }`), para que participen
+> de la transacción. Vale tanto para la columna de destino como para la de origen.
+>
+> La Tarea 5 tiene el mismo defecto en `create()` y se corrigió del mismo modo; míralo
+> como referencia.
+
 - [ ] **Step 1: Crear los DTO**
 
 `backend/src/modules/work-items/dto/move-work-item.dto.ts`:
