@@ -53,7 +53,7 @@ export class AgreementsService {
         description: dto.description,
         assigneeUserId: dto.assigneeUserId ?? null,
         assigneeName: dto.assigneeName ?? null,
-        dueDate: dto.dueDate ? new Date(dto.dueDate) : null,
+        dueDate: dto.dueDate ?? null,
       }),
     );
   }
@@ -63,7 +63,7 @@ export class AgreementsService {
     if (!c) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Compromiso no encontrado' });
     Object.assign(c, {
       ...dto,
-      dueDate: dto.dueDate ? new Date(dto.dueDate) : c.dueDate,
+      dueDate: dto.dueDate ?? c.dueDate,
     });
     return this.commitmentRepo.save(c);
   }

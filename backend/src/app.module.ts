@@ -52,6 +52,11 @@ import { EmailModule } from './modules/email/email.module';
         // Con 'Z' lee y escribe los DATETIME en UTC, de modo que DATETIME y
         // TIMESTAMP round-trip de forma coherente y la aritmetica de SLA cuadra.
         timezone: 'Z',
+        // Una columna DATE no tiene hora ni zona. Con timezone:'Z' el driver la
+        // convertía a un Date en medianoche UTC y al serializarla volvía el día
+        // anterior. Devolverlas como string las deja intactas, que es lo que las
+        // entidades ya declaran.
+        dateStrings: ['DATE'],
         // BIGINT se convierte a number si es seguro (< 2^53); strings si es más grande.
         // Esto evita comparaciones fallidas en el frontend (t.id === selectedId).
         supportBigNumbers: true,

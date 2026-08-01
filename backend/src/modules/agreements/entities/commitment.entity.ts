@@ -28,8 +28,13 @@ export class Commitment {
   @Column({ name: 'assignee_name', type: 'varchar', length: 180, nullable: true })
   assigneeName!: string | null;
 
+  /**
+   * DATE, sin hora. Se tipa string y no Date a propósito: con
+   * `dateStrings: ['DATE']` en la conexión (ver app.module.ts), el driver ya
+   * no la hace pasar por un Date en zona horaria, así que llega intacta.
+   */
   @Column({ name: 'due_date', type: 'date', nullable: true })
-  dueDate!: Date | null;
+  dueDate!: string | null;
 
   @Column({ type: 'enum', enum: ['OPEN', 'DONE', 'CANCELLED'], default: 'OPEN' })
   status!: CommitmentStatus;
