@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
@@ -9,8 +9,9 @@ import type {
   Client, SupportAgentView, WorkItem, WorkItemPriority, WorkItemStatus,
 } from '../api/types';
 import { BOARD_COLUMNS, STATUS_LABELS } from './work-items/workitem-ui';
-import WorkItemCard from './work-items/WorkItemCard';
 import MoveReasonDialog from './work-items/MoveReasonDialog';
+import BoardColumn from './work-items/BoardColumn';
+import type { DropTarget } from './work-items/BoardColumn';
 
 const SEARCH_DEBOUNCE_MS = 280;
 
@@ -46,80 +47,18 @@ function computeDropIndex(container: HTMLElement, clientY: number, excludeId: nu
   return cards.length;
 }
 
-interface DropTarget {
-  status: WorkItemStatus;
-  index: number;
-}
-
-interface BoardColumnProps {
-  status: WorkItemStatus;
-  label: string;
-  items: WorkItem[];
-  loading: boolean;
-  assigneeLabel: (item: WorkItem) => string;
-  onOpen: (item: WorkItem) => void;
-  onMove: (item: WorkItem, toStatus: WorkItemStatus) => void;
-  draggingId: number | null;
-  dropTarget: DropTarget | null;
-  onDragStartCard: (item: WorkItem) => void;
-  onDragEndCard: () => void;
-  onColumnDragOver: (e: DragEvent<HTMLElement>, status: WorkItemStatus) => void;
-  onColumnDragLeave: (e: DragEvent<HTMLElement>, status: WorkItemStatus) => void;
-  onColumnDrop: (e: DragEvent<HTMLElement>, status: WorkItemStatus) => void;
-  minHeight?: number;
-}
-
-const DROP_INDICATOR = (
-  <div aria-hidden="true" style={{ height: 3, borderRadius: 2, background: '#15191a', margin: '0 2px' }} />
-);
-
 /**
- * Una columna del tablero (o una de las dos bandejas de la franja fuera de
- * flujo): además de listar tarjetas, es zona de destino del arrastre nativo
- * — `onDragOver` con `preventDefault()` para admitir el drop, y un
- * indicador visual (barra) en la posición de inserción calculada.
+ * Mismo algoritmo que `reorder()` en
+ * backend/src/modules/work-items/domain/work-item-board.ts: saca `movedId`
+ * de la columna y lo reinserta en `toIndex`. Se usa aquí solo para
+ * previsualizar si un drop dentro de la misma columna cambiaría algo — si
+ * el resultado es idéntico al orden actual, soltar la tarjeta sobre su
+ * propio lugar no debe disparar ni la llamada a la API ni el refetch.
  */
-function BoardColumn({
-  status, label, items, loading, assigneeLabel, onOpen, onMove, draggingId, dropTarget,
-  onDragStartCard, onDragEndCard, onColumnDragOver, onColumnDragLeave, onColumnDrop, minHeight,
-}: BoardColumnProps) {
-  return (
-    <section
-      aria-label={`Columna ${label}`}
-      onDragOver={(e) => onColumnDragOver(e, status)}
-      onDragLeave={(e) => onColumnDragLeave(e, status)}
-      onDrop={(e) => onColumnDrop(e, status)}
-      style={{
-        background: '#f5f6f6', border: '1px solid #e2e5e6', borderRadius: 10, padding: 10,
-        display: 'flex', flexDirection: 'column', gap: 8, minHeight: minHeight ?? 220,
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 4px' }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: '#15191a' }}>{label}</span>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: '#6d7577' }}>
-          {items.length}
-        </span>
-      </div>
-      {!loading && items.length === 0 && (
-        <div style={{ fontSize: 12, color: '#9aa1a2', padding: '8px 4px' }}>Sin ítems</div>
-      )}
-      {items.map((item, idx) => (
-        <Fragment key={item.id}>
-          {dropTarget?.status === status && dropTarget.index === idx && DROP_INDICATOR}
-          <WorkItemCard
-            item={item}
-            assigneeName={assigneeLabel(item)}
-            onOpen={onOpen}
-            onMove={onMove}
-            dragging={draggingId === item.id}
-            onDragStart={onDragStartCard}
-            onDragEnd={onDragEndCard}
-          />
-        </Fragment>
-      ))}
-      {dropTarget?.status === status && dropTarget.index === items.length && DROP_INDICATOR}
-    </section>
-  );
+function reorderPreview(columnIds: number[], movedId: number, toIndex: number): number[] {
+  const without = columnIds.filter((id) => id !== movedId);
+  const index = Math.max(0, Math.min(toIndex, without.length));
+  return [...without.slice(0, index), movedId, ...without.slice(index)];
 }
 
 export default function WorkItemsBoardPage() {
@@ -150,6 +89,14 @@ export default function WorkItemsBoardPage() {
   // Movimiento pendiente de motivo: se llena al soltar (o elegir del menú)
   // un destino BLOQUEADO/CANCELADO, y solo entonces se abre el diálogo.
   const [pendingMove, setPendingMove] = useState<{ item: WorkItem; toStatus: WorkItemStatus; toIndex: number } | null>(null);
+
+  // Red de seguridad para el foco: si tras un movimiento el refetch
+  // recompone el tablero y el elemento que tenía el foco (el botón «Mover
+  // a…» de la tarjeta) desaparece porque la tarjeta cambió de columna, el
+  // navegador lo manda a <body> — quedarse "en ningún lado" para quien
+  // navega por teclado. performMove revisa esto tras refrescar y, si pasó,
+  // trae el foco aquí en vez de dejarlo perdido.
+  const boardRef = useRef<HTMLDivElement>(null);
 
   const setParam = (key: string, value: string) => {
     const next = new URLSearchParams(searchParams);
@@ -311,6 +258,15 @@ export default function WorkItemsBoardPage() {
       const data = await workItemsApi.list(listParams);
       setItems(data);
       setError(null);
+      // Deja que React confirme el DOM con la nueva lista antes de mirar
+      // dónde quedó el foco: si el nodo enfocado (el botón «Mover a…» de
+      // esta tarjeta) se desmontó porque la tarjeta cambió de columna, el
+      // navegador ya lo habrá mandado a <body> para este punto.
+      setTimeout(() => {
+        if (document.activeElement === document.body) {
+          boardRef.current?.focus();
+        }
+      }, 0);
     } catch (e) {
       setError('El movimiento se guardó, pero el tablero no se pudo actualizar y puede estar desactualizado. Recarga la página.');
       console.warn('[WorkItemsBoardPage] Fallo al refrescar el tablero tras mover un ítem.', e);
@@ -321,8 +277,22 @@ export default function WorkItemsBoardPage() {
    * Punto de entrada único para ambos caminos (arrastre y menú «Mover
    * a…»): si el destino exige motivo (BLOQUEADO/CANCELADO), abre el
    * diálogo y solo llama a la API al confirmar; si no, mueve directo.
+   *
+   * Antes de eso, si el destino es la misma columna en la que ya está el
+   * ítem, se previsualiza el resultado con el mismo algoritmo que usa el
+   * backend (`reorderPreview`): si soltar ahí no cambia el orden (soltar la
+   * tarjeta sobre su propio lugar), no hay nada que guardar ni que
+   * refrescar — ni siquiera si el destino fuera BLOQUEADO/CANCELADO, porque
+   * no hay movimiento real que justifique pedir un motivo.
    */
   const requestMove = (item: WorkItem, toStatus: WorkItemStatus, toIndex: number) => {
+    if (item.status === toStatus) {
+      const columnIds = items.filter((i) => i.status === toStatus).map((i) => i.id);
+      const preview = reorderPreview(columnIds, item.id, toIndex);
+      if (preview.length === columnIds.length && preview.every((id, idx) => id === columnIds[idx])) {
+        return;
+      }
+    }
     if (OUT_OF_FLOW_STATUSES.includes(toStatus)) {
       setPendingMove({ item, toStatus, toIndex });
       return;
@@ -377,7 +347,12 @@ export default function WorkItemsBoardPage() {
   };
 
   return (
-    <div style={{ padding: 26, display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div
+      ref={boardRef}
+      tabIndex={-1}
+      aria-label="Tablero de requerimientos"
+      style={{ padding: 26, display: 'flex', flexDirection: 'column', gap: 18 }}
+    >
       <h1 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Requerimientos</h1>
 
       <section

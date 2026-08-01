@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { FocusEvent } from 'react';
 
 import type { WorkItem, WorkItemStatus } from '../../api/types';
 import { ALL_STATUSES, PRIORITY_STYLES, STATUS_LABELS, dueDateStyle } from './workitem-ui';
@@ -67,10 +68,21 @@ function MoveMenu({
     };
   }, [open]);
 
+  // Un usuario de teclado que hace Tab hacia afuera del menú (sin Escape ni
+  // elegir un destino) no debe dejarlo abierto con aria-expanded="true"
+  // colgado. relatedTarget es el elemento que RECIBE el foco: si sigue
+  // dentro del contenedor (botón o algún menuitem), no se cierra — moverse
+  // *dentro* del menú con Tab no debe cerrarlo.
+  const handleBlur = (e: FocusEvent<HTMLDivElement>) => {
+    const next = e.relatedTarget as Node | null;
+    if (next && containerRef.current?.contains(next)) return;
+    setOpen(false);
+  };
+
   const destinations = ALL_STATUSES.filter((s) => s !== item.status);
 
   return (
-    <div ref={containerRef} style={{ position: 'relative' }}>
+    <div ref={containerRef} style={{ position: 'relative' }} onBlur={handleBlur}>
       <button
         ref={buttonRef}
         type="button"
@@ -104,6 +116,10 @@ function MoveMenu({
               onClick={() => {
                 setOpen(false);
                 onMove(item, status);
+                // Sin esto el foco se va a la nada: el <button role="menuitem">
+                // desaparece con el menú y nada más lo reclama. Mismo destino
+                // que Escape — el botón «Mover a…» que abrió todo esto.
+                buttonRef.current?.focus();
               }}
               style={{
                 fontSize: 12, textAlign: 'left', padding: '7px 10px', borderRadius: 5,
