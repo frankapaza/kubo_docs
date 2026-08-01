@@ -3,6 +3,7 @@ import {
 } from '@nestjs/common';
 
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { WorkItemsService } from './work-items.service';
 import { WorkItemBoardService } from './work-item-board.service';
@@ -15,7 +16,7 @@ import { DueFilter } from './work-items.repository';
 import { WorkItemStatus, WorkItemPriority } from './domain/work-item-board';
 
 @Controller('work-items')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, StaffOnlyGuard)
 export class WorkItemsController {
   constructor(
     private readonly service: WorkItemsService,

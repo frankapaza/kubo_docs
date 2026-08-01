@@ -19,12 +19,13 @@ import { UpdateActaDto } from './dto/update-acta.dto';
 import { SignActaDto } from './dto/sign-acta.dto';
 import { ExportToJiraDto } from '../integrations/dto/export-jira.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
 @Controller()
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, StaffOnlyGuard, RolesGuard)
 export class ActasController {
   constructor(
     private readonly service: ActasService,

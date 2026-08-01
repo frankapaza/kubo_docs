@@ -1,10 +1,11 @@
 import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 import { AgentsService } from './agents.service';
 import { AgentChatDto } from './dto/agent-chat.dto';
 
 @Controller('agents')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, StaffOnlyGuard)
 export class AgentsController {
   constructor(private readonly service: AgentsService) {}
 

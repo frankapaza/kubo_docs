@@ -13,9 +13,10 @@ import { ParticipantsService } from './participants.service';
 import { CreateParticipantDto } from './dto/create-participant.dto';
 import { UpdateParticipantDto } from './dto/update-participant.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 
 @Controller()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, StaffOnlyGuard)
 export class ParticipantsController {
   constructor(private readonly service: ParticipantsService) {}
 

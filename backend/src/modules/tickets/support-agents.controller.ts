@@ -1,13 +1,14 @@
 import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, UseGuards } from '@nestjs/common';
 
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { SupportAgentsService } from './support-agents.service';
 import { CreateSupportAgentDto, UpdateSupportAgentDto } from './dto/support-agent.dto';
 
 @Controller('support-agents')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, StaffOnlyGuard, RolesGuard)
 export class SupportAgentsController {
   constructor(private readonly service: SupportAgentsService) {}
 

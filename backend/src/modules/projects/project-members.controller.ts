@@ -11,11 +11,12 @@ import {
 import { ProjectMembersService } from './project-members.service';
 import { AddMemberDto } from './dto/add-member.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 
 @Controller('projects/:projectId/members')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, StaffOnlyGuard, RolesGuard)
 export class ProjectMembersController {
   constructor(private readonly service: ProjectMembersService) {}
 

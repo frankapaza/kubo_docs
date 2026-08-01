@@ -15,12 +15,13 @@ import { MeetingsService } from './meetings.service';
 import { CreateMeetingDto } from './dto/create-meeting.dto';
 import { UpdateMeetingDto } from './dto/update-meeting.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { MeetingStatus } from './entities/meeting.entity';
 
 @Controller('meetings')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, StaffOnlyGuard, RolesGuard)
 export class MeetingsController {
   constructor(private readonly service: MeetingsService) {}
 

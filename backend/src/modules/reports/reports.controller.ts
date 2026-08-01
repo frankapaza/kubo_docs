@@ -1,5 +1,6 @@
 import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { ReportsService } from './reports.service';
@@ -7,7 +8,7 @@ import { JiraReportDto, MultiJiraReportDto } from './dto/jira-report.dto';
 import { MonthlyAttentionReportDto } from './dto/monthly-attention-report.dto';
 
 @Controller('reports')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, StaffOnlyGuard, RolesGuard)
 export class ReportsController {
   constructor(private readonly service: ReportsService) {}
 

@@ -12,9 +12,10 @@ import {
 import { TranscriptionsService } from './transcriptions.service';
 import { UpdateTranscriptionDto } from './dto/update-transcription.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 
 @Controller()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, StaffOnlyGuard)
 export class TranscriptionsController {
   constructor(private readonly service: TranscriptionsService) {}
 

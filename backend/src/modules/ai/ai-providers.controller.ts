@@ -14,12 +14,13 @@ import { AIProvidersService } from './ai-providers.service';
 import { CreateAIProviderDto } from './dto/create-ai-provider.dto';
 import { UpdateAIProviderDto } from './dto/update-ai-provider.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 
 @Controller('ai/providers')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, StaffOnlyGuard, RolesGuard)
 @Roles('ADMIN')
 export class AIProvidersController {
   constructor(private readonly service: AIProvidersService) {}

@@ -13,9 +13,10 @@ import { AgreementsService } from './agreements.service';
 import { CreateAgreementDto, UpdateAgreementDto } from './dto/agreement.dto';
 import { CreateCommitmentDto, UpdateCommitmentDto } from './dto/commitment.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 
 @Controller()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, StaffOnlyGuard)
 export class AgreementsController {
   constructor(private readonly service: AgreementsService) {}
 

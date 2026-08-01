@@ -16,6 +16,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { TicketsService } from './tickets.service';
 import { TicketTransitionsService } from './ticket-transitions.service';
@@ -34,7 +35,7 @@ import { TicketPriority } from './domain/ticket-priority';
 const TRANSCRIBE_MAX_MB = 25;
 
 @Controller('tickets')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, StaffOnlyGuard)
 export class TicketsController {
   constructor(
     private readonly service: TicketsService,

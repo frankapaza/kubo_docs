@@ -12,9 +12,10 @@ import {
 import { AgendaService } from './agenda.service';
 import { AgendaItemDto, BulkAgendaDto } from './dto/agenda-item.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 
 @Controller()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, StaffOnlyGuard)
 export class AgendaController {
   constructor(private readonly service: AgendaService) {}
 

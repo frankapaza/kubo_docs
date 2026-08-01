@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 import { DocumentSignatoriesService } from './document-signatories.service';
 import { CreateSignatoryDto } from './dto/create-signatory.dto';
 import { UpdateSignatoryDto } from './dto/update-signatory.dto';
@@ -21,13 +22,13 @@ export class DocumentSignatoriesController {
 
   // ── Rutas protegidas ────────────────────────────────────────────────────
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, StaffOnlyGuard)
   @Get('documents/:documentId/signatories')
   list(@Param('documentId', ParseIntPipe) documentId: number) {
     return this.service.list(documentId);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, StaffOnlyGuard)
   @Post('documents/:documentId/signatories')
   create(
     @Param('documentId', ParseIntPipe) documentId: number,
@@ -36,20 +37,20 @@ export class DocumentSignatoriesController {
     return this.service.create(documentId, dto);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, StaffOnlyGuard)
   @Patch('document-signatories/:id')
   update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateSignatoryDto) {
     return this.service.update(id, dto);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, StaffOnlyGuard)
   @Delete('document-signatories/:id')
   async remove(@Param('id', ParseIntPipe) id: number): Promise<{ ok: true }> {
     await this.service.remove(id);
     return { ok: true };
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, StaffOnlyGuard)
   @Post('document-signatories/:id/request-signature')
   requestSignature(@Param('id', ParseIntPipe) id: number) {
     return this.service.requestSignature(id);

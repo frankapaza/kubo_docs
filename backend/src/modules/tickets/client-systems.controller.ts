@@ -1,11 +1,12 @@
 import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, UseGuards } from '@nestjs/common';
 
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 import { ClientSystemsService } from './client-systems.service';
 import { CreateClientSystemDto, UpdateClientSystemDto } from './dto/client-system.dto';
 
 @Controller('clients/:clientId/systems')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, StaffOnlyGuard)
 export class ClientSystemsController {
   constructor(private readonly service: ClientSystemsService) {}
 

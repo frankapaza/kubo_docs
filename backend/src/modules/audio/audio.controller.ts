@@ -22,6 +22,7 @@ import { AudioService } from './audio.service';
 import { ACCEPTED_AUDIO_MIME } from './audio.constants';
 import { UploadAudioDto } from './dto/upload-audio.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { MulterExceptionFilter } from './filters/multer-exception.filter';
 
@@ -33,7 +34,7 @@ const UPLOAD_TMP_DIR = path.join(
 fs.mkdirSync(UPLOAD_TMP_DIR, { recursive: true });
 
 @Controller()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, StaffOnlyGuard)
 @UseFilters(MulterExceptionFilter)
 export class AudioController {
   constructor(private readonly service: AudioService) {}
