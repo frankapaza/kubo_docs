@@ -1792,6 +1792,7 @@ git commit -m "feat(web): tipos y cliente API de work items"
 - Create: `web/src/pages/work-items/workitem-ui.ts`
 - Create: `web/src/pages/work-items/WorkItemCard.tsx`
 - Create: `web/src/pages/WorkItemsBoardPage.tsx`
+- Modify: `web/src/App.tsx` (la ruta `/work-items`, para que esta tarea y las dos siguientes se puedan verificar en un navegador)
 
 **Interfaces:**
 - Consumes: `workItemsApi`, `supportAgentsApi` (para resolver nombres sin depender de `/users`, que está restringido por rol), `clientsApi`.
@@ -1875,16 +1876,27 @@ La tarjeta es un `<article>` con un `<button>` interno que abre el detalle — n
 
 El listado se pide una sola vez sin filtrar por estado y se reparte en columnas en el cliente — el endpoint ya devuelve todo ordenado por `(status, board_order)`.
 
-- [ ] **Step 4: Verificar**
+- [ ] **Step 4: Añadir la ruta**
+
+En `web/src/App.tsx`, importar `WorkItemsBoardPage` y añadir
+`<Route path="/work-items" element={<WorkItemsBoardPage />} />` junto a las de
+tickets. La entrada del menú lateral llega en la Tarea 12; la ruta va aquí para
+que esta tarea y las dos siguientes se puedan verificar de verdad en un navegador
+en lugar de a ciegas.
+
+- [ ] **Step 5: Verificar**
 
 Run: `cd web && npm run build` — sin errores.
 
-Con backend y web levantados, abrir `/work-items` (la ruta se añade en la Tarea 12; hasta entonces, verificar el componente montándolo temporalmente o esperar a esa tarea y verificar ahí). Confirmar que las cuatro columnas se pintan, que las tarjetas caen en la columna correcta y en su orden, y que los filtros cambian el resultado.
+Con backend y web levantados, navegar a `http://localhost:5173/work-items`.
+Confirmar que las cuatro columnas se pintan, que las tarjetas caen en la columna
+correcta y en su orden por `boardOrder`, y que los filtros cambian el resultado y
+quedan reflejados en la URL.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add web/src/pages/work-items web/src/pages/WorkItemsBoardPage.tsx
+git add web/src/pages/work-items web/src/pages/WorkItemsBoardPage.tsx web/src/App.tsx
 git commit -m "feat(web): tablero de requerimientos con columnas y filtros"
 ```
 
@@ -1990,16 +2002,16 @@ git commit -m "feat(web): panel de detalle y alta de requerimientos"
 ### Task 12: Web — ruta, menú lateral y verificación de extremo a extremo
 
 **Files:**
-- Modify: `web/src/App.tsx`
 - Modify: `web/src/layout/AppLayout.tsx`
 
 **Interfaces:**
-- Consumes: `WorkItemsBoardPage`.
-- Produces: la ruta `/work-items` y la entrada «Requerimientos» en el menú.
+- Consumes: la ruta `/work-items`, ya añadida en la Tarea 9.
+- Produces: la entrada «Requerimientos» en el menú lateral.
 
-- [ ] **Step 1: Añadir la ruta**
+- [ ] **Step 1: Confirmar que la ruta existe**
 
-En `App.tsx`, importar `WorkItemsBoardPage` y añadir `<Route path="/work-items" element={<WorkItemsBoardPage />} />` junto a las de tickets.
+`grep -n "work-items" web/src/App.tsx` debe encontrar el import y la ruta que
+añadió la Tarea 9. Si no están, añadirlos aquí.
 
 - [ ] **Step 2: Añadir la entrada al menú**
 
@@ -2026,7 +2038,7 @@ Con la app levantada, recorrer el ciclo entero **sin tocar la base de datos a ma
 - [ ] **Step 4: Commit**
 
 ```bash
-git add web/src/App.tsx web/src/layout/AppLayout.tsx
+git add web/src/layout/AppLayout.tsx
 git commit -m "feat(web): ruta y entrada de menu para requerimientos"
 ```
 
