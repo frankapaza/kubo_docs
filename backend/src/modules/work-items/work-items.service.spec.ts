@@ -1,12 +1,42 @@
 import { WorkItemsService } from './work-items.service';
 import { WorkItem } from './entities/work-item.entity';
+import { WorkItemEvent } from './entities/work-item-event.entity';
 
 const column = (priorities: string[]): WorkItem[] =>
   priorities.map((p, i) => ({ id: i + 1, priority: p, boardOrder: i }) as WorkItem);
 
+/**
+ * El manager transaccional debe devolver un stub distinto por entidad -- igual
+ * que en ticket-transitions.service.spec.ts -- porque create() ahora escribe
+ * el evento CREATED directo con manager.getRepository(WorkItemEvent), no a
+ * través de WorkItemEventsService. Un único stub compartido no podría
+ * distinguir la escritura del ítem de la del evento.
+ */
 const makeService = (pendingColumn: WorkItem[] = []) => {
   const created = { id: 99, status: 'PENDIENTE', priority: 'MEDIA' } as WorkItem;
   const applied: number[][] = [];
+  const savedEvents: Partial<WorkItemEvent>[] = [];
+
+  const itemRepoStub = {
+    save: jest.fn().mockImplementation((e) => Promise.resolve({ ...created, ...e })),
+    create: jest.fn().mockImplementation((e) => e),
+    update: jest.fn().mockResolvedValue(undefined),
+  };
+  const eventRepoStub = {
+    create: jest.fn().mockImplementation((e) => e),
+    save: jest.fn().mockImplementation((e) => {
+      savedEvents.push(e);
+      return Promise.resolve({ id: savedEvents.length, ...e });
+    }),
+  };
+  const manager = {
+    getRepository: jest.fn().mockImplementation((entity: unknown) => {
+      if (entity === WorkItem) return itemRepoStub;
+      if (entity === WorkItemEvent) return eventRepoStub;
+      throw new Error(`getRepository inesperado: ${String(entity)}`);
+    }),
+  };
+
   const repo = {
     listColumn: jest.fn().mockResolvedValue(pendingColumn),
     applyOrder: jest.fn().mockImplementation((_m, ids: number[]) => {
@@ -14,20 +44,14 @@ const makeService = (pendingColumn: WorkItem[] = []) => {
       return Promise.resolve();
     }),
     findById: jest.fn().mockResolvedValue(created),
-    runInTransaction: jest.fn().mockImplementation((work) =>
-      work({ getRepository: () => ({
-        save: jest.fn().mockImplementation((e) => Promise.resolve({ ...created, ...e })),
-        create: jest.fn().mockImplementation((e) => e),
-        update: jest.fn().mockResolvedValue(undefined),
-      }) }),
-    ),
+    runInTransaction: jest.fn().mockImplementation((work) => work(manager)),
   };
   const events = { record: jest.fn().mockResolvedValue({}), listByItem: jest.fn() };
   const clients = { findByIdOrFail: jest.fn().mockResolvedValue({ id: 1 }) };
   const projects = { findById: jest.fn().mockResolvedValue({ id: 1 }) };
   return {
     service: new WorkItemsService(repo as any, events as any, clients as any, projects as any),
-    repo, events, clients, projects, applied,
+    repo, events, clients, projects, applied, savedEvents,
   };
 };
 
@@ -68,12 +92,29 @@ describe('create', () => {
     expect(applied[0]).toEqual([1, 2, 99]);
   });
 
-  it('registra exactamente un evento CREATED', async () => {
-    const { service, events } = makeService();
+  it('registra exactamente un evento CREATED en la misma transaccion', async () => {
+    // El evento se escribe con manager.getRepository(WorkItemEvent), no con
+    // WorkItemEventsService.record (que usa su propio repositorio no
+    // transaccional): si el alta fallara antes del commit, un evento escrito
+    // por fuera de la transacción quedaría huérfano.
+    const { service, events, savedEvents } = makeService();
     await service.create(5, { clientId: 1, title: 'X' });
-    expect(events.record).toHaveBeenCalledTimes(1);
-    expect(events.record).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'CREATED', toStatus: 'PENDIENTE', actorUserId: 5 }),
+    expect(savedEvents).toHaveLength(1);
+    expect(savedEvents[0]).toEqual(
+      expect.objectContaining({
+        type: 'CREATED',
+        toStatus: 'PENDIENTE',
+        actorUserId: 5,
+        payload: { priority: 'MEDIA' },
+      }),
     );
+    expect(events.record).not.toHaveBeenCalled();
+  });
+
+  it('el item creado devuelve code y boardOrder', async () => {
+    const { service } = makeService(column(['ALTA', 'MEDIA', 'BAJA']));
+    const item = await service.create(5, { clientId: 1, title: 'Urgente', priority: 'ALTA' });
+    expect(item.code).toBe('RQ-0099');
+    expect(item.boardOrder).toBe(1);
   });
 });

@@ -74,13 +74,25 @@ export class WorkItemsService {
       const orderedIds = reorder(pending.map((w) => w.id), saved.id, index);
       await this.repo.applyOrder(manager, orderedIds);
 
-      await this.events.record({
-        workItemId: saved.id,
-        type: 'CREATED',
-        actorUserId: userId,
-        toStatus: 'PENDIENTE',
-        payload: { priority },
-      });
+      // El evento CREATED se escribe con el mismo manager transaccional que el
+      // alta, el código y la renumeración: si algo falla antes del commit, no
+      // debe quedar un evento huérfano de un ítem que nunca existió. Por eso
+      // se escribe aquí directo, en vez de a través de WorkItemEventsService
+      // (que usa su propio repositorio no transaccional). Los valores por
+      // defecto que normalmente aplica el servicio (reason -> null, etc.) se
+      // replican a mano para que la fila quede idéntica a una escrita por él.
+      const eventRepo = manager.getRepository(WorkItemEvent);
+      await eventRepo.save(
+        eventRepo.create({
+          workItemId: saved.id,
+          type: 'CREATED',
+          actorUserId: userId,
+          fromStatus: null,
+          toStatus: 'PENDIENTE',
+          reason: null,
+          payload: { priority },
+        }),
+      );
 
       // saved ya trae todos los campos escritos; solo falta reflejar el
       // código asignado justo arriba, sin una lectura extra dentro de la
