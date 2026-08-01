@@ -14,8 +14,19 @@ const item = (over: Partial<WorkItem> = {}): WorkItem =>
  * huérfano). Por la misma razón la columna se lee dentro de la transacción,
  * vía manager.getRepository(WorkItem).find(...), en vez de repo.listColumn
  * (que no participa del bloqueo transaccional).
+ *
+ * `current` es lo que devuelve repo.findById (el chequeo temprano, fuera de
+ * la transacción); `freshCurrent` (por defecto igual a `current`) es lo que
+ * devuelve itemRepo.findOne dentro de ella. Separarlos permite simular una
+ * foto vieja: dos operaciones sobre el mismo ítem donde la que abrió la
+ * transacción después ve un estado distinto al que existía cuando se hizo el
+ * chequeo temprano.
  */
-const makeService = (current: WorkItem, columns: Record<string, WorkItem[]> = {}) => {
+const makeService = (
+  current: WorkItem,
+  columns: Record<string, WorkItem[]> = {},
+  freshCurrent: WorkItem = current,
+) => {
   const applied: number[][] = [];
   const patches: Array<Record<string, unknown>> = [];
   const savedEvents: Array<Partial<WorkItemEvent>> = [];
@@ -28,7 +39,7 @@ const makeService = (current: WorkItem, columns: Record<string, WorkItem[]> = {}
       patches.push(p);
       return Promise.resolve(undefined);
     }),
-    findOne: jest.fn().mockResolvedValue(current),
+    findOne: jest.fn().mockResolvedValue(freshCurrent),
   };
   const eventRepoStub = {
     create: jest.fn().mockImplementation((e: Partial<WorkItemEvent>) => e),
@@ -154,6 +165,43 @@ describe('move', () => {
     await service.move({ workItemId: 2, actorUserId: 5, toStatus: 'EN_PROCESO', toIndex: 0 });
     expect(patches.some((p) => p.closedAt === null)).toBe(true);
   });
+
+  it('limpia closed_at al cancelar un item cerrado', async () => {
+    const { service, patches } = makeService(item({ status: 'CERRADO', closedAt: new Date() }));
+    await service.move({
+      workItemId: 2,
+      actorUserId: 5,
+      toStatus: 'CANCELADO',
+      toIndex: 0,
+      reason: 'Ya no aplica',
+    });
+    expect(patches.some((p) => p.closedAt === null)).toBe(true);
+  });
+
+  it('lee el item dentro de la transaccion antes de decidir, no solo el chequeo temprano', async () => {
+    const { service, itemRepoStub } = makeService(item());
+    await service.move({ workItemId: 2, actorUserId: 5, toStatus: 'EN_PROCESO', toIndex: 0 });
+    expect(itemRepoStub.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 2 } }),
+    );
+  });
+
+  it('decide con el estado fresco de la transaccion, no con la foto previa a abrirla', async () => {
+    // El chequeo temprano (repo.findById) ve el ítem todavía EN_PROCESO; para
+    // cuando la transacción abre y relee, alguien más ya lo cerró. Si el
+    // servicio usara la foto vieja para decidir `from`, no limpiaría
+    // closed_at al salir de CERRADO ni marcaria el evento como REOPENED.
+    const stale = item({ status: 'EN_PROCESO', closedAt: null });
+    const fresh = item({ status: 'CERRADO', closedAt: new Date() });
+    const { service, patches, savedEvents } = makeService(stale, {}, fresh);
+
+    await service.move({ workItemId: 2, actorUserId: 5, toStatus: 'PRUEBAS', toIndex: 0 });
+
+    expect(patches.some((p) => p.closedAt === null)).toBe(true);
+    expect(savedEvents).toContainEqual(
+      expect.objectContaining({ type: 'REOPENED', fromStatus: 'CERRADO', toStatus: 'PRUEBAS' }),
+    );
+  });
 });
 
 describe('assign', () => {
@@ -187,5 +235,19 @@ describe('changePriority', () => {
     );
     expect(events.record).not.toHaveBeenCalled();
     expect(applied).toHaveLength(0);
+  });
+
+  it('usa la prioridad fresca de la transaccion para el payload, no la foto previa a abrirla', async () => {
+    // El chequeo temprano ve MEDIA; para cuando la transacción relee, alguien
+    // más ya la cambió a BAJA. El payload.from debe reflejar BAJA, no MEDIA.
+    const stale = item({ priority: 'MEDIA' });
+    const fresh = item({ priority: 'BAJA' });
+    const { service, savedEvents } = makeService(stale, {}, fresh);
+
+    await service.changePriority({ workItemId: 2, actorUserId: 5, priority: 'ALTA' });
+
+    expect(savedEvents).toContainEqual(
+      expect.objectContaining({ payload: { from: 'BAJA', to: 'ALTA' } }),
+    );
   });
 });

@@ -47,8 +47,10 @@ export class WorkItemBoardService {
    * reordenar dentro de ella son la misma acción desde el tablero.
    */
   async move(input: MoveInput): Promise<WorkItem> {
-    const current = await this.findOrFail(input.workItemId);
-    const from = current.status;
+    // Chequeo temprano y barato: si el ítem no existe, ni se abre transacción.
+    // Su resultado no se usa para decidir nada -- ver la relectura de abajo.
+    await this.findOrFail(input.workItemId);
+
     const to = input.toStatus;
 
     // Se valida antes de escribir nada: un movimiento rechazado no deja rastro.
@@ -59,6 +61,20 @@ export class WorkItemBoardService {
 
     return this.repo.runInTransaction(async (manager) => {
       const itemRepo = manager.getRepository(WorkItem);
+
+      // Se relee el ítem con el manager transaccional en vez de reutilizar el
+      // `current` de más arriba: `from` decide si hay que limpiar closed_at,
+      // el fromStatus del evento y el tipo que le asigna typeForMove. Si se
+      // usara la foto de antes de abrir la transacción, dos operaciones sobre
+      // el mismo ítem (un cierre y un movimiento concurrentes, un doble clic,
+      // un reintento) podrían decidir con un estado que ya no es el vigente:
+      // por ejemplo, no limpiar closed_at al salir de CERRADO porque la foto
+      // vieja todavía lo mostraba en otra columna.
+      const current = await itemRepo.findOne({ where: { id: input.workItemId } });
+      if (!current) {
+        throw new NotFoundException({ code: 'NOT_FOUND', message: 'Requerimiento no encontrado' });
+      }
+      const from = current.status;
 
       // Las lecturas que deciden el orden de las columnas van dentro de la
       // transacción, con el manager transaccional: si se leyeran antes (fuera
@@ -145,10 +161,23 @@ export class WorkItemBoardService {
    * aplica al crear (ver WorkItemsService.create).
    */
   async changePriority(input: ChangePriorityInput): Promise<WorkItem> {
-    const current = await this.findOrFail(input.workItemId);
+    // Chequeo temprano y barato: si el ítem no existe, ni se abre transacción.
+    // Su resultado no se usa para decidir nada -- ver la relectura de abajo.
+    await this.findOrFail(input.workItemId);
 
     return this.repo.runInTransaction(async (manager) => {
       const itemRepo = manager.getRepository(WorkItem);
+
+      // Se relee el ítem con el manager transaccional: el payload del evento
+      // necesita la prioridad vigente en el momento del cambio, no la de la
+      // foto tomada antes de abrir la transacción (mismo motivo que en
+      // move(): dos cambios de prioridad concurrentes sobre el mismo ítem
+      // podrían dejar un `from` que ya no es cierto).
+      const current = await itemRepo.findOne({ where: { id: input.workItemId } });
+      if (!current) {
+        throw new NotFoundException({ code: 'NOT_FOUND', message: 'Requerimiento no encontrado' });
+      }
+
       await itemRepo.update(input.workItemId, { priority: input.priority });
 
       const eventRepo = manager.getRepository(WorkItemEvent);
