@@ -7,6 +7,7 @@ import { APP_INTERCEPTOR } from '@nestjs/core';
 
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 import { DbTimezoneInitializer } from './config/db-timezone.initializer';
+import { JwtSecretsValidator } from './config/jwt-secrets.validator';
 
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
@@ -102,6 +103,7 @@ import { EmailModule } from './modules/email/email.module';
   providers: [
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
     DbTimezoneInitializer,
+    JwtSecretsValidator,
   ],
 })
 export class AppModule {}
