@@ -1177,6 +1177,45 @@ git commit -m "feat(work-items): CRUD, codigo legible e insercion por prioridad"
 
 Las tres escriben el cambio y su evento en una sola transacción. `move` renumera la columna de origen y la de destino.
 
+> **Corrección al código de ejemplo de esta tarea — prevalece sobre lo que se lee más abajo.**
+>
+> Los tres métodos aparecen escribiendo su evento con `await this.events.record({...})`
+> dentro del callback de `runInTransaction`. **Eso está mal y hay que cambiarlo.**
+> `WorkItemEventsService` usa su propio repositorio inyectado, que no participa en la
+> transacción: si la escritura del ítem se revierte, el evento se queda. Es exactamente
+> el defecto que costó cinco hallazgos en la funcionalidad anterior, y ya apareció una
+> sexta vez en la Tarea 5 de este mismo plan.
+>
+> En los tres métodos, sustituir esa llamada por una escritura directa a través del
+> manager, igual que hace `TicketsService.create()`:
+>
+> ```ts
+> const eventRepo = manager.getRepository(WorkItemEvent);
+> await eventRepo.save(
+>   eventRepo.create({
+>     workItemId: <id>,
+>     type: <tipo>,
+>     actorUserId: input.actorUserId,
+>     fromStatus: <from o null>,
+>     toStatus: <to o null>,
+>     reason: <reason o null>,
+>     payload: <payload o null>,
+>   }),
+> );
+> ```
+>
+> Poner los `null` explícitos: `WorkItemEventsService.record` normaliza con
+> `reason?.trim() || null` y `?? null`, y una fila escrita por el manager debe quedar
+> idéntica a una escrita por el servicio. Dos caminos que producen filas distintas
+> serían peor que el problema que se está resolviendo.
+>
+> `WorkItemEventsService` sigue inyectado: `typeForMove` se usa para clasificar el
+> evento sin duplicar la tabla de correspondencias.
+>
+> Los tests del brief que afirmen `events.record` deben cambiarse para afirmar sobre el
+> repositorio de eventos transaccional, con stubs distintos por entidad en
+> `getRepository` — la Tarea 5 ya lo hizo así y sirve de referencia.
+
 - [ ] **Step 1: Crear los DTO**
 
 `backend/src/modules/work-items/dto/move-work-item.dto.ts`:
