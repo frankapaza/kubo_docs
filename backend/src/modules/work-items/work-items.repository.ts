@@ -35,10 +35,20 @@ export class WorkItemsRepository {
       qb.andWhere('w.assignee_user_id = :assignee', { assignee: filters.assigneeUserId });
     }
     if (filters.dueFilter === 'vencidos') {
-      qb.andWhere('w.due_date IS NOT NULL AND w.due_date < CURDATE()');
+      // Un ítem CERRADO o CANCELADO nunca está vencido (ver dueDateStyle en
+      // web/src/pages/work-items/workitem-ui.ts): ya salió del flujo, así que
+      // su fecha límite dejó de significar nada. Sin este filtro, un ítem
+      // cerrado con due_date pasada aparecía en "Vencidos" contradiciendo lo
+      // que pinta la propia tarjeta (gris, sin marca de vencido).
+      qb.andWhere("w.due_date IS NOT NULL AND w.due_date < CURDATE() AND w.status NOT IN ('CERRADO','CANCELADO')");
     }
     if (filters.dueFilter === 'semana') {
-      qb.andWhere('w.due_date IS NOT NULL AND w.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)');
+      // "Semana" es un aviso de lo próximo a vencer, no una alerta de
+      // incumplimiento: mismo razonamiento que "vencidos", un ítem que ya
+      // salió del flujo no tiene nada próximo que atender.
+      qb.andWhere(
+        "w.due_date IS NOT NULL AND w.due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 7 DAY) AND w.status NOT IN ('CERRADO','CANCELADO')",
+      );
     }
     if (filters.q) {
       qb.andWhere('(w.title LIKE :q OR w.description_md LIKE :q OR w.code LIKE :q)', {

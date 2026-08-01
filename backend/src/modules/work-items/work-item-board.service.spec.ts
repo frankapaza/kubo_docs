@@ -186,6 +186,38 @@ describe('move', () => {
     );
   });
 
+  it('reordena dentro de CERRADO sin tocar closed_at ni escribir evento', async () => {
+    const closedAt = new Date('2026-01-01T10:00:00Z');
+    const cols = {
+      CERRADO: [
+        item({ id: 1, status: 'CERRADO', closedAt: new Date('2026-01-02T10:00:00Z') }),
+        item({ id: 2, status: 'CERRADO', closedAt }),
+        item({ id: 3, status: 'CERRADO', closedAt: new Date('2026-01-03T10:00:00Z') }),
+      ],
+    };
+    const { service, patches, savedEvents } = makeService(item({ id: 2, status: 'CERRADO', closedAt }), cols);
+
+    await service.move({ workItemId: 2, actorUserId: 5, toStatus: 'CERRADO', toIndex: 0 });
+
+    expect(patches.some((p) => 'closedAt' in p)).toBe(false);
+    expect(savedEvents).toHaveLength(0);
+  });
+
+  it('reordena dentro de BLOQUEADO sin motivo y no escribe evento', async () => {
+    const cols = {
+      BLOQUEADO: [
+        item({ id: 1, status: 'BLOQUEADO' }),
+        item({ id: 2, status: 'BLOQUEADO' }),
+      ],
+    };
+    const { service, savedEvents } = makeService(item({ id: 2, status: 'BLOQUEADO' }), cols);
+
+    await expect(
+      service.move({ workItemId: 2, actorUserId: 5, toStatus: 'BLOQUEADO', toIndex: 0 }),
+    ).resolves.toBeDefined();
+    expect(savedEvents).toHaveLength(0);
+  });
+
   it('decide con el estado fresco de la transaccion, no con la foto previa a abrirla', async () => {
     // El chequeo temprano (repo.findById) ve el ítem todavía EN_PROCESO; para
     // cuando la transacción abre y relee, alguien más ya lo cerró. Si el

@@ -21,3 +21,13 @@ kubo.tar.gz
 # OS
 .DS_Store
 Thumbs.db
+
+# Scripts sueltos de backend/sql/: scratch de depuración contra un contenedor
+# local o remoto (a veces con -p<password> inline), no versionados y no parte
+# de las migraciones reales. Los cambios de esquema de verdad van en
+# backend/sql/migrations/ o en los add_*_table.sql / seed_*.sql ya trackeados
+# en la raíz de backend/sql/ -- ver `git ls-files backend/sql` para la lista.
+backend/sql/*.sh
+backend/sql/check_*.sql
+backend/sql/fix_*.sql
+backend/sql/add_service_cols.sql

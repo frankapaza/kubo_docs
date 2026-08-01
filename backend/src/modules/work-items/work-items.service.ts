@@ -47,14 +47,18 @@ export class WorkItemsService {
     return this.repo.runInTransaction(async (manager) => {
       const itemRepo = manager.getRepository(WorkItem);
 
-      // La lectura que decide la posición debe ir dentro de la transacción,
-      // con el manager transaccional: si se leyera antes (fuera de la
-      // transacción, sin bloqueo), dos altas concurrentes en la misma banda
-      // de prioridad verían la misma foto, calcularían índices superpuestos
-      // y cada una renumeraría la columna en su propia transacción — la
-      // última en confirmar pisaría en silencio el orden de la otra. Mismo
-      // criterio de orden que WorkItemsRepository.listColumn, para que el
-      // comportamiento de la lectura no cambie, solo su alcance transaccional.
+      // La lectura que decide la posición va dentro de la transacción, con el
+      // manager transaccional, para que vea una foto consistente con las
+      // escrituras que siguen (mismo criterio de orden que
+      // WorkItemsRepository.listColumn). Esto NO cierra la ventana de lost
+      // update: bajo REPEATABLE READ, find({ where, order }) es una lectura
+      // de snapshot sin bloqueo tanto dentro como fuera de la transacción --
+      // moverla adentro cambió su visibilidad, no su bloqueo. Dos altas
+      // concurrentes en la misma banda de prioridad pueden seguir viendo la
+      // misma foto y calcular índices solapados; el estilo de esta casa no
+      // toma bloqueos pesimistas en ningún lado, así que se acepta como una
+      // ventana de baja probabilidad que se autocorrige en la siguiente
+      // reordenación (reorder() renumera la columna entera).
       const pending = await itemRepo.find({
         where: { status: 'PENDIENTE' },
         order: { boardOrder: 'ASC', id: 'ASC' },
