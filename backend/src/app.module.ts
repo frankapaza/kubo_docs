@@ -25,6 +25,7 @@ import { IntegrationsModule } from './modules/integrations/integrations.module';
 import { ClientsModule } from './modules/clients/clients.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { WorkItemsModule } from './modules/work-items/work-items.module';
+import { PortalModule } from './modules/portal/portal.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { DocumentSignatoriesModule } from './modules/document-signatories/document-signatories.module';
 import { WorkspaceModule } from './modules/workspace/workspace.module';
@@ -91,6 +92,7 @@ import { EmailModule } from './modules/email/email.module';
     ClientsModule,
     TicketsModule,
     WorkItemsModule,
+    PortalModule,
     DocumentsModule,
     DocumentSignatoriesModule,
     WorkspaceModule,
