@@ -559,3 +559,47 @@ export interface SupportAgentView extends SupportAgent {
   email: string;
   openTickets: number;
 }
+
+export type WorkItemStatus =
+  | 'PENDIENTE' | 'EN_PROCESO' | 'PRUEBAS' | 'CERRADO' | 'BLOQUEADO' | 'CANCELADO';
+
+export type WorkItemPriority = 'ALTA' | 'MEDIA' | 'BAJA';
+
+export type WorkItemEventType =
+  | 'CREATED' | 'MOVED' | 'ASSIGNED' | 'COMMENT' | 'BLOCKED' | 'UNBLOCKED'
+  | 'CLOSED' | 'REOPENED' | 'CANCELLED' | 'PRIORITY_CHANGED';
+
+export interface WorkItem {
+  id: number;
+  code: string | null;
+  clientId: number;
+  projectId: number | null;
+  title: string;
+  descriptionMd: string | null;
+  acceptanceCriteria: string[] | null;
+  labels: string[] | null;
+  status: WorkItemStatus;
+  priority: WorkItemPriority;
+  assigneeUserId: number | null;
+  boardOrder: number;
+  dueDate: string | null;
+  closedAt: string | null;
+  createdAt: string;
+}
+
+export interface WorkItemEvent {
+  id: number;
+  workItemId: number;
+  type: WorkItemEventType;
+  fromStatus: WorkItemStatus | null;
+  toStatus: WorkItemStatus | null;
+  actorUserId: number | null;
+  reason: string | null;
+  payload: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface WorkItemDetail {
+  workItem: WorkItem;
+  timeline: WorkItemEvent[];
+}
