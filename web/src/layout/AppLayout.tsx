@@ -6,7 +6,7 @@ import { useIdleLogout } from '../auth/useIdleLogout';
 import { canManageUsers } from '../auth/permissions';
 import { workspaceApi } from '../api/workspace.api';
 import { roleLabels } from '../components/ui/Badge';
-import { BotIcon, FileTextIcon, FolderIcon, InboxIcon, KuboLogo, LogOutIcon, SettingsIcon, SparklesIcon, UsersIcon, ZapIcon } from '../components/ui/Icon';
+import { ArchiveIcon, BotIcon, FileTextIcon, FolderIcon, InboxIcon, KuboLogo, LogOutIcon, SettingsIcon, SparklesIcon, UsersIcon, ZapIcon } from '../components/ui/Icon';
 import { toast } from '../ui/Toast';
 // Nota: "UsersIcon" también se usa en la sección Clientes; es intencional.
 
@@ -102,6 +102,13 @@ export default function AppLayout() {
           >
             <InboxIcon size={18} />
             Tickets
+          </NavLink>
+          <NavLink
+            to="/work-items"
+            className={({ isActive }) => `${navItem} ${isActive ? navActive : navIdle}`}
+          >
+            <ArchiveIcon size={18} />
+            Requerimientos
           </NavLink>
 
           <p className="px-3 py-1 mt-4 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
