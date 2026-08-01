@@ -21,6 +21,7 @@ import AgentsPage from './pages/AgentsPage';
 import AgentChatPage from './pages/AgentChatPage';
 import TicketsListPage from './pages/TicketsListPage';
 import TicketDetailPage from './pages/TicketDetailPage';
+import WorkItemsBoardPage from './pages/WorkItemsBoardPage';
 import MonthlyReportPage from './pages/MonthlyReportPage';
 import SignaturePage from './pages/SignaturePage';
 import { ProtectedRoute } from './auth/ProtectedRoute';
@@ -47,6 +48,7 @@ export default function App() {
           <Route path="/actas/:actaId" element={<ActaEditorPage />} />
           <Route path="/tickets" element={<TicketsListPage />} />
           <Route path="/tickets/:ticketId" element={<TicketDetailPage />} />
+          <Route path="/work-items" element={<WorkItemsBoardPage />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agents/:type" element={<AgentChatPage />} />
           <Route path="/users" element={<UsersPage />} />
