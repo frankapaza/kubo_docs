@@ -2,6 +2,7 @@ import {
   reorder,
   insertionIndex,
   requiresReason,
+  assertReason,
   BOARD_COLUMNS,
   DEFAULT_PRIORITY,
 } from './work-item-board';
@@ -27,6 +28,75 @@ describe('requiresReason', () => {
     expect(requiresReason('EN_PROCESO')).toBe(false);
     expect(requiresReason('PRUEBAS')).toBe(false);
     expect(requiresReason('CERRADO')).toBe(false);
+  });
+});
+
+describe('assertReason', () => {
+  it('lanza BAD_INPUT para BLOQUEADO sin motivo (undefined)', () => {
+    expect(() => assertReason('BLOQUEADO', undefined)).toThrow();
+    try {
+      assertReason('BLOQUEADO', undefined);
+    } catch (e: any) {
+      expect(e.getResponse().code).toBe('BAD_INPUT');
+    }
+  });
+
+  it('lanza BAD_INPUT para BLOQUEADO con null', () => {
+    expect(() => assertReason('BLOQUEADO', null)).toThrow();
+    try {
+      assertReason('BLOQUEADO', null);
+    } catch (e: any) {
+      expect(e.getResponse().code).toBe('BAD_INPUT');
+    }
+  });
+
+  it('lanza BAD_INPUT para BLOQUEADO con string vacio', () => {
+    expect(() => assertReason('BLOQUEADO', '')).toThrow();
+    try {
+      assertReason('BLOQUEADO', '');
+    } catch (e: any) {
+      expect(e.getResponse().code).toBe('BAD_INPUT');
+    }
+  });
+
+  it('lanza BAD_INPUT para BLOQUEADO con solo espacios', () => {
+    expect(() => assertReason('BLOQUEADO', '   ')).toThrow();
+    try {
+      assertReason('BLOQUEADO', '   ');
+    } catch (e: any) {
+      expect(e.getResponse().code).toBe('BAD_INPUT');
+    }
+  });
+
+  it('lanza BAD_INPUT para CANCELADO sin motivo', () => {
+    expect(() => assertReason('CANCELADO', undefined)).toThrow();
+    try {
+      assertReason('CANCELADO', undefined);
+    } catch (e: any) {
+      expect(e.getResponse().code).toBe('BAD_INPUT');
+    }
+  });
+
+  it('no lanza para BLOQUEADO con motivo valido', () => {
+    expect(() => assertReason('BLOQUEADO', 'Esperando aprobacion')).not.toThrow();
+  });
+
+  it('no lanza para CANCELADO con motivo valido', () => {
+    expect(() => assertReason('CANCELADO', 'No aplica')).not.toThrow();
+  });
+
+  it('no lanza para columnas de flujo sin motivo', () => {
+    expect(() => assertReason('PENDIENTE', undefined)).not.toThrow();
+    expect(() => assertReason('EN_PROCESO', null)).not.toThrow();
+    expect(() => assertReason('PRUEBAS', '')).not.toThrow();
+    expect(() => assertReason('CERRADO', '   ')).not.toThrow();
+  });
+
+  it('no lanza para columnas de flujo con motivo', () => {
+    expect(() => assertReason('PENDIENTE', 'Razon')).not.toThrow();
+    expect(() => assertReason('EN_PROCESO', 'Razon')).not.toThrow();
+    expect(() => assertReason('PRUEBAS', 'Razon')).not.toThrow();
+    expect(() => assertReason('CERRADO', 'Razon')).not.toThrow();
   });
 });
 
