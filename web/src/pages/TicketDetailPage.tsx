@@ -1,24 +1,22 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
-import { ticketsApi } from '../api/tickets.api';
-import { usersApi } from '../api/users.api';
+import { ticketsApi, supportAgentsApi } from '../api/tickets.api';
 import { clientsApi } from '../api/clients.api';
-import type { TicketDetail, TicketOrigin, TicketRequestType } from '../api/types';
-import { STATUS_STYLES, PRIORITY_STYLES, STATUS_LABELS } from './tickets/ticket-ui';
+import type { TicketDetail, TicketRequestType, TicketStatus } from '../api/types';
+import { STATUS_STYLES, PRIORITY_STYLES, STATUS_LABELS, ORIGIN_LABELS } from './tickets/ticket-ui';
 import TicketTimeline from './tickets/TicketTimeline';
 import TicketSlaClock from './tickets/TicketSlaClock';
 import ResolveDialog from './tickets/ResolveDialog';
+import AssignDialog from './tickets/AssignDialog';
+import OverridePriorityDialog from './tickets/OverridePriorityDialog';
 
-const ORIGIN_LABELS: Record<TicketOrigin, string> = {
-  EMAIL: 'Correo',
-  WHATSAPP_TEXT: 'WhatsApp (texto)',
-  WHATSAPP_AUDIO: 'WhatsApp (audio)',
-  VOICE_LIVE: 'Dictado en vivo',
-  MEETING: 'Reunión / acta',
-  NOTE: 'Nota rápida',
-  PORTAL: 'Portal',
-};
+// Mismos seis estados que OPEN_STATUSES en
+// backend/src/modules/tickets/domain/ticket-state-machine.ts (no importable
+// desde el backend): triaje, asignación y ajuste de prioridad son acciones
+// de gestión válidas mientras el ticket sigue abierto; dejan de tener
+// sentido una vez resuelto o cerrado.
+const OPEN_STATUSES: TicketStatus[] = ['NUEVO', 'TRIAJE', 'ASIGNADO', 'EN_ATENCION', 'ESPERA_CLIENTE', 'DERIVADO'];
 
 const REQUEST_TYPE_LABELS: Record<TicketRequestType, string> = {
   INCIDENCIA: 'Incidencia',
@@ -61,18 +59,21 @@ export default function TicketDetailPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resolveOpen, setResolveOpen] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [priorityOpen, setPriorityOpen] = useState(false);
   const [usersById, setUsersById] = useState<Map<number, string>>(new Map());
   const [clientName, setClientName] = useState<string | null>(null);
 
-  // Resuelve assigneeUserId -> nombre. GET /users está restringido por rol; si
-  // falla por permisos la ficha cae al id crudo (ver TicketsListPage).
+  // Resuelve assigneeUserId -> nombre a partir de GET /support-agents, sin
+  // restricción de rol (ver TicketsListPage: GET /users sí la tiene y dejaba
+  // a un técnico DEVELOPER viendo el id crudo).
   useEffect(() => {
-    usersApi
+    supportAgentsApi
       .list()
-      .then((list) => setUsersById(new Map(list.map((u) => [u.id, u.fullName]))))
+      .then((list) => setUsersById(new Map(list.map((a) => [a.userId, a.fullName]))))
       .catch((e) => {
         console.warn(
-          '[TicketDetailPage] No se pudo cargar la lista de usuarios; la ficha mostrará ids crudos.',
+          '[TicketDetailPage] No se pudo cargar la lista de técnicos; la ficha mostrará ids crudos.',
           e,
         );
       });
@@ -191,7 +192,23 @@ export default function TicketDetailPage() {
   const canEscalate = ['ASIGNADO', 'EN_ATENCION'].includes(ticket.status);
   const canResolve = ['EN_ATENCION', 'ESPERA_CLIENTE'].includes(ticket.status);
   const canClose = ticket.status === 'RESUELTO';
-  const hasActions = canTake || canWait || canResume || canEscalate || canResolve || canClose;
+  // triage() y assign() no llaman a assertTransition para el propio patch
+  // (solo la transición de estado que delegan, cuando aplica, la valida
+  // aparte — ver TicketAIService.triage / TicketAssignmentService.assign).
+  // Gating aquí por OPEN_STATUSES: no tiene sentido re-triar ni reasignar un
+  // ticket ya resuelto o cerrado, aunque el backend no lo prohíba.
+  const canTriage = OPEN_STATUSES.includes(ticket.status);
+  const canAssign = OPEN_STATUSES.includes(ticket.status);
+  const canOverridePriority = OPEN_STATUSES.includes(ticket.status);
+  // Precondiciones exactas de TicketAIService.pushToJira: ya estructurado
+  // (subject + descriptionMd), con proyecto, y sin enviar todavía (si ya
+  // tiene jiraIssueKey, el backend respondería CONFLICT).
+  const canPushToJira = Boolean(
+    ticket.subject && ticket.descriptionMd && ticket.projectId && !ticket.jiraIssueKey,
+  );
+  const hasActions =
+    canTake || canWait || canResume || canEscalate || canResolve || canClose ||
+    canTriage || canAssign || canOverridePriority || canPushToJira;
 
   return (
     <div style={{ padding: 26, display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -298,6 +315,16 @@ export default function TicketDetailPage() {
               </div>
             )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {canAssign && (
+                <button disabled={busy} onClick={() => setAssignOpen(true)} style={actionButtonStyle()}>
+                  {ticket.assigneeUserId ? 'Reasignar' : 'Asignar'}
+                </button>
+              )}
+              {canTriage && (
+                <button disabled={busy} onClick={() => act(() => ticketsApi.triage(id))} style={actionButtonStyle()}>
+                  Triaje IA
+                </button>
+              )}
               {canTake && (
                 <button disabled={busy} onClick={() => act(() => ticketsApi.take(id))} style={actionButtonStyle()}>
                   Tomar
@@ -338,6 +365,16 @@ export default function TicketDetailPage() {
                   style={actionButtonStyle('primary')}
                 >
                   Cerrar
+                </button>
+              )}
+              {canOverridePriority && (
+                <button disabled={busy} onClick={() => setPriorityOpen(true)} style={actionButtonStyle()}>
+                  Ajustar prioridad
+                </button>
+              )}
+              {canPushToJira && (
+                <button disabled={busy} onClick={() => act(() => ticketsApi.pushToJira(id))} style={actionButtonStyle()}>
+                  Enviar a Jira
                 </button>
               )}
               {!hasActions && (
@@ -396,6 +433,29 @@ export default function TicketDetailPage() {
               correctiveAction: v.correctiveAction,
             }),
           );
+        }}
+      />
+
+      <AssignDialog
+        open={assignOpen}
+        ticketId={id}
+        serviceCategory={ticket.serviceCategory}
+        onCancel={() => setAssignOpen(false)}
+        onConfirm={(v) => {
+          setAssignOpen(false);
+          act(() => ticketsApi.assign(id, v));
+        }}
+      />
+
+      <OverridePriorityDialog
+        open={priorityOpen}
+        currentImpact={ticket.impact}
+        currentUrgency={ticket.urgency}
+        currentPriority={ticket.priority}
+        onCancel={() => setPriorityOpen(false)}
+        onConfirm={(v) => {
+          setPriorityOpen(false);
+          act(() => ticketsApi.overridePriority(id, v));
         }}
       />
     </div>

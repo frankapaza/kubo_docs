@@ -44,6 +44,11 @@ export default function TicketTimeline({ events }: { events: TicketEvent[] }) {
             {e.reason && (
               <span style={{ fontSize: 12, color: '#4a5052', lineHeight: 1.55 }}>{e.reason}</span>
             )}
+            {e.type === 'TRIAGED' && typeof e.payload?.confidence === 'number' && (
+              <span style={{ fontSize: 12, color: '#4a5052' }}>
+                Confianza de la IA: {Math.round(e.payload.confidence)}%
+              </span>
+            )}
             {e.actorUserId === null && (
               <span style={{ fontSize: 11, color: '#6d7577' }}>Registrado por el sistema</span>
             )}
