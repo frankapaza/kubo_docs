@@ -5,6 +5,14 @@ export interface Swatch { bg: string; fg: string }
 /** Las cuatro columnas de flujo, en orden. */
 export const BOARD_COLUMNS: WorkItemStatus[] = ['PENDIENTE', 'EN_PROCESO', 'PRUEBAS', 'CERRADO'];
 
+/**
+ * Los seis estados posibles, en el mismo orden que
+ * backend/src/modules/work-items/domain/work-item-board.ts (WORK_ITEM_STATUSES).
+ * Usado por el menú «Mover a…» de la tarjeta: ahí sí se puede elegir
+ * BLOQUEADO o CANCELADO, aunque no tengan columna propia en el tablero.
+ */
+export const ALL_STATUSES: WorkItemStatus[] = [...BOARD_COLUMNS, 'BLOQUEADO', 'CANCELADO'];
+
 export const STATUS_LABELS: Record<WorkItemStatus, string> = {
   PENDIENTE: 'Pendiente',
   EN_PROCESO: 'En proceso',

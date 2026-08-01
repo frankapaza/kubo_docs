@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import type { DragEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { workItemsApi } from '../api/work-items.api';
@@ -9,6 +10,7 @@ import type {
 } from '../api/types';
 import { BOARD_COLUMNS, STATUS_LABELS } from './work-items/workitem-ui';
 import WorkItemCard from './work-items/WorkItemCard';
+import MoveReasonDialog from './work-items/MoveReasonDialog';
 
 const SEARCH_DEBOUNCE_MS = 280;
 
@@ -24,6 +26,101 @@ const DUE_FILTERS: { value: DueFilterValue; label: string }[] = [
   { value: 'vencidos', label: 'Vencidos' },
   { value: 'semana', label: 'Esta semana' },
 ];
+
+/**
+ * Índice de inserción dentro de `container` según la posición vertical del
+ * puntero: compara `clientY` con el punto medio de cada tarjeta hija
+ * (`[data-card-id]`). Se excluye la tarjeta que se está arrastrando —igual
+ * que `reorder()` en el backend, que primero saca el ítem movido de la
+ * columna y luego lo reinserta— para que el índice calculado aquí coincida
+ * con el que espera `POST /work-items/:id/move`.
+ */
+function computeDropIndex(container: HTMLElement, clientY: number, excludeId: number | null): number {
+  const cards = Array.from(container.querySelectorAll<HTMLElement>('[data-card-id]')).filter(
+    (el) => Number(el.dataset.cardId) !== excludeId,
+  );
+  for (let i = 0; i < cards.length; i += 1) {
+    const rect = cards[i].getBoundingClientRect();
+    if (clientY < rect.top + rect.height / 2) return i;
+  }
+  return cards.length;
+}
+
+interface DropTarget {
+  status: WorkItemStatus;
+  index: number;
+}
+
+interface BoardColumnProps {
+  status: WorkItemStatus;
+  label: string;
+  items: WorkItem[];
+  loading: boolean;
+  assigneeLabel: (item: WorkItem) => string;
+  onOpen: (item: WorkItem) => void;
+  onMove: (item: WorkItem, toStatus: WorkItemStatus) => void;
+  draggingId: number | null;
+  dropTarget: DropTarget | null;
+  onDragStartCard: (item: WorkItem) => void;
+  onDragEndCard: () => void;
+  onColumnDragOver: (e: DragEvent<HTMLElement>, status: WorkItemStatus) => void;
+  onColumnDragLeave: (e: DragEvent<HTMLElement>, status: WorkItemStatus) => void;
+  onColumnDrop: (e: DragEvent<HTMLElement>, status: WorkItemStatus) => void;
+  minHeight?: number;
+}
+
+const DROP_INDICATOR = (
+  <div aria-hidden="true" style={{ height: 3, borderRadius: 2, background: '#15191a', margin: '0 2px' }} />
+);
+
+/**
+ * Una columna del tablero (o una de las dos bandejas de la franja fuera de
+ * flujo): además de listar tarjetas, es zona de destino del arrastre nativo
+ * — `onDragOver` con `preventDefault()` para admitir el drop, y un
+ * indicador visual (barra) en la posición de inserción calculada.
+ */
+function BoardColumn({
+  status, label, items, loading, assigneeLabel, onOpen, onMove, draggingId, dropTarget,
+  onDragStartCard, onDragEndCard, onColumnDragOver, onColumnDragLeave, onColumnDrop, minHeight,
+}: BoardColumnProps) {
+  return (
+    <section
+      aria-label={`Columna ${label}`}
+      onDragOver={(e) => onColumnDragOver(e, status)}
+      onDragLeave={(e) => onColumnDragLeave(e, status)}
+      onDrop={(e) => onColumnDrop(e, status)}
+      style={{
+        background: '#f5f6f6', border: '1px solid #e2e5e6', borderRadius: 10, padding: 10,
+        display: 'flex', flexDirection: 'column', gap: 8, minHeight: minHeight ?? 220,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 4px' }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#15191a' }}>{label}</span>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: '#6d7577' }}>
+          {items.length}
+        </span>
+      </div>
+      {!loading && items.length === 0 && (
+        <div style={{ fontSize: 12, color: '#9aa1a2', padding: '8px 4px' }}>Sin ítems</div>
+      )}
+      {items.map((item, idx) => (
+        <Fragment key={item.id}>
+          {dropTarget?.status === status && dropTarget.index === idx && DROP_INDICATOR}
+          <WorkItemCard
+            item={item}
+            assigneeName={assigneeLabel(item)}
+            onOpen={onOpen}
+            onMove={onMove}
+            dragging={draggingId === item.id}
+            onDragStart={onDragStartCard}
+            onDragEnd={onDragEndCard}
+          />
+        </Fragment>
+      ))}
+      {dropTarget?.status === status && dropTarget.index === items.length && DROP_INDICATOR}
+    </section>
+  );
+}
 
 export default function WorkItemsBoardPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -43,6 +140,16 @@ export default function WorkItemsBoardPage() {
   const [usersById, setUsersById] = useState<Map<number, string>>(new Map());
   const [openItem, setOpenItem] = useState<WorkItem | null>(null);
   const [outOfFlowOpen, setOutOfFlowOpen] = useState(false);
+
+  // Estado del arrastre nativo: qué tarjeta se mueve y dónde caería si se
+  // soltara ahora. Puramente visual — el reacomodo real solo ocurre tras la
+  // respuesta del servidor (ver performMove).
+  const [draggingId, setDraggingId] = useState<number | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+
+  // Movimiento pendiente de motivo: se llena al soltar (o elegir del menú)
+  // un destino BLOQUEADO/CANCELADO, y solo entonces se abre el diálogo.
+  const [pendingMove, setPendingMove] = useState<{ item: WorkItem; toStatus: WorkItemStatus; toIndex: number } | null>(null);
 
   const setParam = (key: string, value: string) => {
     const next = new URLSearchParams(searchParams);
@@ -112,6 +219,20 @@ export default function WorkItemsBoardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qParam]);
 
+  // Parámetros de listado derivados de la URL. Se memoizan para poder
+  // reusarlos tanto en el efecto de carga como en el refetch tras un
+  // movimiento, sin duplicar la construcción del objeto.
+  const listParams = useMemo(
+    () => ({
+      clientId: clientIdParam ? Number(clientIdParam) : undefined,
+      priority: priorityParam || undefined,
+      assigneeId: assigneeIdParam ? Number(assigneeIdParam) : undefined,
+      dueFilter: dueFilterParam || undefined,
+      q: qParam || undefined,
+    }),
+    [clientIdParam, priorityParam, assigneeIdParam, dueFilterParam, qParam],
+  );
+
   // El filtrado (cliente, prioridad, asignado, fecha, texto) va al backend.
   // Deliberadamente NO se manda status: el endpoint ya devuelve todo
   // ordenado por (status, board_order) y el reparto en columnas — incluida
@@ -122,13 +243,7 @@ export default function WorkItemsBoardPage() {
     setLoading(true);
     setError(null);
     workItemsApi
-      .list({
-        clientId: clientIdParam ? Number(clientIdParam) : undefined,
-        priority: priorityParam || undefined,
-        assigneeId: assigneeIdParam ? Number(assigneeIdParam) : undefined,
-        dueFilter: dueFilterParam || undefined,
-        q: qParam || undefined,
-      })
+      .list(listParams)
       .then((data) => {
         if (!cancelled) setItems(data);
       })
@@ -144,10 +259,19 @@ export default function WorkItemsBoardPage() {
     return () => {
       cancelled = true;
     };
-  }, [clientIdParam, priorityParam, assigneeIdParam, dueFilterParam, qParam]);
+  }, [listParams]);
 
   const columns = useMemo(() => {
     const map = new Map<WorkItemStatus, WorkItem[]>(BOARD_COLUMNS.map((s) => [s, [] as WorkItem[]]));
+    for (const item of items) {
+      const bucket = map.get(item.status);
+      if (bucket) bucket.push(item);
+    }
+    return map;
+  }, [items]);
+
+  const outOfFlowByStatus = useMemo(() => {
+    const map = new Map<WorkItemStatus, WorkItem[]>(OUT_OF_FLOW_STATUSES.map((s) => [s, [] as WorkItem[]]));
     for (const item of items) {
       const bucket = map.get(item.status);
       if (bucket) bucket.push(item);
@@ -165,11 +289,91 @@ export default function WorkItemsBoardPage() {
       ? usersById.get(item.assigneeUserId) ?? String(item.assigneeUserId)
       : 'Sin asignar';
 
-  // El movimiento real (arrastre nativo y menú «Mover a…» accesible por
-  // teclado, contra workItemsApi.move) llega en la Tarea 10. Por ahora no hay
-  // ningún control en la tarjeta que dispare esto; se deja wireado.
-  const handleMove = (item: WorkItem) => {
-    console.info(`[WorkItemsBoardPage] onMove(${item.code ?? item.id}): pendiente de la Tarea 10.`);
+  const columnLength = (status: WorkItemStatus): number =>
+    items.filter((i) => i.status === status).length;
+
+  /**
+   * Ejecuta el movimiento contra el backend y, si se guardó, recarga la
+   * lista completa: el servidor renumera la columna (y la de origen) y es
+   * la única fuente de verdad — nunca se reordena localmente. Un fallo de
+   * la escritura y un fallo del refresco posterior dejan mensajes
+   * distintos: son hechos distintos para quien mira la pantalla.
+   */
+  const performMove = async (item: WorkItem, toStatus: WorkItemStatus, toIndex: number, reason?: string) => {
+    try {
+      await workItemsApi.move(item.id, { toStatus, toIndex, reason });
+    } catch (e: any) {
+      setError(e?.response?.data?.message ?? `No se pudo mover ${item.code ?? `#${item.id}`}. Intenta de nuevo.`);
+      console.warn('[WorkItemsBoardPage] Fallo al mover el ítem.', e);
+      return;
+    }
+    try {
+      const data = await workItemsApi.list(listParams);
+      setItems(data);
+      setError(null);
+    } catch (e) {
+      setError('El movimiento se guardó, pero el tablero no se pudo actualizar y puede estar desactualizado. Recarga la página.');
+      console.warn('[WorkItemsBoardPage] Fallo al refrescar el tablero tras mover un ítem.', e);
+    }
+  };
+
+  /**
+   * Punto de entrada único para ambos caminos (arrastre y menú «Mover
+   * a…»): si el destino exige motivo (BLOQUEADO/CANCELADO), abre el
+   * diálogo y solo llama a la API al confirmar; si no, mueve directo.
+   */
+  const requestMove = (item: WorkItem, toStatus: WorkItemStatus, toIndex: number) => {
+    if (OUT_OF_FLOW_STATUSES.includes(toStatus)) {
+      setPendingMove({ item, toStatus, toIndex });
+      return;
+    }
+    void performMove(item, toStatus, toIndex);
+  };
+
+  // Menú «Mover a…»: siempre al final de la columna de destino.
+  const handleMoveFromMenu = (item: WorkItem, toStatus: WorkItemStatus) => {
+    requestMove(item, toStatus, columnLength(toStatus));
+  };
+
+  const handleDragStartCard = (item: WorkItem) => setDraggingId(item.id);
+
+  const handleDragEndCard = () => {
+    setDraggingId(null);
+    setDropTarget(null);
+  };
+
+  const handleColumnDragOver = (e: DragEvent<HTMLElement>, status: WorkItemStatus) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const index = computeDropIndex(e.currentTarget, e.clientY, draggingId);
+    setDropTarget({ status, index });
+  };
+
+  const handleColumnDragLeave = (e: DragEvent<HTMLElement>, status: WorkItemStatus) => {
+    // Solo limpiar si el puntero de verdad salió del contenedor, no al
+    // pasar por encima de una tarjeta hija (que también dispara dragleave).
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
+    setDropTarget((prev) => (prev?.status === status ? null : prev));
+  };
+
+  const handleColumnDrop = (e: DragEvent<HTMLElement>, status: WorkItemStatus) => {
+    e.preventDefault();
+    const id = Number(e.dataTransfer.getData('text/plain'));
+    const index = computeDropIndex(e.currentTarget, e.clientY, draggingId);
+    setDropTarget(null);
+    setDraggingId(null);
+    const item = items.find((i) => i.id === id);
+    if (!item) return;
+    requestMove(item, status, index);
+  };
+
+  const handleCancelMoveReason = () => setPendingMove(null);
+
+  const handleConfirmMoveReason = (reason: string) => {
+    if (!pendingMove) return;
+    const { item, toStatus, toIndex } = pendingMove;
+    setPendingMove(null);
+    void performMove(item, toStatus, toIndex, reason);
   };
 
   return (
@@ -262,38 +466,25 @@ export default function WorkItemsBoardPage() {
       {loading && <div style={{ fontSize: 13, color: '#6d7577' }}>Cargando…</div>}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
-        {BOARD_COLUMNS.map((status) => {
-          const columnItems = columns.get(status) ?? [];
-          return (
-            <section
-              key={status}
-              aria-label={`Columna ${STATUS_LABELS[status]}`}
-              style={{
-                background: '#f5f6f6', border: '1px solid #e2e5e6', borderRadius: 10, padding: 10,
-                display: 'flex', flexDirection: 'column', gap: 8, minHeight: 220,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 4px' }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#15191a' }}>{STATUS_LABELS[status]}</span>
-                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: '#6d7577' }}>
-                  {columnItems.length}
-                </span>
-              </div>
-              {!loading && columnItems.length === 0 && (
-                <div style={{ fontSize: 12, color: '#9aa1a2', padding: '8px 4px' }}>Sin ítems</div>
-              )}
-              {columnItems.map((item) => (
-                <WorkItemCard
-                  key={item.id}
-                  item={item}
-                  assigneeName={assigneeLabel(item)}
-                  onOpen={(i) => setOpenItem(i)}
-                  onMove={handleMove}
-                />
-              ))}
-            </section>
-          );
-        })}
+        {BOARD_COLUMNS.map((status) => (
+          <BoardColumn
+            key={status}
+            status={status}
+            label={STATUS_LABELS[status]}
+            items={columns.get(status) ?? []}
+            loading={loading}
+            assigneeLabel={assigneeLabel}
+            onOpen={(i) => setOpenItem(i)}
+            onMove={handleMoveFromMenu}
+            draggingId={draggingId}
+            dropTarget={dropTarget}
+            onDragStartCard={handleDragStartCard}
+            onDragEndCard={handleDragEndCard}
+            onColumnDragOver={handleColumnDragOver}
+            onColumnDragLeave={handleColumnDragLeave}
+            onColumnDrop={handleColumnDrop}
+          />
+        ))}
       </div>
 
       <section style={{ background: '#fff', border: '1px solid #e2e5e6', borderRadius: 10, overflow: 'hidden' }}>
@@ -317,19 +508,27 @@ export default function WorkItemsBoardPage() {
           <div
             style={{
               padding: '0 16px 16px', display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10,
+              gridTemplateColumns: 'repeat(2, 1fr)', gap: 10,
             }}
           >
-            {outOfFlowItems.length === 0 && (
-              <div style={{ fontSize: 12, color: '#9aa1a2' }}>No hay ítems bloqueados ni cancelados.</div>
-            )}
-            {outOfFlowItems.map((item) => (
-              <WorkItemCard
-                key={item.id}
-                item={item}
-                assigneeName={assigneeLabel(item)}
+            {OUT_OF_FLOW_STATUSES.map((status) => (
+              <BoardColumn
+                key={status}
+                status={status}
+                label={STATUS_LABELS[status]}
+                items={outOfFlowByStatus.get(status) ?? []}
+                loading={loading}
+                assigneeLabel={assigneeLabel}
                 onOpen={(i) => setOpenItem(i)}
-                onMove={handleMove}
+                onMove={handleMoveFromMenu}
+                draggingId={draggingId}
+                dropTarget={dropTarget}
+                onDragStartCard={handleDragStartCard}
+                onDragEndCard={handleDragEndCard}
+                onColumnDragOver={handleColumnDragOver}
+                onColumnDragLeave={handleColumnDragLeave}
+                onColumnDrop={handleColumnDrop}
+                minHeight={120}
               />
             ))}
           </div>
@@ -365,6 +564,13 @@ export default function WorkItemsBoardPage() {
           </p>
         </aside>
       )}
+
+      <MoveReasonDialog
+        open={pendingMove !== null}
+        toStatus={pendingMove?.toStatus ?? null}
+        onCancel={handleCancelMoveReason}
+        onConfirm={handleConfirmMoveReason}
+      />
     </div>
   );
 }
