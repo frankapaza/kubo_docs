@@ -12,6 +12,8 @@ import { BOARD_COLUMNS, STATUS_LABELS } from './work-items/workitem-ui';
 import MoveReasonDialog from './work-items/MoveReasonDialog';
 import BoardColumn from './work-items/BoardColumn';
 import type { DropTarget } from './work-items/BoardColumn';
+import WorkItemPanel from './work-items/WorkItemPanel';
+import NewWorkItemDialog from './work-items/NewWorkItemDialog';
 
 const SEARCH_DEBOUNCE_MS = 280;
 
@@ -77,7 +79,8 @@ export default function WorkItemsBoardPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [agents, setAgents] = useState<SupportAgentView[]>([]);
   const [usersById, setUsersById] = useState<Map<number, string>>(new Map());
-  const [openItem, setOpenItem] = useState<WorkItem | null>(null);
+  const [openItemId, setOpenItemId] = useState<number | null>(null);
+  const [newItemOpen, setNewItemOpen] = useState(false);
   const [outOfFlowOpen, setOutOfFlowOpen] = useState(false);
 
   // Estado del arrastre nativo: qué tarjeta se mueve y dónde caería si se
@@ -231,6 +234,24 @@ export default function WorkItemsBoardPage() {
     [items],
   );
 
+  /**
+   * Recarga la lista con los filtros vigentes, sin tocar `loading` (que es
+   * el spinner de la carga inicial/por filtro): la usan el panel de detalle
+   * tras cambiar prioridad o asignado, y el alta de un ítem nuevo. Un fallo
+   * aquí es un hecho distinto de un fallo al escribir el cambio que la
+   * disparó — mismo criterio que performMove más abajo.
+   */
+  const refetchList = async () => {
+    try {
+      const data = await workItemsApi.list(listParams);
+      setItems(data);
+      setError(null);
+    } catch (e) {
+      setError('No se pudo actualizar el tablero. Recarga la página.');
+      console.warn('[WorkItemsBoardPage] Fallo al refrescar el tablero.', e);
+    }
+  };
+
   const assigneeLabel = (item: WorkItem): string =>
     item.assigneeUserId
       ? usersById.get(item.assigneeUserId) ?? String(item.assigneeUserId)
@@ -353,7 +374,20 @@ export default function WorkItemsBoardPage() {
       aria-label="Tablero de requerimientos"
       style={{ padding: 26, display: 'flex', flexDirection: 'column', gap: 18 }}
     >
-      <h1 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Requerimientos</h1>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <h1 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Requerimientos</h1>
+        <button
+          type="button"
+          onClick={() => setNewItemOpen(true)}
+          aria-label="Crear nuevo requerimiento"
+          style={{
+            fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7,
+            background: '#15191a', color: '#fff', border: 'none', cursor: 'pointer',
+          }}
+        >
+          + Nuevo requerimiento
+        </button>
+      </div>
 
       <section
         style={{
@@ -449,7 +483,7 @@ export default function WorkItemsBoardPage() {
             items={columns.get(status) ?? []}
             loading={loading}
             assigneeLabel={assigneeLabel}
-            onOpen={(i) => setOpenItem(i)}
+            onOpen={(i) => setOpenItemId(i.id)}
             onMove={handleMoveFromMenu}
             draggingId={draggingId}
             dropTarget={dropTarget}
@@ -494,7 +528,7 @@ export default function WorkItemsBoardPage() {
                 items={outOfFlowByStatus.get(status) ?? []}
                 loading={loading}
                 assigneeLabel={assigneeLabel}
-                onOpen={(i) => setOpenItem(i)}
+                onOpen={(i) => setOpenItemId(i.id)}
                 onMove={handleMoveFromMenu}
                 draggingId={draggingId}
                 dropTarget={dropTarget}
@@ -510,35 +544,23 @@ export default function WorkItemsBoardPage() {
         )}
       </section>
 
-      {openItem && (
-        <aside
-          aria-label={`Detalle de ${openItem.code ?? openItem.id}`}
-          style={{
-            position: 'fixed', right: 20, bottom: 20, width: 320, background: '#fff',
-            border: '1px solid #e2e5e6', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.14)', padding: 16,
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-            <strong style={{ fontSize: 13 }}>
-              {openItem.code ?? `#${openItem.id}`} — {openItem.title}
-            </strong>
-            <button
-              type="button"
-              onClick={() => setOpenItem(null)}
-              aria-label="Cerrar detalle"
-              style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: 0 }}
-            >
-              ×
-            </button>
-          </div>
-          <p style={{ fontSize: 12, color: '#4a5052', margin: '8px 0 4px' }}>
-            Estado: {STATUS_LABELS[openItem.status]} · Prioridad: {openItem.priority}
-          </p>
-          <p style={{ fontSize: 11, color: '#9aa1a2', margin: 0 }}>
-            El panel completo (descripción, criterios de aceptación y timeline) llega en la Tarea 11.
-          </p>
-        </aside>
+      {openItemId !== null && (
+        <WorkItemPanel
+          workItemId={openItemId}
+          onClose={() => setOpenItemId(null)}
+          onChanged={() => void refetchList()}
+        />
       )}
+
+      <NewWorkItemDialog
+        open={newItemOpen}
+        onCancel={() => setNewItemOpen(false)}
+        onCreated={(created) => {
+          setNewItemOpen(false);
+          void refetchList();
+          setOpenItemId(created.id);
+        }}
+      />
 
       <MoveReasonDialog
         open={pendingMove !== null}

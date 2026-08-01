@@ -1,4 +1,4 @@
-import type { WorkItemPriority, WorkItemStatus } from '../../api/types';
+import type { WorkItemEventType, WorkItemPriority, WorkItemStatus } from '../../api/types';
 
 export interface Swatch { bg: string; fg: string }
 
@@ -31,6 +31,21 @@ export const PRIORITY_STYLES: Record<WorkItemPriority, Swatch> = {
 export const OUT_OF_FLOW_STYLES: Record<'BLOQUEADO' | 'CANCELADO', Swatch> = {
   BLOQUEADO: { bg: 'oklch(0.95 0.04 290)', fg: 'oklch(0.45 0.13 290)' },
   CANCELADO: { bg: '#eceeef',              fg: '#6d7577' },
+};
+
+/**
+ * Color del punto de línea de tiempo por tipo de evento de work item; sin
+ * entrada usa el color por defecto de WorkItemTimeline. Mismo idioma que
+ * TIMELINE_EVENT_DOTS en pages/tickets/ticket-ui.ts.
+ */
+export const WORK_ITEM_EVENT_DOTS: Partial<Record<WorkItemEventType, string>> = {
+  CREATED: 'oklch(0.52 0.1 205)',
+  BLOCKED: 'oklch(0.45 0.13 290)',
+  UNBLOCKED: 'oklch(0.6 0.12 150)',
+  CLOSED: '#4a5052',
+  CANCELLED: '#6d7577',
+  REOPENED: 'oklch(0.5 0.11 70)',
+  PRIORITY_CHANGED: 'oklch(0.68 0.14 78)',
 };
 
 /**
