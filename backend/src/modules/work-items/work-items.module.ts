@@ -7,12 +7,25 @@ import { WorkItemsRepository } from './work-items.repository';
 import { WorkItemEventsRepository } from './work-item-events.repository';
 import { WorkItemEventsService } from './work-item-events.service';
 import { WorkItemsService } from './work-items.service';
+import { WorkItemBoardService } from './work-item-board.service';
 import { ClientsModule } from '../clients/clients.module';
 import { ProjectsModule } from '../projects/projects.module';
 
 @Module({
   imports: [TypeOrmModule.forFeature([WorkItem, WorkItemEvent]), ClientsModule, ProjectsModule],
-  providers: [WorkItemsRepository, WorkItemEventsRepository, WorkItemEventsService, WorkItemsService],
-  exports: [WorkItemsRepository, WorkItemEventsRepository, WorkItemEventsService, WorkItemsService],
+  providers: [
+    WorkItemsRepository,
+    WorkItemEventsRepository,
+    WorkItemEventsService,
+    WorkItemsService,
+    WorkItemBoardService,
+  ],
+  exports: [
+    WorkItemsRepository,
+    WorkItemEventsRepository,
+    WorkItemEventsService,
+    WorkItemsService,
+    WorkItemBoardService,
+  ],
 })
 export class WorkItemsModule {}
