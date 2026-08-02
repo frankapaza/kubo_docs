@@ -22,19 +22,31 @@ export class HttpExceptionFilter implements ExceptionFilter {
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    const payload =
+    const payload: string | Record<string, unknown> =
       exception instanceof HttpException
-        ? (exception.getResponse() as Record<string, unknown>)
+        ? (exception.getResponse() as string | Record<string, unknown>)
         : { message: 'Internal server error' };
+
+    const asObject = typeof payload === 'object' ? payload : {};
+    // `message` no es siempre un string: los errores de validación de
+    // class-validator llegan como `string[]`, uno por restricción incumplida.
+    // Serializarlo tal cual dejaba que React los pintara concatenados sin
+    // separador alguno («El asunto es obligatorio.La descripción es
+    // obligatoria.»), porque un array de nodos se renderiza pegado.
+    const rawMessage = typeof payload === 'string' ? payload : asObject.message;
+    const messages = Array.isArray(rawMessage) ? rawMessage.map(String) : undefined;
 
     const body = {
       statusCode: status,
-      code: this.resolveCode(status, payload),
-      message:
-        typeof payload === 'string'
-          ? payload
-          : (payload.message as string) ?? 'Error',
-      details: typeof payload === 'object' ? (payload as any).details : undefined,
+      code: this.resolveCode(status, asObject),
+      // Un solo texto legible, siempre. La lista completa sigue disponible en
+      // `details` para quien quiera pintarla campo a campo.
+      message: messages
+        ? messages.join(' ')
+        : typeof rawMessage === 'string'
+          ? rawMessage
+          : 'Error',
+      details: asObject.details ?? messages,
       path: req.url,
       timestamp: new Date().toISOString(),
     };
@@ -47,7 +59,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
   }
 
   private resolveCode(status: number, payload: Record<string, unknown>): string {
-    if (typeof payload === 'object' && typeof payload.code === 'string') {
+    if (typeof payload.code === 'string') {
       return payload.code;
     }
     const map: Record<number, string> = {

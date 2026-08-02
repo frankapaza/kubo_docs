@@ -23,20 +23,34 @@ import { IsInt, IsOptional, IsString, MaxLength, Min, MinLength } from 'class-va
  */
 const DESCRIPTION_MAX_CHARS = 16383;
 
+/** 240 es la anchura de la columna `subject`, que sí es varchar en caracteres. */
+const SUBJECT_MAX_CHARS = 240;
+
+/**
+ * Todos los mensajes van escritos, y hablan del campo tal como se llama en el
+ * formulario («el asunto», «la descripción»), nunca de la propiedad ni de la
+ * columna. Los literales por defecto de class-validator —«subject must be
+ * shorter than or equal to 240 characters»— incumplen la restricción global de
+ * mensajes en español y son la única respuesta del portal que se saltaba la
+ * disciplina de proyección campo por campo del resto del módulo.
+ */
 export class CreatePortalTicketDto {
-  /** 240 es la anchura de la columna `subject`, que sí es varchar en caracteres. */
-  @IsString()
-  @MinLength(1)
-  @MaxLength(240)
+  @IsString({ message: 'El asunto es obligatorio.' })
+  @MinLength(1, { message: 'El asunto es obligatorio.' })
+  @MaxLength(SUBJECT_MAX_CHARS, {
+    message: `El asunto no puede superar los ${SUBJECT_MAX_CHARS} caracteres.`,
+  })
   subject!: string;
 
-  @IsString()
-  @MinLength(1)
-  @MaxLength(DESCRIPTION_MAX_CHARS)
+  @IsString({ message: 'La descripción es obligatoria.' })
+  @MinLength(1, { message: 'La descripción es obligatoria.' })
+  @MaxLength(DESCRIPTION_MAX_CHARS, {
+    message: `La descripción no puede superar los ${DESCRIPTION_MAX_CHARS} caracteres.`,
+  })
   description!: string;
 
   @IsOptional()
-  @IsInt()
-  @Min(1)
+  @IsInt({ message: 'El sistema seleccionado no es válido.' })
+  @Min(1, { message: 'El sistema seleccionado no es válido.' })
   systemId?: number;
 }

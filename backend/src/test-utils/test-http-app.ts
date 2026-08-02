@@ -1,7 +1,8 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication } from '@nestjs/common';
 import { TestingModule } from '@nestjs/testing';
 
 import { HttpExceptionFilter } from '../common/filters/http-exception.filter';
+import { createGlobalValidationPipe } from '../common/validation/validation-pipe.factory';
 
 /**
  * Utilidad para pruebas de integración: levanta un `TestingModule` como una
@@ -84,15 +85,8 @@ export class TestHttpApp {
 export async function startTestHttpApp(moduleRef: TestingModule): Promise<TestHttpApp> {
   const app = moduleRef.createNestApplication();
 
-  // Misma configuración que `main.ts`.
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-      transformOptions: { enableImplicitConversion: true },
-    }),
-  );
+  // El mismo pipe y el mismo filtro que monta `main.ts`, no una copia.
+  app.useGlobalPipes(createGlobalValidationPipe());
   app.useGlobalFilters(new HttpExceptionFilter());
 
   await app.init();

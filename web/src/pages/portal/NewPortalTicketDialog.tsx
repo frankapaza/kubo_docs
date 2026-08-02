@@ -14,6 +14,24 @@ interface Props {
   onCreated: (ticket: PortalTicket) => void;
 }
 
+/**
+ * Cuerpo de error de la API: `{ code, message }`, y en los 400 de validación
+ * también `details` con un motivo por entrada. `message` es siempre una cadena
+ * ya legible — el filtro del backend une la lista— así que `details` solo se
+ * usa para poder desglosarla en viñetas.
+ */
+function toErrorList(e: any): string[] {
+  const data = e?.response?.data as { message?: string; details?: unknown } | undefined;
+
+  if (Array.isArray(data?.details) && data.details.length > 0) {
+    return data.details.map(String);
+  }
+  if (typeof data?.message === 'string' && data.message.length > 0) {
+    return [data.message];
+  }
+  return ['No se pudo crear el ticket. Inténtalo de nuevo.'];
+}
+
 export default function NewPortalTicketDialog({ open, onCancel, onCreated }: Props) {
   const [subject, setSubject] = useState('');
   const [description, setDescription] = useState('');
@@ -21,7 +39,10 @@ export default function NewPortalTicketDialog({ open, onCancel, onCreated }: Pro
   const [systems, setSystems] = useState<PortalClientSystem[]>([]);
 
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Lista y no cadena: un 400 de validación puede traer varios motivos a la
+  // vez. El backend manda `message` ya legible y `details` con la lista
+  // desglosada; aquí se pinta una viñeta por motivo cuando hay más de uno.
+  const [errors, setErrors] = useState<string[]>([]);
 
   // Resetea el formulario cada vez que el diálogo se abre; se mantiene
   // montado (mismo patrón que NewTicketDialog del panel interno) para no
@@ -31,7 +52,7 @@ export default function NewPortalTicketDialog({ open, onCancel, onCreated }: Pro
     setSubject('');
     setDescription('');
     setSystemId('');
-    setError(null);
+    setErrors([]);
   }, [open]);
 
   // `listSystems` solo devuelve los sistemas activos del cliente y es
@@ -74,11 +95,11 @@ export default function NewPortalTicketDialog({ open, onCancel, onCreated }: Pro
 
   const submit = async () => {
     if (!canSubmit) {
-      setError('El asunto y la descripción son obligatorios.');
+      setErrors(['El asunto y la descripción son obligatorios.']);
       return;
     }
     setBusy(true);
-    setError(null);
+    setErrors([]);
     try {
       const created = await portalApi.createTicket({
         subject: subject.trim(),
@@ -90,7 +111,7 @@ export default function NewPortalTicketDialog({ open, onCancel, onCreated }: Pro
       // Fallo de escritura: el ticket NO se creó. Se muestra en el propio
       // diálogo (no en consola) para que quede claro que hay que reintentar,
       // a diferencia del fallo silencioso de `listSystems` de arriba.
-      setError(e?.response?.data?.message ?? 'No se pudo crear el ticket. Inténtalo de nuevo.');
+      setErrors(toErrorList(e));
     } finally {
       setBusy(false);
     }
@@ -116,12 +137,20 @@ export default function NewPortalTicketDialog({ open, onCancel, onCreated }: Pro
           Cuéntanos qué necesitas; nuestro equipo lo revisará y te dará seguimiento.
         </p>
 
-        {error && (
+        {errors.length > 0 && (
           <div
             role="alert"
             className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
           >
-            {error}
+            {errors.length === 1 ? (
+              errors[0]
+            ) : (
+              <ul className="list-disc space-y-1 pl-5">
+                {errors.map((message) => (
+                  <li key={message}>{message}</li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
 

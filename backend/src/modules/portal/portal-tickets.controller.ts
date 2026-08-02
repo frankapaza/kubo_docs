@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseIntPipe,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 
 import { ClientJwtGuard } from './guards/client-jwt.guard';
 import { CurrentClientUser } from './decorators/current-client-user.decorator';
@@ -13,6 +22,19 @@ import { PortalClientSystemView, PortalTicketView } from './dto/portal-ticket.dt
  * verificar. Cualquier `clientId` que llegara por el cuerpo o la query sería
  * ignorado por el servicio, y además el ValidationPipe global lo rechaza.
  */
+/**
+ * `ParseIntPipe` de serie responde «Validation failed (numeric string is
+ * expected)»: inglés y jerga de framework, y era lo que pintaba la pantalla de
+ * detalle del portal. Se le da la forma `{ code, message }` del proyecto.
+ */
+const ticketIdPipe = new ParseIntPipe({
+  exceptionFactory: () =>
+    new BadRequestException({
+      code: 'VALIDATION_ERROR',
+      message: 'El identificador del ticket no es válido.',
+    }),
+});
+
 @Controller('portal')
 @UseGuards(ClientJwtGuard)
 export class PortalTicketsController {
@@ -31,7 +53,7 @@ export class PortalTicketsController {
   @Get('tickets/:id')
   detail(
     @CurrentClientUser() user: AuthClientUser,
-    @Param('id', ParseIntPipe) id: number,
+    @Param('id', ticketIdPipe) id: number,
   ): Promise<PortalTicketView> {
     return this.service.detail(user.clientId, id);
   }
