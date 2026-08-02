@@ -601,6 +601,43 @@ describe('cómo se compone el correo', () => {
   });
 
   /**
+   * El aviso cuenta lo que paso en el evento, y el evento puede llevar hasta un
+   * minuto en la cola. Con dos transiciones dentro del mismo minuto —resolver y
+   * cerrar, que es una secuencia normal— el ticket ya esta cerrado cuando el
+   * vigilante drena, y el correo de «ya esta resuelto» decia «Estado: Cerrado».
+   * El dato exacto viaja en la propia fila.
+   */
+  it('el estado sale del evento, no del ticket en el momento del drenaje', async () => {
+    const { dispatcher, email } = montar({ ticket: unTicket({ status: 'CERRADO' }) });
+
+    await dispatcher.dispatchForEvent(unEvento({ type: 'RESOLVED', toStatus: 'RESUELTO' }));
+
+    const [correo] = enviados(email);
+    expect(correo.html).toContain('Resuelto');
+    expect(correo.html).not.toContain('Cerrado');
+  });
+
+  /**
+   * `SLA_AT_RISK` no cambia de estado: su `to_status` es nulo. Ahí lo único
+   * que se puede contar es en qué estado está el ticket, y es además lo que
+   * el técnico necesita saber para atenderlo.
+   */
+  it('si el evento no cambia de estado, se usa el del ticket', async () => {
+    const { dispatcher, email } = montar({
+      ticket: unTicket({ status: 'EN_ATENCION', assigneeUserId: null }),
+      // La plantilla sembrada de SLA sí lleva `{{estado}}`; la de este archivo
+      // se quedó sin él, y sin la variable el test no probaría nada.
+      plantillas: [
+        { ...PLANTILLA_EQUIPO_SLA, bodyMd: 'Estado: {{estado}}.\n\n{{enlace_panel}}' },
+      ],
+    });
+
+    await dispatcher.dispatchForEvent(unEvento({ type: 'SLA_AT_RISK', toStatus: null }));
+
+    expect(enviados(email)[0].html).toContain('En atención');
+  });
+
+  /**
    * El sistema es UTC de punta a punta, así que el `Date` que llega es
    * correcto; lo que puede salir mal es la impresión. `toLocaleString` sin
    * `timeZone` toma la del proceso, y el contenedor de producción corre en UTC

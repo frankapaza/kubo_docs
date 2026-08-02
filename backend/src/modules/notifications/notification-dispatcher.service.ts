@@ -89,6 +89,24 @@ function statusLabel(status: TicketStatus): string | null {
 }
 
 /**
+ * El estado que cuenta el aviso: el que dejó **el evento**, no el que tenga el
+ * ticket cuando el vigilante lo drene.
+ *
+ * Entre lo uno y lo otro puede pasar hasta un minuto —el aviso viaja por una
+ * bandeja de salida—, y dos transiciones dentro del mismo minuto es una
+ * secuencia normal: resolver y cerrar a continuación. Leyendo `ticket.status`,
+ * el correo de "ya está resuelto" llegaba diciendo "Estado: Cerrado". El dato
+ * exacto está en la fila del evento.
+ *
+ * `toStatus` es nulo en los eventos que no cambian de estado (`SLA_AT_RISK`).
+ * Ahí sí se usa el del ticket: es lo único que hay que contar, y además es lo
+ * que el técnico necesita saber para atenderlo.
+ */
+function eventStatusLabel(ticket: Ticket, event: TicketEvent): string | null {
+  return statusLabel(event.toStatus ?? ticket.status);
+}
+
+/**
  * Un identificador utilizable, o `null`.
  *
  * TypeORM hidrata **toda** columna `bigint` como cadena aunque la entidad la
@@ -410,7 +428,7 @@ export class NotificationDispatcher {
     return {
       codigo: ticket.code,
       asunto: ticket.subject,
-      estado: statusLabel(ticket.status),
+      estado: eventStatusLabel(ticket, event),
       fecha: formatDateTime(event.createdAt),
       razon_social: razonSocial,
       enlace_portal: `${frontendUrl}/portal/tickets/${String(ticket.id)}`,
@@ -430,7 +448,7 @@ export class NotificationDispatcher {
     return {
       codigo: ticket.code,
       asunto: ticket.subject,
-      estado: statusLabel(ticket.status),
+      estado: eventStatusLabel(ticket, event),
       fecha: formatDateTime(event.createdAt),
       razon_social: razonSocial,
       enlace_portal: `${frontendUrl}/portal/tickets/${String(ticket.id)}`,
