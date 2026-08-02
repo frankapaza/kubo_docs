@@ -251,6 +251,42 @@ describe('NotificationScheduler', () => {
       expect(fila.notifyLastError).toContain('No se pudieron enviar 1 de 1 avisos');
     });
 
+    /**
+     * `sent` cuenta **correos**, no eventos con éxito, y el envío parcial es
+     * el único caso en que ese matiz importa: un evento que manda dos avisos,
+     * sale el primero y falla el segundo. El despachador se molesta en
+     * contarlo en `sentEntries` justo para esto; si el vigilante no lo lee, el
+     * resumen dice que no salió ningún correo el mismo minuto en que un
+     * cliente recibió el suyo, y el día que pregunte por qué le llegó dos
+     * veces no hay nada en el log que lo explique.
+     */
+    it('en un envío parcial cuenta los correos que sí salieron', async () => {
+      const fila = unaFila();
+      const { scheduler } = montar([fila], {
+        pordefecto: new NotificationDispatchError(
+          'No se pudieron enviar 1 de 2 avisos del evento 901 (ticket 13). ' +
+            'Fallaron: TICKET_CREATED_PORTAL/TEAM: ECONNREFUSED. Ya habían salido 1 de 2 ' +
+            '(TICKET_CREATED/CLIENT); el reintento del evento los repetirá.',
+          ['TICKET_CREATED/CLIENT'],
+          ['TICKET_CREATED_PORTAL/TEAM'],
+          [new Error('ECONNREFUSED')],
+        ),
+      });
+
+      const resumen = await scheduler.drain(T0);
+
+      expect(resumen).toEqual({ processed: 1, sent: 1, failed: 1, abandoned: 0 });
+    });
+
+    /** Un fallo que no viene del despachador no aporta ningún correo enviado. */
+    it('un error cualquiera no inventa correos enviados', async () => {
+      const { scheduler } = montar([unaFila()], { pordefecto: new Error('la base no responde') });
+
+      const resumen = await scheduler.drain(T0);
+
+      expect(resumen.sent).toBe(0);
+    });
+
     it('el evento que acaba de fallar no se reintenta en la pasada siguiente', async () => {
       const fila = unaFila();
       const { scheduler, dispatcher } = montar([fila], {

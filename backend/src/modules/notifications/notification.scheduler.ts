@@ -4,7 +4,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { TicketEvent } from '../tickets/entities/ticket-event.entity';
 import { TicketEventsRepository } from '../tickets/ticket-events.repository';
 
-import { NotificationDispatcher } from './notification-dispatcher.service';
+import { NotificationDispatcher, NotificationDispatchError } from './notification-dispatcher.service';
 
 /**
  * Cuántas filas se piden por pasada.
@@ -100,7 +100,10 @@ export interface DrainSummary {
   /**
    * Correos que salieron, no eventos: un evento puede mandar dos. Se cuentan
    * aunque después falle el sellado — salieron igual, y ese es el dato que
-   * hace falta para entender un duplicado.
+   * hace falta para entender un duplicado. Y por lo mismo se cuentan también
+   * los del **envío parcial**, leídos de `NotificationDispatchError.sentEntries`:
+   * es justo el caso en que el dato importa, porque el reintento del evento
+   * entero los va a repetir.
    */
   sent: number;
   /** Eventos cuyo despacho falló en esta pasada. Incluye el que agota el tope. */
@@ -350,6 +353,17 @@ export class NotificationScheduler {
         if (await this.seal(event, now, attempts, result.skipped)) summary.processed += 1;
       } catch (error) {
         summary.failed += 1;
+        // Un despacho que falla puede haber entregado parte del plan: el alta
+        // desde el portal escribe al autor y al buzón, y el primero puede
+        // salir antes de que reviente el segundo. `sent` cuenta correos, no
+        // eventos con éxito, así que esos cuentan igual — y el despachador se
+        // molesta en enumerarlos en `sentEntries` justo para esto. Sin leerlo,
+        // el resumen diría que no salió nada el mismo minuto en que a un
+        // cliente le llegó el suyo, que es el dato que hace falta el día que
+        // pregunte por qué lo recibió dos veces.
+        if (error instanceof NotificationDispatchError) {
+          summary.sent += error.sentEntries.length;
+        }
         const outcome = await this.recordFailure(event, now, attempts, error);
         if (outcome.written) summary.processed += 1;
         if (outcome.abandoned) summary.abandoned += 1;
