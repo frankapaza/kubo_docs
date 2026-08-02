@@ -2,9 +2,22 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import { QueryFailedError } from 'typeorm';
 
 import { ClientUsersService } from './client-users.service';
 import { UpdateClientUserDto } from './dto/client-user.dto';
+
+/**
+ * Un `QueryFailedError` tal como lo produce mysql2: `TypeORM` copia las
+ * propiedades del error del driver (`code`, `errno`, `sqlMessage`...) sobre
+ * la propia excepción, así que basta con dárselas al `driverError` de
+ * mentira para que el objeto resultante sea indistinguible del real a
+ * efectos de `isDuplicateEntryError`.
+ */
+const makeQueryFailedError = (code: string, message: string): QueryFailedError => {
+  const driverError = Object.assign(new Error(message), { code, errno: 1062 });
+  return new QueryFailedError('INSERT INTO client_users ...', [], driverError);
+};
 
 /** El cliente 1 sembrado en desarrollo, con su usuario de control ya de alta. */
 const CLIENT = { id: 1, razonSocial: 'Cliente Prueba SAC' };
@@ -112,6 +125,31 @@ describe('ClientUsersService.create', () => {
       service.create(9, { ...dtoBase, email: 'PORTAL.TEST@ClientePrueba.PE' } as any),
     ).rejects.toThrow(ConflictException);
     expect(repo.create).not.toHaveBeenCalled();
+  });
+
+  it('la carrera del correo duplicado tambien es CONFLICT, con el mismo cuerpo que la comprobacion previa', async () => {
+    const { service, repo } = makeService();
+    // La comprobacion previa (findByEmail) no ve nada: simula que otra alta
+    // concurrente con el mismo correo gano la carrera y el INSERT choca
+    // contra el indice unico de la base.
+    repo.create.mockRejectedValueOnce(makeQueryFailedError('ER_DUP_ENTRY', "Duplicate entry 'x' for key 'uq_client_users_email'"));
+
+    const error = await service.create(9, dtoBase as any).catch((e) => e);
+    expect(error).toBeInstanceOf(ConflictException);
+    expect(error.getResponse()).toEqual({
+      code: 'CONFLICT',
+      message: `Ya existe un usuario de cliente con el correo ${dtoBase.email}`,
+    });
+  });
+
+  it('un QueryFailedError que no es de clave duplicada sigue subiendo tal cual, no se convierte en 409', async () => {
+    const { service, repo } = makeService();
+    const otroError = makeQueryFailedError('ER_NO_REFERENCED_ROW_2', 'Cannot add or update a child row');
+    repo.create.mockRejectedValueOnce(otroError);
+
+    const error = await service.create(9, dtoBase as any).catch((e) => e);
+    expect(error).toBe(otroError);
+    expect(error).not.toBeInstanceOf(ConflictException);
   });
 
   it('normaliza el correo a minusculas al guardar', async () => {
