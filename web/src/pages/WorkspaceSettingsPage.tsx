@@ -41,6 +41,7 @@ export default function WorkspaceSettingsPage() {
       smtpUser: settings.smtpUser ?? '',
       smtpFrom: settings.smtpFrom ?? '',
       // smtpPass nunca se pre-llena; el usuario lo deja vacío si no quiere cambiarlo
+      teamInboxEmail: settings.teamInboxEmail ?? '',
       audioRetentionPolicy: settings.audioRetentionPolicy ?? 'DELETE_AFTER_DAYS',
       audioRetentionDays: settings.audioRetentionDays ?? 7,
     });
@@ -347,6 +348,22 @@ export default function WorkspaceSettingsPage() {
                 value={form.smtpFrom ?? ''}
                 onChange={(e) => setForm({ ...form, smtpFrom: e.target.value })}
               />
+            </div>
+
+            <div className="mt-3">
+              <label className="label">Buzón del equipo (avisos internos de tickets)</label>
+              <input
+                type="email"
+                className="input"
+                placeholder="soporte@kuboti.com"
+                value={form.teamInboxEmail ?? ''}
+                onChange={(e) => setForm({ ...form, teamInboxEmail: e.target.value })}
+              />
+              <p className="text-xs text-slate-400 mt-1">
+                Aquí llegan los avisos que no son para un cliente: un ticket nuevo abierto desde el
+                portal y un SLA en riesgo sin responsable asignado. <strong>Si lo dejas vacío</strong>,
+                esos avisos caen a la dirección del remitente configurada arriba ("From").
+              </p>
             </div>
 
             <details className="mt-4 text-xs text-slate-500">

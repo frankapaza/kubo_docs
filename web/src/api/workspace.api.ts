@@ -28,6 +28,11 @@ export interface WorkspaceSettings {
   // `smtpPassEncrypted` se devuelve pero nunca se usa en el frontend.
   smtpPassEncrypted?: string | null;
 
+  // Buzón del equipo para los avisos internos de tickets (ticket nuevo desde
+  // el portal, SLA en riesgo). `null` = sin configurar: esos avisos caen al
+  // remitente SMTP (`smtpFrom`).
+  teamInboxEmail: string | null;
+
   audioRetentionPolicy: AudioRetentionPolicy;
   audioRetentionDays: number;
 
@@ -54,6 +59,10 @@ export interface UpdateWorkspaceBody {
   // Se envía solo si cambia; el backend lo encripta.
   smtpPass?: string;
   smtpFrom?: string;
+
+  // Cadena vacía = limpiarlo (el backend lo admite: ver `IsString`, no
+  // `IsEmail`, en `UpdateWorkspaceSettingsDto.teamInboxEmail`).
+  teamInboxEmail?: string;
 
   audioRetentionPolicy?: AudioRetentionPolicy;
   audioRetentionDays?: number;
