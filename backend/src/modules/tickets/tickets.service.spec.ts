@@ -108,6 +108,14 @@ describe('create con actor', () => {
     expect(repo.savedEvents).toHaveLength(0);
   });
 
+  it('el evento CREATED de un ticket del equipo lleva el actor en actor_user_id', async () => {
+    const { service, repo } = makeService();
+    await service.create({ kind: 'STAFF', userId: 5 }, { rawText: 'algo' } as any);
+    const ev = repo.savedEvents[0];
+    expect(ev.actorUserId).toBe(5);
+    expect(ev.actorClientUserId).toBeNull();
+  });
+
   it('el evento CREATED lleva el actor que corresponda', async () => {
     const { service, repo } = makeService();
     await service.create(

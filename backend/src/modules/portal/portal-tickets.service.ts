@@ -11,13 +11,14 @@ import { TicketEventsService } from '../tickets/ticket-events.service';
 import { TicketsService } from '../tickets/tickets.service';
 import { ClientSystemsRepository } from '../tickets/client-systems.repository';
 import { Ticket } from '../tickets/entities/ticket.entity';
-import { TicketEvent, TicketEventType } from '../tickets/entities/ticket-event.entity';
+import { TicketEvent } from '../tickets/entities/ticket-event.entity';
 
 import { CreatePortalTicketDto } from './dto/create-portal-ticket.dto';
 import {
   PortalClientSystemView,
   PortalTicketEventView,
   PortalTicketView,
+  PortalVisibleEventType,
 } from './dto/portal-ticket.dto';
 
 /**
@@ -127,16 +128,35 @@ function toNumberOrNull(value: unknown): number | null {
  *    "documento de cierre generado" (ver ticket-ai.service.ts), con el dato
  *    en `payload`, que el portal tampoco publica.
  */
-const CLIENT_VISIBLE_EVENT_TYPES: ReadonlySet<TicketEventType> = new Set<TicketEventType>([
-  'CREATED',
-  'TRIAGED',
-  'STATUS_CHANGED',
-  'TAKEN',
-  'ESCALATED',
-  'RESOLVED',
-  'REOPENED',
-  'CLOSED',
-]);
+const CLIENT_VISIBLE_EVENT_TYPES: ReadonlySet<PortalVisibleEventType> =
+  new Set<PortalVisibleEventType>([
+    'CREATED',
+    'TRIAGED',
+    'STATUS_CHANGED',
+    'TAKEN',
+    'ESCALATED',
+    'RESOLVED',
+    'REOPENED',
+    'CLOSED',
+  ]);
+
+/**
+ * Un evento del timeline que el cliente puede ver.
+ *
+ * Es un type guard y no un simple booleano a propósito: lo que devuelve es lo
+ * que le permite al compilador saber que el `type` del evento cabe en
+ * `PortalTicketEventView`. Así, meter en el conjunto un tipo que no esté en la
+ * unión —o publicar un evento sin pasar por este filtro— deja de compilar.
+ *
+ * El cast de dentro es solo el que `ReadonlySet<T>.has` exige por firma (su
+ * parámetro es `T`, no `unknown`); lo que se comprueba de verdad en tiempo de
+ * ejecución sigue siendo la pertenencia al conjunto.
+ */
+function isClientVisible(e: TicketEvent): e is ClientVisibleEvent {
+  return CLIENT_VISIBLE_EVENT_TYPES.has(e.type as PortalVisibleEventType);
+}
+
+type ClientVisibleEvent = TicketEvent & { type: PortalVisibleEventType };
 
 /**
  * Cara del ticket que ve el cliente. Todo lo que sale del portal pasa por
@@ -172,9 +192,7 @@ export class PortalTicketsService {
     const timeline = await this.events.listByTicket(Number(ticket.id));
     return {
       ...this.toPortalView(ticket),
-      timeline: timeline
-        .filter((e) => CLIENT_VISIBLE_EVENT_TYPES.has(e.type))
-        .map((e) => this.toEventView(e)),
+      timeline: timeline.filter(isClientVisible).map((e) => this.toEventView(e)),
     };
   }
 
@@ -284,8 +302,13 @@ export class PortalTicketsService {
     return loEscribioElCliente ? t.rawText ?? null : null;
   }
 
-  /** El timeline se muestra sin `reason` ni actor: son datos internos. */
-  private toEventView(e: TicketEvent): PortalTicketEventView {
+  /**
+   * El timeline se muestra sin `reason` ni actor: son datos internos.
+   *
+   * Solo acepta un `ClientVisibleEvent`, así que un evento que no haya pasado
+   * por `isClientVisible` no puede llegar hasta aquí ni por descuido.
+   */
+  private toEventView(e: ClientVisibleEvent): PortalTicketEventView {
     return {
       type: e.type,
       fromStatus: e.fromStatus ?? null,

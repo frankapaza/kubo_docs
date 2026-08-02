@@ -1,3 +1,5 @@
+import { TicketEventType } from '../../tickets/entities/ticket-event.entity';
+
 /**
  * Lo que el portal de clientes puede ver de un ticket. Es una lista blanca
  * escrita a mano, no un recorte de la entidad: al añadir una columna nueva a
@@ -8,8 +10,35 @@
  * urgencia, política y vencimientos de SLA, `slaAtRisk`, `assigneeUserId`,
  * nivel de escalado, texto crudo, resolución, causa raíz y todo lo de Jira.
  */
+/**
+ * Los tipos de evento que el portal publica, como unión cerrada.
+ *
+ * No es cosmética: la lista blanca `CLIENT_VISIBLE_EVENT_TYPES` del servicio
+ * es lo que mantiene `SLA_AT_RISK` y `PRIORITY_OVERRIDDEN` fuera del timeline
+ * del cliente, y con `type: string` el compilador no vigilaba nada. Tipado
+ * así, publicar un evento que no esté en la lista no compila: el compilador
+ * pasa a ser el segundo guardián de una lista blanca que cumple una función
+ * de seguridad.
+ *
+ * Con `Extract` sobre el enum real, y no con literales sueltos: la unión
+ * queda atada a `TicketEventType`, así que no puede prometer un tipo de
+ * evento que ya no exista. El frontend la modela igual en
+ * `web/src/api/types.ts` (`PortalTicketEventType`).
+ */
+export type PortalVisibleEventType = Extract<
+  TicketEventType,
+  | 'CREATED'
+  | 'TRIAGED'
+  | 'STATUS_CHANGED'
+  | 'TAKEN'
+  | 'ESCALATED'
+  | 'RESOLVED'
+  | 'REOPENED'
+  | 'CLOSED'
+>;
+
 export interface PortalTicketEventView {
-  type: string;
+  type: PortalVisibleEventType;
   fromStatus: string | null;
   toStatus: string | null;
   createdAt: string;
