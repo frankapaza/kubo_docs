@@ -56,7 +56,14 @@ export class NotificationTemplatesService {
     if (dto.isActive !== undefined) patch.isActive = dto.isActive ? 1 : 0;
 
     const updated = await this.repo.update(id, patch);
-    return updated!;
+    // Sin el `!` a propósito: el repositorio relee la fila después del
+    // `UPDATE`, y entre las dos consultas alguien puede haberla borrado. Es
+    // improbable —estas siete filas las siembra una migración y nadie las
+    // borra desde el panel—, pero con `!` esa carrera se convertía en un
+    // `TypeError` en el controlador al proyectar la vista: un 500 sin mensaje,
+    // en vez del mismo 404 en español que ya devuelve si el id no existe.
+    if (!updated) throw this.notFound();
+    return updated;
   }
 
   /**
@@ -125,12 +132,15 @@ export class NotificationTemplatesService {
 
   private async findByIdOrFail(id: number): Promise<NotificationTemplate> {
     const template = await this.repo.findById(id);
-    if (!template) {
-      throw new NotFoundException({
-        code: 'NOT_FOUND',
-        message: 'Plantilla de notificación no encontrada',
-      });
-    }
+    if (!template) throw this.notFound();
     return template;
+  }
+
+  /** El mismo 404, se descubra al buscarla o al releerla tras el `UPDATE`. */
+  private notFound(): NotFoundException {
+    return new NotFoundException({
+      code: 'NOT_FOUND',
+      message: 'Plantilla de notificación no encontrada',
+    });
   }
 }

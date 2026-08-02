@@ -161,6 +161,24 @@ describe('NotificationTemplatesService.update', () => {
     );
   });
 
+  /**
+   * La carrera: la fila existe cuando se valida, alguien la borra, y la
+   * relectura posterior al `UPDATE` devuelve `null`. Con el `!` de antes eso
+   * era un `TypeError` leyendo propiedades de `undefined` en el controlador —
+   * un 500 sin mensaje— en vez del 404 en español que el panel ya sabe
+   * enseñar. Es la única mutación de la rama: merece fallar bien.
+   */
+  it('devuelve 404, no un error opaco, si la fila desaparece entre el UPDATE y la relectura', async () => {
+    const { service, repo } = makeService();
+    repo.update.mockResolvedValueOnce(null);
+
+    const error = await service.update(1, 9, { subject: 'Asunto nuevo' } as any).catch((e) => e);
+
+    expect(error).toBeInstanceOf(NotFoundException);
+    expect(error.getResponse()).toEqual(expect.objectContaining({ code: 'NOT_FOUND' }));
+    expect(error.getResponse().message).toMatch(/[áéíóúñ¿]|no encontrada/i);
+  });
+
   it('graba quien la editó en updatedBy, tomado de la sesión y no del cuerpo', async () => {
     const { service, almacen } = makeService();
     await service.update(1, 42, { subject: 'Asunto nuevo sin variables raras' } as any);
