@@ -101,7 +101,7 @@ export class TicketsController {
 
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateTicketDto) {
-    return this.service.create(user.id, dto);
+    return this.service.create({ kind: 'STAFF', userId: user.id }, dto);
   }
 
   @Patch(':id')

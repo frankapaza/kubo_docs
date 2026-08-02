@@ -52,6 +52,9 @@ export class TicketEvent {
   @Column({ name: 'actor_user_id', type: 'bigint', unsigned: true, nullable: true })
   actorUserId!: number | null;
 
+  @Column({ name: 'actor_client_user_id', type: 'bigint', unsigned: true, nullable: true })
+  actorClientUserId!: number | null;
+
   @Column({ type: 'text', nullable: true })
   reason!: string | null;
 

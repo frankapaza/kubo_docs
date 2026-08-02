@@ -19,6 +19,16 @@ export interface DecoratedTicket extends Ticket {
   slaOverdue: boolean;
 }
 
+/**
+ * Quién origina la escritura: un miembro del equipo o un usuario del portal
+ * de clientes. Las dos columnas del actor en Ticket/TicketEvent nunca se
+ * ponen a la vez -- decidido por `kind` -- para que la fila nunca quede en
+ * un estado ambiguo sobre quién la creó.
+ */
+export type TicketActor =
+  | { kind: 'STAFF'; userId: number }
+  | { kind: 'CLIENT'; clientUserId: number };
+
 @Injectable()
 export class TicketsService {
   constructor(
@@ -63,7 +73,7 @@ export class TicketsService {
     }) as DecoratedTicket;
   }
 
-  async create(userId: number, dto: CreateTicketDto): Promise<Ticket> {
+  async create(actor: TicketActor, dto: CreateTicketDto): Promise<Ticket> {
     if (dto.clientId) await this.clients.findByIdOrFail(dto.clientId);
     if (dto.projectId) await this.projects.findById(dto.projectId);
 
@@ -106,7 +116,8 @@ export class TicketsService {
           slaPolicyId: slaInit.slaPolicyId,
           slaResponseDueAt: slaInit.slaResponseDueAt,
           slaResolutionDueAt: slaInit.slaResolutionDueAt,
-          createdBy: userId,
+          createdBy: actor.kind === 'STAFF' ? actor.userId : null,
+          createdByClientUserId: actor.kind === 'CLIENT' ? actor.clientUserId : null,
         }),
       );
 
@@ -117,7 +128,8 @@ export class TicketsService {
         eventRepo.create({
           ticketId: ticket.id,
           type: 'CREATED',
-          actorUserId: userId,
+          actorUserId: actor.kind === 'STAFF' ? actor.userId : null,
+          actorClientUserId: actor.kind === 'CLIENT' ? actor.clientUserId : null,
           fromStatus: null,
           toStatus: 'NUEVO',
           reason: null,

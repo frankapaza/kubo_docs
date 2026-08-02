@@ -216,8 +216,11 @@ export class Ticket {
   @Column({ name: 'closure_document_id', type: 'bigint', unsigned: true, nullable: true })
   closureDocumentId!: number | null;
 
-  @Column({ name: 'created_by', type: 'bigint', unsigned: true })
-  createdBy!: number;
+  @Column({ name: 'created_by', type: 'bigint', unsigned: true, nullable: true })
+  createdBy!: number | null;
+
+  @Column({ name: 'created_by_client_user_id', type: 'bigint', unsigned: true, nullable: true })
+  createdByClientUserId!: number | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
