@@ -11,7 +11,10 @@ import { PortalAuthService } from './portal-auth.service';
 import { PortalAuthController } from './portal-auth.controller';
 import { PortalTicketsService } from './portal-tickets.service';
 import { PortalTicketsController } from './portal-tickets.controller';
+import { ClientUsersService } from './client-users.service';
+import { ClientUsersController } from './client-users.controller';
 import { TicketsModule } from '../tickets/tickets.module';
+import { ClientsModule } from '../clients/clients.module';
 
 @Module({
   imports: [
@@ -23,12 +26,22 @@ import { TicketsModule } from '../tickets/tickets.module';
     // TicketsService y ClientSystemsRepository, todos ya exportados por él.
     // La dependencia es en un solo sentido: TicketsModule no conoce el portal.
     TicketsModule,
+    // Solo para validar que el cliente existe al dar de alta un usuario suyo
+    // (ClientUsersService.create). La dependencia es igualmente unidireccional:
+    // ClientsModule no conoce el portal.
+    ClientsModule,
   ],
-  controllers: [PortalAuthController, PortalTicketsController],
+  controllers: [PortalAuthController, PortalTicketsController, ClientUsersController],
   // `JwtModule`/`PassportModule` ya no se exportan: PortalAuthService y
   // ClientJwtStrategy los consumen dentro de este mismo módulo y ningún otro
   // módulo del proyecto importa PortalModule para reutilizarlos.
-  providers: [ClientUsersRepository, ClientJwtStrategy, PortalAuthService, PortalTicketsService],
+  providers: [
+    ClientUsersRepository,
+    ClientJwtStrategy,
+    PortalAuthService,
+    PortalTicketsService,
+    ClientUsersService,
+  ],
   exports: [ClientUsersRepository],
 })
 export class PortalModule {}
