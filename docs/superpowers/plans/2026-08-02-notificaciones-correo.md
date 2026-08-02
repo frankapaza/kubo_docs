@@ -185,8 +185,10 @@ Sin DI, sin base de datos, sin `Date.now()`: todo entra por parámetro. Es el m�
 
 **Los dos juegos de variables**, según la spec §4:
 
-- **Cliente:** `codigo`, `asunto`, `estado`, `fecha`, `cliente`, `enlacePortal`.
-- **Equipo:** las de cliente más `prioridad`, `venceSla`, `responsable`, `motivo`, `enlacePanel`.
+Los nombres definitivos los fijó la Task 1 al sembrar las plantillas, y son estos. No los cambies: si divergen, las siete plantillas sembradas quedan rotas.
+
+- **Cliente:** `codigo`, `asunto`, `estado`, `fecha`, `razon_social`, `enlace_portal`.
+- **Equipo:** las de cliente más `prioridad`, `sla`, `responsable`, `motivo`, `enlace_panel`.
 
 - [ ] **Step 1: Escribir los tests que fallan**
 
