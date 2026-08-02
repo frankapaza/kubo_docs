@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import ClientsListPage from './pages/ClientsListPage';
@@ -24,14 +24,49 @@ import TicketDetailPage from './pages/TicketDetailPage';
 import WorkItemsBoardPage from './pages/WorkItemsBoardPage';
 import MonthlyReportPage from './pages/MonthlyReportPage';
 import SignaturePage from './pages/SignaturePage';
+import PortalLoginPage from './pages/portal/PortalLoginPage';
+import PortalTicketsListPage from './pages/portal/PortalTicketsListPage';
 import { ProtectedRoute } from './auth/ProtectedRoute';
+import { PortalProtectedRoute } from './auth/PortalProtectedRoute';
+import { PortalAuthProvider } from './auth/PortalAuthContext';
 import AppLayout from './layout/AppLayout';
+import PortalLayout from './layout/PortalLayout';
+
+/**
+ * Envuelve únicamente el subárbol `/portal/*` con el contexto de sesión del
+ * portal: no se agrega al `AuthProvider` global en `main.tsx` para no
+ * mezclarlo con las rutas internas, que no lo necesitan ni deben poder leerlo.
+ */
+function PortalRoot() {
+  return (
+    <PortalAuthProvider>
+      <Outlet />
+    </PortalAuthProvider>
+  );
+}
 
 export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+
+      {/*
+        Portal de clientes: fuera de `AppLayout` y de `ProtectedRoute` (guard
+        de sesión interna) a propósito. Un usuario de cliente no tiene sesión
+        interna, así que si el guard interno envolviera estas rutas lo
+        mandaría siempre al login del panel.
+      */}
+      <Route element={<PortalRoot />}>
+        <Route path="/portal/login" element={<PortalLoginPage />} />
+        <Route element={<PortalProtectedRoute />}>
+          <Route element={<PortalLayout />}>
+            <Route path="/portal" element={<Navigate to="/portal/tickets" replace />} />
+            <Route path="/portal/tickets" element={<PortalTicketsListPage />} />
+          </Route>
+        </Route>
+      </Route>
+
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
           <Route path="/" element={<Navigate to="/clients" replace />} />

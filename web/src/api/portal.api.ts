@@ -14,7 +14,10 @@ import type {
  * navegador sin pisarse.
  */
 export const PORTAL_TOKEN_STORAGE_KEY = 'kubo_portal_token';
-const PORTAL_REFRESH_TOKEN_KEY = 'kubo_portal_refresh_token';
+// Exportada para que `PortalAuthContext` guarde el refreshToken tras el login
+// bajo la misma clave que usa el interceptor de refresh de aquí abajo, sin
+// duplicar el literal ni crear un segundo almacenamiento.
+export const PORTAL_REFRESH_TOKEN_KEY = 'kubo_portal_refresh_token';
 
 /** Límites de `CreatePortalTicketDto` en el backend: deben coincidir siempre con él. */
 export const PORTAL_TICKET_SUBJECT_MAX_LENGTH = 240;
