@@ -1,4 +1,8 @@
-import { NotificationDispatcher } from './notification-dispatcher.service';
+import {
+  NotificationDispatchError,
+  NotificationDispatcher,
+} from './notification-dispatcher.service';
+import { CLIENT_VARIABLES, TEAM_VARIABLES } from './domain/template-renderer';
 
 /**
  * Los identificadores van como **cadena** a propósito en todos los dobles:
@@ -115,6 +119,8 @@ interface Opciones {
   smtpFrom?: string | null;
   cliente?: any | null;
   enviaOk?: boolean;
+  /** Dirección concreta cuyo envío rebota, para montar un envío parcial. */
+  fallaPara?: string | null;
   /** `null` = la variable de entorno no está puesta. */
   frontendUrl?: string | null;
 }
@@ -140,6 +146,7 @@ function montar(opciones: Opciones = {}) {
     smtpFrom = REMITENTE,
     cliente = { id: CLIENT_ID, razonSocial: 'Comercial Andina SAC' },
     enviaOk = true,
+    fallaPara = null,
     frontendUrl = 'https://docs.kuboti.com',
   } = opciones;
 
@@ -179,10 +186,10 @@ function montar(opciones: Opciones = {}) {
     ),
   };
   const email = {
-    send: jest.fn(() =>
-      enviaOk
+    send: jest.fn((input: any) =>
+      enviaOk && (fallaPara === null || input.to !== fallaPara)
         ? Promise.resolve({ messageId: '<1@kuboti.com>', accepted: [], rejected: [] })
-        : Promise.reject(new Error('SMTP no responde')),
+        : Promise.reject(new Error(`SMTP no responde (${String(input.to)})`)),
     ),
   };
   const config = {
@@ -331,11 +338,64 @@ describe('a quién se le escribe', () => {
     expect(email.send).not.toHaveBeenCalled();
   });
 
+  it('un autor que no pertenece a la empresa del ticket no recibe nada', async () => {
+    // Hoy no hay camino que lleve aquí —el id sale del propio ticket—, pero es
+    // la última comprobación antes de poner una dirección en el `To:`, y lo que
+    // hay al otro lado es el ticket de una empresa llegando a otra.
+    const { dispatcher, email } = montar({
+      clientUser: {
+        id: CLIENT_USER_ID,
+        clientId: '77', // otra empresa
+        email: 'otro@otraempresa.pe',
+        fullName: 'Alguien de otra empresa',
+        isActive: 1,
+      },
+    });
+
+    const resultado = await dispatcher.dispatchForEvent(unEvento());
+
+    expect(email.send).not.toHaveBeenCalled();
+    expect(resultado.sent).toBe(0);
+  });
+
+  it('tampoco si el ticket no tiene empresa: dos nulos no son una coincidencia', async () => {
+    const { dispatcher, email } = montar({
+      ticket: unTicket({ clientId: null }),
+      clientUser: {
+        id: CLIENT_USER_ID,
+        clientId: null,
+        email: AUTOR_EMAIL,
+        fullName: 'Ana Quispe',
+        isActive: 1,
+      },
+    });
+
+    await dispatcher.dispatchForEvent(unEvento());
+    expect(email.send).not.toHaveBeenCalled();
+  });
+
   it('SLA en riesgo con responsable asignado: va al responsable', async () => {
     const { dispatcher, email } = montar();
     await dispatcher.dispatchForEvent(unEvento({ type: 'SLA_AT_RISK', toStatus: null }));
 
     expect(enviados(email).map((c) => c.to)).toEqual([RESPONSABLE_EMAIL]);
+  });
+
+  it('SLA en riesgo con el responsable dado de baja: cae al buzón del equipo', async () => {
+    // Es correo interno, pero es la misma puerta que se le cierra al usuario de
+    // cliente desactivado. Y el buzón es justo quien debe enterarse de un SLA
+    // en riesgo cuyo responsable ya no está.
+    const { dispatcher, email } = montar({
+      assignee: {
+        id: ASSIGNEE_ID,
+        email: RESPONSABLE_EMAIL,
+        fullName: RESPONSABLE_NOMBRE,
+        isActive: 0,
+      },
+    });
+
+    await dispatcher.dispatchForEvent(unEvento({ type: 'SLA_AT_RISK', toStatus: null }));
+    expect(enviados(email).map((c) => c.to)).toEqual([BUZON_EQUIPO]);
   });
 
   it('SLA en riesgo sin responsable: va al buzón del equipo', async () => {
@@ -431,6 +491,49 @@ describe('un fallo de envío', () => {
 
     expect(resultado).toBeNull();
   });
+
+  it('el resto del plan se intenta igualmente: un rebote del cliente no deja al equipo sin enterarse', async () => {
+    // Alta desde el portal: dos avisos. El del cliente va primero y rebota.
+    const { dispatcher, email } = montar({ fallaPara: AUTOR_EMAIL });
+
+    await dispatcher
+      .dispatchForEvent(unEvento({ type: 'CREATED', fromStatus: null, toStatus: 'NUEVO' }))
+      .catch(() => null);
+
+    expect(email.send).toHaveBeenCalledTimes(2);
+    expect(enviados(email).map((c) => c.to)).toContain(BUZON_EQUIPO);
+  });
+
+  it('un envío parcial lanza, y el error dice cuántos salieron y cuáles', async () => {
+    const { dispatcher } = montar({ fallaPara: BUZON_EQUIPO });
+
+    const error = await dispatcher
+      .dispatchForEvent(unEvento({ type: 'CREATED', fromStatus: null, toStatus: 'NUEVO' }))
+      .catch((e) => e);
+
+    expect(error).toBeInstanceOf(NotificationDispatchError);
+    expect(error.code).toBe('NOTIFICATION_SEND_ERROR');
+    expect(error.sentEntries).toEqual(['TICKET_CREATED/CLIENT']);
+    expect(error.failedEntries).toEqual(['TICKET_CREATED_PORTAL/TEAM']);
+    expect(error.causes).toHaveLength(1);
+    // Quien lea `notify_last_error` tiene que poder saber que el reintento
+    // duplicará el correo que sí llegó.
+    expect(error.message).toContain('TICKET_CREATED/CLIENT');
+    expect(error.message).toContain('TICKET_CREATED_PORTAL/TEAM');
+    expect(error.message).toMatch(/repetir/i);
+  });
+
+  it('si fallan todos, el error no habla de repeticiones', async () => {
+    const { dispatcher } = montar({ enviaOk: false });
+
+    const error = await dispatcher
+      .dispatchForEvent(unEvento({ type: 'CREATED', fromStatus: null, toStatus: 'NUEVO' }))
+      .catch((e) => e);
+
+    expect(error.sentEntries).toEqual([]);
+    expect(error.failedEntries).toHaveLength(2);
+    expect(error.message).not.toMatch(/repetir/i);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -509,5 +612,78 @@ describe('cómo se compone el correo', () => {
     await dispatcher.dispatchForEvent(unEvento());
     const [correo] = enviados(email);
     expect(correo.html).toContain(`http://localhost:5173/portal/tickets/${TICKET_ID}`);
+  });
+
+  it.each([['', 'vacía'], ['   ', 'en blanco']])(
+    'una FRONTEND_URL %s (%s) también cae al valor por defecto, no deja el enlace sin host',
+    async (valor) => {
+      // `docker-compose.yml` inyecta `FRONTEND_URL: ${FRONTEND_URL}` y Compose
+      // sustituye por cadena vacía cuando falta en el `.env`: no omite la clave.
+      // Con `??` el enlace saldría como `/portal/tickets/13`, sin host.
+      const { dispatcher, email } = montar({ frontendUrl: valor });
+
+      await dispatcher.dispatchForEvent(unEvento());
+      const [correo] = enviados(email);
+      expect(correo.html).toContain(`http://localhost:5173/portal/tickets/${TICKET_ID}`);
+      expect(correo.html).not.toContain(`"/portal/tickets/${TICKET_ID}"`);
+    },
+  );
+
+  it('una razón social vacía en base sale como "(no disponible)", no como un hueco', async () => {
+    const { dispatcher, email } = montar({ cliente: { id: CLIENT_ID, razonSocial: '' } });
+
+    await dispatcher.dispatchForEvent(unEvento());
+    const [correo] = enviados(email);
+    expect(correo.html).toContain('(no disponible)');
+    expect(correo.html).not.toContain('<strong>Empresa:</strong> </li>');
+  });
+
+  it('una URL con asteriscos no acaba con un <strong> dentro del href', async () => {
+    const plantillaConUrlRara = {
+      ...PLANTILLA_CLIENTE,
+      bodyMd: 'Mira **aquí**: https://docs.kuboti.com/a**b**c/fin',
+    };
+    const { dispatcher, email } = montar({
+      plantillas: [plantillaConUrlRara, PLANTILLA_EQUIPO_ALTA],
+    });
+
+    await dispatcher.dispatchForEvent(unEvento());
+    const [correo] = enviados(email);
+    const href = /href="([^"]*)"/.exec(correo.html)?.[1] ?? '';
+    expect(href).not.toContain('<');
+    // La negrita de fuera del enlace sí se sigue convirtiendo.
+    expect(correo.html).toContain('<strong>aquí</strong>');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// El juego de claves por público, fijado por un test y no solo por el tipo
+// ---------------------------------------------------------------------------
+
+describe('los juegos de valores', () => {
+  /** Contexto mínimo: estas dos funciones son puras respecto a lo que reciben. */
+  const contexto = {
+    ticket: unTicket(),
+    event: unEvento(),
+    razonSocial: 'Comercial Andina SAC',
+    responsable: RESPONSABLE_NOMBRE,
+    frontendUrl: 'https://docs.kuboti.com',
+  };
+
+  it('el del cliente tiene exactamente las claves de su catálogo, ni una más', () => {
+    const { dispatcher } = montar();
+    const values = (dispatcher as any).clientValues(contexto);
+
+    // Aflojar el tipo de retorno a Record<string, …> quitaría la única barrera
+    // que hay hoy contra que una clave de equipo se cuele aquí sin que nada se
+    // ponga en rojo. Esta aserción es esa segunda barrera.
+    expect(Object.keys(values).sort()).toEqual([...CLIENT_VARIABLES].sort());
+  });
+
+  it('el del equipo tiene exactamente las claves del suyo', () => {
+    const { dispatcher } = montar();
+    const values = (dispatcher as any).teamValues(contexto);
+
+    expect(Object.keys(values).sort()).toEqual([...TEAM_VARIABLES].sort());
   });
 });

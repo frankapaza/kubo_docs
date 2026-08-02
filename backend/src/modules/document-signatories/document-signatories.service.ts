@@ -96,7 +96,14 @@ export class DocumentSignatoriesService {
 
     await this.repo.update(id, { signatureToken: token, tokenExpiresAt: expiresAt });
 
-    const frontendUrl = this.config.get<string>('FRONTEND_URL') ?? 'http://localhost:5173';
+    // `|| ''` y no `??`: `docker-compose.yml` inyecta `FRONTEND_URL: ${FRONTEND_URL}`
+    // y Compose **sustituye por cadena vacía** cuando la variable no está en el
+    // `.env` — no omite la clave. Con `??`, una cadena vacía pasaría de largo y el
+    // enlace saldría como `/sign/<token>`, sin host: irreparable para quien lo
+    // recibe. Con `||`, cae al valor por defecto, que al menos se puede corregir a
+    // mano.
+    const frontendUrl =
+      (this.config.get<string>('FRONTEND_URL') || '').trim() || 'http://localhost:5173';
     const signUrl = `${frontendUrl}/sign/${token}`;
     const emisor = await this.workspace.get().catch(() => null);
     const brand = emisor?.razonSocial ?? 'Kubo DevDocs';
