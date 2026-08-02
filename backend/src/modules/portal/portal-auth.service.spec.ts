@@ -1,4 +1,4 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { NotFoundException, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PortalAuthService } from './portal-auth.service';
 
@@ -22,7 +22,7 @@ const makeService = (user: unknown, client: unknown = { id: 7, razonSocial: 'Cli
   const clients = {
     findByIdOrFail: client
       ? jest.fn().mockResolvedValue(client)
-      : jest.fn().mockRejectedValue(new Error('Cliente no encontrado')),
+      : jest.fn().mockRejectedValue(new NotFoundException('Cliente no encontrado')),
   };
   return {
     service: new PortalAuthService(repo as any, jwt as any, cfg as any, clients as any),
@@ -121,6 +121,21 @@ describe('login', () => {
     );
     const res = await service.login('a@x.com', 'correcta');
     expect(res.clientUser.clientRazonSocial).toBeNull();
+  });
+
+  it('deja subir un fallo de infraestructura al resolver el cliente, en vez de disfrazarlo de null', async () => {
+    const hash = await bcrypt.hash('correcta', 10);
+    const { service, clients } = makeService({
+      id: 1,
+      clientId: 7,
+      email: 'a@x.com',
+      passwordHash: hash,
+      isActive: 1,
+      isAdmin: 0,
+    });
+    const caida = new Error('ECONNREFUSED');
+    clients.findByIdOrFail = jest.fn().mockRejectedValue(caida);
+    await expect(service.login('a@x.com', 'correcta')).rejects.toThrow(caida);
   });
 });
 

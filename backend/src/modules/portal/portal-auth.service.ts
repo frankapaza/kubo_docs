@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
@@ -130,8 +130,13 @@ export class PortalAuthService {
     try {
       const client = await this.clients.findByIdOrFail(clientId);
       return client.razonSocial;
-    } catch {
-      return null;
+    } catch (err) {
+      // Un cliente que ya no existe degrada a null y la cabecera cae al nombre
+      // del usuario. Cualquier otro fallo —la base caída, por ejemplo— tiene
+      // que seguir subiendo: silenciarlo lo disfrazaría de "cliente sin
+      // resolver" y perderíamos el 500 que de verdad es.
+      if (err instanceof NotFoundException) return null;
+      throw err;
     }
   }
 }
