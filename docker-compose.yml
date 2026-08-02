@@ -47,6 +47,10 @@ services:
       NODE_ENV: production
       PORT: 3000
       API_PREFIX: api/v1
+      # Caddy es el unico proxy por delante. Sin esto, la limitacion de
+      # intentos del portal contaria todas las peticiones contra la IP del
+      # contenedor de Caddy y los clientes se bloquearian entre si.
+      TRUST_PROXY_HOPS: 1
       DB_HOST: mysql
       DB_PORT: 3306
       DB_USER: root

@@ -2,8 +2,10 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
+import { PORTAL_AUTH_THROTTLERS } from '../../config/throttler.config';
 import { ClientUser } from './entities/client-user.entity';
 import { ClientUsersRepository } from './client-users.repository';
 import { ClientJwtStrategy } from './strategies/client-jwt.strategy';
@@ -21,6 +23,12 @@ import { ClientsModule } from '../clients/clients.module';
     ConfigModule,
     PassportModule,
     JwtModule.register({}),
+    // Limitación de intentos de la superficie pública del portal. Se registra
+    // aquí, y no en AppModule, porque el único sitio donde se monta el guard
+    // (`ApiThrottlerGuard`) es `PortalAuthController`: no hay throttler global
+    // y el panel interno sigue sin límite a propósito. `ThrottlerModule` está
+    // marcado @Global, así que sus providers quedan disponibles igualmente.
+    ThrottlerModule.forRoot({ throttlers: PORTAL_AUTH_THROTTLERS }),
     TypeOrmModule.forFeature([ClientUser]),
     // De TicketsModule solo se consumen TicketsRepository, TicketEventsService,
     // TicketsService y ClientSystemsRepository, todos ya exportados por él.
