@@ -1,4 +1,8 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+
+import { ApiThrottlerGuard } from '../../common/guards/api-throttler.guard';
+import { NOTIFICATION_TEST_THROTTLE } from '../../config/throttler.config';
 
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -114,6 +118,8 @@ export class NotificationTemplatesController {
    */
   @Post(':id/test')
   @Roles('ADMIN')
+  @UseGuards(ApiThrottlerGuard)
+  @Throttle(NOTIFICATION_TEST_THROTTLE)
   sendTest(
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() user: AuthUser,

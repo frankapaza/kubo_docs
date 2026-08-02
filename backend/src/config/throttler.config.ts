@@ -46,6 +46,9 @@ import { ThrottlerOptions } from '@nestjs/throttler';
  * (el tablero de work items, el detalle de ticket, los reportes), y romperlas
  * sería peor que el problema que se arregla aquí. El login del personal
  * (`auth.controller.ts`) tiene la misma carencia y queda fuera de esta rama.
+ *
+ * La única excepción a esa regla es el envío de prueba de una plantilla de
+ * correo: ver `NOTIFICATION_TEST_THROTTLE` al final del fichero.
  */
 
 /** Ventana corta: frena la ráfaga. */
@@ -66,4 +69,26 @@ export const PORTAL_AUTH_THROTTLERS: ThrottlerOptions[] = [
 export const PORTAL_REFRESH_THROTTLE = {
   [THROTTLER_BURST]: { ttl: ONE_MINUTE_MS, limit: 10 },
   [THROTTLER_SUSTAINED]: { ttl: FIFTEEN_MINUTES_MS, limit: 60 },
+};
+
+/**
+ * Override para `POST /notification-templates/:id/test`.
+ *
+ * La única excepción al «el panel interno no se limita» de arriba, y por un
+ * motivo que no aplica al resto: es la única ruta del panel con un efecto
+ * externo e irreversible. Cada llamada saca un correo de verdad por el SMTP de
+ * producción. Un administrador con el dedo pegado al botón —o una sesión suya
+ * comprometida— puede quemar la cuota del proveedor y la reputación del
+ * remitente, que es justo el activo que la §9 de la spec señala como riesgo:
+ * si el dominio se quema, los avisos acaban en no deseado y toda la
+ * funcionalidad deja de servir por perfecto que esté el código.
+ *
+ * Los límites son holgados para el uso real —enviarse una prueba es algo que
+ * se hace unas pocas veces mientras se ajusta un texto— y estrechos frente al
+ * abuso. Se limita SOLO esta ruta: listar, editar y previsualizar no envían
+ * nada, y limitarlas sería molestar sin motivo.
+ */
+export const NOTIFICATION_TEST_THROTTLE = {
+  [THROTTLER_BURST]: { ttl: ONE_MINUTE_MS, limit: 3 },
+  [THROTTLER_SUSTAINED]: { ttl: FIFTEEN_MINUTES_MS, limit: 10 },
 };
