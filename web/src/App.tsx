@@ -28,6 +28,7 @@ import SignaturePage from './pages/SignaturePage';
 import PortalLoginPage from './pages/portal/PortalLoginPage';
 import PortalTicketsListPage from './pages/portal/PortalTicketsListPage';
 import PortalTicketDetailPage from './pages/portal/PortalTicketDetailPage';
+import PortalHelpPage from './pages/portal/PortalHelpPage';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { PortalProtectedRoute } from './auth/PortalProtectedRoute';
 import { PortalAuthProvider } from './auth/PortalAuthContext';
@@ -66,6 +67,13 @@ export default function App() {
             <Route path="/portal" element={<Navigate to="/portal/tickets" replace />} />
             <Route path="/portal/tickets" element={<PortalTicketsListPage />} />
             <Route path="/portal/tickets/:ticketId" element={<PortalTicketDetailPage />} />
+            {/*
+              Manual del cliente. Va aquí dentro, y no como ruta suelta, por
+              dos motivos: comparte la cabecera del portal (que es desde donde
+              se enlaza) y tiene que quedar ANTES del catch-all de abajo, que
+              se traga cualquier subruta que no esté enumerada.
+            */}
+            <Route path="/portal/help" element={<PortalHelpPage />} />
             {/*
               Catch-all del propio subárbol del portal: sin él, una subruta no
               enumerada (p.ej. "/portal/loquesea") no casa con nada de aquí

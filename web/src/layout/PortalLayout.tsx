@@ -1,6 +1,6 @@
-import { Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { usePortalAuth } from '../auth/PortalAuthContext';
-import { KuboLogo, LogOutIcon } from '../components/ui/Icon';
+import { BookOpenIcon, KuboLogo, LogOutIcon } from '../components/ui/Icon';
 
 /**
  * Cabecera mínima del portal de clientes: nombre de la empresa (el que haya
@@ -40,14 +40,32 @@ export default function PortalLayout() {
               <p className="text-xs text-slate-500 mt-1 truncate">{headerName}</p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onLogout}
-            className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900 transition flex-shrink-0"
-          >
-            <LogOutIcon size={16} />
-            Salir
-          </button>
+          <div className="flex items-center gap-4 flex-shrink-0">
+            {/*
+              La ayuda se busca en la cabecera, que es lo único que el portal
+              tiene siempre a la vista. `NavLink` y no `Link` para que se
+              distinga cuando ya estás dentro del manual.
+            */}
+            <NavLink
+              to="/portal/help"
+              className={({ isActive }) =>
+                `inline-flex items-center gap-2 text-sm font-medium transition ${
+                  isActive ? 'text-kubo-primary' : 'text-slate-600 hover:text-slate-900'
+                }`
+              }
+            >
+              <BookOpenIcon size={16} />
+              Ayuda
+            </NavLink>
+            <button
+              type="button"
+              onClick={onLogout}
+              className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900 transition"
+            >
+              <LogOutIcon size={16} />
+              Salir
+            </button>
+          </div>
         </div>
       </header>
 
