@@ -603,3 +603,60 @@ export interface WorkItemDetail {
   workItem: WorkItem;
   timeline: WorkItemEvent[];
 }
+
+// Portal de clientes: reflejan exactamente lo que expone `PortalTicketsController`
+// / `PortalAuthController` (proyección `PortalTicketView` en el backend), no la
+// entidad `Ticket` completa. Sin prioridad, SLA, asignado, ni motivo/actor de
+// eventos: el backend nunca los manda, así que el tipo tampoco los promete.
+
+/**
+ * Tipos de evento visibles en el portal. Lista blanca, igual que en el
+ * backend (`CLIENT_VISIBLE_EVENT_TYPES`): quedan fuera ASSIGNED, COMMENT,
+ * SLA_AT_RISK y PRIORITY_OVERRIDDEN.
+ */
+export type PortalTicketEventType =
+  | 'CREATED' | 'TRIAGED' | 'STATUS_CHANGED' | 'TAKEN'
+  | 'ESCALATED' | 'RESOLVED' | 'REOPENED' | 'CLOSED';
+
+export interface PortalTicketEvent {
+  type: PortalTicketEventType;
+  fromStatus: TicketStatus | null;
+  toStatus: TicketStatus | null;
+  createdAt: string;
+}
+
+export interface PortalTicket {
+  id: number;
+  code: string | null;
+  subject: string | null;
+  descriptionMd: string | null;
+  status: TicketStatus;
+  systemId: number | null;
+  createdAt: string;
+  resolvedAt: string | null;
+  closedAt: string | null;
+}
+
+/** Detalle: lo mismo que `PortalTicket` más el timeline visible para el cliente. */
+export interface PortalTicketDetail extends PortalTicket {
+  timeline: PortalTicketEvent[];
+}
+
+/** Sistemas del cliente, solo lo imprescindible para poblar un selector. */
+export interface PortalClientSystem {
+  id: number;
+  name: string;
+}
+
+export interface PortalClientUser {
+  id: number;
+  email: string;
+  fullName: string;
+  clientId: number;
+}
+
+export interface PortalSession {
+  accessToken: string;
+  refreshToken: string;
+  clientUser: PortalClientUser;
+}
