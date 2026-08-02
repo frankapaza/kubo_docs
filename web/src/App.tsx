@@ -26,6 +26,7 @@ import MonthlyReportPage from './pages/MonthlyReportPage';
 import SignaturePage from './pages/SignaturePage';
 import PortalLoginPage from './pages/portal/PortalLoginPage';
 import PortalTicketsListPage from './pages/portal/PortalTicketsListPage';
+import PortalTicketDetailPage from './pages/portal/PortalTicketDetailPage';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { PortalProtectedRoute } from './auth/PortalProtectedRoute';
 import { PortalAuthProvider } from './auth/PortalAuthContext';
@@ -63,6 +64,7 @@ export default function App() {
           <Route element={<PortalLayout />}>
             <Route path="/portal" element={<Navigate to="/portal/tickets" replace />} />
             <Route path="/portal/tickets" element={<PortalTicketsListPage />} />
+            <Route path="/portal/tickets/:ticketId" element={<PortalTicketDetailPage />} />
             {/*
               Catch-all del propio subárbol del portal: sin él, una subruta no
               enumerada (p.ej. "/portal/loquesea") no casa con nada de aquí
