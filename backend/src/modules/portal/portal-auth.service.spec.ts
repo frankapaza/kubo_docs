@@ -157,6 +157,36 @@ describe('refresh', () => {
     await expect(service.refresh('lo-que-sea')).rejects.toThrow(UnauthorizedException);
   });
 
+  /**
+   * El 401 del refresco tiene un significado concreto aguas abajo: el
+   * interceptor del frontend lo lee como "sesion muerta", borra las tres
+   * claves y redirige al login. Si un fallo de infraestructura se disfrazara
+   * de 401, un parpadeo de la base cerraria la sesion de todos los usuarios
+   * del portal y la caida no apareceria como 5xx en ninguna metrica.
+   */
+  it('un fallo de infraestructura al resolver el cliente sube tal cual, no se convierte en 401', async () => {
+    const hash = await hash$;
+    const user = { id: 1, clientId: 7, email: 'a@x.com', passwordHash: hash, isActive: 1, isAdmin: 0 };
+    const { service, jwt, clients } = makeService(user);
+    jwt.verifyAsync = jest.fn().mockResolvedValue({ sub: 1, email: 'a@x.com', clientId: 7, isClientAdmin: false });
+    const caida = new Error('ECONNREFUSED');
+    clients.findByIdOrFail = jest.fn().mockRejectedValue(caida);
+
+    await expect(service.refresh('un-refresh-token-valido')).rejects.toThrow(caida);
+    await expect(service.refresh('un-refresh-token-valido')).rejects.not.toBeInstanceOf(
+      UnauthorizedException,
+    );
+  });
+
+  it('un fallo de la base al buscar al usuario sube tal cual, no se convierte en 401', async () => {
+    const { service, jwt, repo } = makeService(null);
+    jwt.verifyAsync = jest.fn().mockResolvedValue({ sub: 1, email: 'a@x.com', clientId: 7, isClientAdmin: false });
+    const caida = new Error('ER_LOCK_WAIT_TIMEOUT');
+    repo.findById = jest.fn().mockRejectedValue(caida);
+
+    await expect(service.refresh('un-refresh-token-valido')).rejects.toThrow(caida);
+  });
+
   it('rechaza el refresco de un usuario desactivado', async () => {
     const hash = await hash$;
     const user = { id: 1, clientId: 7, email: 'a@x.com', passwordHash: hash, isActive: 0, isAdmin: 0 };

@@ -38,6 +38,14 @@ function invalidCredentials(): UnauthorizedException {
   });
 }
 
+/** Único error del refresco: firma inválida, expirada o usuario ya inservible. */
+function invalidRefreshToken(): UnauthorizedException {
+  return new UnauthorizedException({
+    code: 'UNAUTHORIZED',
+    message: 'El token de refresco no es válido.',
+  });
+}
+
 /**
  * Hash bcrypt fijo (cost 10, sin contraseña real detrás) usado cuando el
  * correo no existe. Sin él, esa rama no pagaría el coste de `bcrypt.compare`
@@ -71,22 +79,36 @@ export class PortalAuthService {
     return this.issueTokens(user);
   }
 
+  /**
+   * El `try` cubre solo la verificación de la firma, que es lo único que puede
+   * fallar *por culpa del token*. Todo lo demás sube tal cual.
+   *
+   * El 401 del refresco tiene un significado concreto aguas abajo: el
+   * interceptor del frontend lo lee como sesión muerta, borra las tres claves
+   * y redirige al login. Con `findById` dentro del `try`, un parpadeo de la
+   * base cerraba la sesión de todos los usuarios del portal a la vez y la
+   * caída no aparecía como 5xx en ninguna métrica. Es además justo el error
+   * que `resolveClientRazonSocial` se molesta en relanzar para no disfrazarlo.
+   */
   async refresh(refreshToken: string): Promise<PortalAuthResponse> {
+    let payload: ClientJwtPayload;
     try {
-      const payload = await this.jwt.verifyAsync<ClientJwtPayload>(refreshToken, {
+      payload = await this.jwt.verifyAsync<ClientJwtPayload>(refreshToken, {
         secret: this.cfg.get<string>('JWT_CLIENT_REFRESH_SECRET'),
       });
-      const user = await this.clientUsers.findById(payload.sub);
-      if (!user || !user.isActive) {
-        throw invalidCredentials();
-      }
-      return this.issueTokens(user);
     } catch {
-      throw new UnauthorizedException({
-        code: 'UNAUTHORIZED',
-        message: 'El token de refresco no es válido.',
-      });
+      throw invalidRefreshToken();
     }
+
+    const user = await this.clientUsers.findById(payload.sub);
+    // Mismo error que una firma inválida, a propósito: un token que apunta a
+    // un usuario borrado o desactivado ya no sirve para refrescar, y el
+    // cliente no necesita saber cuál de las dos cosas pasó.
+    if (!user || !user.isActive) {
+      throw invalidRefreshToken();
+    }
+
+    return this.issueTokens(user);
   }
 
   private async issueTokens(user: ClientUser): Promise<PortalAuthResponse> {
