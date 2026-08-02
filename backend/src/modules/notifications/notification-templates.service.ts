@@ -1,13 +1,19 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 
-import { NotificationAudience, validateTemplate } from './domain/template-renderer';
+import { EmailService } from '../email/email.service';
+
+import { ComposedEmail, composeEmail } from './domain/email-compose';
+import { NotificationAudience, sampleValuesFor, validateTemplate } from './domain/template-renderer';
 import { UpdateNotificationTemplateDto } from './dto/update-notification-template.dto';
 import { NotificationTemplate } from './entities/notification-template.entity';
 import { NotificationTemplatesRepository } from './notification-templates.repository';
 
 @Injectable()
 export class NotificationTemplatesService {
-  constructor(private readonly repo: NotificationTemplatesRepository) {}
+  constructor(
+    private readonly repo: NotificationTemplatesRepository,
+    private readonly email: EmailService,
+  ) {}
 
   /** Todas las plantillas, para el panel: activas e inactivas por igual. */
   list(): Promise<NotificationTemplate[]> {
@@ -51,6 +57,40 @@ export class NotificationTemplatesService {
 
     const updated = await this.repo.update(id, patch);
     return updated!;
+  }
+
+  /**
+   * El asunto y el cuerpo compuestos con datos de ejemplo (`sampleValuesFor`),
+   * por el mismo camino -- `composeEmail` -- que usa `NotificationDispatcher`
+   * para el envío real. No envía nada: no toca `EmailService` en absoluto. Es
+   * a propósito que use el mismo camino de composición y no uno propio: una
+   * previsualización que compusiera distinto dejaría de enseñar cómo va a
+   * quedar el correo de verdad, que es lo único que se le pide.
+   */
+  async preview(id: number): Promise<ComposedEmail> {
+    const template = await this.findByIdOrFail(id);
+    return composeEmail(template, template.audience, sampleValuesFor(template.audience));
+  }
+
+  /**
+   * Manda el correo de ejemplo de una plantilla a `to`, tal cual lo reciba.
+   *
+   * Este método no resuelve ningún destinatario propio -- ni el autor del
+   * ticket, ni el buzón del equipo -- porque no hay ticket real detrás: el
+   * único candidato a destinatario es el parámetro `to`. La regla de "solo al
+   * usuario que hace la petición" la impone quien llama (el controlador, con
+   * el correo del token), no esta función; pero al no tener ninguna otra
+   * fuente de destinatario, tampoco tiene por dónde filtrarse uno distinto.
+   */
+  async sendTest(id: number, to: string): Promise<{ to: string }> {
+    const template = await this.findByIdOrFail(id);
+    const { subject, html, text } = composeEmail(
+      template,
+      template.audience,
+      sampleValuesFor(template.audience),
+    );
+    await this.email.send({ to, subject, html, text });
+    return { to };
   }
 
   /**

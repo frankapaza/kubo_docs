@@ -101,6 +101,41 @@ export function validateTemplate(
   return { ok: false, unknown: [...unknown], wrongAudience: [...wrongAudience] };
 }
 
+/**
+ * Valores de ejemplo para previsualizar una plantilla sin ningún ticket real
+ * detrás -- los usan `NotificationTemplatesService.preview` y `.sendTest`.
+ *
+ * Cubren **las once variables**, cliente y equipo, con valores reconocibles
+ * (nunca vacíos ni "-"): si a la previsualización le faltara una, `render` la
+ * sustituiría por `(no disponible)` y el ADMIN vería un hueco que no le dice
+ * nada sobre cómo va a quedar el correo de verdad.
+ *
+ * Para CLIENT se recortan a las seis suyas -- las mismas que `variablesFor`
+ * expondría -- para no sugerir, ni por accidente, que una plantilla de
+ * cliente podría llevar `{{motivo}}`.
+ */
+export function sampleValuesFor(audience: NotificationAudience): Record<string, string> {
+  const client: Record<ClientVariable, string> = {
+    codigo: 'TKT-0001',
+    asunto: 'Ejemplo: no carga el módulo de caja',
+    estado: 'En atención',
+    fecha: '2 de agosto de 2026, 10:00 a. m.',
+    razon_social: 'Empresa de Ejemplo S.A.C.',
+    enlace_portal: 'https://portal.ejemplo.pe/portal/tickets/1',
+  };
+  if (audience === 'CLIENT') return client;
+
+  const team: Record<TeamVariable, string> = {
+    ...client,
+    prioridad: 'P2',
+    sla: '2 de agosto de 2026, 18:00',
+    responsable: 'Nombre del responsable',
+    motivo: 'Ejemplo de motivo de la transición',
+    enlace_panel: 'https://panel.ejemplo.pe/tickets/1',
+  };
+  return team;
+}
+
 /** Valores a sustituir, indexados por nombre de variable (sin llaves ni espacios). */
 export type TemplateValues = Record<string, string | number | null | undefined>;
 

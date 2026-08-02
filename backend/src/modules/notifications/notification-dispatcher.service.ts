@@ -11,13 +11,9 @@ import { UsersService } from '../users/users.service';
 import { TicketsRepository } from '../tickets/tickets.repository';
 import { WorkspaceService } from '../workspace/workspace.service';
 
+import { composeEmail } from './domain/email-compose';
 import { NotificationPlanEntry, plansForEvent } from './domain/notification-rules';
-import {
-  ClientVariable,
-  NotificationAudience,
-  TeamVariable,
-  render,
-} from './domain/template-renderer';
+import { ClientVariable, NotificationAudience, TeamVariable } from './domain/template-renderer';
 import { NotificationTemplate } from './entities/notification-template.entity';
 import { NotificationTemplatesService } from './notification-templates.service';
 
@@ -90,79 +86,6 @@ const SIN_RESPONSABLE = 'Sin asignar';
  */
 function statusLabel(status: TicketStatus): string | null {
   return TICKET_STATUS_LABELS[status] ?? null;
-}
-
-/**
- * Deshace exactamente los cinco escapes que aplica `render` a los valores
- * sustituidos, y ninguno más.
- *
- * Hace falta porque `render` escapa siempre —está pensado para el cuerpo
- * HTML—, pero el asunto de un correo y su parte `text/plain` no son HTML: ahí
- * un apóstrofo del asunto del ticket se leería literalmente como `&#39;`. El
- * `&amp;` va el último a propósito: al revés, `&amp;lt;` acabaría convertido
- * en `<`, que es justo la reinyección que el escapado evita.
- */
-function undoHtmlEscaping(value: string): string {
-  return value
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, '&');
-}
-
-/**
- * Marcado de línea del cuerpo: la columna se llama `body_md` y las siete
- * plantillas sembradas usan negritas y viñetas. Sin esto el cliente leería
- * `- **Código:** TKT-0013` con los asteriscos a la vista.
- *
- * Es un subconjunto mínimo y deliberado —negrita, viñeta, enlace—, no un
- * intérprete de Markdown: cuanto menos transforme, menos formas hay de que el
- * contenido escrito por el cliente acabe significando algo.
- */
-function inlineMarkup(line: string): string {
-  return (
-    line
-      // Los enlaces van solos en su línea en las plantillas sembradas. Se corta
-      // en `<` para no tragarse las etiquetas que esta misma función genera, y
-      // en `*` porque la negrita se sustituye **después**: sin excluirlo, una
-      // URL con asteriscos acabaría con un `<strong>` metido dentro del `href`
-      // y el enlace no abriría. No es inyección —las comillas ya llegan como
-      // entidades— pero sí un enlace roto.
-      .replace(/\bhttps?:\/\/[^\s<*]+/g, (url) => `<a href="${url}">${url}</a>`)
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  );
-}
-
-/**
- * Convierte el texto ya renderizado en HTML sencillo: párrafos separados por
- * línea en blanco, bloques de líneas que empiezan por `- ` como lista, y
- * saltos de línea sueltos como `<br>`.
- *
- * **No escapa nada.** El contenido del cliente ya viene escapado por `render`,
- * y volver a escapar aquí convertiría un `&lt;` en `&amp;lt;`, que es lo que el
- * lector vería en pantalla. Tampoco puede inyectar: lo único que se añade son
- * las etiquetas que pone esta función, y un `<` del cliente ya no es un `<`
- * cuando llega hasta aquí. El resto del texto lo escribe el equipo en el panel
- * y pasa por `validateTemplate` al guardarse.
- */
-function textToSimpleHtml(text: string): string {
-  const bloques = text
-    .split(/\n\s*\n/)
-    .map((b) => b.trim())
-    .filter((b) => b.length > 0)
-    .map((bloque) => {
-      const lineas = bloque.split('\n').map((l) => l.trim());
-      if (lineas.every((l) => l.startsWith('- '))) {
-        const items = lineas.map((l) => `<li>${inlineMarkup(l.slice(2))}</li>`).join('');
-        return `<ul>${items}</ul>`;
-      }
-      return `<p>${lineas.map(inlineMarkup).join('<br>')}</p>`;
-    });
-
-  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;color:#22272a">${bloques.join(
-    '',
-  )}</div>`;
 }
 
 /**
@@ -406,8 +329,12 @@ export class NotificationDispatcher {
   /**
    * Un correo listo para `EmailService.send`.
    *
-   * El asunto y la parte de texto van sin las entidades HTML que introduce
-   * `render`: ninguno de los dos es HTML. El `html` sí las conserva.
+   * La composición en sí (`subject`/`html`/`text`) vive en `composeEmail`
+   * (`./domain/email-compose.ts`), pura y sin depender de este servicio: es
+   * el mismo camino que usa `NotificationTemplatesService.preview` /
+   * `.sendTest` para que lo que ve el ADMIN al previsualizar sea, letra por
+   * letra, lo que este método manda de verdad. Aquí solo se añade el `to`
+   * que ya resolvió `dispatchOne`.
    */
   private compose(
     template: NotificationTemplate,
@@ -415,15 +342,7 @@ export class NotificationDispatcher {
     values: Record<string, string | null>,
     to: string,
   ) {
-    const subject = render(template.subject, audience, values);
-    const body = render(template.bodyMd, audience, values);
-
-    return {
-      to,
-      subject: undoHtmlEscaping(subject),
-      html: textToSimpleHtml(body),
-      text: undoHtmlEscaping(body),
-    };
+    return { to, ...composeEmail(template, audience, values) };
   }
 
   // -------------------------------------------------------------------------

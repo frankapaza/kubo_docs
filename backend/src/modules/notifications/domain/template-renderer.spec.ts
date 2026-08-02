@@ -1,4 +1,4 @@
-import { variablesFor, validateTemplate, render } from './template-renderer';
+import { variablesFor, validateTemplate, render, sampleValuesFor } from './template-renderer';
 
 describe('variablesFor', () => {
   it('el publico CLIENT expone exactamente las seis variables del portal', () => {
@@ -26,6 +26,39 @@ describe('variablesFor', () => {
       'motivo',
       'enlace_panel',
     ]);
+  });
+});
+
+describe('sampleValuesFor', () => {
+  it('CLIENT trae valor para cada una de sus seis variables, ninguna vacía', () => {
+    const values = sampleValuesFor('CLIENT');
+    for (const nombre of variablesFor('CLIENT')) {
+      expect(values[nombre]).toBeTruthy();
+    }
+  });
+
+  it('CLIENT no trae ninguna variable de equipo: no sugiere que se puedan usar', () => {
+    const values = sampleValuesFor('CLIENT');
+    expect(values.prioridad).toBeUndefined();
+    expect(values.sla).toBeUndefined();
+    expect(values.responsable).toBeUndefined();
+    expect(values.motivo).toBeUndefined();
+    expect(values.enlace_panel).toBeUndefined();
+  });
+
+  it('TEAM trae valor para las once variables, ninguna vacía', () => {
+    const values = sampleValuesFor('TEAM');
+    for (const nombre of variablesFor('TEAM')) {
+      expect(values[nombre]).toBeTruthy();
+    }
+  });
+
+  it('renderizar una plantilla sembrada con estos valores no deja ninguna variable como "(no disponible)"', () => {
+    const plantillaEquipo = '{{codigo}} {{asunto}} {{estado}} {{fecha}} {{razon_social}} ' +
+      '{{enlace_portal}} {{prioridad}} {{sla}} {{responsable}} {{motivo}} {{enlace_panel}}';
+    const out = render(plantillaEquipo, 'TEAM', sampleValuesFor('TEAM'));
+    expect(out).not.toContain('no disponible');
+    expect(out).not.toContain('{{');
   });
 });
 

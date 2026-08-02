@@ -12,12 +12,14 @@ import { WorkspaceModule } from '../workspace/workspace.module';
 import { NotificationTemplate } from './entities/notification-template.entity';
 import { NotificationDispatcher } from './notification-dispatcher.service';
 import { NotificationScheduler } from './notification.scheduler';
+import { NotificationTemplatesController } from './notification-templates.controller';
 import { NotificationTemplatesRepository } from './notification-templates.repository';
 import { NotificationTemplatesService } from './notification-templates.service';
 
 /**
  * Plantillas de aviso por correo, el despachador que las usa y el vigilante que
- * drena la bandeja de salida. Sin controlador todavía -- lo monta la Task 7.
+ * drena la bandeja de salida. `NotificationTemplatesController` expone el panel
+ * (listar, editar, previsualizar, prueba) montado en la Task 7.
  *
  * `NotificationScheduler` no se exporta: nadie lo llama desde fuera, lo dispara
  * su propio `@Cron`. Depende de `ScheduleModule.forRoot()`, que ya está en
@@ -42,6 +44,7 @@ import { NotificationTemplatesService } from './notification-templates.service';
     WorkspaceModule,
     EmailModule,
   ],
+  controllers: [NotificationTemplatesController],
   providers: [
     NotificationTemplatesRepository,
     NotificationTemplatesService,

@@ -75,8 +75,14 @@ const makeService = () => {
     }),
   };
 
-  const service = new NotificationTemplatesService(repo as any);
-  return { service, repo, almacen };
+  const email = {
+    send: jest.fn((_input: { to: string; subject: string; html: string; text?: string }) =>
+      Promise.resolve({ messageId: '<1@kuboti.com>', accepted: [], rejected: [] }),
+    ),
+  };
+
+  const service = new NotificationTemplatesService(repo as any, email as any);
+  return { service, repo, almacen, email };
 };
 
 describe('NotificationTemplatesService.update', () => {
@@ -203,6 +209,68 @@ describe('NotificationTemplatesService.list', () => {
     const rows = await service.list();
     expect(rows).toHaveLength(3);
     expect(rows.some((r) => r.isActive === 0)).toBe(true);
+  });
+});
+
+describe('NotificationTemplatesService.preview', () => {
+  it('compone el asunto y el cuerpo con datos de ejemplo, por el mismo camino que el envío real, sin enviar nada', async () => {
+    const { service, email } = makeService();
+    const preview = await service.preview(1); // CLIENT: TICKET_CREATED
+
+    expect(preview.subject).toContain('Recibimos tu solicitud');
+    expect(preview.subject).not.toContain('{{'); // ninguna variable sin sustituir
+    expect(preview.text).not.toContain('{{');
+    expect(preview.html).not.toContain('(no disponible)'); // los datos de ejemplo cubren las 6 variables
+    expect(email.send).not.toHaveBeenCalled();
+  });
+
+  it('la plantilla de equipo se previsualiza con sus cinco variables adicionales, también sin enviar nada', async () => {
+    const { service, email } = makeService();
+    const preview = await service.preview(6); // TEAM: TICKET_CREATED_PORTAL
+
+    expect(preview.html).not.toContain('(no disponible)');
+    expect(preview.html).not.toContain('{{');
+    expect(email.send).not.toHaveBeenCalled();
+  });
+
+  it('404 si la plantilla no existe, y tampoco llama a EmailService.send', async () => {
+    const { service, email } = makeService();
+    const error = await service.preview(999).catch((e) => e);
+
+    expect(error).toBeInstanceOf(NotFoundException);
+    expect(email.send).not.toHaveBeenCalled();
+  });
+});
+
+describe('NotificationTemplatesService.sendTest', () => {
+  it('envía el correo de ejemplo exactamente al destinatario que recibe como parámetro', async () => {
+    const { service, email } = makeService();
+    const result = await service.sendTest(1, 'admin@kubo.pe');
+
+    expect(email.send).toHaveBeenCalledTimes(1);
+    const [enviado] = email.send.mock.calls[0];
+    expect(enviado.to).toBe('admin@kubo.pe');
+    expect(enviado.subject).toContain('Recibimos tu solicitud');
+    expect(result).toEqual({ to: 'admin@kubo.pe' });
+  });
+
+  it('nunca envía a una dirección distinta de la recibida por parámetro, aunque la plantilla no tenga destinatario propio', async () => {
+    // sendTest no resuelve ningún destinatario de negocio (autor del ticket,
+    // buzón del equipo...): el único "to" posible es el que decide quien
+    // llama -- el controlador, con el correo del token. Esta prueba fija que
+    // la función no tiene ningún otro camino para elegir destinatario.
+    const { service, email } = makeService();
+    await service.sendTest(6, 'otro.admin@kubo.pe');
+
+    expect(email.send.mock.calls[0][0].to).toBe('otro.admin@kubo.pe');
+  });
+
+  it('404 si la plantilla no existe: no llega a llamar a EmailService.send', async () => {
+    const { service, email } = makeService();
+    const error = await service.sendTest(999, 'admin@kubo.pe').catch((e) => e);
+
+    expect(error).toBeInstanceOf(NotFoundException);
+    expect(email.send).not.toHaveBeenCalled();
   });
 });
 
