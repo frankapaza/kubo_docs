@@ -33,6 +33,7 @@ import { DocumentSignatoriesModule } from './modules/document-signatories/docume
 import { WorkspaceModule } from './modules/workspace/workspace.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { EmailModule } from './modules/email/email.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -100,6 +101,7 @@ import { EmailModule } from './modules/email/email.module';
     WorkspaceModule,
     ReportsModule,
     EmailModule,
+    NotificationsModule,
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
