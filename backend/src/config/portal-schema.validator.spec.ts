@@ -13,7 +13,17 @@ const COLUMNAS_013 = [
 /** La columna que añade la 014: la autoría de cliente en la auditoría. */
 const COLUMNA_014 = { tableName: 'audit_log', columnName: 'client_user_id' };
 
-const COLUMNAS_ESPERADAS = [...COLUMNAS_013, COLUMNA_014];
+/** Las tres columnas de la bandeja de salida que añade la 015. */
+const COLUMNAS_015 = [
+  { tableName: 'ticket_events', columnName: 'notified_at' },
+  { tableName: 'ticket_events', columnName: 'notify_attempts' },
+  { tableName: 'ticket_events', columnName: 'notify_last_error' },
+];
+
+const COLUMNAS_ESPERADAS = [...COLUMNAS_013, COLUMNA_014, ...COLUMNAS_015];
+
+/** Las tablas que tienen que estar: client_users (013) y las plantillas (015). */
+const TABLAS_ESPERADAS = ['client_users', 'notification_templates'];
 
 /**
  * DataSource de mentira: responde a la consulta de tablas y a la de columnas
@@ -47,16 +57,17 @@ describe('PortalSchemaValidator', () => {
 
   afterEach(() => jest.restoreAllMocks());
 
-  it('arranca si la tabla y todas las columnas esperadas estan', async () => {
+  it('arranca si las tablas y todas las columnas esperadas estan', async () => {
     await expect(
-      build(['client_users'], COLUMNAS_ESPERADAS).onApplicationBootstrap(),
+      build(TABLAS_ESPERADAS, COLUMNAS_ESPERADAS).onApplicationBootstrap(),
     ).resolves.toBeUndefined();
     expect(log).toHaveBeenCalled();
   });
 
-  it('aborta si falta la tabla client_users', async () => {
-    await expect(build([], COLUMNAS_ESPERADAS).onApplicationBootstrap()).rejects.toThrow(
-      /client_users/,
+  it.each(TABLAS_ESPERADAS)('aborta si falta la tabla %s', async (ausente) => {
+    const presentes = TABLAS_ESPERADAS.filter((t) => t !== ausente);
+    await expect(build(presentes, COLUMNAS_ESPERADAS).onApplicationBootstrap()).rejects.toThrow(
+      new RegExp(ausente),
     );
   });
 
@@ -65,20 +76,47 @@ describe('PortalSchemaValidator', () => {
     async (etiqueta, ausente) => {
       const presentes = COLUMNAS_ESPERADAS.filter((c) => c !== ausente);
       await expect(
-        build(['client_users'], presentes).onApplicationBootstrap(),
+        build(TABLAS_ESPERADAS, presentes).onApplicationBootstrap(),
       ).rejects.toThrow(new RegExp(etiqueta as string));
     },
   );
 
   it('atribuye cada ausencia a su migracion: la 014 es la de audit_log', async () => {
-    const error = await build(['client_users'], COLUMNAS_013)
+    const error = await build(TABLAS_ESPERADAS, [...COLUMNAS_013, ...COLUMNAS_015])
       .onApplicationBootstrap()
       .catch((e: Error) => e);
     const message = (error as Error).message;
     expect(message).toContain('014_audit_client_user.sql');
     expect(message).toContain('audit_log.client_user_id');
-    // Solo se nombra lo que de verdad falta: la 013 esta aplicada.
+    // Solo se nombra lo que de verdad falta: la 013 y la 015 estan aplicadas.
     expect(message).not.toContain('013_portal_clientes.sql');
+    expect(message).not.toContain('015_notificaciones.sql');
+  });
+
+  it('atribuye a la 015 la tabla de plantillas y las tres columnas de la bandeja', async () => {
+    const error = await build(['client_users'], [...COLUMNAS_013, COLUMNA_014])
+      .onApplicationBootstrap()
+      .catch((e: Error) => e);
+    const message = (error as Error).message;
+    expect(message).toContain('015_notificaciones.sql');
+    expect(message).toContain('notification_templates');
+    for (const { tableName, columnName } of COLUMNAS_015) {
+      expect(message).toContain(`${tableName}.${columnName}`);
+    }
+    // Las otras dos estan aplicadas: no se nombran.
+    expect(message).not.toContain('013_portal_clientes.sql');
+    expect(message).not.toContain('014_audit_client_user.sql');
+  });
+
+  it('avisa de que las columnas de la 015 no se anaden a mano: el sellado va dentro', async () => {
+    const error = await build(['client_users'], [...COLUMNAS_013, COLUMNA_014])
+      .onApplicationBootstrap()
+      .catch((e: Error) => e);
+    // Crear notified_at a mano deja el historico sin sellar, y el vigilante
+    // manda un correo por cada evento de meses atras. El mensaje tiene que
+    // desaconsejarlo explicitamente, no solo pedir la migracion.
+    expect((error as Error).message).toMatch(/a mano/i);
+    expect((error as Error).message).toMatch(/sellado/i);
   });
 
   it('el mensaje nombra la migracion que falta y como aplicarla', async () => {
@@ -92,12 +130,14 @@ describe('PortalSchemaValidator', () => {
     expect((error as Error).message).toMatch(/mysql .*< *backend\/sql\/migrations/);
   });
 
-  it('nombra a la vez la tabla y todas las columnas ausentes, no solo la primera', async () => {
+  it('nombra a la vez las tablas y todas las columnas ausentes, no solo la primera', async () => {
     const error = await build([], [])
       .onApplicationBootstrap()
       .catch((e: Error) => e);
     const message = (error as Error).message;
-    expect(message).toContain('client_users');
+    for (const tabla of TABLAS_ESPERADAS) {
+      expect(message).toContain(tabla);
+    }
     for (const { tableName, columnName } of COLUMNAS_ESPERADAS) {
       expect(message).toContain(`${tableName}.${columnName}`);
     }

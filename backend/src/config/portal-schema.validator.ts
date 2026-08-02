@@ -23,7 +23,8 @@ const comoAplicarla = (migration: string): string =>
   `< backend/sql/migrations/${migration}`;
 
 /**
- * Comprueba al arranque que la migración 013 está aplicada, y aborta si no.
+ * Comprueba al arranque que las migraciones 013, 014 y 015 están aplicadas, y
+ * aborta si no.
  *
  * El portal de clientes no solo añade tablas nuevas: **modifica entidades ya
  * existentes**. `ticket.entity.ts` declara `created_by_client_user_id` y
@@ -55,10 +56,14 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
 
   private static readonly MIGRATION_013 = '013_portal_clientes.sql';
   private static readonly MIGRATION_014 = '014_audit_client_user.sql';
+  private static readonly MIGRATION_015 = '015_notificaciones.sql';
 
-  /** Tablas nuevas de la 013. */
+  /** Tablas nuevas de la 013 y la 015. */
   private static readonly REQUIRED_TABLES: ReadonlyArray<{ table: string; migration: string }> = [
     { table: 'client_users', migration: PortalSchemaValidator.MIGRATION_013 },
+    // 015: sin ella el vigilante no tiene plantillas que leer y no sale
+    // ningún aviso; peor, la pantalla de administración responde 500.
+    { table: 'notification_templates', migration: PortalSchemaValidator.MIGRATION_015 },
   ];
 
   /**
@@ -79,6 +84,15 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
     // TODA la auditoría se pierde en silencio (el interceptor degrada el
     // fallo del INSERT a un warn por petición).
     { table: 'audit_log', column: 'client_user_id', migration: PortalSchemaValidator.MIGRATION_014 },
+    // 015: las tres columnas de la bandeja de salida. `ticket-event.entity.ts`
+    // las declara, así que sin ellas vuelve el ER_BAD_FIELD_ERROR en todo el
+    // timeline. Y hay algo peor que un 500: si `notified_at` apareciera sin
+    // pasar por la migración —creada a mano, por ejemplo—, no habría sellado
+    // del histórico y el vigilante enviaría un correo por cada uno de los
+    // eventos de meses atrás. Exigir la migración es exigir el sellado.
+    { table: 'ticket_events', column: 'notified_at', migration: PortalSchemaValidator.MIGRATION_015 },
+    { table: 'ticket_events', column: 'notify_attempts', migration: PortalSchemaValidator.MIGRATION_015 },
+    { table: 'ticket_events', column: 'notify_last_error', migration: PortalSchemaValidator.MIGRATION_015 },
   ];
 
   constructor(private readonly dataSource: DataSource) {}
@@ -92,8 +106,9 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
 
     this.logger.log(
       'Esquema del portal de clientes verificado: las migraciones ' +
-        `${PortalSchemaValidator.MIGRATION_013} y ${PortalSchemaValidator.MIGRATION_014} están ` +
-        'aplicadas (client_users y las columnas del actor existen).',
+        `${PortalSchemaValidator.MIGRATION_013}, ${PortalSchemaValidator.MIGRATION_014} y ` +
+        `${PortalSchemaValidator.MIGRATION_015} están aplicadas (client_users, ` +
+        'notification_templates y las columnas del actor y de notificación existen).',
     );
   }
 
@@ -153,7 +168,10 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
       'Las entidades ya declaran esas columnas, así que TypeORM las emite en todo SELECT e ' +
       'INSERT: sin la 013, el listado de tickets, el detalle, las transiciones, la asignación y ' +
       'el escaneo de SLA responden 500 (ER_BAD_FIELD_ERROR); sin la 014 se pierde toda la ' +
-      'auditoría. Las migraciones solo se ejecutan por docker-entrypoint-initdb.d, y MySQL solo ' +
+      'auditoría; sin la 015 no hay bandeja de salida ni plantillas, y no sale ningún aviso por ' +
+      'correo. No añadas a mano las columnas de la 015: el sellado del histórico va dentro de esa ' +
+      'migración, y sin él el vigilante envía un correo por cada evento de meses atrás. ' +
+      'Las migraciones solo se ejecutan por docker-entrypoint-initdb.d, y MySQL solo ' +
       'corre ese directorio sobre un datadir vacío: una base que ya tenía datos NO las recibe al ' +
       'reconstruir los contenedores. Aplícalas a mano (son idempotentes) y vuelve a arrancar.'
     );
