@@ -9,9 +9,17 @@ interface MissingItem {
   migration: string;
 }
 
-/** Cómo aplicar a mano una migración sobre una base que ya tiene datos. */
+/**
+ * Cómo aplicar a mano una migración sobre una base que ya tiene datos.
+ *
+ * El `sh -c` con comillas simples no es adorno: la contraseña vive dentro del
+ * contenedor, en `MYSQL_ROOT_PASSWORD`. Sin él la expande el shell del host,
+ * donde no existe —allí se llama `DB_ROOT_PASSWORD`—, y MySQL responde
+ * "Access denied (using password: NO)" justo cuando el backend está en bucle
+ * de reinicio y el operador menos margen tiene para adivinar por qué.
+ */
 const comoAplicarla = (migration: string): string =>
-  'docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" kubo_devdocs ' +
+  `docker compose exec -T mysql sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" kubo_devdocs' ` +
   `< backend/sql/migrations/${migration}`;
 
 /**

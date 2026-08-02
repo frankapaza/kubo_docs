@@ -446,11 +446,17 @@ Aplicar una migración (las del portal de clientes, en orden):
 
   cd ~/kubo
   docker compose exec -T mysql \
-    mysql -uroot -p"$MYSQL_ROOT_PASSWORD" kubo_devdocs \
+    sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" kubo_devdocs' \
     < backend/sql/migrations/013_portal_clientes.sql
   docker compose exec -T mysql \
-    mysql -uroot -p"$MYSQL_ROOT_PASSWORD" kubo_devdocs \
+    sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" kubo_devdocs' \
     < backend/sql/migrations/014_audit_client_user.sql
+
+  >> Las comillas simples y el `sh -c` son necesarios: la contraseña vive
+     dentro del contenedor, en MYSQL_ROOT_PASSWORD. Sin ellos la expande
+     el shell del host, donde no existe, y MySQL responde "Access denied
+     (using password: NO)". En el host la variable se llama
+     DB_ROOT_PASSWORD y está en .env.production.
 
 Las migraciones son idempotentes (CREATE TABLE IF NOT EXISTS y ALTER
 guardados con information_schema): reejecutar una ya aplicada no hace
@@ -458,9 +464,14 @@ nada. Ante la duda, se vuelven a pasar todas en orden.
 
 Comprobar que quedó aplicada:
 
-  docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" \
-    kubo_devdocs -e "SHOW TABLES LIKE 'client_users'; \
-    SHOW COLUMNS FROM tickets LIKE 'created_by_client_user_id';"
+  echo "SHOW TABLES LIKE 'client_users';
+        SHOW COLUMNS FROM tickets LIKE 'created_by_client_user_id';
+        SHOW COLUMNS FROM audit_log LIKE 'client_user_id';" \
+    | docker compose exec -T mysql \
+      sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" kubo_devdocs'
+
+  >> Se pasa la consulta por la entrada estándar en vez de con -e para no
+     tener que anidar comillas dentro del sh -c.
 
 Si se olvida este paso, el backend NO arranca: PortalSchemaValidator
 comprueba el esquema al boot y aborta diciendo qué migración falta. Ese

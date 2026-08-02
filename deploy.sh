@@ -9,8 +9,13 @@ set -e
 # cualquier base que YA TENGA DATOS las migraciones nuevas hay que aplicarlas
 # a mano ANTES de levantar el backend:
 #
-#   docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" \
-#     kubo_devdocs < backend/sql/migrations/013_portal_clientes.sql
+#   docker compose exec -T mysql \
+#     sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" kubo_devdocs' \
+#     < backend/sql/migrations/013_portal_clientes.sql
+#
+# El sh -c con comillas simples hace falta: la contrasena vive dentro del
+# contenedor. Sin el la expande el shell del host, donde no existe, y MySQL
+# responde "Access denied (using password: NO)".
 #
 # Si se olvida, el backend aborta al arrancar (PortalSchemaValidator) diciendo
 # que migracion falta. Procedimiento completo en COMANDOS.txt, "PASO 3-bis".
