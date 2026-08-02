@@ -1,7 +1,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { PortalTicketsService } from './portal-tickets.service';
+import { PortalTicketsService, sameId } from './portal-tickets.service';
 import { CreatePortalTicketDto } from './dto/create-portal-ticket.dto';
 
 /**
@@ -268,6 +268,46 @@ describe('la frontera', () => {
       { kind: 'CLIENT', clientUserId: 11 },
       { clientId: 7, systemId: 5, subject: 'Asunto', rawText: 'Detalle', origin: 'PORTAL' },
     );
+  });
+});
+
+/**
+ * `sameId` es LA comprobacion de pertenencia que sostiene la regla del 404 del
+ * portal. Se prueba directamente y no solo a traves del servicio: hoy el
+ * segundo argumento siempre llega validado, pero la funcion no puede depender
+ * de eso -- `Number(null)` es 0 y `Number(undefined)` es NaN, asi que un lado
+ * sin guardar convierte un "no hay valor" en un id comparable.
+ */
+describe('sameId', () => {
+  it('compara por valor: el bigint que llega como cadena es el mismo id', () => {
+    expect(sameId('7', 7)).toBe(true);
+    expect(sameId(7, '7')).toBe(true);
+  });
+
+  it('distingue ids distintos', () => {
+    expect(sameId('7', 8)).toBe(false);
+  });
+
+  it.each([
+    ['nulo', null],
+    ['indefinido', undefined],
+    ['cadena vacia', ''],
+    ['no numerico', 'abc'],
+  ])('un %s nunca es igual a nada, este en el primer argumento o en el segundo', (_e, valor) => {
+    expect(sameId(valor, 0)).toBe(false);
+    expect(sameId(0, valor)).toBe(false);
+    expect(sameId(valor, 7)).toBe(false);
+    expect(sameId(7, valor)).toBe(false);
+    expect(sameId(valor, valor)).toBe(false);
+  });
+
+  it('es simetrica para cualquier par', () => {
+    const valores = [null, undefined, '', 'abc', 0, '0', 7, '7', NaN, -1];
+    for (const a of valores) {
+      for (const b of valores) {
+        expect(sameId(a, b)).toBe(sameId(b, a));
+      }
+    }
   });
 });
 

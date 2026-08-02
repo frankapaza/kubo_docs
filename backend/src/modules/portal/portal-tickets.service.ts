@@ -42,9 +42,30 @@ function ticketNotFound(): NotFoundException {
  *
  * Los `tinyint` (`isActive`, `isAdmin`, `slaAtRisk`) sí llegan como número; no
  * necesitan este tratamiento.
+ *
+ * Simétrica a propósito: guardar solo el primer argumento dejaba `Number(null)`
+ * → `0` y `Number(undefined)` → `NaN` entrando por el segundo, de modo que un
+ * "no hay valor" se convertía en un id comparable. Hoy el segundo siempre
+ * llega validado, pero esta es **la** comprobación de pertenencia que sostiene
+ * la regla del 404 del portal y no debe depender de quién la llame.
+ *
+ * Se exporta para poder probarla directamente: por el mismo motivo.
  */
-function sameId(a: unknown, b: unknown): boolean {
-  return a !== null && a !== undefined && Number(a) === Number(b);
+export function sameId(a: unknown, b: unknown): boolean {
+  const na = toComparableId(a);
+  const nb = toComparableId(b);
+  return na !== null && nb !== null && na === nb;
+}
+
+/**
+ * Un identificador comparable, o `null` si el valor no es uno. Fuera quedan
+ * `null`, `undefined`, la cadena vacía (que `Number` convertiría en 0) y todo
+ * lo que no dé un número finito.
+ */
+function toComparableId(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
 /**
