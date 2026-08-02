@@ -47,9 +47,10 @@ services:
       - ./backend/sql/migrations/014_audit_client_user.sql:/docker-entrypoint-initdb.d/023_mig_014.sql:ro
       - ./backend/sql/migrations/015_notificaciones.sql:/docker-entrypoint-initdb.d/024_mig_015.sql:ro
       - ./backend/sql/migrations/016_notify_next_attempt.sql:/docker-entrypoint-initdb.d/025_mig_016.sql:ro
+      - ./backend/sql/migrations/017_plantillas_respuesta.sql:/docker-entrypoint-initdb.d/026_mig_017.sql:ro
       # Seeds — van detrás de todas las migraciones, así que el seed se
       # renumera cada vez que entra una migración nueva.
-      - ./backend/sql/seed_document_templates.sql:/docker-entrypoint-initdb.d/026_seed_templates.sql:ro
+      - ./backend/sql/seed_document_templates.sql:/docker-entrypoint-initdb.d/027_seed_templates.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s
