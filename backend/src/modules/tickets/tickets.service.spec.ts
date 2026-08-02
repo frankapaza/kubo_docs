@@ -91,6 +91,23 @@ describe('create con actor', () => {
     expect(saved.createdByClientUserId).toBe(11);
   });
 
+  /**
+   * La invariante "todo ticket tiene exactamente un autor" la sostenia solo la
+   * union de TypeScript: con los ternarios `kind === 'STAFF' ? ... : null`, un
+   * tercer valor producia un ticket Y su evento CREATED con las dos columnas
+   * de actor nulas -- un ticket sin autor, posible desde que la 013 hizo
+   * created_by nullable. Falla cerrado y antes de abrir la transaccion.
+   */
+  it('un actor de tipo no contemplado no crea nada: falla cerrado', async () => {
+    const { service, repo } = makeService();
+    await expect(
+      service.create({ kind: 'ROBOT', userId: 1 } as any, { rawText: 'algo' } as any),
+    ).rejects.toThrow();
+    expect(repo.runInTransaction).not.toHaveBeenCalled();
+    expect(repo.savedTickets).toHaveLength(0);
+    expect(repo.savedEvents).toHaveLength(0);
+  });
+
   it('el evento CREATED lleva el actor que corresponda', async () => {
     const { service, repo } = makeService();
     await service.create(

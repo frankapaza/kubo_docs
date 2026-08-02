@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 
 import { TicketsRepository, TicketListFilters } from './tickets.repository';
 import { TicketEventsService } from './ticket-events.service';
@@ -28,6 +33,44 @@ export interface DecoratedTicket extends Ticket {
 export type TicketActor =
   | { kind: 'STAFF'; userId: number }
   | { kind: 'CLIENT'; clientUserId: number };
+
+/** Las dos columnas del actor, ya repartidas. Nunca van las dos a la vez. */
+interface ActorColumns {
+  createdBy: number | null;
+  createdByClientUserId: number | null;
+}
+
+/**
+ * Reparte el actor en sus dos columnas, o se niega a escribir.
+ *
+ * Con los ternarios `actor.kind === 'STAFF' ? … : null` repartidos por dos
+ * sitios, un tercer valor de `kind` producía un ticket **y** su evento CREATED
+ * con las dos columnas nulas: un ticket sin autor, posible solo desde que la
+ * 013 hizo `created_by` nullable, y que ya no se puede atribuir a nadie a
+ * posteriori. La invariante la sostenía únicamente la unión de TypeScript, que
+ * no existe en tiempo de ejecución: basta un `as any`, un JSON deserializado o
+ * una variante nueva sin actualizar aquí.
+ *
+ * El `never` deja además el descuido en tiempo de compilación: añadir un
+ * tercer `kind` a `TicketActor` sin decidir sus columnas no compila.
+ */
+function resolveActorColumns(actor: TicketActor): ActorColumns {
+  switch (actor.kind) {
+    case 'STAFF':
+      return { createdBy: actor.userId, createdByClientUserId: null };
+    case 'CLIENT':
+      return { createdBy: null, createdByClientUserId: actor.clientUserId };
+    default: {
+      const noContemplado: never = actor;
+      throw new InternalServerErrorException({
+        code: 'INTERNAL',
+        message:
+          'No se pudo determinar el autor del ticket: tipo de actor no contemplado ' +
+          `(${JSON.stringify((noContemplado as { kind?: unknown })?.kind)}).`,
+      });
+    }
+  }
+}
 
 @Injectable()
 export class TicketsService {
@@ -74,6 +117,9 @@ export class TicketsService {
   }
 
   async create(actor: TicketActor, dto: CreateTicketDto): Promise<Ticket> {
+    // Lo primero: sin autor no se escribe nada, ni ticket ni evento.
+    const actorColumns = resolveActorColumns(actor);
+
     if (dto.clientId) await this.clients.findByIdOrFail(dto.clientId);
     if (dto.projectId) await this.projects.findById(dto.projectId);
 
@@ -116,8 +162,8 @@ export class TicketsService {
           slaPolicyId: slaInit.slaPolicyId,
           slaResponseDueAt: slaInit.slaResponseDueAt,
           slaResolutionDueAt: slaInit.slaResolutionDueAt,
-          createdBy: actor.kind === 'STAFF' ? actor.userId : null,
-          createdByClientUserId: actor.kind === 'CLIENT' ? actor.clientUserId : null,
+          createdBy: actorColumns.createdBy,
+          createdByClientUserId: actorColumns.createdByClientUserId,
         }),
       );
 
@@ -128,8 +174,9 @@ export class TicketsService {
         eventRepo.create({
           ticketId: ticket.id,
           type: 'CREATED',
-          actorUserId: actor.kind === 'STAFF' ? actor.userId : null,
-          actorClientUserId: actor.kind === 'CLIENT' ? actor.clientUserId : null,
+          // Las mismas columnas que el ticket: un solo reparto para los dos.
+          actorUserId: actorColumns.createdBy,
+          actorClientUserId: actorColumns.createdByClientUserId,
           fromStatus: null,
           toStatus: 'NUEVO',
           reason: null,
