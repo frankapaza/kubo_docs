@@ -3,7 +3,11 @@ import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 
 import { NotificationTemplatesService } from './notification-templates.service';
-import { UpdateNotificationTemplateDto } from './dto/update-notification-template.dto';
+import {
+  BODY_MD_MAX_LENGTH,
+  TEXT_COLUMN_MAX_BYTES,
+  UpdateNotificationTemplateDto,
+} from './dto/update-notification-template.dto';
 
 /**
  * Tres de las siete plantillas sembradas por la migración 015, suficientes
@@ -306,5 +310,42 @@ describe('el dto de actualización', () => {
     const instancia = plainToInstance(UpdateNotificationTemplateDto, {});
     const errores = await validate(instancia, { whitelist: true, forbidNonWhitelisted: true });
     expect(errores).toEqual([]);
+  });
+
+  /**
+   * `subject` ya tenía tope, casando con su `VARCHAR(300)`. `bodyMd` no tenía
+   * ninguno, y su columna es un `TEXT`: 65 535 **bytes**. Con MySQL en
+   * `STRICT_TRANS_TABLES` pasarse no trunca, aborta, así que un cuerpo enorme
+   * salía como un 500 crudo en vez del 400 en español que el editor del panel
+   * sabe enseñar.
+   */
+  describe('el tope del cuerpo', () => {
+    const validarBody = (bodyMd: string) =>
+      validate(plainToInstance(UpdateNotificationTemplateDto, { bodyMd }), {
+        whitelist: true,
+        forbidNonWhitelisted: true,
+      });
+
+    it('rechaza un cuerpo que no cabría en la columna, y lo dice en español', async () => {
+      const errores = await validarBody('x'.repeat(BODY_MD_MAX_LENGTH + 1));
+
+      expect(errores).toHaveLength(1);
+      expect(Object.values(errores[0].constraints ?? {}).join(' ')).toMatch(/cuerpo|caracteres/i);
+    });
+
+    it('acepta uno justo en el tope', async () => {
+      expect(await validarBody('x'.repeat(BODY_MD_MAX_LENGTH))).toEqual([]);
+    });
+
+    /**
+     * El tope se cuenta en caracteres y la columna en bytes. En `utf8mb4` un
+     * carácter puede ocupar hasta tres bytes por unidad de las que cuenta
+     * `MaxLength`, así que el tope tiene que dejar sitio para el peor caso: si
+     * no, un cuerpo lleno de acentos pasaría la validación y reventaría el
+     * `UPDATE` igual que antes.
+     */
+    it('el tope deja sitio al peor caso en bytes de utf8mb4', () => {
+      expect(BODY_MD_MAX_LENGTH * 3).toBeLessThan(TEXT_COLUMN_MAX_BYTES);
+    });
   });
 });
