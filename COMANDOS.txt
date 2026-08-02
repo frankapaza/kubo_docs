@@ -442,12 +442,15 @@ de datos vacío.
 No hay runner de migraciones: este paso es manual y es responsabilidad
 de quien despliega.
 
-Aplicar una migración (ejemplo con la 013 del portal de clientes):
+Aplicar una migración (las del portal de clientes, en orden):
 
   cd ~/kubo
   docker compose exec -T mysql \
     mysql -uroot -p"$MYSQL_ROOT_PASSWORD" kubo_devdocs \
     < backend/sql/migrations/013_portal_clientes.sql
+  docker compose exec -T mysql \
+    mysql -uroot -p"$MYSQL_ROOT_PASSWORD" kubo_devdocs \
+    < backend/sql/migrations/014_audit_client_user.sql
 
 Las migraciones son idempotentes (CREATE TABLE IF NOT EXISTS y ALTER
 guardados con information_schema): reejecutar una ya aplicada no hace

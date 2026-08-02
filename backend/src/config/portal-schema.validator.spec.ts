@@ -10,6 +10,11 @@ const COLUMNAS_013 = [
   { tableName: 'work_item_events', columnName: 'actor_client_user_id' },
 ];
 
+/** La columna que añade la 014: la autoría de cliente en la auditoría. */
+const COLUMNA_014 = { tableName: 'audit_log', columnName: 'client_user_id' };
+
+const COLUMNAS_ESPERADAS = [...COLUMNAS_013, COLUMNA_014];
+
 /**
  * DataSource de mentira: responde a la consulta de tablas y a la de columnas
  * segun el catalogo que se le pase, igual que haria information_schema.
@@ -42,28 +47,39 @@ describe('PortalSchemaValidator', () => {
 
   afterEach(() => jest.restoreAllMocks());
 
-  it('arranca si la tabla y las cuatro columnas de la 013 estan', async () => {
+  it('arranca si la tabla y todas las columnas esperadas estan', async () => {
     await expect(
-      build(['client_users'], COLUMNAS_013).onApplicationBootstrap(),
+      build(['client_users'], COLUMNAS_ESPERADAS).onApplicationBootstrap(),
     ).resolves.toBeUndefined();
     expect(log).toHaveBeenCalled();
   });
 
   it('aborta si falta la tabla client_users', async () => {
-    await expect(build([], COLUMNAS_013).onApplicationBootstrap()).rejects.toThrow(
+    await expect(build([], COLUMNAS_ESPERADAS).onApplicationBootstrap()).rejects.toThrow(
       /client_users/,
     );
   });
 
-  it.each(COLUMNAS_013.map((c) => [`${c.tableName}.${c.columnName}`, c]))(
+  it.each(COLUMNAS_ESPERADAS.map((c) => [`${c.tableName}.${c.columnName}`, c]))(
     'aborta si falta la columna %s',
     async (etiqueta, ausente) => {
-      const presentes = COLUMNAS_013.filter((c) => c !== ausente);
+      const presentes = COLUMNAS_ESPERADAS.filter((c) => c !== ausente);
       await expect(
         build(['client_users'], presentes).onApplicationBootstrap(),
       ).rejects.toThrow(new RegExp(etiqueta as string));
     },
   );
+
+  it('atribuye cada ausencia a su migracion: la 014 es la de audit_log', async () => {
+    const error = await build(['client_users'], COLUMNAS_013)
+      .onApplicationBootstrap()
+      .catch((e: Error) => e);
+    const message = (error as Error).message;
+    expect(message).toContain('014_audit_client_user.sql');
+    expect(message).toContain('audit_log.client_user_id');
+    // Solo se nombra lo que de verdad falta: la 013 esta aplicada.
+    expect(message).not.toContain('013_portal_clientes.sql');
+  });
 
   it('el mensaje nombra la migracion que falta y como aplicarla', async () => {
     const error = await build([], [])
@@ -82,7 +98,7 @@ describe('PortalSchemaValidator', () => {
       .catch((e: Error) => e);
     const message = (error as Error).message;
     expect(message).toContain('client_users');
-    for (const { tableName, columnName } of COLUMNAS_013) {
+    for (const { tableName, columnName } of COLUMNAS_ESPERADAS) {
       expect(message).toContain(`${tableName}.${columnName}`);
     }
   });

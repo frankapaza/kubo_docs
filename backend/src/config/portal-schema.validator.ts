@@ -1,10 +1,18 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 
+/** Algo que el código da por hecho y la base no tiene todavía. */
+interface MissingItem {
+  kind: 'tabla' | 'columna';
+  /** `client_users` o `tickets.created_by_client_user_id`. */
+  name: string;
+  migration: string;
+}
+
 /** Cómo aplicar a mano una migración sobre una base que ya tiene datos. */
-const COMO_APLICARLA =
+const comoAplicarla = (migration: string): string =>
   'docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" kubo_devdocs ' +
-  '< backend/sql/migrations/013_portal_clientes.sql';
+  `< backend/sql/migrations/${migration}`;
 
 /**
  * Comprueba al arranque que la migración 013 está aplicada, y aborta si no.
@@ -37,51 +45,65 @@ const COMO_APLICARLA =
 export class PortalSchemaValidator implements OnApplicationBootstrap {
   private readonly logger = new Logger('PortalSchemaValidator');
 
-  /** La migración que aporta todo lo que se comprueba aquí. */
-  private static readonly MIGRATION = '013_portal_clientes.sql';
+  private static readonly MIGRATION_013 = '013_portal_clientes.sql';
+  private static readonly MIGRATION_014 = '014_audit_client_user.sql';
 
   /** Tablas nuevas de la 013. */
-  private static readonly REQUIRED_TABLES = ['client_users'] as const;
+  private static readonly REQUIRED_TABLES: ReadonlyArray<{ table: string; migration: string }> = [
+    { table: 'client_users', migration: PortalSchemaValidator.MIGRATION_013 },
+  ];
 
   /**
-   * Columnas hermanas del actor que la 013 añade a tablas ya existentes. Son
-   * las peligrosas: sin ellas, las entidades mienten sobre el esquema real y
-   * el módulo de tickets interno deja de funcionar.
+   * Columnas hermanas del actor que las migraciones del portal añaden a tablas
+   * ya existentes. Son las peligrosas: sin ellas, las entidades mienten sobre
+   * el esquema real y lo que deja de funcionar es código que ya existía.
    */
-  private static readonly REQUIRED_COLUMNS: ReadonlyArray<{ table: string; column: string }> = [
-    { table: 'tickets', column: 'created_by_client_user_id' },
-    { table: 'ticket_events', column: 'actor_client_user_id' },
-    { table: 'work_items', column: 'created_by_client_user_id' },
-    { table: 'work_item_events', column: 'actor_client_user_id' },
+  private static readonly REQUIRED_COLUMNS: ReadonlyArray<{
+    table: string;
+    column: string;
+    migration: string;
+  }> = [
+    { table: 'tickets', column: 'created_by_client_user_id', migration: PortalSchemaValidator.MIGRATION_013 },
+    { table: 'ticket_events', column: 'actor_client_user_id', migration: PortalSchemaValidator.MIGRATION_013 },
+    { table: 'work_items', column: 'created_by_client_user_id', migration: PortalSchemaValidator.MIGRATION_013 },
+    { table: 'work_item_events', column: 'actor_client_user_id', migration: PortalSchemaValidator.MIGRATION_013 },
+    // 014: sin ella, la entidad AuditLog pide una columna que no existe y
+    // TODA la auditoría se pierde en silencio (el interceptor degrada el
+    // fallo del INSERT a un warn por petición).
+    { table: 'audit_log', column: 'client_user_id', migration: PortalSchemaValidator.MIGRATION_014 },
   ];
 
   constructor(private readonly dataSource: DataSource) {}
 
   async onApplicationBootstrap(): Promise<void> {
-    const missingTables = await this.findMissingTables();
-    const missingColumns = await this.findMissingColumns();
+    const missing = [...(await this.findMissingTables()), ...(await this.findMissingColumns())];
 
-    if (missingTables.length > 0 || missingColumns.length > 0) {
-      throw new Error(this.buildMessage(missingTables, missingColumns));
+    if (missing.length > 0) {
+      throw new Error(PortalSchemaValidator.buildMessage(missing));
     }
 
     this.logger.log(
-      `Esquema del portal de clientes verificado: la migración ${PortalSchemaValidator.MIGRATION} ` +
-        'está aplicada (client_users y las cuatro columnas del actor existen).',
+      'Esquema del portal de clientes verificado: las migraciones ' +
+        `${PortalSchemaValidator.MIGRATION_013} y ${PortalSchemaValidator.MIGRATION_014} están ` +
+        'aplicadas (client_users y las columnas del actor existen).',
     );
   }
 
-  private async findMissingTables(): Promise<string[]> {
+  private async findMissingTables(): Promise<MissingItem[]> {
     const rows: Array<{ tableName: string }> = await this.dataSource.query(
       'SELECT TABLE_NAME AS tableName FROM information_schema.TABLES ' +
         'WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN (?)',
-      [[...PortalSchemaValidator.REQUIRED_TABLES]],
+      [PortalSchemaValidator.REQUIRED_TABLES.map((t) => t.table)],
     );
     const present = new Set(rows.map((r) => r.tableName));
-    return PortalSchemaValidator.REQUIRED_TABLES.filter((t) => !present.has(t));
+    return PortalSchemaValidator.REQUIRED_TABLES.filter((t) => !present.has(t.table)).map((t) => ({
+      kind: 'tabla',
+      name: t.table,
+      migration: t.migration,
+    }));
   }
 
-  private async findMissingColumns(): Promise<string[]> {
+  private async findMissingColumns(): Promise<MissingItem[]> {
     const tables = [...new Set(PortalSchemaValidator.REQUIRED_COLUMNS.map((c) => c.table))];
     const rows: Array<{ tableName: string; columnName: string }> = await this.dataSource.query(
       'SELECT TABLE_NAME AS tableName, COLUMN_NAME AS columnName FROM information_schema.COLUMNS ' +
@@ -89,27 +111,43 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
       [tables],
     );
     const present = new Set(rows.map((r) => `${r.tableName}.${r.columnName}`));
-    return PortalSchemaValidator.REQUIRED_COLUMNS.map((c) => `${c.table}.${c.column}`).filter(
-      (qualified) => !present.has(qualified),
-    );
+    return PortalSchemaValidator.REQUIRED_COLUMNS.filter(
+      (c) => !present.has(`${c.table}.${c.column}`),
+    ).map((c) => ({ kind: 'columna', name: `${c.table}.${c.column}`, migration: c.migration }));
   }
 
-  private buildMessage(missingTables: string[], missingColumns: string[]): string {
-    const faltantes = [
-      missingTables.length > 0 ? `tablas: ${missingTables.join(', ')}` : null,
-      missingColumns.length > 0 ? `columnas: ${missingColumns.join(', ')}` : null,
-    ]
-      .filter(Boolean)
-      .join('; ');
+  /**
+   * Un solo mensaje con todo lo que falta, agrupado por migración: el operador
+   * ve de una vez qué ficheros tiene que pasar y en qué orden, sin arrancar
+   * cinco veces para descubrirlos de uno en uno.
+   */
+  private static buildMessage(missing: MissingItem[]): string {
+    const porMigracion = [...new Set(missing.map((m) => m.migration))].sort();
+
+    const detalle = porMigracion
+      .map((migration) => {
+        const suyos = missing.filter((m) => m.migration === migration);
+        const tablas = suyos.filter((m) => m.kind === 'tabla').map((m) => m.name);
+        const columnas = suyos.filter((m) => m.kind === 'columna').map((m) => m.name);
+        const que = [
+          tablas.length > 0 ? `tablas: ${tablas.join(', ')}` : null,
+          columnas.length > 0 ? `columnas: ${columnas.join(', ')}` : null,
+        ]
+          .filter(Boolean)
+          .join('; ');
+        return `${migration} (${que})\n    ${comoAplicarla(migration)}`;
+      })
+      .join('\n  ');
 
     return (
-      `Falta aplicar la migración ${PortalSchemaValidator.MIGRATION} en esta base de datos ` +
-      `(${faltantes}). Las entidades Ticket y TicketEvent ya declaran esas columnas, así que ` +
-      'TypeORM las emite en todo SELECT e INSERT: sin la migración, el listado de tickets, el ' +
-      'detalle, las transiciones, la asignación y el escaneo de SLA responden 500 ' +
-      '(ER_BAD_FIELD_ERROR). Las migraciones solo se ejecutan por docker-entrypoint-initdb.d, y ' +
-      'MySQL solo corre ese directorio sobre un datadir vacío: una base que ya tenía datos NO la ' +
-      `recibe al reconstruir los contenedores. Aplícala a mano y vuelve a arrancar: ${COMO_APLICARLA}`
+      'Faltan migraciones por aplicar en esta base de datos:\n  ' +
+      `${detalle}\n` +
+      'Las entidades ya declaran esas columnas, así que TypeORM las emite en todo SELECT e ' +
+      'INSERT: sin la 013, el listado de tickets, el detalle, las transiciones, la asignación y ' +
+      'el escaneo de SLA responden 500 (ER_BAD_FIELD_ERROR); sin la 014 se pierde toda la ' +
+      'auditoría. Las migraciones solo se ejecutan por docker-entrypoint-initdb.d, y MySQL solo ' +
+      'corre ese directorio sobre un datadir vacío: una base que ya tenía datos NO las recibe al ' +
+      'reconstruir los contenedores. Aplícalas a mano (son idempotentes) y vuelve a arrancar.'
     );
   }
 }

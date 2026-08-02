@@ -9,12 +9,22 @@ import {
 @Entity('audit_log')
 @Index('idx_audit_entity', ['entityType', 'entityId'])
 @Index('idx_audit_user', ['userId', 'createdAt'])
+@Index('idx_audit_client_user', ['clientUserId', 'createdAt'])
 export class AuditLog {
   @PrimaryGeneratedColumn({ type: 'bigint', unsigned: true })
   id!: number;
 
+  /** Quién del personal actuó. FK a `users(id)`. Nulo si actuó un cliente. */
   @Column({ name: 'user_id', type: 'bigint', unsigned: true, nullable: true })
   userId!: number | null;
+
+  /**
+   * Quién del portal actuó (`client_users.id`, migración 014). Nunca se
+   * rellena a la vez que `userId`: el par de columnas es lo que distingue un
+   * asiento del personal de uno de cliente y de uno del sistema (ambas nulas).
+   */
+  @Column({ name: 'client_user_id', type: 'bigint', unsigned: true, nullable: true })
+  clientUserId!: number | null;
 
   @Column({ type: 'varchar', length: 80 })
   action!: string;
