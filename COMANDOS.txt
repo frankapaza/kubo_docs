@@ -419,9 +419,53 @@ Ya dentro del servidor:
   # Extraer el nuevo código encima (mantiene .env.production)
   tar -xzf ~/kubo.tar.gz
 
+  # >>> APLICAR LAS MIGRACIONES SQL NUEVAS (ver PASO 3-bis, más abajo) <<<
+  # Obligatorio si la versión trae migraciones. Va ANTES del build.
+
   # Reconstruir y relanzar contenedores
   docker compose build
   docker compose up -d
+
+-----------------------------------------------------------------------
+  PASO 3-bis — APLICAR MIGRACIONES SQL  (NO ES AUTOMÁTICO)
+-----------------------------------------------------------------------
+Los .sql de backend/sql/migrations/ están montados en
+/docker-entrypoint-initdb.d del contenedor mysql, y MySQL ejecuta ese
+directorio UNA SOLA VEZ: únicamente cuando arranca sobre un directorio
+de datos vacío.
+
+  >> El volumen mysql_data sobrevive a `docker compose up -d --build`.
+  >> Por lo tanto, en CUALQUIER BASE QUE YA TENGA DATOS —producción, o
+  >> cualquier entorno que no se acabe de crear desde cero— las
+  >> migraciones nuevas NO se aplican solas. Hay que ejecutarlas a mano.
+
+No hay runner de migraciones: este paso es manual y es responsabilidad
+de quien despliega.
+
+Aplicar una migración (ejemplo con la 013 del portal de clientes):
+
+  cd ~/kubo
+  docker compose exec -T mysql \
+    mysql -uroot -p"$MYSQL_ROOT_PASSWORD" kubo_devdocs \
+    < backend/sql/migrations/013_portal_clientes.sql
+
+Las migraciones son idempotentes (CREATE TABLE IF NOT EXISTS y ALTER
+guardados con information_schema): reejecutar una ya aplicada no hace
+nada. Ante la duda, se vuelven a pasar todas en orden.
+
+Comprobar que quedó aplicada:
+
+  docker compose exec -T mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" \
+    kubo_devdocs -e "SHOW TABLES LIKE 'client_users'; \
+    SHOW COLUMNS FROM tickets LIKE 'created_by_client_user_id';"
+
+Si se olvida este paso, el backend NO arranca: PortalSchemaValidator
+comprueba el esquema al boot y aborta diciendo qué migración falta. Ese
+aborto es deliberado — sin la 013, las entidades Ticket y TicketEvent
+piden columnas que no existen y TODO el módulo de tickets (listado,
+detalle, transiciones, asignación, SLA) responde 500. Se ve en:
+
+  docker compose logs --tail=50 backend
 
   # Ver que todo quedó arriba
   docker compose ps
