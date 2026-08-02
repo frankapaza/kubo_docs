@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 
 import { TicketsRepository } from '../tickets/tickets.repository';
 import { TicketEventsService } from '../tickets/ticket-events.service';
@@ -39,6 +45,37 @@ function ticketNotFound(): NotFoundException {
  */
 function sameId(a: unknown, b: unknown): boolean {
   return a !== null && a !== undefined && Number(a) === Number(b);
+}
+
+/**
+ * Exige que el identificador de la sesión sea un entero positivo antes de
+ * usarlo para acotar nada.
+ *
+ * No es paranoia: `TicketsRepository.list` monta el filtro con
+ * `if (filters.clientId) qb.andWhere('t.client_id = :clientId', …)`, así que un
+ * `clientId` falsy —`0`, `NaN`, `undefined`— **hace desaparecer el WHERE** y la
+ * consulta devuelve hasta 500 tickets de todas las empresas. Ese repositorio lo
+ * comparte el panel interno, donde "sin filtro de cliente" es una consulta
+ * legítima, así que la forma de fallo no se corrige allí: se corrige aquí, que
+ * es donde importa. El portal falla cerrado.
+ *
+ * Hoy el valor no puede llegar mal —`client_users.client_id` es
+ * `bigint unsigned NOT NULL` y el secreto propio del portal impide que un token
+ * del personal valide aquí— pero la frontera no debe depender de eso.
+ */
+function assertSessionScope(value: number, campo: 'clientId' | 'clientUserId'): void {
+  if (Number.isInteger(value) && value > 0) return;
+
+  // Qué campo falló va al log, nunca a la respuesta: el cuerpo se queda en el
+  // `{ code, message }` de siempre. Si esto salta, es un fallo de programación
+  // o un token manipulado, y en ambos casos interesa verlo en el servidor.
+  new Logger(PortalTicketsService.name).error(
+    `Sesión de portal sin ${campo} utilizable (${String(value)}): se rechaza la petición sin consultar.`,
+  );
+  throw new UnauthorizedException({
+    code: 'UNAUTHORIZED',
+    message: 'La sesión no identifica a ninguna empresa.',
+  });
 }
 
 function toIso(value: Date | string | null | undefined): string | null {
@@ -95,11 +132,15 @@ export class PortalTicketsService {
   ) {}
 
   async list(clientId: number): Promise<PortalTicketView[]> {
+    // Antes de consultar, no después: si el `clientId` no sirve para acotar,
+    // `TicketsRepository.list` devolvería tickets de todas las empresas.
+    assertSessionScope(clientId, 'clientId');
     const rows = await this.tickets.list({ clientId });
     return rows.map((t) => this.toPortalView(t));
   }
 
   async detail(clientId: number, ticketId: number): Promise<PortalTicketView> {
+    assertSessionScope(clientId, 'clientId');
     const ticket = await this.tickets.findById(ticketId);
     // La comprobación de pertenencia va aquí y no en la consulta a propósito:
     // es explícita, y el mismo error cubre "no existe" y "no es tuyo".
@@ -127,6 +168,11 @@ export class PortalTicketsService {
     clientId: number,
     dto: CreatePortalTicketDto,
   ): Promise<PortalTicketView> {
+    // Los dos: el `clientId` acota el ticket y el `clientUserId` queda grabado
+    // como su autor. Un cero o un NaN aquí crearía una fila huérfana.
+    assertSessionScope(clientId, 'clientId');
+    assertSessionScope(clientUserId, 'clientUserId');
+
     const systemId = await this.resolveSystemId(clientId, dto.systemId);
 
     const ticket = await this.ticketsService.create(
@@ -143,6 +189,7 @@ export class PortalTicketsService {
   }
 
   async systems(clientId: number): Promise<PortalClientSystemView[]> {
+    assertSessionScope(clientId, 'clientId');
     const rows = await this.systemsRepo.listByClient(clientId);
     return rows.filter((s) => !!s.isActive).map((s) => ({ id: Number(s.id), name: s.name }));
   }

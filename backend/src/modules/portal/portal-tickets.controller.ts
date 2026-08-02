@@ -23,10 +23,6 @@ export class PortalTicketsController {
     return this.service.list(user.clientId);
   }
 
-  /**
-   * Declarado antes de `tickets/:id` para que Nest no interprete "systems"
-   * como un id al resolver las rutas en orden.
-   */
   @Get('systems')
   systems(@CurrentClientUser() user: AuthClientUser): Promise<PortalClientSystemView[]> {
     return this.service.systems(user.clientId);

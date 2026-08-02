@@ -1,5 +1,8 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { PortalTicketsService } from './portal-tickets.service';
+import { CreatePortalTicketDto } from './dto/create-portal-ticket.dto';
 
 /**
  * Un ticket "completo": trae todas las columnas sensibles que el portal NO
@@ -75,11 +78,43 @@ const fullEvent = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+/**
+ * El ticket de la empresa de al lado. Vive siempre en el doble del
+ * repositorio: es el control negativo permanente de todos los tests de
+ * listado. Si el filtro por cliente desapareciera, este ticket aparecería.
+ */
+const TICKET_AJENO = fullTicket({
+  id: 999,
+  code: 'KB-0999',
+  clientId: 99,
+  subject: 'Ticket confidencial de otra empresa',
+  rawText: 'no debe salir jamas por el portal del cliente 7',
+});
+
+/** Los ids de la base llegan como cadena en unas columnas y número en otras. */
+const mismoId = (a: unknown, b: unknown) =>
+  a !== null && a !== undefined && Number(a) === Number(b);
+
 const makeService = (ticketOver: Record<string, unknown> = {}) => {
   const ticket = fullTicket(ticketOver);
+
+  /**
+   * El doble **filtra de verdad**, no devuelve siempre lo mismo.
+   *
+   * Con un doble que ignorase los filtros, `expect(repo.list).toHaveBeenCalledWith(...)`
+   * solo demostraría que el servicio *dice* el clientId correcto, no que la
+   * respuesta esté acotada: un repositorio que se saltara el WHERE dejaría el
+   * test en verde. Al filtrar aquí, las aserciones sobre lo devuelto pasan a
+   * ser aserciones reales sobre la frontera.
+   */
+  const almacen = [ticket, TICKET_AJENO];
   const repo = {
-    list: jest.fn().mockResolvedValue([ticket]),
-    findById: jest.fn().mockResolvedValue(ticket),
+    list: jest.fn((filters: { clientId?: number }) =>
+      Promise.resolve(almacen.filter((t) => mismoId(t.clientId, filters?.clientId))),
+    ),
+    findById: jest.fn((id: number) =>
+      Promise.resolve(almacen.find((t) => mismoId(t.id, id)) ?? null),
+    ),
   };
   // Un timeline realista: el ciclo de vida mezclado con los eventos internos
   // (asignación, SLA, prioridad, marcadores de Jira) que el portal debe callar.
@@ -121,6 +156,64 @@ describe('la frontera', () => {
     const { service, repo } = makeService();
     await service.list(7);
     expect(repo.list).toHaveBeenCalledWith(expect.objectContaining({ clientId: 7 }));
+  });
+
+  it('el listado no devuelve ni un ticket de otra empresa', async () => {
+    const { service } = makeService();
+    const vistos = await service.list(7);
+    expect(vistos).toHaveLength(1);
+    expect(vistos.map((t) => t.id)).not.toContain(999);
+    expect(JSON.stringify(vistos)).not.toContain('otra empresa');
+  });
+
+  it('el listado del otro cliente tampoco ve los nuestros: el filtro va en los dos sentidos', async () => {
+    const { service } = makeService();
+    const vistos = await service.list(99);
+    expect(vistos.map((t) => t.id)).toEqual([999]);
+  });
+
+  // El filtro del repositorio compartido falla *abierto*: `if (filters.clientId)`
+  // deja caer el WHERE si el valor es falsy, y la consulta devolvería tickets de
+  // todas las empresas. El portal no puede delegar su frontera en eso.
+  it.each([
+    ['cero', 0],
+    ['indefinido', undefined],
+    ['nulo', null],
+    ['NaN', NaN],
+    ['negativo', -1],
+    ['decimal', 1.5],
+  ])('list rechaza un clientId %s sin llegar a consultar', async (_etiqueta, valor) => {
+    const { service, repo } = makeService();
+    await expect(service.list(valor as any)).rejects.toThrow();
+    expect(repo.list).not.toHaveBeenCalled();
+  });
+
+  it('detail rechaza un clientId invalido sin llegar a consultar', async () => {
+    const { service, repo } = makeService();
+    await expect(service.detail(0, 1)).rejects.toThrow();
+    expect(repo.findById).not.toHaveBeenCalled();
+  });
+
+  it('create rechaza un clientId invalido sin llegar a escribir', async () => {
+    const { service, tickets } = makeService();
+    await expect(
+      service.create(11, 0, { subject: 'x', description: 'y' } as any),
+    ).rejects.toThrow();
+    expect(tickets.create).not.toHaveBeenCalled();
+  });
+
+  it('create rechaza un clientUserId invalido sin llegar a escribir', async () => {
+    const { service, tickets } = makeService();
+    await expect(
+      service.create(0, 7, { subject: 'x', description: 'y' } as any),
+    ).rejects.toThrow();
+    expect(tickets.create).not.toHaveBeenCalled();
+  });
+
+  it('systems rechaza un clientId invalido sin llegar a consultar', async () => {
+    const { service, systems } = makeService();
+    await expect(service.systems(undefined as any)).rejects.toThrow();
+    expect(systems.listByClient).not.toHaveBeenCalled();
   });
 
   it('el detalle de un ticket de otro cliente devuelve NOT_FOUND, no el ticket', async () => {
@@ -325,5 +418,37 @@ describe('la proyeccion', () => {
     expect(view.systemId).toBe(5);
     expect(view.createdAt).toBe('2026-08-01T09:00:00.000Z');
     expect(view.resolvedAt).toBeNull();
+  });
+});
+
+describe('el dto de alta', () => {
+  const validar = async (dto: Record<string, unknown>) => {
+    const instancia = plainToInstance(CreatePortalTicketDto, dto);
+    const errores = await validate(instancia);
+    return errores.map((e) => e.property);
+  };
+
+  const base = { subject: 'Asunto', description: 'Detalle' };
+
+  it('acepta el alta minima', async () => {
+    expect(await validar(base)).toEqual([]);
+  });
+
+  it('exige subject y description', async () => {
+    expect((await validar({})).sort()).toEqual(['description', 'subject']);
+  });
+
+  // `raw_text` es TEXT utf8mb4: 65535 *bytes*, no caracteres. Un caracter puede
+  // ocupar hasta 4, asi que 16383 es el mayor numero de caracteres que cabe
+  // siempre (65532 bytes en el peor caso). Con MySQL en STRICT_TRANS_TABLES,
+  // pasarse es un error 1406 -> un 500 al cliente en vez de un 400.
+  it('acota description a lo que cabe de verdad en la columna', async () => {
+    expect(await validar({ ...base, description: 'a'.repeat(16383) })).toEqual([]);
+    expect(await validar({ ...base, description: 'a'.repeat(16384) })).toEqual(['description']);
+  });
+
+  it('acota subject a los 240 de su columna', async () => {
+    expect(await validar({ ...base, subject: 'a'.repeat(240) })).toEqual([]);
+    expect(await validar({ ...base, subject: 'a'.repeat(241) })).toEqual(['subject']);
   });
 });
