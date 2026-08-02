@@ -162,22 +162,39 @@ jobs:
             docker compose up -d
 
             echo "===== 7. Esperar a que el backend arranque ====="
-            # Los dos validadores del arranque abortan con un mensaje que dice
-            # que falta. Si el backend no responde en dos minutos, volcamos ese
-            # mensaje en el log del workflow para no tener que entrar a buscarlo.
-            for i in $(seq 1 24); do
-              CODIGO=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost/api/v1/tickets || echo 000)
-              # 401 es la respuesta buena aqui: significa que Nest esta en pie y
-              # el guard de sesion responde. 200 tambien vale; 000 es que no hay
-              # nadie escuchando todavia.
-              if [ "$CODIGO" != "000" ] && [ "$CODIGO" != "502" ] && [ "$CODIGO" != "503" ]; then
-                echo "Backend respondiendo (HTTP $CODIGO) al intento $i."
-                docker compose logs --tail 30 backend
-                echo "Deploy completado."
-                exit 0
+            # Se mira el log del contenedor, no una peticion HTTP.
+            #
+            # Un `curl http://localhost/...` no sirve aqui: Caddy sirve el sitio
+            # por nombre (docs.kuboti.com), asi que una peticion con Host
+            # localhost no casa con ninguna ruta y devuelve 404. Ese 404 se
+            # parece a "vivo" y llegaria igual con el backend muerto, que es
+            # justo el caso que hay que detectar.
+            #
+            # Los dos validadores del arranque abortan con un mensaje explicito;
+            # eso es lo que se busca, junto a la linea de Nest en pie.
+            ARRANCO=0
+            for i in $(seq 1 30); do
+              LOG=$(docker compose logs --tail 200 backend 2>&1 || true)
+              if echo "$LOG" | grep -q "Nest application successfully started"; then
+                ARRANCO=1
+                break
+              fi
+              if echo "$LOG" | grep -qE "PortalSchemaValidator|JwtSecretsValidator|DbTimezoneInitializer" \
+                 && echo "$LOG" | grep -qiE "falta|abort|Error:"; then
+                echo "UN VALIDADOR DE ARRANQUE ABORTO. Lo que dice:"
+                echo "$LOG" | tail -60
+                break
               fi
               sleep 5
             done
+
+            if [ "$ARRANCO" = "1" ]; then
+              echo "Backend en pie."
+              docker compose ps
+              docker compose logs --tail 40 backend
+              echo "Deploy completado."
+              exit 0
+            fi
 
             echo "EL BACKEND NO ARRANCO. Log completo:"
             docker compose logs --tail 120 backend
