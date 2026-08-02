@@ -98,6 +98,23 @@ describe('Envío de prueba de plantilla — limitación de frecuencia (integraci
     expect(res.body).toMatchObject({ code: 'TOO_MANY_REQUESTS', message: THROTTLED_MESSAGE });
   });
 
+  /**
+   * El destinatario sale del token y de ningún otro sitio. Los tests unitarios
+   * no pueden probarlo: llaman al método en TypeScript, donde forjar un `to`
+   * ni siquiera es expresable porque el parámetro no existe. Solo una petición
+   * HTTP de verdad, con el cuerpo puesto a mano, comprueba que Nest no lo liga
+   * y que el correo no acaba donde diga el atacante.
+   */
+  it('ignora un destinatario falsificado en el cuerpo y usa el del token', async () => {
+    const res = await app.post('/notification-templates/1/test', {
+      body: { to: 'atacante@ejemplo-malicioso.com' },
+    });
+
+    expect(res.status).toBe(201);
+    expect(sendTest).toHaveBeenCalledWith(1, ADMIN_EMAIL);
+    expect(sendTest).not.toHaveBeenCalledWith(expect.anything(), 'atacante@ejemplo-malicioso.com');
+  });
+
   it('la previsualización no se limita: no envía nada, y acotarla sería molestar sin motivo', async () => {
     for (let i = 0; i < 6; i += 1) {
       const res = await app.post('/notification-templates/1/preview');
