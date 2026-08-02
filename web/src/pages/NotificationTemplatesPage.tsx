@@ -79,16 +79,24 @@ export default function NotificationTemplatesPage() {
         </Card>
       ) : (
         <>
+          {/*
+            Los dos subtítulos dicen exactamente a quién escribe el backend, y
+            eso es más estrecho de lo que parece: al cliente le escribe el
+            autor del ticket y nadie más de su empresa, y de los dos avisos de
+            equipo solo el de SLA puede acabar en el responsable. Un texto
+            aproximado aquí hace que un ADMIN redacte para un lector que no
+            existe.
+          */}
           <AudienceSection
             title="Avisos a clientes"
-            subtitle="Los recibe la empresa cliente en el correo de contacto del ticket. Solo pueden usar las seis variables que el portal ya deja ver."
+            subtitle="Los recibe quien abrió el ticket desde el portal, y nadie más de su empresa: si lo abrió el equipo por teléfono, no sale ninguno. Solo pueden usar las seis variables que el portal ya deja ver."
             icon={<UsersIcon size={18} />}
             templates={byAudience('CLIENT')}
             onEdit={setEditingId}
           />
           <AudienceSection
             title="Avisos al equipo"
-            subtitle="Los recibe el responsable del ticket o, si no hay uno, el buzón del equipo configurado en Ajustes del área de trabajo."
+            subtitle="El de SLA en riesgo va al responsable del ticket y, si no tiene o está dado de baja, al buzón del equipo. El de ticket nuevo va siempre al buzón. Se configura en Ajustes del área de trabajo; si está vacío, se usa la dirección del remitente."
             icon={<BellIcon size={18} />}
             templates={byAudience('TEAM')}
             onEdit={setEditingId}
