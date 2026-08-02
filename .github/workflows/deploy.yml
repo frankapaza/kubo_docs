@@ -4,6 +4,35 @@ on:
   push:
     branches: [main]
 
+# -----------------------------------------------------------------------------
+#  El despliegue prepara la base ANTES de reconstruir, y por eso es seguro.
+#
+#  Antes hacia solo `git pull && build && up -d`. Eso bastaba mientras el codigo
+#  nuevo funcionara sobre el esquema viejo, y dejo de bastar en cuanto una
+#  version empezo a exigir columnas nuevas: el backend aborta al arrancar si
+#  faltan (PortalSchemaValidator) o si faltan sus secretos (JwtSecretsValidator),
+#  a proposito —vale mas no servir que servir roto—, pero el resultado era la web
+#  caida hasta que alguien entrara por SSH a aplicar las migraciones.
+#
+#  El orden de aqui abajo hace que el fallo, si ocurre, sea "el despliegue no
+#  pasa" en vez de "la web se cae":
+#
+#    1-5  respaldo, entorno y migraciones. Nada de esto toca los contenedores en
+#         marcha: la version vieja sigue sirviendo. Las migraciones son aditivas
+#         y guardadas, asi que el codigo viejo simplemente ignora lo nuevo.
+#    6    solo si todo lo anterior salio bien, se reconstruye y se levanta.
+#
+#  `set -e` en la primera linea es lo que sostiene esa promesa: cualquier fallo
+#  en 1-5 corta el trabajo antes de tocar nada que este sirviendo.
+#
+#  Lo que este workflow NO hace, y no debe hacer:
+#
+#    · La migracion 011, que borra `client_requests`. Es la unica destructiva y
+#      la unica irreversible. Se aplica a mano, despues de comprobar que la
+#      version nueva funciona, para que hasta ese momento se pueda volver atras.
+#    · Tocar datos existentes. Solo anade tablas y columnas nulables.
+# -----------------------------------------------------------------------------
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -14,8 +43,146 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: 30m
           script: |
+            set -e
             cd /home/kubo/kubo
+
+            # Ejecuta un fichero .sql dentro del contenedor de mysql.
+            # El `sh -c` con comillas simples no es adorno: la contrasena vive
+            # DENTRO del contenedor, en MYSQL_ROOT_PASSWORD. Sin el la expandiria
+            # el shell del host, donde no existe, y mysql responderia
+            # "Access denied (using password: NO)".
+            sql_file() {
+              docker compose exec -T mysql \
+                sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' < "$1"
+            }
+            sql_query() {
+              printf '%s\n' "$1" | docker compose exec -T mysql \
+                sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -N -B "$MYSQL_DATABASE"'
+            }
+
+            echo "===== 1. Traer el codigo (no toca lo que esta sirviendo) ====="
             git pull
+            git log --oneline -1
+
+            echo "===== 2. Respaldo de la base ====="
+            # Lo primero, y antes de cualquier ALTER. Es lo unico que devuelve
+            # atras si algo sale mal.
+            RESPALDO=$HOME/respaldo-pre-deploy-$(date +%F-%H%M%S).sql
+            docker compose exec -T mysql \
+              sh -c 'exec mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines "$MYSQL_DATABASE"' \
+              > "$RESPALDO"
+            TAM=$(stat -c%s "$RESPALDO")
+            echo "Respaldo: $RESPALDO ($TAM bytes)"
+            if [ "$TAM" -lt 10000 ]; then
+              echo "ABORTA: el respaldo pesa $TAM bytes. Sin red de seguridad no se sigue."
+              exit 1
+            fi
+            # Solo los diez ultimos, para no llenar el disco.
+            ls -1t $HOME/respaldo-pre-deploy-*.sql | tail -n +11 | xargs -r rm -f
+
+            echo "===== 3. Variables de entorno que la version nueva exige ====="
+            cp .env.production $HOME/env-produccion-respaldo-$(date +%F-%H%M%S)
+
+            # Los secretos del portal se generan aqui si no existen. Solo si no
+            # existen: regenerarlos en cada despliegue cerraria la sesion de
+            # todos los usuarios del portal cada vez.
+            #
+            # JwtSecretsValidator aborta el arranque si los cuatro no son
+            # distintos, asi que `openssl rand` es tambien lo que garantiza que
+            # no colisionen.
+            for v in JWT_CLIENT_ACCESS_SECRET JWT_CLIENT_REFRESH_SECRET; do
+              if ! grep -qE "^${v}=.+" .env.production; then
+                echo "$v: no estaba, se genera"
+                printf '\n%s=%s\n' "$v" "$(openssl rand -base64 48)" >> .env.production
+              else
+                echo "$v: ya estaba, no se toca"
+              fi
+            done
+
+            # Sin esto los correos de aviso salen apuntando a localhost y el
+            # cliente no puede abrir su ticket desde el enlace.
+            if ! grep -qE '^FRONTEND_URL=.+' .env.production; then
+              echo "FRONTEND_URL: no estaba, se pone"
+              printf '\nFRONTEND_URL=https://docs.kuboti.com\n' >> .env.production
+            else
+              echo "FRONTEND_URL: $(grep -E '^FRONTEND_URL=' .env.production | head -1)"
+            fi
+
+            echo "===== 4. Migraciones ====="
+            # Todas guardadas con information_schema e idempotentes: reejecutar
+            # una ya aplicada no hace nada. Aditivas: la version vieja que sigue
+            # sirviendo ahora mismo ignora lo que anaden.
+            #
+            # `workspace_settings` no la crea ninguna migracion numerada, y el
+            # compose de produccion no la montaba, asi que puede no existir. La
+            # 015 le anade una columna, de modo que estos tres van antes. El
+            # orden entre ellos tampoco es libre.
+            EXISTE_WS=$(sql_query "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='workspace_settings';")
+            if [ "$EXISTE_WS" = "0" ]; then
+              echo "workspace_settings no existe: se crea"
+              for f in add_workspace_settings add_workspace_smtp_and_session add_workspace_audio_retention; do
+                echo "--- $f"
+                sql_file "backend/sql/$f.sql"
+              done
+            else
+              echo "workspace_settings ya existe"
+            fi
+
+            # La 011 NO esta aqui a proposito: borra client_requests, que la
+            # version vieja todavia usa. Se aplica a mano despues de validar.
+            for m in 010_service_desk 012_work_items 013_portal_clientes \
+                     014_audit_client_user 015_notificaciones \
+                     016_notify_next_attempt 017_plantillas_respuesta; do
+              echo "--- $m"
+              sql_file "backend/sql/migrations/$m.sql"
+            done
+
+            echo "===== 5. Comprobar antes de reconstruir ====="
+            # El sellado del historico de la 015 es lo unico irreversible de todo
+            # esto: si no funciono, el vigilante mandara un correo por cada evento
+            # antiguo, a clientes reales, y eso no se recoge. Mejor no desplegar.
+            PENDIENTES=$(sql_query "SELECT COUNT(*) FROM ticket_events WHERE notified_at IS NULL;")
+            PLANTILLAS=$(sql_query "SELECT COUNT(*) FROM notification_templates;")
+            echo "Eventos pendientes de notificar: $PENDIENTES (tiene que ser 0)"
+            echo "Plantillas de aviso: $PLANTILLAS (tienen que ser 7)"
+            if [ "$PENDIENTES" != "0" ]; then
+              echo "ABORTA: el sellado del historico no funciono. No se despliega."
+              echo "La version vieja sigue sirviendo, sin tocar."
+              exit 1
+            fi
+            if [ "$PLANTILLAS" != "7" ]; then
+              echo "ABORTA: se esperaban 7 plantillas sembradas y hay $PLANTILLAS."
+              exit 1
+            fi
+
+            echo "===== 6. Reconstruir y levantar ====="
             docker compose build backend web
             docker compose up -d
+
+            echo "===== 7. Esperar a que el backend arranque ====="
+            # Los dos validadores del arranque abortan con un mensaje que dice
+            # que falta. Si el backend no responde en dos minutos, volcamos ese
+            # mensaje en el log del workflow para no tener que entrar a buscarlo.
+            for i in $(seq 1 24); do
+              CODIGO=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost/api/v1/tickets || echo 000)
+              # 401 es la respuesta buena aqui: significa que Nest esta en pie y
+              # el guard de sesion responde. 200 tambien vale; 000 es que no hay
+              # nadie escuchando todavia.
+              if [ "$CODIGO" != "000" ] && [ "$CODIGO" != "502" ] && [ "$CODIGO" != "503" ]; then
+                echo "Backend respondiendo (HTTP $CODIGO) al intento $i."
+                docker compose logs --tail 30 backend
+                echo "Deploy completado."
+                exit 0
+              fi
+              sleep 5
+            done
+
+            echo "EL BACKEND NO ARRANCO. Log completo:"
+            docker compose logs --tail 120 backend
+            echo ""
+            echo "El respaldo de la base esta en $RESPALDO"
+            echo "Las migraciones aplicadas son aditivas: la version anterior"
+            echo "vuelve a funcionar con 'git checkout <commit> && docker compose up -d --build'."
+            exit 1
