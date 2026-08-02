@@ -105,12 +105,45 @@ function toId(value: unknown): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-/** Fecha legible en español, para lo que lee una persona dentro del correo. */
+/**
+ * La zona en la que se imprimen las fechas de los correos.
+ *
+ * Escrita aquí y no heredada del proceso. El sistema es UTC de punta a punta y
+ * el `Date` que llega es correcto; lo que fallaba era la impresión:
+ * `toLocaleString` sin `timeZone` usa la del proceso, y el contenedor de
+ * producción corre en UTC —ni el Dockerfile, ni el compose, ni el
+ * `.env.production.example` fijan `TZ`—. Un ticket abierto a las 18:14 de Lima
+ * le llegaba al cliente como las 11:14 p. m.
+ *
+ * Se fija aquí, en el formateo, y no con un `TZ` en el contenedor: así es
+ * determinista y no depende de que alguien acierte con una variable de entorno
+ * que hoy no pone nadie. Y no se cazó antes porque el backend de desarrollo
+ * corre en el host, que ya está en hora de Lima.
+ */
+const PERU_TIME_ZONE = 'America/Lima';
+
+/**
+ * Cómo se marca la zona dentro del correo.
+ *
+ * Una hora suelta en un correo transaccional es ambigua justo cuando más
+ * importa —el plazo de un SLA, la hora en que se cerró un ticket—, y el lector
+ * no tiene forma de saber en qué zona la escribió el servidor. Va como texto y
+ * no con `timeZoneName`: esa opción no se puede combinar con `dateStyle` /
+ * `timeStyle`, y "hora de Perú" se lee mejor que "GMT-5".
+ */
+const PERU_TIME_ZONE_LABEL = 'hora de Perú';
+
+/** Fecha legible en español, en hora de Perú, para lo que lee una persona. */
 function formatDateTime(value: Date | string | null | undefined): string | null {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleString('es-PE', { dateStyle: 'long', timeStyle: 'short' });
+  const texto = date.toLocaleString('es-PE', {
+    dateStyle: 'long',
+    timeStyle: 'short',
+    timeZone: PERU_TIME_ZONE,
+  });
+  return `${texto} (${PERU_TIME_ZONE_LABEL})`;
 }
 
 /** Todo lo que hace falta para poner valores a las variables de un aviso. */

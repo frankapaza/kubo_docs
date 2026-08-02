@@ -119,7 +119,10 @@ export function sampleValuesFor(audience: NotificationAudience): Record<string, 
     codigo: 'TKT-0001',
     asunto: 'Ejemplo: no carga el módulo de caja',
     estado: 'En atención',
-    fecha: '2 de agosto de 2026, 10:00 a. m.',
+    // Con el mismo formato y el mismo indicador de zona que imprime
+    // `NotificationDispatcher`: la previsualización tiene que enseñar cómo va
+    // a quedar el correo de verdad, y la zona es parte de eso.
+    fecha: '2 de agosto de 2026 a las 10:00 a. m. (hora de Perú)',
     razon_social: 'Empresa de Ejemplo S.A.C.',
     enlace_portal: 'https://portal.ejemplo.pe/portal/tickets/1',
   };
@@ -128,7 +131,7 @@ export function sampleValuesFor(audience: NotificationAudience): Record<string, 
   const team: Record<TeamVariable, string> = {
     ...client,
     prioridad: 'P2',
-    sla: '2 de agosto de 2026, 18:00',
+    sla: '2 de agosto de 2026 a las 6:00 p. m. (hora de Perú)',
     responsable: 'Nombre del responsable',
     motivo: 'Ejemplo de motivo de la transición',
     enlace_panel: 'https://panel.ejemplo.pe/tickets/1',

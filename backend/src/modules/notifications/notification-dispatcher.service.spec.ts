@@ -600,6 +600,72 @@ describe('cómo se compone el correo', () => {
     expect(correo.html).not.toContain('RESUELTO');
   });
 
+  /**
+   * El sistema es UTC de punta a punta, así que el `Date` que llega es
+   * correcto; lo que puede salir mal es la impresión. `toLocaleString` sin
+   * `timeZone` toma la del proceso, y el contenedor de producción corre en UTC
+   * —ni el Dockerfile, ni el compose, ni el `.env.production.example` fijan
+   * `TZ`—: un ticket abierto a las 10:30 de Lima le llegaría al cliente como
+   * las 3:30 p. m.
+   *
+   * Estos tests fuerzan `process.env.TZ = 'UTC'` a propósito. Sin eso no
+   * probarían nada aquí: el backend de desarrollo corre en el host, en hora de
+   * Lima, y por eso la verificación no pudo cazarlo.
+   */
+  describe('las fechas van en hora de Perú, corra donde corra el proceso', () => {
+    /**
+     * Cómo tiene que quedar impreso EVENT_AT (15:30 UTC) y el plazo de SLA
+     * (09:00 UTC del 15 de marzo). Escritos a mano y no derivados de un
+     * `Intl` con la zona puesta: derivarlos sería comparar la implementación
+     * consigo misma.
+     */
+    const FECHA_EN_LIMA = '2 de agosto de 2026 a las 10:30 a. m. (hora de Perú)';
+    const SLA_EN_LIMA = '15 de marzo de 2027 a las 4:00 a. m. (hora de Perú)';
+
+    it('{{fecha}}: la hora del evento sale en hora de Lima y lo dice', async () => {
+      const { dispatcher, email } = montar();
+      await dispatcher.dispatchForEvent(unEvento());
+
+      expect(enviados(email)[0].html).toContain(FECHA_EN_LIMA);
+    });
+
+    it('{{sla}}: el plazo del equipo, igual', async () => {
+      const { dispatcher, email } = montar({ ticket: unTicket({ assigneeUserId: null }) });
+      await dispatcher.dispatchForEvent(unEvento({ type: 'SLA_AT_RISK', toStatus: null }));
+
+      expect(enviados(email)[0].html).toContain(SLA_EN_LIMA);
+    });
+
+    /**
+     * Esta sí mira por dentro, y a propósito.
+     *
+     * Lo que hay que demostrar es que la zona **no se hereda del proceso**, y
+     * eso no se puede demostrar comparando horas: el host de desarrollo corre
+     * en hora de Lima —por eso la verificación no cazó el fallo— y bajo Jest
+     * no se puede cambiar la zona del proceso a mitad de la suite (asignar
+     * `process.env.TZ` no invalida la caché de zona de V8, porque el entorno
+     * de Jest trabaja sobre una copia de `process.env`). Con las dos de
+     * arriba, un `toLocaleString` sin `timeZone` seguiría pasando en este
+     * host mientras alguien conservara el sufijo. Aquí se comprueba la única
+     * parte que es host-independiente: que cada formateo lleva la zona
+     * escrita.
+     */
+    it('el formateo fija la zona, no la hereda del proceso', async () => {
+      const spy = jest.spyOn(Date.prototype, 'toLocaleString');
+      const { dispatcher } = montar();
+
+      await dispatcher.dispatchForEvent(
+        unEvento({ type: 'CREATED', fromStatus: null, toStatus: 'NUEVO' }),
+      );
+
+      expect(spy).toHaveBeenCalled();
+      for (const [, opciones] of spy.mock.calls) {
+        expect(opciones).toMatchObject({ timeZone: 'America/Lima' });
+      }
+      spy.mockRestore();
+    });
+  });
+
   it('manda html y también text', async () => {
     const { dispatcher, email } = montar();
     await dispatcher.dispatchForEvent(unEvento());
