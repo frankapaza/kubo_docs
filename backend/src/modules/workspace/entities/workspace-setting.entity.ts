@@ -68,6 +68,15 @@ export class WorkspaceSetting {
   @Column({ name: 'smtp_from', type: 'varchar', length: 255, nullable: true })
   smtpFrom!: string | null;
 
+  /**
+   * Buzón del equipo (migración 015). Es la única dirección interna a la que
+   * llegan los avisos de tickets: no se avisa a todos los ADMIN uno por uno,
+   * porque eso convertiría cada alta de un usuario interno en un cambio
+   * silencioso de la lista de distribución. Vacío ⇒ se cae a `smtpFrom`.
+   */
+  @Column({ name: 'team_inbox_email', type: 'varchar', length: 180, nullable: true })
+  teamInboxEmail!: string | null;
+
   // ========== Retención de audio ==========
   @Column({
     name: 'audio_retention_policy',

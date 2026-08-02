@@ -77,6 +77,10 @@ services:
       WHISPER_MODEL: ${WHISPER_MODEL}
       WHISPER_LANGUAGE: ${WHISPER_LANGUAGE}
       CORS_ORIGINS: ${CORS_ORIGINS}
+      # Base de los enlaces que van dentro de los correos (ticket en el portal,
+      # ticket en el panel, firma de documentos). El backend no la puede
+      # deducir: las peticiones le llegan por Caddy, no desde el navegador.
+      FRONTEND_URL: ${FRONTEND_URL}
     volumes:
       - backend_uploads:/app/uploads
     networks:

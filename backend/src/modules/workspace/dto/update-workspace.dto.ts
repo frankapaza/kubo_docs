@@ -99,6 +99,14 @@ export class UpdateWorkspaceSettingsDto {
   @Length(0, 255)
   smtpFrom?: string;
 
+  // Buzón del equipo para los avisos de tickets. Cadena vacía = limpiarlo, y
+  // entonces los avisos internos caen al remitente SMTP; por eso `IsString` y
+  // no `IsEmail`, que rechazaría el vaciado.
+  @IsOptional()
+  @IsString()
+  @Length(0, 180)
+  teamInboxEmail?: string;
+
   // Retención de audio
   @IsOptional()
   @IsEnum(AUDIO_RETENTION_POLICIES)

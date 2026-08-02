@@ -56,6 +56,7 @@ export class WorkspaceService {
       'smtpHost',
       'smtpUser',
       'smtpFrom',
+      'teamInboxEmail',
     ];
     simpleKeys.forEach((key) => {
       const value = dto[key];
@@ -113,6 +114,23 @@ export class WorkspaceService {
       this.logger.warn(`No se pudo descifrar SMTP pass: ${(e as Error).message}`);
       return null;
     }
+  }
+
+  /**
+   * Buzón del equipo, o `null` si no está configurado.
+   *
+   * Devuelve `null` también cuando la fila de ajustes no existe todavía: quien
+   * llama tiene que tener un plan para el caso "no hay buzón" de todos modos
+   * (cae al remitente SMTP), y hacer estallar un aviso por correo porque falte
+   * la configuración del emisor sería desproporcionado.
+   *
+   * Recorta el valor: un espacio suelto guardado desde el panel dejaría una
+   * dirección de destino inválida que solo se vería en el rebote.
+   */
+  async getTeamInboxEmail(): Promise<string | null> {
+    const settings = await this.get().catch(() => null);
+    const inbox = settings?.teamInboxEmail?.trim();
+    return inbox ? inbox : null;
   }
 
   /**

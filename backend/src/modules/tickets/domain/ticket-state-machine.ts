@@ -21,6 +21,26 @@ export const TICKET_STATUSES: TicketStatus[] = [
   'CERRADO',
 ];
 
+/**
+ * Cómo se llama cada estado en español, para lo que lee una persona: hoy los
+ * correos de aviso, mañana cualquier otra salida del backend.
+ *
+ * Copia deliberada de `STATUS_LABELS` de `web/src/pages/tickets/ticket-ui.ts`,
+ * no un import: el backend no importa del frontend. Si un día se añade un
+ * estado a `TicketStatus`, el `Record` completo obliga a nombrarlo aquí
+ * también y deja de compilar hasta que se haga.
+ */
+export const TICKET_STATUS_LABELS: Record<TicketStatus, string> = {
+  NUEVO: 'Nuevo',
+  TRIAJE: 'Triaje',
+  ASIGNADO: 'Asignado',
+  EN_ATENCION: 'En atención',
+  ESPERA_CLIENTE: 'Espera cliente',
+  DERIVADO: 'Derivado',
+  RESUELTO: 'Resuelto',
+  CERRADO: 'Cerrado',
+};
+
 /** Estados que cuentan como "abierto" en la bandeja, los KPI y el job de riesgo. */
 export const OPEN_STATUSES: TicketStatus[] = [
   'NUEVO',
