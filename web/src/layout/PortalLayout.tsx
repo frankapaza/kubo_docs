@@ -12,6 +12,10 @@ export default function PortalLayout() {
   const { clientUser, logout } = usePortalAuth();
   const navigate = useNavigate();
 
+  // Si el backend no pudo resolver la razón social (`clientRazonSocial` nulo
+  // o vacío), se cae al nombre del usuario en vez de dejar la cabecera vacía.
+  const headerName = clientUser?.clientRazonSocial || clientUser?.fullName || '';
+
   const onLogout = () => {
     logout();
     navigate('/portal/login', { replace: true });
@@ -28,15 +32,12 @@ export default function PortalLayout() {
                 Portal de clientes
               </p>
               {/*
-                El login del portal (`portal-auth.service.ts`) devuelve `clientUser`
-                con `id`, `email`, `fullName` y `clientId`, pero no la razón social
-                del cliente: no hay endpoint que la exponga. Mostramos el nombre del
-                usuario en su lugar en vez de inventar el de la empresa o añadir un
-                endpoint nuevo (fuera del alcance de esta tarea).
+                `clientRazonSocial` viene de `portal-auth.service.ts` (login y
+                refresh), resuelto vía `ClientsService.findByIdOrFail`. Si llega
+                vacío o nulo, se muestra el nombre del usuario en su lugar en vez
+                de dejar la cabecera en blanco.
               */}
-              <p className="text-xs text-slate-500 mt-1 truncate">
-                {clientUser?.fullName ?? ''}
-              </p>
+              <p className="text-xs text-slate-500 mt-1 truncate">{headerName}</p>
             </div>
           </div>
           <button

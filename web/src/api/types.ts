@@ -653,6 +653,12 @@ export interface PortalClientUser {
   email: string;
   fullName: string;
   clientId: number;
+  /**
+   * Razón social del cliente, tal como la devuelve `portal-auth.service.ts`
+   * (login y refresh). `null` si el backend no pudo resolverla; en ese caso
+   * la cabecera del portal cae al nombre del usuario.
+   */
+  clientRazonSocial: string | null;
 }
 
 export interface PortalSession {

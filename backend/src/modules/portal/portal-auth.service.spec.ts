@@ -11,7 +11,7 @@ jest.mock('bcrypt', () => {
   return { ...actual, compare: jest.fn(actual.compare) };
 });
 
-const makeService = (user: unknown) => {
+const makeService = (user: unknown, client: unknown = { id: 7, razonSocial: 'Cliente de Prueba SAC' }) => {
   const repo = {
     findByEmail: jest.fn().mockResolvedValue(user),
     findById: jest.fn().mockResolvedValue(user),
@@ -19,7 +19,17 @@ const makeService = (user: unknown) => {
   };
   const jwt = { signAsync: jest.fn().mockResolvedValue('tok'), verifyAsync: jest.fn() };
   const cfg = { get: jest.fn().mockReturnValue('secreto') };
-  return { service: new PortalAuthService(repo as any, jwt as any, cfg as any), repo, jwt };
+  const clients = {
+    findByIdOrFail: client
+      ? jest.fn().mockResolvedValue(client)
+      : jest.fn().mockRejectedValue(new Error('Cliente no encontrado')),
+  };
+  return {
+    service: new PortalAuthService(repo as any, jwt as any, cfg as any, clients as any),
+    repo,
+    jwt,
+    clients,
+  };
 };
 
 describe('login', () => {
@@ -71,5 +81,72 @@ describe('login', () => {
     const { service } = makeService(null);
     await service.login('nadie@x.com', 'x').catch(() => undefined);
     expect(bcrypt.compare).toHaveBeenCalled();
+  });
+
+  it('incluye la razon social del cliente en clientUser', async () => {
+    const hash = await bcrypt.hash('correcta', 10);
+    const { service, clients } = makeService(
+      { id: 1, clientId: 7, email: 'a@x.com', passwordHash: hash, isActive: 1, isAdmin: 0 },
+      { id: 7, razonSocial: 'Cliente de Prueba SAC', ruc: '20123456789', address: 'Av. Falsa 123' },
+    );
+    const res = await service.login('a@x.com', 'correcta');
+    expect(res.clientUser.clientRazonSocial).toBe('Cliente de Prueba SAC');
+    expect(clients.findByIdOrFail).toHaveBeenCalledWith(7);
+  });
+
+  it('no filtra ningun otro campo del cliente ademas de la razon social', async () => {
+    const hash = await bcrypt.hash('correcta', 10);
+    const { service } = makeService(
+      { id: 1, clientId: 7, email: 'a@x.com', passwordHash: hash, isActive: 1, isAdmin: 0 },
+      {
+        id: 7,
+        razonSocial: 'Cliente de Prueba SAC',
+        ruc: '20123456789',
+        address: 'Av. Falsa 123',
+        contactEmail: 'facturacion@cliente.pe',
+        legalRepDoc: '12345678',
+      },
+    );
+    const res = await service.login('a@x.com', 'correcta');
+    expect(Object.keys(res.clientUser).sort()).toEqual(
+      ['clientId', 'clientRazonSocial', 'email', 'fullName', 'id'].sort(),
+    );
+  });
+
+  it('degrada a null si el cliente no se puede resolver, sin tumbar el login', async () => {
+    const hash = await bcrypt.hash('correcta', 10);
+    const { service } = makeService(
+      { id: 1, clientId: 7, email: 'a@x.com', passwordHash: hash, isActive: 1, isAdmin: 0 },
+      null,
+    );
+    const res = await service.login('a@x.com', 'correcta');
+    expect(res.clientUser.clientRazonSocial).toBeNull();
+  });
+});
+
+describe('refresh', () => {
+  const hash$ = bcrypt.hash('correcta', 10);
+
+  it('devuelve tambien la razon social del cliente al refrescar', async () => {
+    const hash = await hash$;
+    const user = { id: 1, clientId: 7, email: 'a@x.com', passwordHash: hash, isActive: 1, isAdmin: 0 };
+    const { service, jwt } = makeService(user, { id: 7, razonSocial: 'Cliente de Prueba SAC' });
+    jwt.verifyAsync = jest.fn().mockResolvedValue({ sub: 1, email: 'a@x.com', clientId: 7, isClientAdmin: false });
+    const res = await service.refresh('un-refresh-token-valido');
+    expect(res.clientUser.clientRazonSocial).toBe('Cliente de Prueba SAC');
+  });
+
+  it('rechaza un token de refresco invalido', async () => {
+    const { service, jwt } = makeService(null);
+    jwt.verifyAsync = jest.fn().mockRejectedValue(new Error('invalido'));
+    await expect(service.refresh('lo-que-sea')).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('rechaza el refresco de un usuario desactivado', async () => {
+    const hash = await hash$;
+    const user = { id: 1, clientId: 7, email: 'a@x.com', passwordHash: hash, isActive: 0, isAdmin: 0 };
+    const { service, jwt } = makeService(user);
+    jwt.verifyAsync = jest.fn().mockResolvedValue({ sub: 1, email: 'a@x.com', clientId: 7, isClientAdmin: false });
+    await expect(service.refresh('un-refresh-token-valido')).rejects.toThrow(UnauthorizedException);
   });
 });

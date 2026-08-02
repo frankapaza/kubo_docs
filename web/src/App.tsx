@@ -63,6 +63,17 @@ export default function App() {
           <Route element={<PortalLayout />}>
             <Route path="/portal" element={<Navigate to="/portal/tickets" replace />} />
             <Route path="/portal/tickets" element={<PortalTicketsListPage />} />
+            {/*
+              Catch-all del propio subárbol del portal: sin él, una subruta no
+              enumerada (p.ej. "/portal/loquesea") no casa con nada de aquí
+              arriba y cae en el catch-all global de más abajo, que está
+              gobernado por el guard interno — mandando a un cliente sin sesión
+              interna a "/login" (el del panel) en vez de a "/portal/login".
+              Al vivir dentro de `PortalProtectedRoute`, un cliente sin sesión
+              de portal nunca llega a renderizar esta ruta: el guard lo
+              redirige antes a "/portal/login".
+            */}
+            <Route path="/portal/*" element={<Navigate to="/portal/tickets" replace />} />
           </Route>
         </Route>
       </Route>

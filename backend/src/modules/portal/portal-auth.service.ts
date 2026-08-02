@@ -5,6 +5,7 @@ import * as bcrypt from 'bcrypt';
 import { ClientUsersRepository } from './client-users.repository';
 import { ClientUser } from './entities/client-user.entity';
 import { ClientJwtPayload } from './strategies/client-jwt.strategy';
+import { ClientsService } from '../clients/clients.service';
 
 export interface PortalAuthResponse {
   accessToken: string;
@@ -14,6 +15,14 @@ export interface PortalAuthResponse {
     email: string;
     fullName: string;
     clientId: number;
+    /**
+     * Solo la razón social del cliente, nunca el objeto completo: la cabecera
+     * del portal no tiene por qué recibir RUC, dirección ni datos de
+     * facturación para pintar un nombre. `null` si el cliente no pudo
+     * resolverse (no debería pasar dado el FK de `client_users.client_id`,
+     * pero no se asume); el frontend cae al nombre del usuario en ese caso.
+     */
+    clientRazonSocial: string | null;
   };
 }
 
@@ -44,6 +53,7 @@ export class PortalAuthService {
     private readonly clientUsers: ClientUsersRepository,
     private readonly jwt: JwtService,
     private readonly cfg: ConfigService,
+    private readonly clients: ClientsService,
   ) {}
 
   async login(email: string, password: string): Promise<PortalAuthResponse> {
@@ -104,7 +114,24 @@ export class PortalAuthService {
         email: user.email,
         fullName: user.fullName,
         clientId: Number(user.clientId),
+        clientRazonSocial: await this.resolveClientRazonSocial(Number(user.clientId)),
       },
     };
+  }
+
+  /**
+   * Proyección campo por campo, igual disciplina que `toView` en
+   * `client-users.service.ts`: se pide el cliente completo a `ClientsService`
+   * (única vía de acceso que expone `ClientsModule` al portal) y se extrae
+   * solo `razonSocial`, nunca el resto (RUC, dirección, representante legal,
+   * datos de facturación...).
+   */
+  private async resolveClientRazonSocial(clientId: number): Promise<string | null> {
+    try {
+      const client = await this.clients.findByIdOrFail(clientId);
+      return client.razonSocial;
+    } catch {
+      return null;
+    }
   }
 }

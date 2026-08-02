@@ -1,7 +1,12 @@
 import {
   createContext, useContext, useEffect, useState, ReactNode,
 } from 'react';
-import { portalApi, PORTAL_TOKEN_STORAGE_KEY, PORTAL_REFRESH_TOKEN_KEY } from '../api/portal.api';
+import {
+  portalApi,
+  PORTAL_TOKEN_STORAGE_KEY,
+  PORTAL_REFRESH_TOKEN_KEY,
+  PORTAL_USER_STORAGE_KEY,
+} from '../api/portal.api';
 import type { PortalClientUser } from '../api/types';
 
 /**
@@ -13,10 +18,11 @@ import type { PortalClientUser } from '../api/types';
  * El backend del portal (`portal-auth.controller.ts`) solo expone `login` y
  * `refresh`, ninguno de los dos un `/me`: no hay forma de recuperar el
  * `clientUser` a partir del token sin volver a autenticar. Por eso se
- * persiste también el perfil (no solo el token) para poder restaurar la
- * sesión al recargar la página.
+ * persiste también el perfil (no solo el token, bajo `PORTAL_USER_STORAGE_KEY`
+ * — definida en `portal.api.ts` para que este contexto y el logout forzado
+ * del interceptor de 401 limpien exactamente las mismas claves) para poder
+ * restaurar la sesión al recargar la página.
  */
-const PORTAL_USER_STORAGE_KEY = 'kubo_portal_user';
 
 interface PortalAuthCtx {
   clientUser: PortalClientUser | null;

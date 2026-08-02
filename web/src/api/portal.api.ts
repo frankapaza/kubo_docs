@@ -18,6 +18,12 @@ export const PORTAL_TOKEN_STORAGE_KEY = 'kubo_portal_token';
 // bajo la misma clave que usa el interceptor de refresh de aquí abajo, sin
 // duplicar el literal ni crear un segundo almacenamiento.
 export const PORTAL_REFRESH_TOKEN_KEY = 'kubo_portal_refresh_token';
+// El perfil (`clientUser`) se persiste aparte del token porque el backend del
+// portal no expone un `/me` (ver `PortalAuthContext`). Exportada también para
+// que el logout forzado de `doPortalLogout`, más abajo, y el `logout()` del
+// contexto limpien exactamente las mismas tres claves, en vez de tener dos
+// listas que alguien tiene que recordar mantener sincronizadas.
+export const PORTAL_USER_STORAGE_KEY = 'kubo_portal_user';
 
 /** Límites de `CreatePortalTicketDto` en el backend: deben coincidir siempre con él. */
 export const PORTAL_TICKET_SUBJECT_MAX_LENGTH = 240;
@@ -39,6 +45,7 @@ let refreshPromise: Promise<string> | null = null;
 function doPortalLogout() {
   localStorage.removeItem(PORTAL_TOKEN_STORAGE_KEY);
   localStorage.removeItem(PORTAL_REFRESH_TOKEN_KEY);
+  localStorage.removeItem(PORTAL_USER_STORAGE_KEY);
   // Al login del portal, nunca al del panel interno.
   if (window.location.pathname !== '/portal/login') window.location.href = '/portal/login';
 }
