@@ -1,3 +1,5 @@
+import { ROLES_KEY } from '../../common/decorators/roles.decorator';
+
 import { CLIENT_VARIABLES, TEAM_VARIABLES } from './domain/template-renderer';
 import { NotificationTemplatesController } from './notification-templates.controller';
 
@@ -94,4 +96,31 @@ describe('NotificationTemplatesController.update', () => {
 
     expect(service.update).toHaveBeenCalledWith(1, 42, { subject: 'nuevo' });
   });
+});
+
+/**
+ * Estas plantillas son los textos que salen en nombre de Kubo hacia clientes
+ * reales, con las variables internas que cada publico puede ver. Leerlas no es
+ * una operacion neutra: quien las lee sabe exactamente que se le cuenta a cada
+ * lado y por que canal.
+ *
+ * La pantalla ya lo trata asi -- se cierra entera con `canManageUsers` -- pero
+ * el backend dejaba el `GET` abierto a cualquier miembro del equipo
+ * autenticado. Un permiso que solo vive en el frontend no es un permiso: basta
+ * un `curl` con el token de cualquier tecnico. El sitio donde tiene que
+ * coincidir es el backend, no al reves.
+ */
+describe('los permisos del controlador', () => {
+  const rolesDe = (metodo: string): string[] | undefined =>
+    Reflect.getMetadata(
+      ROLES_KEY,
+      (NotificationTemplatesController.prototype as any)[metodo],
+    );
+
+  it.each(['list', 'update', 'preview', 'sendTest'])(
+    '%s exige rol ADMIN',
+    (metodo) => {
+      expect(rolesDe(metodo)).toEqual(['ADMIN']);
+    },
+  );
 });

@@ -60,9 +60,10 @@ function toView(template: NotificationTemplate): NotificationTemplateView {
  * Superficie del panel interno para las plantillas de aviso por correo:
  * listarlas, editarlas, previsualizarlas y mandarse una prueba.
  *
- * Todo bajo `StaffOnlyGuard` + rol `ADMIN` en lo que muta o dispara un envío:
- * son textos que salen en nombre de Kubo a clientes reales, no algo que deba
- * tocar cualquier miembro del equipo.
+ * Todo bajo `StaffOnlyGuard` + rol `ADMIN`, también el listado: son textos que
+ * salen en nombre de Kubo a clientes reales, y saber qué dicen —y qué variable
+ * interna ve cada público— no es algo que deba poder leer cualquier miembro
+ * del equipo.
  *
  * **Nota para quien construya la pantalla de previsualización (Task 8):** el
  * `bodyMd` de una plantilla no se escapa al guardarse -- ver el comentario en
@@ -80,7 +81,20 @@ function toView(template: NotificationTemplate): NotificationTemplateView {
 export class NotificationTemplatesController {
   constructor(private readonly service: NotificationTemplatesService) {}
 
+  /**
+   * También `ADMIN`, aunque solo lea.
+   *
+   * Estas siete filas son los textos que salen en nombre de Kubo hacia
+   * clientes reales, y cada una declara qué variables internas —prioridad,
+   * SLA, responsable, motivo— puede ver cada público. Leerlas es saber qué se
+   * le cuenta a quién. La pantalla ya lo trataba así (se cierra entera con
+   * `canManageUsers`), pero aquí el `GET` quedaba abierto a cualquier miembro
+   * del equipo autenticado, y un permiso que solo vive en el frontend no es un
+   * permiso: basta un `curl` con el token de cualquier técnico. Se sube el
+   * backend en vez de bajar la pantalla.
+   */
   @Get()
+  @Roles('ADMIN')
   async list(): Promise<NotificationTemplateView[]> {
     const rows = await this.service.list();
     return rows.map(toView);

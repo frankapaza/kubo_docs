@@ -17,13 +17,12 @@ import { BellIcon, RefreshIcon, UsersIcon } from '../components/ui/Icon';
 import EditNotificationTemplateDialog from './notification-templates/EditNotificationTemplateDialog';
 
 /**
- * Gate de página: todo lo que muta (editar, previsualizar, enviar prueba)
- * exige rol ADMIN en el backend (`@Roles('ADMIN')` en
- * `NotificationTemplatesController`); el `GET` de listado no lo exige, pero
- * esta pantalla no tiene ningún modo "solo lectura" -- ver, editar y probar
- * son la misma vista --, así que gatearla entera evita construir una UI de
- * permisos parciales que no existe en ningún otro sitio del panel. Mismo
- * criterio que `ClientUsersPage` y `TemplatesPage`.
+ * Gate de página: los cuatro endpoints de `NotificationTemplatesController`
+ * exigen rol ADMIN, el listado incluido. Esta pantalla no tiene ningún modo
+ * "solo lectura" -- ver, editar y probar son la misma vista --, así que
+ * gatearla entera coincide exactamente con lo que permite el backend, sin
+ * construir una UI de permisos parciales que no existe en ningún otro sitio
+ * del panel. Mismo criterio que `ClientUsersPage` y `TemplatesPage`.
  */
 export default function NotificationTemplatesPage() {
   const { user } = useAuth();
