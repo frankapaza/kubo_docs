@@ -192,13 +192,31 @@ interface FailureOutcome {
  *    es una mentira que ya no se puede retirar. Cada fila se escribe con su
  *    propio `UPDATE`, después de que el envío haya terminado.
  *
+ * ## Una sola pasada a la vez
+ *
+ * `@nestjs/schedule` no espera a que el callback anterior termine —
+ * `waitForCompletion` vale `false` por omisión—, y una pasada pasa de sesenta
+ * segundos con facilidad: el lote es de cien, los envíos son secuenciales y
+ * `EmailService.send` abre un transporter nuevo por correo (handshake, TLS y
+ * AUTH cada vez). Con el SMTP lento, la pasada siguiente entraría con la
+ * primera todavía dentro del envío y sin haber sellado ninguna fila: la
+ * consulta le devolvería exactamente las mismas y las despacharía otra vez.
+ * Ese duplicado no es ninguno de los aceptados —no viene con un fallo
+ * registrado detrás, ni hace falta una segunda réplica—: lo produce el camino
+ * feliz. Y, de paso, las dos pasadas leerían `notify_attempts = 0` y las dos
+ * escribirían `1`, falseando el presupuesto de reintentos justo cuando el SMTP
+ * va mal. Ver `handleCron` y `running`.
+ *
  * ## Sobre el "exactamente una vez"
  *
  * No lo hay, y no se pretende. Si el proceso muere entre el envío y el sellado,
  * el correo saldrá dos veces. La alternativa —sellar antes de enviar— cambia
  * un correo repetido por un correo perdido en silencio, que es peor. Lo que sí
  * se acota es que ese duplicado no se repita para siempre: ver
- * `NOTIFY_MAX_WRITE_FAILURES`.
+ * `NOTIFY_MAX_WRITE_FAILURES`. Y con dos réplicas del backend tampoco lo hay:
+ * el freno de `running` vive en memoria del proceso y no coordina nada entre
+ * instancias — es un compromiso aceptado, distinto del solapamiento de una
+ * sola instancia, que sí se cierra aquí.
  */
 @Injectable()
 export class NotificationScheduler {
@@ -214,6 +232,24 @@ export class NotificationScheduler {
   private readonly writeFailures = new Map<string, number>();
   private readonly blocked = new Set<string>();
 
+  /**
+   * Desde cuándo hay una pasada en vuelo, o `null` si no la hay.
+   *
+   * El `@Cron` ya lleva `waitForCompletion: true`, que se lo pide a la
+   * librería. Este campo no lo duplica: lo complementa con lo que la opción no
+   * da, que es **el rastro**. Una pasada que se salta por solaparse tiene que
+   * distinguirse de un minuto sin trabajo, y lo que hay que poder leer el día
+   * en que alguien pregunte por qué un aviso tardó un cuarto de hora es cuánto
+   * lleva atascada la que sigue dentro. Guardar el instante y no un booleano
+   * es justo eso: el aviso dice desde cuándo.
+   *
+   * Además, no depende de un detalle de la librería. `waitForCompletion` es
+   * una opción del decorador: basta con que alguien reordene el `@Cron`, lo
+   * copie a otro vigilante o cambie de versión para perderla en silencio, y lo
+   * que se pierde es que no salgan correos repetidos.
+   */
+  private runningSince: Date | null = null;
+
   constructor(
     private readonly events: TicketEventsRepository,
     private readonly dispatcher: NotificationDispatcher,
@@ -223,11 +259,32 @@ export class NotificationScheduler {
    * Cada minuto. Es el retraso máximo que un aviso puede acumular por estar en
    * cola, y el precio de no acoplar los nueve puntos donde se escriben eventos
    * al envío de correo.
+   *
+   * `waitForCompletion: true` porque el valor por omisión es `false`: sin él,
+   * la librería dispara la pasada siguiente aunque esta siga dentro del envío
+   * (ver la sección "Una sola pasada a la vez" en la cabecera de la clase). El
+   * freno propio de `runningSince` va además de la opción, no en su lugar.
    */
-  @Cron(CronExpression.EVERY_MINUTE)
+  @Cron(CronExpression.EVERY_MINUTE, { waitForCompletion: true })
   async handleCron(): Promise<void> {
+    const inicio = new Date();
+
+    // La comprobación y la marca, las dos antes del primer `await`: entre
+    // ellas no puede colarse otra pasada.
+    if (this.runningSince !== null) {
+      const segundos = Math.round((inicio.getTime() - this.runningSince.getTime()) / 1_000);
+      this.logger.warn(
+        `La pasada anterior del drenaje de avisos sigue en curso desde hace ${segundos}s ` +
+          '(empezó a las ' + this.runningSince.toISOString() + '): esta se salta. ' +
+          'Entrar ahora releería las mismas filas —todavía sin sellar— y volvería a mandar ' +
+          'sus correos. Si se repite, el envío va más lento que el reloj: mira el SMTP.',
+      );
+      return;
+    }
+    this.runningSince = inicio;
+
     try {
-      const { processed, sent, failed, abandoned } = await this.drain(new Date());
+      const { processed, sent, failed, abandoned } = await this.drain(inicio);
 
       if (processed > 0) {
         const linea =
@@ -253,6 +310,10 @@ export class NotificationScheduler {
       // convertiría en un rechazo sin capturar y el proceso podría caerse,
       // dejando de mandar avisos por un fallo puntual de una consulta.
       this.logger.error(`Falló el drenaje de la bandeja de avisos: ${errorText(error)}`);
+    } finally {
+      // En `finally` y no al final del `try`: una pasada que reviente no puede
+      // dejar el freno echado para siempre y apagar el vigilante entero.
+      this.runningSince = null;
     }
   }
 

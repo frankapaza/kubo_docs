@@ -568,6 +568,86 @@ describe('NotificationScheduler', () => {
     });
   });
 
+  /**
+   * `@nestjs/schedule` **no espera** a que termine el callback anterior:
+   * `waitForCompletion` vale `false` por omisión. Y una pasada pasa de sesenta
+   * segundos con facilidad —lote de cien, envíos secuenciales, un transporter
+   * nuevo por correo—, así que la segunda entra mientras la primera aún no ha
+   * sellado ninguna fila: la consulta le devuelve exactamente las mismas y las
+   * despacha otra vez. No es el duplicado ya aceptado (el del reintento, que
+   * viene con un fallo registrado, o el de dos réplicas): aquí duplica el
+   * camino feliz con una sola instancia.
+   */
+  describe('dos pasadas solapadas', () => {
+    /** Un despacho que se queda colgado, como un SMTP que no responde. */
+    function despachoColgado(dispatcher: ReturnType<typeof despachadorFake>) {
+      let liberar!: () => void;
+      const colgado = new Promise<void>((resolve) => {
+        liberar = resolve;
+      });
+      dispatcher.dispatchForEvent.mockImplementation(async () => {
+        await colgado;
+        return { sent: 1, skipped: null };
+      });
+      return liberar;
+    }
+
+    it('la segunda no vuelve a despachar la fila que la primera tiene en vuelo', async () => {
+      const fila = unaFila();
+      const { scheduler, dispatcher, logs } = montar([fila]);
+      const liberar = despachoColgado(dispatcher);
+
+      // La pasada del minuto uno se queda dentro del envío...
+      const primera = scheduler.handleCron();
+      // ...y entra la del minuto dos, con la fila todavía sin sellar.
+      await scheduler.handleCron();
+
+      expect(dispatcher.dispatchForEvent).toHaveBeenCalledTimes(1);
+      // Y se entera quien lea el log: una pasada saltada no puede confundirse
+      // con un minuto sin trabajo.
+      expect(textoDe(logs.warn)).toMatch(/en curso/i);
+
+      liberar();
+      await primera;
+
+      expect(dispatcher.dispatchForEvent).toHaveBeenCalledTimes(1);
+      expect(fila.notifiedAt).not.toBeNull();
+    });
+
+    it('la pasada siguiente drena con normalidad en cuanto la anterior termina', async () => {
+      const primeraFila = unaFila({ id: '901' });
+      const { scheduler, dispatcher, repo } = montar([primeraFila]);
+      const liberar = despachoColgado(dispatcher);
+
+      const primera = scheduler.handleCron();
+      await scheduler.handleCron();
+      liberar();
+      await primera;
+
+      // Llega una fila nueva y el cron siguiente la coge: el freno solo dura
+      // lo que dura la pasada.
+      repo.filas.push(unaFila({ id: '902' }));
+      dispatcher.dispatchForEvent.mockImplementation(async () => ({ sent: 1, skipped: null }));
+      await scheduler.handleCron();
+
+      expect(dispatcher.dispatchForEvent).toHaveBeenCalledTimes(2);
+      expect(repo.filas[1].notifiedAt).not.toBeNull();
+    });
+
+    it('una pasada que revienta no deja el freno echado', async () => {
+      const fila = unaFila();
+      const { scheduler, dispatcher } = montar([fila]);
+      jest.spyOn(scheduler, 'drain').mockRejectedValueOnce(new Error('la base no responde'));
+
+      await scheduler.handleCron();
+      // El spy solo falla una vez: la pasada siguiente usa el `drain` real.
+      await scheduler.handleCron();
+
+      expect(dispatcher.dispatchForEvent).toHaveBeenCalledTimes(1);
+      expect(fila.notifiedAt).not.toBeNull();
+    });
+  });
+
   describe('el cron', () => {
     it('llama a drain', async () => {
       const { scheduler } = montar([unaFila()]);
