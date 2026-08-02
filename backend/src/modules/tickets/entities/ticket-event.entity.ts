@@ -98,6 +98,20 @@ export class TicketEvent {
   notifyAttempts!: number;
 
   /**
+   * Cuándo toca el siguiente intento. **`null` significa "intentable ya"**, no
+   * "nunca": es el valor de una fila que todavía no ha fallado ninguna vez.
+   *
+   * Existe (migración 016) porque sin ella la única referencia temporal era
+   * `created_at`, y medir la espera desde ahí hacía que cualquier evento más
+   * viejo que el retraso mayor cumpliera todos los retrasos a la vez: gastaba
+   * sus tres intentos en tres pasadas seguidas y quedaba abandonado. Es
+   * exactamente lo que ocurre cuando el SMTP vuelve de una caída larga y el
+   * vigilante encuentra la cola envejecida.
+   */
+  @Column({ name: 'notify_next_attempt_at', type: 'datetime', nullable: true })
+  notifyNextAttemptAt!: Date | null;
+
+  /**
    * El último motivo por el que no salió todo, o por el que no salió nada.
    *
    * `VARCHAR(500)` y MySQL en `STRICT_TRANS_TABLES`: quien escriba aquí tiene

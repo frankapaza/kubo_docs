@@ -18,6 +18,7 @@ services:
       - ./backend/sql/migrations/013_portal_clientes.sql:/docker-entrypoint-initdb.d/013_portal_clientes.sql:ro
       - ./backend/sql/migrations/014_audit_client_user.sql:/docker-entrypoint-initdb.d/014_audit_client_user.sql:ro
       - ./backend/sql/migrations/015_notificaciones.sql:/docker-entrypoint-initdb.d/015_notificaciones.sql:ro
+      - ./backend/sql/migrations/016_notify_next_attempt.sql:/docker-entrypoint-initdb.d/016_notify_next_attempt.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s

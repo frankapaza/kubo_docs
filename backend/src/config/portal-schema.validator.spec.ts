@@ -24,7 +24,14 @@ const COLUMNAS_015 = [
   { tableName: 'workspace_settings', columnName: 'team_inbox_email' },
 ];
 
-const COLUMNAS_ESPERADAS = [...COLUMNAS_013, COLUMNA_014, ...COLUMNAS_015];
+/**
+ * Lo que anade la 016: el instante del siguiente intento. Sin ella el vigilante
+ * medía la espera desde `created_at` y cualquier evento viejo gastaba sus tres
+ * intentos en tres pasadas seguidas.
+ */
+const COLUMNA_016 = { tableName: 'ticket_events', columnName: 'notify_next_attempt_at' };
+
+const COLUMNAS_ESPERADAS = [...COLUMNAS_013, COLUMNA_014, ...COLUMNAS_015, COLUMNA_016];
 
 /** Las tablas que tienen que estar: client_users (013) y las plantillas (015). */
 const TABLAS_ESPERADAS = ['client_users', 'notification_templates'];
@@ -86,19 +93,20 @@ describe('PortalSchemaValidator', () => {
   );
 
   it('atribuye cada ausencia a su migracion: la 014 es la de audit_log', async () => {
-    const error = await build(TABLAS_ESPERADAS, [...COLUMNAS_013, ...COLUMNAS_015])
+    const error = await build(TABLAS_ESPERADAS, [...COLUMNAS_013, ...COLUMNAS_015, COLUMNA_016])
       .onApplicationBootstrap()
       .catch((e: Error) => e);
     const message = (error as Error).message;
     expect(message).toContain('014_audit_client_user.sql');
     expect(message).toContain('audit_log.client_user_id');
-    // Solo se nombra lo que de verdad falta: la 013 y la 015 estan aplicadas.
+    // Solo se nombra lo que de verdad falta: las otras tres estan aplicadas.
     expect(message).not.toContain('013_portal_clientes.sql');
     expect(message).not.toContain('015_notificaciones.sql');
+    expect(message).not.toContain('016_notify_next_attempt.sql');
   });
 
   it('atribuye a la 015 la tabla de plantillas, la bandeja y el buzon del equipo', async () => {
-    const error = await build(['client_users'], [...COLUMNAS_013, COLUMNA_014])
+    const error = await build(['client_users'], [...COLUMNAS_013, COLUMNA_014, COLUMNA_016])
       .onApplicationBootstrap()
       .catch((e: Error) => e);
     const message = (error as Error).message;
@@ -107,13 +115,29 @@ describe('PortalSchemaValidator', () => {
     for (const { tableName, columnName } of COLUMNAS_015) {
       expect(message).toContain(`${tableName}.${columnName}`);
     }
-    // Las otras dos estan aplicadas: no se nombran.
+    // Las otras estan aplicadas: no se nombran.
     expect(message).not.toContain('013_portal_clientes.sql');
     expect(message).not.toContain('014_audit_client_user.sql');
+    expect(message).not.toContain('016_notify_next_attempt.sql');
+  });
+
+  /**
+   * La 016 se atribuye sola. Importa distinguirla de la 015: son dos ficheros
+   * distintos y aplicar solo la 015 deja al vigilante sin la columna con la que
+   * mide la espera entre reintentos.
+   */
+  it('atribuye a la 016 el instante del siguiente intento, sin culpar a la 015', async () => {
+    const error = await build(TABLAS_ESPERADAS, [...COLUMNAS_013, COLUMNA_014, ...COLUMNAS_015])
+      .onApplicationBootstrap()
+      .catch((e: Error) => e);
+    const message = (error as Error).message;
+    expect(message).toContain('016_notify_next_attempt.sql');
+    expect(message).toContain('ticket_events.notify_next_attempt_at');
+    expect(message).not.toContain('015_notificaciones.sql');
   });
 
   it('avisa de que las columnas de la 015 no se anaden a mano: el sellado va dentro', async () => {
-    const error = await build(['client_users'], [...COLUMNAS_013, COLUMNA_014])
+    const error = await build(['client_users'], [...COLUMNAS_013, COLUMNA_014, COLUMNA_016])
       .onApplicationBootstrap()
       .catch((e: Error) => e);
     // Crear notified_at a mano deja el historico sin sellar, y el vigilante

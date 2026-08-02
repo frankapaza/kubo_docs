@@ -57,6 +57,7 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
   private static readonly MIGRATION_013 = '013_portal_clientes.sql';
   private static readonly MIGRATION_014 = '014_audit_client_user.sql';
   private static readonly MIGRATION_015 = '015_notificaciones.sql';
+  private static readonly MIGRATION_016 = '016_notify_next_attempt.sql';
 
   /** Tablas nuevas de la 013 y la 015. */
   private static readonly REQUIRED_TABLES: ReadonlyArray<{ table: string; migration: string }> = [
@@ -86,10 +87,13 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
     { table: 'audit_log', column: 'client_user_id', migration: PortalSchemaValidator.MIGRATION_014 },
     // 015: las tres columnas de la bandeja de salida.
     //
-    // La razón que vale hoy no es la de las anteriores. Aquí no se protege un
-    // ER_BAD_FIELD_ERROR —`ticket-event.entity.ts` todavía no declara estas
-    // columnas; lo hará cuando se construya el vigilante—: se protege el
-    // sellado del histórico. El UPDATE que marca los eventos viejos como ya
+    // Aquí valen las dos razones. La primera es la de siempre desde que el
+    // vigilante existe: `ticket-event.entity.ts` ya declara estas columnas, así
+    // que TypeORM las emite en todo SELECT sobre `ticket_events` y sin ellas es
+    // ER_BAD_FIELD_ERROR en el timeline de cada ticket.
+    //
+    // La segunda es exclusiva de la 015 y es la que de verdad importa: protege
+    // el sellado del histórico. El UPDATE que marca los eventos viejos como ya
     // notificados vive DENTRO de la 015, en el mismo IF que crea
     // `notified_at`. Si la columna apareciera por otro camino —creada a mano
     // para "desbloquear" un arranque, por ejemplo—, el histórico quedaría sin
@@ -99,6 +103,19 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
     { table: 'ticket_events', column: 'notified_at', migration: PortalSchemaValidator.MIGRATION_015 },
     { table: 'ticket_events', column: 'notify_attempts', migration: PortalSchemaValidator.MIGRATION_015 },
     { table: 'ticket_events', column: 'notify_last_error', migration: PortalSchemaValidator.MIGRATION_015 },
+    // 016: el instante del siguiente intento.
+    //
+    // Sin ella no es solo que falle el SELECT: es que el esquema de espera que
+    // la sustituía estaba roto. Medir el retraso desde `created_at` hacía que
+    // cualquier evento más viejo que el retraso mayor gastase sus tres intentos
+    // en tres pasadas seguidas y quedara abandonado — justo lo que pasa cuando
+    // el SMTP vuelve tras una caída larga y el vigilante encuentra la cola
+    // envejecida. Volver a arrancar sin esta columna es volver a ese fallo.
+    {
+      table: 'ticket_events',
+      column: 'notify_next_attempt_at',
+      migration: PortalSchemaValidator.MIGRATION_016,
+    },
     // 015: el buzón del equipo. Sin él la pantalla de ajustes responde 500 al
     // leer o guardar, y sin esta línea el arranque no lo habría avisado.
     {
