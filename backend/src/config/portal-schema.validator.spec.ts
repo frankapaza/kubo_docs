@@ -13,11 +13,15 @@ const COLUMNAS_013 = [
 /** La columna que añade la 014: la autoría de cliente en la auditoría. */
 const COLUMNA_014 = { tableName: 'audit_log', columnName: 'client_user_id' };
 
-/** Las tres columnas de la bandeja de salida que añade la 015. */
+/**
+ * Lo que anade la 015 a tablas ya existentes: las tres columnas de la bandeja
+ * de salida y el buzon del equipo en los ajustes.
+ */
 const COLUMNAS_015 = [
   { tableName: 'ticket_events', columnName: 'notified_at' },
   { tableName: 'ticket_events', columnName: 'notify_attempts' },
   { tableName: 'ticket_events', columnName: 'notify_last_error' },
+  { tableName: 'workspace_settings', columnName: 'team_inbox_email' },
 ];
 
 const COLUMNAS_ESPERADAS = [...COLUMNAS_013, COLUMNA_014, ...COLUMNAS_015];
@@ -93,7 +97,7 @@ describe('PortalSchemaValidator', () => {
     expect(message).not.toContain('015_notificaciones.sql');
   });
 
-  it('atribuye a la 015 la tabla de plantillas y las tres columnas de la bandeja', async () => {
+  it('atribuye a la 015 la tabla de plantillas, la bandeja y el buzon del equipo', async () => {
     const error = await build(['client_users'], [...COLUMNAS_013, COLUMNA_014])
       .onApplicationBootstrap()
       .catch((e: Error) => e);

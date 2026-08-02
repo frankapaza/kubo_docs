@@ -32,12 +32,28 @@ SET NAMES utf8mb4;
 -- -------------------------------------------------------------------------
 -- 0) Ayudante guardado para las columnas que no llevan sellado
 -- -------------------------------------------------------------------------
+--  Guarda por TABLA y por COLUMNA, en ese orden. Comprobar solo la columna no
+--  basta: si la tabla no existe, la consulta a COLUMNS no devuelve filas, el
+--  IF sale verdadero y el ALTER revienta con ER_NO_SUCH_TABLE. Bajo
+--  docker-entrypoint-initdb.d eso detiene la cadena entera de migraciones,
+--  que es justo lo que advierte la cabecera.
+--
+--  Y no es hipotético aquí: `workspace_settings` nace en los
+--  `add_workspace_*.sql`, que solo monta `docker-compose.dev.yml`. En el
+--  inventario de `docker-compose.yml` esa tabla no existe, y con
+--  `synchronize: false` nadie la crea después. Sin la guarda de tabla, el CALL
+--  sobre `workspace_settings` falla ahí. Con ella, se salta en silencio: la
+--  columna llegará el día que la tabla llegue.
+-- -------------------------------------------------------------------------
 DROP PROCEDURE IF EXISTS kubo_add_column_015;
 DELIMITER //
 CREATE PROCEDURE kubo_add_column_015(
   IN p_table VARCHAR(64), IN p_column VARCHAR(64), IN p_ddl VARCHAR(512))
 BEGIN
-  IF NOT EXISTS (
+  IF EXISTS (
+    SELECT 1 FROM information_schema.TABLES
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = p_table
+  ) AND NOT EXISTS (
     SELECT 1 FROM information_schema.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME = p_table AND COLUMN_NAME = p_column
@@ -54,6 +70,11 @@ DELIMITER ;
 --  El UPDATE está aquí dentro a propósito. Solo corre la vez que se crea la
 --  columna. En cualquier reejecución el IF es falso, no se toca ni una fila,
 --  y los eventos que estén pendientes de notificar siguen pendientes.
+--
+--  Aquí no hace falta la guarda de tabla que sí lleva `kubo_add_column_015`:
+--  `ticket_events` la crea la 010, que está montada en los dos compose. Y si
+--  algún día no lo estuviera, esto debe reventar y no seguir en silencio: sin
+--  la bandeja de salida la migración no significa nada.
 -- -------------------------------------------------------------------------
 DROP PROCEDURE IF EXISTS kubo_seal_notified_015;
 DELIMITER //

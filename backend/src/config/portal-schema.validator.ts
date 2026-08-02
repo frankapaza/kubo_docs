@@ -84,15 +84,28 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
     // TODA la auditoría se pierde en silencio (el interceptor degrada el
     // fallo del INSERT a un warn por petición).
     { table: 'audit_log', column: 'client_user_id', migration: PortalSchemaValidator.MIGRATION_014 },
-    // 015: las tres columnas de la bandeja de salida. `ticket-event.entity.ts`
-    // las declara, así que sin ellas vuelve el ER_BAD_FIELD_ERROR en todo el
-    // timeline. Y hay algo peor que un 500: si `notified_at` apareciera sin
-    // pasar por la migración —creada a mano, por ejemplo—, no habría sellado
-    // del histórico y el vigilante enviaría un correo por cada uno de los
-    // eventos de meses atrás. Exigir la migración es exigir el sellado.
+    // 015: las tres columnas de la bandeja de salida.
+    //
+    // La razón que vale hoy no es la de las anteriores. Aquí no se protege un
+    // ER_BAD_FIELD_ERROR —`ticket-event.entity.ts` todavía no declara estas
+    // columnas; lo hará cuando se construya el vigilante—: se protege el
+    // sellado del histórico. El UPDATE que marca los eventos viejos como ya
+    // notificados vive DENTRO de la 015, en el mismo IF que crea
+    // `notified_at`. Si la columna apareciera por otro camino —creada a mano
+    // para "desbloquear" un arranque, por ejemplo—, el histórico quedaría sin
+    // sellar y el vigilante mandaría un correo por cada evento de meses atrás,
+    // a clientes reales, sin vuelta atrás. Exigir la migración es exigir el
+    // sellado, y por eso el mensaje de error desaconseja el atajo.
     { table: 'ticket_events', column: 'notified_at', migration: PortalSchemaValidator.MIGRATION_015 },
     { table: 'ticket_events', column: 'notify_attempts', migration: PortalSchemaValidator.MIGRATION_015 },
     { table: 'ticket_events', column: 'notify_last_error', migration: PortalSchemaValidator.MIGRATION_015 },
+    // 015: el buzón del equipo. Sin él la pantalla de ajustes responde 500 al
+    // leer o guardar, y sin esta línea el arranque no lo habría avisado.
+    {
+      table: 'workspace_settings',
+      column: 'team_inbox_email',
+      migration: PortalSchemaValidator.MIGRATION_015,
+    },
   ];
 
   constructor(private readonly dataSource: DataSource) {}
