@@ -1,3 +1,8 @@
+import { TICKET_STATUSES, TicketStatus } from '../../tickets/domain/ticket-state-machine';
+import { TICKET_EVENT_TYPES } from '../../tickets/entities/ticket-event.entity';
+import { TICKET_ORIGINS } from '../../tickets/entities/ticket.entity';
+
+import { plansForEvent } from './notification-rules';
 import { NotificationAudience, validateTemplate } from './template-renderer';
 
 /**
@@ -176,6 +181,83 @@ remitente, pero **no se registra en el ticket ni avisa a nadie
 automáticamente**. El ticket se gestiona desde el panel.`,
   },
 ];
+
+/**
+ * Todos los `triggerKey/audience` que `plansForEvent` puede llegar a emitir,
+ * sacados a fuerza bruta de la propia función: cada tipo de evento, cada
+ * estado destino posible (y ninguno), cada origen y las dos combinaciones de
+ * autor y responsable.
+ *
+ * A fuerza bruta y no leyendo constantes exportadas a propósito. Una lista de
+ * claves exportada al lado de las reglas puede quedarse corta el día que se
+ * añada un aviso y no se acuerde nadie de actualizarla; esto no puede, porque
+ * pregunta por el comportamiento. Y no es caro: son unas pocas centenas de
+ * combinaciones de una función pura.
+ */
+function avisosQueLasReglasEmiten(): string[] {
+  const encontrados = new Set<string>();
+  const estados: Array<TicketStatus | null> = [null, ...TICKET_STATUSES];
+
+  for (const type of TICKET_EVENT_TYPES) {
+    for (const toStatus of estados) {
+      for (const origin of TICKET_ORIGINS) {
+        for (const hasClientAuthor of [true, false]) {
+          for (const hasAssignee of [true, false]) {
+            for (const entry of plansForEvent({
+              type,
+              toStatus,
+              origin,
+              hasClientAuthor,
+              hasAssignee,
+            })) {
+              encontrados.add(`${entry.triggerKey}/${entry.audience}`);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return [...encontrados].sort();
+}
+
+const AVISOS_SEMBRADOS = SEEDED_TEMPLATES.map((t) => `${t.triggerKey}/${t.audience}`).sort();
+
+/**
+ * La coherencia de las claves de disparo, que es lo que sostiene toda la
+ * funcionalidad y no estaba atada por ningún lado.
+ *
+ * `notification-rules.ts` cita este archivo en su cabecera diciendo que las
+ * siete claves de abajo son las que siembra la 015, y el despachador busca la
+ * plantilla por esa clave: si no la encuentra, no manda nada **y no es un
+ * error** —desactivar una plantilla es la forma documentada de apagar un
+ * aviso—. Una errata en una clave, en cualquiera de los dos lados, apagaría un
+ * aviso en silencio con la suite entera en verde.
+ *
+ * Se comprueba en los dos sentidos, porque las dos erratas existen: una clave
+ * que las reglas emiten y nadie sembró es un aviso que no sale; una plantilla
+ * sembrada que las reglas no pueden disparar nunca es una plantilla que un
+ * ADMIN edita, prueba y no ve llegar jamás.
+ */
+describe('las claves de disparo cuadran con el módulo de reglas', () => {
+  it('las reglas no emiten ningún aviso que no esté sembrado', () => {
+    for (const aviso of avisosQueLasReglasEmiten()) {
+      expect(AVISOS_SEMBRADOS).toContain(aviso);
+    }
+  });
+
+  it('no hay plantilla sembrada que las reglas no puedan disparar nunca', () => {
+    const emitidos = avisosQueLasReglasEmiten();
+    for (const aviso of AVISOS_SEMBRADOS) {
+      expect(emitidos).toContain(aviso);
+    }
+  });
+
+  /** Y son exactamente los mismos siete, ni uno más por ningún lado. */
+  it('son los mismos siete, uno a uno', () => {
+    expect(avisosQueLasReglasEmiten()).toEqual(AVISOS_SEMBRADOS);
+  });
+});
 
 describe('coherencia con las plantillas sembradas (migración 015)', () => {
   it('hay cinco plantillas de cliente y dos de equipo, como en la migración', () => {
