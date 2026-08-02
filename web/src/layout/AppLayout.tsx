@@ -6,7 +6,7 @@ import { useIdleLogout } from '../auth/useIdleLogout';
 import { canManageUsers } from '../auth/permissions';
 import { workspaceApi } from '../api/workspace.api';
 import { roleLabels } from '../components/ui/Badge';
-import { ArchiveIcon, BookOpenIcon, BotIcon, FileTextIcon, FolderIcon, InboxIcon, KuboLogo, LogOutIcon, SettingsIcon, SparklesIcon, UsersIcon, ZapIcon } from '../components/ui/Icon';
+import { ArchiveIcon, BellIcon, BookOpenIcon, BotIcon, FileTextIcon, FolderIcon, InboxIcon, KuboLogo, LogOutIcon, SettingsIcon, SparklesIcon, UsersIcon, ZapIcon } from '../components/ui/Icon';
 import { toast } from '../ui/Toast';
 // Nota: "UsersIcon" también se usa en la sección Clientes; es intencional.
 
@@ -222,6 +222,13 @@ export default function AppLayout() {
                 >
                   <FileTextIcon size={15} className="text-slate-500" />
                   Plantillas de documentos
+                </button>
+                <button
+                  onClick={() => go('/admin/notifications')}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition text-left"
+                >
+                  <BellIcon size={15} className="text-slate-500" />
+                  Notificaciones por correo
                 </button>
                 <button
                   onClick={() => go('/admin/workspace')}

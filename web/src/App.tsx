@@ -13,6 +13,7 @@ import ClientUsersPage from './pages/ClientUsersPage';
 import AIProvidersPage from './pages/AIProvidersPage';
 import IntegrationsPage from './pages/IntegrationsPage';
 import TemplatesPage from './pages/TemplatesPage';
+import NotificationTemplatesPage from './pages/NotificationTemplatesPage';
 import DocumentEditorPage from './pages/DocumentEditorPage';
 import WorkspaceSettingsPage from './pages/WorkspaceSettingsPage';
 import JiraReportPage from './pages/JiraReportPage';
@@ -114,6 +115,12 @@ export default function App() {
           <Route path="/admin/ai-providers" element={<AIProvidersPage />} />
           <Route path="/admin/integrations" element={<IntegrationsPage />} />
           <Route path="/admin/templates" element={<TemplatesPage />} />
+          {/*
+            Distinta de "/admin/templates": esa es de plantillas de
+            documentos comerciales (cotizaciones, contratos); esta es de los
+            avisos automáticos por correo de tickets.
+          */}
+          <Route path="/admin/notifications" element={<NotificationTemplatesPage />} />
           <Route path="/admin/workspace" element={<WorkspaceSettingsPage />} />
           <Route path="/documents/:documentId" element={<DocumentEditorPage />} />
           {/* Manual del equipo interno; se enlaza desde el menú lateral. */}
