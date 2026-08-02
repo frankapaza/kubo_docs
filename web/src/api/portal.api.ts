@@ -42,6 +42,22 @@ portalApiClient.interceptors.request.use((config) => {
 // Promesa de refresh compartida — varios 401 simultáneos reutilizan el mismo intento.
 let refreshPromise: Promise<string> | null = null;
 
+/**
+ * Rutas de autenticación del portal: un 401 en cualquiera de estas nunca debe
+ * disparar un intento de refresco. Para `/portal/auth/login` es el caso real
+ * — una contraseña equivocada con un refreshToken viejo en `localStorage`
+ * gastaba una petición de login MÁS una de refresh, dos peticiones contra el
+ * mismo endpoint que ahora tiene limitación de intentos (5/min por IP, ver
+ * `ApiThrottlerGuard` en el backend): cada error de tecleo se cobraba doble
+ * contra ese cupo. `/portal/auth/refresh` se incluye por completitud —hoy no
+ * pasa por aquí porque usa `axios` directo, no `portalApiClient`, según el
+ * comentario de `refreshPromise` más abajo— para que si alguna vez cambia de
+ * cliente no reabra el mismo problema en silencio.
+ */
+function isPortalAuthRequest(url: string | undefined): boolean {
+  return !!url && /\/portal\/auth\/(login|refresh)(\?|$)/.test(url);
+}
+
 function doPortalLogout() {
   localStorage.removeItem(PORTAL_TOKEN_STORAGE_KEY);
   localStorage.removeItem(PORTAL_REFRESH_TOKEN_KEY);
@@ -54,7 +70,11 @@ portalApiClient.interceptors.response.use(
   (r) => r,
   async (err: AxiosError) => {
     const original = err.config as InternalAxiosRequestConfig & { _retry?: boolean };
-    if (err.response?.status !== 401 || original?._retry) {
+    if (
+      err.response?.status !== 401 ||
+      original?._retry ||
+      isPortalAuthRequest(original?.url)
+    ) {
       return Promise.reject(err);
     }
 
