@@ -88,6 +88,36 @@ describe('render', () => {
       'Motivo: {{motivo}}',
     );
   });
+
+  it('invariante de no reinyeccion: un valor que contiene {{motivo}} no se reinterpreta como variable', () => {
+    // El asunto de un ticket lo escribe el cliente. Si un cliente escribe
+    // literalmente "{{motivo}}" en el asunto de su propio ticket, la salida no
+    // puede convertirse en el motivo interno de una transicion: eso es
+    // exactamente la fuga que este modulo existe para impedir. La sustitucion
+    // debe hacerse en una sola pasada sobre el texto original, nunca releyendo
+    // el resultado ya sustituido en busca de nuevas variables.
+    const values = {
+      ...baseValues,
+      asunto: 'Por favor revisen {{motivo}} del ticket anterior',
+      motivo: 'el cliente incumplio el contrato',
+    };
+    const out = render('Asunto: {{asunto}}', 'CLIENT', values as Record<string, string>);
+    expect(out).toBe('Asunto: Por favor revisen {{motivo}} del ticket anterior');
+    expect(out).not.toContain('el cliente incumplio el contrato');
+  });
+
+  it('invariante de no reinyeccion: un valor que contiene una variable del propio publico tampoco se sustituye', () => {
+    // El peligro no es solo cruzar publicos: es que el contenido del usuario
+    // controle la plantilla. Si el asunto trae "{{codigo}}" con el valor de
+    // OTRO codigo, ese texto debe salir literal, no como el codigo real.
+    const values = {
+      ...baseValues,
+      codigo: 'TCK-001',
+      asunto: 'Referencia al ticket {{codigo}} de la semana pasada',
+    };
+    const out = render('Asunto: {{asunto}}', 'CLIENT', values as Record<string, string>);
+    expect(out).toBe('Asunto: Referencia al ticket {{codigo}} de la semana pasada');
+  });
 });
 
 describe('validateTemplate', () => {
