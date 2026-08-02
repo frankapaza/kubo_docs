@@ -6,11 +6,24 @@ interface MissingItem {
   kind: 'tabla' | 'columna';
   /** `client_users` o `tickets.created_by_client_user_id`. */
   name: string;
-  migration: string;
+  /**
+   * Los ficheros SQL que hay que pasar, **en orden**, para que eso exista.
+   *
+   * Casi siempre es uno solo. Es una lista porque hay un requisito que no lo
+   * cumple ninguna migración por sí sola: `workspace_settings.team_inbox_email`
+   * (ver `TEAM_INBOX_FILES`). Nombrar solo la última de la cadena manda al
+   * operador a aplicar algo que no puede crear lo que falta.
+   */
+  files: readonly string[];
 }
 
 /**
- * Cómo aplicar a mano una migración sobre una base que ya tiene datos.
+ * Cómo aplicar a mano un fichero SQL sobre una base que ya tiene datos.
+ *
+ * La ruta es relativa a `backend/sql/`, así que sirve igual para una migración
+ * numerada (`migrations/015_...`) que para los `add_*.sql` que viven un nivel
+ * más arriba. Es justo lo que hacía falta para poder nombrar los dos ficheros
+ * que crean `workspace_settings`.
  *
  * El `sh -c` con comillas simples no es adorno: la contraseña vive dentro del
  * contenedor, en `MYSQL_ROOT_PASSWORD`. Sin él la expande el shell del host,
@@ -18,9 +31,9 @@ interface MissingItem {
  * "Access denied (using password: NO)" justo cuando el backend está en bucle
  * de reinicio y el operador menos margen tiene para adivinar por qué.
  */
-const comoAplicarla = (migration: string): string =>
+const comoAplicarla = (file: string): string =>
   `docker compose exec -T mysql sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" kubo_devdocs' ` +
-  `< backend/sql/migrations/${migration}`;
+  `< backend/sql/${file}`;
 
 /**
  * Comprueba al arranque que las migraciones 013, 014 y 015 están aplicadas, y
@@ -45,6 +58,15 @@ const comoAplicarla = (migration: string): string =>
  * es tarde, y abortar con un mensaje que diga qué falta y cómo arreglarlo en
  * vez de aceptar tráfico en ese estado.
  *
+ * Un requisito no encaja en "falta tal migración" y por eso se trata aparte:
+ * `workspace_settings.team_inbox_email`. Esa columna la añade la 015, pero
+ * solo si la tabla ya existe —su ayudante está guardado también por tabla, y
+ * con razón—, y `workspace_settings` la crean los `add_workspace_*.sql`, que
+ * hasta ahora solo montaba `docker-compose.dev.yml`. En el stack de producción
+ * la 015 corría entera, omitía la columna en silencio y el arranque abortaba
+ * pidiendo la 015: la migración que el operador ya había aplicado y la única
+ * que no puede arreglarlo. Ver `TEAM_INBOX_FILES` y `notaBuzon`.
+ *
  * Consulta `information_schema` en vez de dejar que falle un SELECT: así se
  * distingue "falta la migración" de "la base está caída", y el diagnóstico
  * sale entero de una sola pasada (tabla y las cuatro columnas), no de la
@@ -54,17 +76,43 @@ const comoAplicarla = (migration: string): string =>
 export class PortalSchemaValidator implements OnApplicationBootstrap {
   private readonly logger = new Logger('PortalSchemaValidator');
 
-  private static readonly MIGRATION_013 = '013_portal_clientes.sql';
-  private static readonly MIGRATION_014 = '014_audit_client_user.sql';
-  private static readonly MIGRATION_015 = '015_notificaciones.sql';
-  private static readonly MIGRATION_016 = '016_notify_next_attempt.sql';
+  private static readonly MIGRATION_013 = 'migrations/013_portal_clientes.sql';
+  private static readonly MIGRATION_014 = 'migrations/014_audit_client_user.sql';
+  private static readonly MIGRATION_015 = 'migrations/015_notificaciones.sql';
+  private static readonly MIGRATION_016 = 'migrations/016_notify_next_attempt.sql';
+
+  /**
+   * Lo que hace falta para que exista `workspace_settings.team_inbox_email`, en
+   * este orden y no en otro.
+   *
+   * La columna la añade la 015, pero su ayudante está guardado **también por
+   * tabla** y se salta la columna en silencio si `workspace_settings` no
+   * existe. Esa guarda es correcta y deliberada: sin ella el ALTER reventaría
+   * y, bajo `docker-entrypoint-initdb.d`, un fichero que falla detiene la
+   * cadena entera de migraciones. Pero significa que en una base donde esa
+   * tabla nunca se creó —el stack de `docker-compose.yml` era exactamente
+   * eso— la 015 corre entera, omite la columna, y el arranque aborta. Decirle
+   * ahí al operador "aplica la 015, es idempotente" es mandarlo a lo que ya
+   * hizo y a lo que no puede funcionar.
+   *
+   * El orden importa dos veces: `add_workspace_smtp_and_session.sql` crea
+   * `smtp_from`, y la 015 añade el buzón `AFTER smtp_from`.
+   */
+  private static readonly TEAM_INBOX_FILES: readonly string[] = [
+    'add_workspace_settings.sql',
+    'add_workspace_smtp_and_session.sql',
+    PortalSchemaValidator.MIGRATION_015,
+  ];
 
   /** Tablas nuevas de la 013 y la 015. */
-  private static readonly REQUIRED_TABLES: ReadonlyArray<{ table: string; migration: string }> = [
-    { table: 'client_users', migration: PortalSchemaValidator.MIGRATION_013 },
+  private static readonly REQUIRED_TABLES: ReadonlyArray<{
+    table: string;
+    files: readonly string[];
+  }> = [
+    { table: 'client_users', files: [PortalSchemaValidator.MIGRATION_013] },
     // 015: sin ella el vigilante no tiene plantillas que leer y no sale
     // ningún aviso; peor, la pantalla de administración responde 500.
-    { table: 'notification_templates', migration: PortalSchemaValidator.MIGRATION_015 },
+    { table: 'notification_templates', files: [PortalSchemaValidator.MIGRATION_015] },
   ];
 
   /**
@@ -75,16 +123,16 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
   private static readonly REQUIRED_COLUMNS: ReadonlyArray<{
     table: string;
     column: string;
-    migration: string;
+    files: readonly string[];
   }> = [
-    { table: 'tickets', column: 'created_by_client_user_id', migration: PortalSchemaValidator.MIGRATION_013 },
-    { table: 'ticket_events', column: 'actor_client_user_id', migration: PortalSchemaValidator.MIGRATION_013 },
-    { table: 'work_items', column: 'created_by_client_user_id', migration: PortalSchemaValidator.MIGRATION_013 },
-    { table: 'work_item_events', column: 'actor_client_user_id', migration: PortalSchemaValidator.MIGRATION_013 },
+    { table: 'tickets', column: 'created_by_client_user_id', files: [PortalSchemaValidator.MIGRATION_013] },
+    { table: 'ticket_events', column: 'actor_client_user_id', files: [PortalSchemaValidator.MIGRATION_013] },
+    { table: 'work_items', column: 'created_by_client_user_id', files: [PortalSchemaValidator.MIGRATION_013] },
+    { table: 'work_item_events', column: 'actor_client_user_id', files: [PortalSchemaValidator.MIGRATION_013] },
     // 014: sin ella, la entidad AuditLog pide una columna que no existe y
     // TODA la auditoría se pierde en silencio (el interceptor degrada el
     // fallo del INSERT a un warn por petición).
-    { table: 'audit_log', column: 'client_user_id', migration: PortalSchemaValidator.MIGRATION_014 },
+    { table: 'audit_log', column: 'client_user_id', files: [PortalSchemaValidator.MIGRATION_014] },
     // 015: las tres columnas de la bandeja de salida.
     //
     // Aquí valen las dos razones. La primera es la de siempre desde que el
@@ -100,9 +148,9 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
     // sellar y el vigilante mandaría un correo por cada evento de meses atrás,
     // a clientes reales, sin vuelta atrás. Exigir la migración es exigir el
     // sellado, y por eso el mensaje de error desaconseja el atajo.
-    { table: 'ticket_events', column: 'notified_at', migration: PortalSchemaValidator.MIGRATION_015 },
-    { table: 'ticket_events', column: 'notify_attempts', migration: PortalSchemaValidator.MIGRATION_015 },
-    { table: 'ticket_events', column: 'notify_last_error', migration: PortalSchemaValidator.MIGRATION_015 },
+    { table: 'ticket_events', column: 'notified_at', files: [PortalSchemaValidator.MIGRATION_015] },
+    { table: 'ticket_events', column: 'notify_attempts', files: [PortalSchemaValidator.MIGRATION_015] },
+    { table: 'ticket_events', column: 'notify_last_error', files: [PortalSchemaValidator.MIGRATION_015] },
     // 016: el instante del siguiente intento.
     //
     // Sin ella no es solo que falle el SELECT: es que el esquema de espera que
@@ -114,14 +162,18 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
     {
       table: 'ticket_events',
       column: 'notify_next_attempt_at',
-      migration: PortalSchemaValidator.MIGRATION_016,
+      files: [PortalSchemaValidator.MIGRATION_016],
     },
-    // 015: el buzón del equipo. Sin él la pantalla de ajustes responde 500 al
-    // leer o guardar, y sin esta línea el arranque no lo habría avisado.
+    // El buzón del equipo. Sin él la pantalla de ajustes responde 500 al leer o
+    // guardar, y sin esta línea el arranque no lo habría avisado.
+    //
+    // Es el único requisito con una cadena de tres ficheros detrás, y no por
+    // gusto: ver `TEAM_INBOX_FILES`. La 015 sola no puede crear esta columna
+    // sobre una base donde `workspace_settings` no existe.
     {
       table: 'workspace_settings',
       column: 'team_inbox_email',
-      migration: PortalSchemaValidator.MIGRATION_015,
+      files: PortalSchemaValidator.TEAM_INBOX_FILES,
     },
   ];
 
@@ -152,7 +204,7 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
     return PortalSchemaValidator.REQUIRED_TABLES.filter((t) => !present.has(t.table)).map((t) => ({
       kind: 'tabla',
       name: t.table,
-      migration: t.migration,
+      files: t.files,
     }));
   }
 
@@ -166,20 +218,24 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
     const present = new Set(rows.map((r) => `${r.tableName}.${r.columnName}`));
     return PortalSchemaValidator.REQUIRED_COLUMNS.filter(
       (c) => !present.has(`${c.table}.${c.column}`),
-    ).map((c) => ({ kind: 'columna', name: `${c.table}.${c.column}`, migration: c.migration }));
+    ).map((c) => ({ kind: 'columna', name: `${c.table}.${c.column}`, files: c.files }));
   }
 
   /**
-   * Un solo mensaje con todo lo que falta, agrupado por migración: el operador
-   * ve de una vez qué ficheros tiene que pasar y en qué orden, sin arrancar
-   * cinco veces para descubrirlos de uno en uno.
+   * Un solo mensaje con todo lo que falta, agrupado por la cadena de ficheros
+   * que lo arregla: el operador ve de una vez qué tiene que pasar y en qué
+   * orden, sin arrancar cinco veces para descubrirlo de uno en uno.
    */
   private static buildMessage(missing: MissingItem[]): string {
-    const porMigracion = [...new Set(missing.map((m) => m.migration))].sort();
+    // La clave agrupa por cadena completa, no por el último fichero: el buzón
+    // del equipo necesita tres y no puede mezclarse con lo que solo necesita
+    // la 015. El `sort` deja los `add_*.sql` delante de `migrations/*`, que es
+    // además el orden en que hay que aplicarlos.
+    const cadenas = [...new Set(missing.map((m) => m.files.join(' → ')))].sort();
 
-    const detalle = porMigracion
-      .map((migration) => {
-        const suyos = missing.filter((m) => m.migration === migration);
+    const detalle = cadenas
+      .map((cadena) => {
+        const suyos = missing.filter((m) => m.files.join(' → ') === cadena);
         const tablas = suyos.filter((m) => m.kind === 'tabla').map((m) => m.name);
         const columnas = suyos.filter((m) => m.kind === 'columna').map((m) => m.name);
         const que = [
@@ -188,7 +244,8 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
         ]
           .filter(Boolean)
           .join('; ');
-        return `${migration} (${que})\n    ${comoAplicarla(migration)}`;
+        const ordenes = suyos[0].files.map((f) => `    ${comoAplicarla(f)}`).join('\n');
+        return `${cadena} (${que})\n${ordenes}`;
       })
       .join('\n  ');
 
@@ -201,9 +258,34 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
       'auditoría; sin la 015 no hay bandeja de salida ni plantillas, y no sale ningún aviso por ' +
       'correo. No añadas a mano las columnas de la 015: el sellado del histórico va dentro de esa ' +
       'migración, y sin él el vigilante envía un correo por cada evento de meses atrás. ' +
+      PortalSchemaValidator.notaBuzon(missing) +
       'Las migraciones solo se ejecutan por docker-entrypoint-initdb.d, y MySQL solo ' +
       'corre ese directorio sobre un datadir vacío: una base que ya tenía datos NO las recibe al ' +
-      'reconstruir los contenedores. Aplícalas a mano (son idempotentes) y vuelve a arrancar.'
+      'reconstruir los contenedores. Aplícalas a mano y vuelve a arrancar: las migraciones ' +
+      'numeradas son idempotentes, pero los add_workspace_*.sql no llevan guardas de ' +
+      'information_schema —son ALTER pelados—, así que si alguna de sus columnas ya estaba, el ' +
+      'fichero falla entero y hay que aplicar a mano solo lo que falte.'
+    );
+  }
+
+  /**
+   * La nota del buzón del equipo, solo cuando es esa columna la que falta.
+   *
+   * Va aparte y condicionada porque es el único caso en que el consejo general
+   * —"aplica la migración que la trae"— es directamente falso: la 015 ya se
+   * aplicó y no puede crearla. Ponerla siempre la convertiría en ruido y
+   * dejaría de leerse justo el día que hace falta.
+   */
+  private static notaBuzon(missing: MissingItem[]): string {
+    const falta = missing.some((m) => m.name === 'workspace_settings.team_inbox_email');
+    if (!falta) return '';
+    return (
+      'Ojo con workspace_settings.team_inbox_email: esa columna la añade la 015, pero su ayudante ' +
+      'está guardado también por tabla y se salta la columna EN SILENCIO cuando ' +
+      'workspace_settings no existe (la guarda es deliberada: sin ella el ALTER rompería el ' +
+      'initdb entero). Así que volver a pasar solo la 015 no la crea nunca; hay que crear antes ' +
+      'la tabla con add_workspace_settings.sql y add_workspace_smtp_and_session.sql —en ese ' +
+      'orden, porque la 015 añade el buzón AFTER smtp_from— y pasar la 015 después. '
     );
   }
 }

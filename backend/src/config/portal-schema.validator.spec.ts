@@ -158,6 +158,68 @@ describe('PortalSchemaValidator', () => {
     expect((error as Error).message).toMatch(/mysql .*< *backend\/sql\/migrations/);
   });
 
+  /**
+   * El buzon del equipo es el unico requisito que la 015 NO puede satisfacer
+   * por si sola. Su ayudante esta guardado tambien por tabla y se salta la
+   * columna en silencio cuando `workspace_settings` no existe -- que es
+   * exactamente el caso del stack de produccion, donde esa tabla no la creaba
+   * nadie. Decirle al operador "aplica la 015, es idempotente" es mandarlo a
+   * un arreglo que no funciona: ya la aplico, y volver a pasarla no crea la
+   * columna. El mensaje tiene que nombrar antes los ficheros que crean la
+   * tabla, y en el orden en que van.
+   */
+  describe('el buzon del equipo: la 015 sola no puede crearlo', () => {
+    const sinBuzon = COLUMNAS_ESPERADAS.filter(
+      (c) => !(c.tableName === 'workspace_settings' && c.columnName === 'team_inbox_email'),
+    );
+
+    const mensaje = async (): Promise<string> => {
+      const error = await build(TABLAS_ESPERADAS, sinBuzon)
+        .onApplicationBootstrap()
+        .catch((e: Error) => e);
+      return (error as Error).message;
+    };
+
+    it('nombra los dos ficheros que crean workspace_settings, no solo la 015', async () => {
+      const message = await mensaje();
+      expect(message).toContain('add_workspace_settings.sql');
+      expect(message).toContain('add_workspace_smtp_and_session.sql');
+      expect(message).toContain('015_notificaciones.sql');
+    });
+
+    it('los pone en el orden en que hay que aplicarlos', async () => {
+      const message = await mensaje();
+      // La 015 anade la columna AFTER smtp_from: al reves, el ALTER revienta.
+      expect(message.indexOf('add_workspace_settings.sql')).toBeLessThan(
+        message.indexOf('add_workspace_smtp_and_session.sql'),
+      );
+      expect(message.indexOf('add_workspace_smtp_and_session.sql')).toBeLessThan(
+        message.indexOf('015_notificaciones.sql'),
+      );
+    });
+
+    it('da la orden de aplicar cada uno, tambien la de los que no estan en migrations/', async () => {
+      const message = await mensaje();
+      expect(message).toMatch(/mysql .*< *backend\/sql\/add_workspace_settings\.sql/);
+    });
+
+    it('explica por que volver a pasar solo la 015 no crea la columna', async () => {
+      const message = await mensaje();
+      expect(message).toMatch(/silencio/i);
+      expect(message).toMatch(/workspace_settings/);
+    });
+
+    /**
+     * Los `add_workspace_*.sql` no llevan guardas de information_schema: son
+     * ALTER pelados. Decir "son idempotentes" a secas de todo el lote manda al
+     * operador a un ALTER que falla por columna duplicada.
+     */
+    it('no promete que los add_workspace_* sean idempotentes', async () => {
+      const message = await mensaje();
+      expect(message).toMatch(/no llevan guardas|no son idempotentes/i);
+    });
+  });
+
   it('nombra a la vez las tablas y todas las columnas ausentes, no solo la primera', async () => {
     const error = await build([], [])
       .onApplicationBootstrap()

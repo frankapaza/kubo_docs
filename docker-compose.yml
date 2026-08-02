@@ -17,6 +17,20 @@ services:
       - ./backend/sql/migrations/012_work_items.sql:/docker-entrypoint-initdb.d/012_work_items.sql:ro
       - ./backend/sql/migrations/013_portal_clientes.sql:/docker-entrypoint-initdb.d/013_portal_clientes.sql:ro
       - ./backend/sql/migrations/014_audit_client_user.sql:/docker-entrypoint-initdb.d/014_audit_client_user.sql:ro
+      # workspace_settings: los ajustes del area de trabajo, con el SMTP y el
+      # buzon del equipo. Solo estaban en docker-compose.dev.yml, asi que aqui
+      # esa tabla no existia nunca y no habia NINGUNA forma de configurar el
+      # correo: ni por panel (la fila vive en esta tabla) ni por variables.
+      #
+      # Van con sufijo de letra, no con numero propio, porque no son
+      # migraciones numeradas; y van entre la 014 y la 015 porque la 015 anade
+      # team_inbox_email a esta tabla. El orden de los tres tampoco es libre:
+      # initdb ejecuta por orden alfabetico de nombre, add_workspace_settings
+      # crea la tabla, add_workspace_smtp crea smtp_from y la 015 mete el buzon
+      # AFTER smtp_from. Al reves, el ALTER revienta y detiene la cadena.
+      - ./backend/sql/add_workspace_settings.sql:/docker-entrypoint-initdb.d/014a_add_workspace_settings.sql:ro
+      - ./backend/sql/add_workspace_smtp_and_session.sql:/docker-entrypoint-initdb.d/014b_add_workspace_smtp.sql:ro
+      - ./backend/sql/add_workspace_audio_retention.sql:/docker-entrypoint-initdb.d/014c_add_workspace_audio.sql:ro
       - ./backend/sql/migrations/015_notificaciones.sql:/docker-entrypoint-initdb.d/015_notificaciones.sql:ro
       - ./backend/sql/migrations/016_notify_next_attempt.sql:/docker-entrypoint-initdb.d/016_notify_next_attempt.sql:ro
     healthcheck:
