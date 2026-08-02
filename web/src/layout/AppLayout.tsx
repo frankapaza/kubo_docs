@@ -134,6 +134,13 @@ export default function AppLayout() {
                 <UsersIcon size={18} />
                 Usuarios
               </NavLink>
+              <NavLink
+                to="/admin/client-users"
+                className={({ isActive }) => `${navItem} ${isActive ? navActive : navIdle}`}
+              >
+                <UsersIcon size={18} />
+                Usuarios de clientes
+              </NavLink>
             </>
           )}
         </nav>

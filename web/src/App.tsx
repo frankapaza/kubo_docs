@@ -9,6 +9,7 @@ import MeetingsListPage from './pages/MeetingsListPage';
 import MeetingDetailPage from './pages/MeetingDetailPage';
 import ActaEditorPage from './pages/ActaEditorPage';
 import UsersPage from './pages/UsersPage';
+import ClientUsersPage from './pages/ClientUsersPage';
 import AIProvidersPage from './pages/AIProvidersPage';
 import IntegrationsPage from './pages/IntegrationsPage';
 import TemplatesPage from './pages/TemplatesPage';
@@ -100,6 +101,7 @@ export default function App() {
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agents/:type" element={<AgentChatPage />} />
           <Route path="/users" element={<UsersPage />} />
+          <Route path="/admin/client-users" element={<ClientUsersPage />} />
           <Route path="/admin/ai-providers" element={<AIProvidersPage />} />
           <Route path="/admin/integrations" element={<IntegrationsPage />} />
           <Route path="/admin/templates" element={<TemplatesPage />} />
