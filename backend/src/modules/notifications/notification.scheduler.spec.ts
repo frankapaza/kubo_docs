@@ -576,30 +576,47 @@ describe('NotificationScheduler', () => {
     });
 
     /**
-     * El texto del abandono se compone envolviendo el último error. Si el
-     * sellado falla y la pasada siguiente lo reintenta, volver a envolverlo
+     * El texto del abandono se compone envolviendo el último error. Si una
+     * fila vuelve a mirarse con el prefijo ya dentro, envolverlo otra vez
      * anidaría el prefijo hasta empujar el error original fuera de los 500
      * caracteres — y el motivo de un aviso perdido es lo último que puede
      * desaparecer por un problema de formato.
+     *
+     * La versión anterior de este test montaba el escenario con
+     * `markNotified.mockRejectedValueOnce`, y no probaba nada: eso **sustituye
+     * la implementación del doble**, así que la primera pasada no escribía el
+     * texto envuelto en ninguna parte y la segunda releía el error pelado. La
+     * guarda nunca llegaba a ejercitarse y el test pasaba igual sin ella.
+     *
+     * Y no es que el escenario estuviera mal montado: es que ese escenario no
+     * existe. Un `UPDATE` que falla no escribe nada, así que un sellado
+     * fallido no puede dejar el prefijo en la fila. El camino real es el otro:
+     * alguien devuelve a la cola un evento ya abandonado —justo lo que invita
+     * a hacer el log, "si el aviso importaba, hay que rehacerlo a mano"— y la
+     * fila reaparece con el texto envuelto que le grabó el abandono anterior.
      */
-    it('el texto del abandono no se anida al reintentarse el sellado', async () => {
+    it('el texto del abandono no se anida cuando la fila vuelve a la cola', async () => {
       const fila = unaFila({
         notifyAttempts: NOTIFY_MAX_ATTEMPTS,
         notifyLastError: '550 el buzón del cliente no existe',
       });
-      const { scheduler, repo } = montar([fila]);
-      repo.markNotified.mockRejectedValueOnce(new Error('ER_LOCK_WAIT_TIMEOUT'));
+      const { scheduler } = montar([fila]);
 
-      // Primera pasada: el sellado falla y la fila sigue pendiente.
+      // Primera pasada: se abandona y queda sellada con el texto envuelto.
+      // Se toma de aquí, no de una constante copiada, para que el test no
+      // dependa de cómo esté redactado el prefijo.
       await scheduler.drain(T0);
-      expect(fila.notifiedAt).toBeNull();
+      const envuelto = fila.notifyLastError!;
+      expect(envuelto).toMatch(/^Agotados los/);
 
-      // Segunda: ahora sí sella.
+      // Alguien la devuelve a la cola a mano para reintentar el aviso.
+      fila.notifiedAt = null;
       await scheduler.drain(enT0Mas(UN_MINUTO));
 
       expect(fila.notifiedAt).not.toBeNull();
-      const veces = fila.notifyLastError!.match(/Agotados los/g) ?? [];
-      expect(veces).toHaveLength(1);
+      // El texto es exactamente el mismo: ni una capa más.
+      expect(fila.notifyLastError).toBe(envuelto);
+      expect(fila.notifyLastError!.match(/Agotados los/g)).toHaveLength(1);
       expect(fila.notifyLastError).toContain('550 el buzón del cliente no existe');
     });
   });

@@ -81,11 +81,16 @@ const ELLIPSIS = '...';
 /**
  * Con qué empieza el texto que se graba al abandonar un evento.
  *
- * Se comprueba antes de volver a componerlo: si el sellado del abandono falla y
- * la pasada siguiente lo reintenta, envolver otra vez el texto ya envuelto
- * acabaría empujando el error original fuera de los 500 caracteres. El motivo
- * de un aviso perdido es justo lo último que puede desaparecer por un problema
- * de formato.
+ * Se comprueba antes de volver a componerlo: envolver otra vez un texto ya
+ * envuelto acabaría empujando el error original fuera de los 500 caracteres, y
+ * el motivo de un aviso perdido es justo lo último que puede desaparecer por
+ * un problema de formato.
+ *
+ * El caso que lo provoca es que una fila ya abandonada vuelva a la cola con su
+ * texto dentro: alguien le quita el sellado para reintentar el aviso, que es
+ * justo a lo que invita el log del abandono. **No** es un sellado que falla —
+ * un `UPDATE` que falla no escribe nada, así que no puede dejar el prefijo en
+ * ninguna parte.
  */
 const ABANDONED_PREFIX = 'Agotados los';
 
@@ -487,9 +492,9 @@ export class NotificationScheduler {
    * intentos se gastaron además del último error, porque leyendo solo el error
    * no se distingue "falló una vez" de "se rindió".
    *
-   * Idempotente: si el texto que llega ya es uno de estos —el sellado del
-   * abandono falló y esta es la pasada siguiente—, se devuelve tal cual. Volver
-   * a envolverlo anidaría el prefijo en cada intento hasta empujar el error
+   * Idempotente: si el texto que llega ya es uno de estos —la fila volvió a la
+   * cola con el rastro de un abandono anterior—, se devuelve tal cual. Volver a
+   * envolverlo anidaría el prefijo en cada vuelta hasta empujar el error
    * original fuera de los 500 caracteres.
    */
   private exhaustedText(lastError: string | null): string {
