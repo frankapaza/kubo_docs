@@ -478,6 +478,34 @@ describe('cuándo no se envía nada, sin que sea un error', () => {
 // El fallo de envío no se traga
 // ---------------------------------------------------------------------------
 
+describe('un destinatario rechazado por el servidor', () => {
+  /**
+   * `EmailService.send` no lanza cuando el servidor acepta el mensaje pero
+   * rechaza a un destinatario: eso viaja en `rejected`. Hoy siempre hay uno
+   * solo y nodemailer acaba lanzando, pero sin esta comprobación el día que un
+   * aviso vaya a varias direcciones un rebote parcial se sellaría como éxito y
+   * el correo se perdería en silencio.
+   */
+  it('cuenta como fallo aunque el envío no lance, para que el vigilante lo reintente', async () => {
+    const { dispatcher, email } = montar();
+    email.send.mockResolvedValueOnce({
+      messageId: '<1@kuboti.com>',
+      accepted: [] as string[],
+      rejected: [AUTOR_EMAIL] as string[],
+    } as never);
+
+    await expect(dispatcher.dispatchForEvent(unEvento())).rejects.toThrow(AUTOR_EMAIL);
+  });
+
+  it('un envío sin rechazos no se toca', async () => {
+    const { dispatcher } = montar();
+
+    await expect(dispatcher.dispatchForEvent(unEvento())).resolves.toEqual(
+      expect.objectContaining({ sent: 1 }),
+    );
+  });
+});
+
 describe('un fallo de envío', () => {
   it('se propaga al llamador: es el vigilante quien decide reintentar', async () => {
     const { dispatcher } = montar({ enviaOk: false });

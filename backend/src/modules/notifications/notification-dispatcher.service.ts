@@ -319,7 +319,21 @@ export class NotificationDispatcher {
     const values =
       entry.audience === 'CLIENT' ? this.clientValues(context) : this.teamValues(context);
 
-    await this.email.send(this.compose(template, entry.audience, values, to));
+    const resultado = await this.email.send(this.compose(template, entry.audience, values, to));
+
+    // `EmailService.send` no lanza cuando el servidor acepta el mensaje pero
+    // rechaza a un destinatario: eso viaja en `rejected`. Hoy siempre hay uno
+    // solo y nodemailer acaba lanzando, pero si no lo miráramos, el día que un
+    // aviso vaya a varias direcciones un rebote parcial se sellaría como éxito
+    // y el correo se perdería sin que nadie se entere. Lo tratamos como fallo
+    // para que el vigilante lo reintente y quede el rastro.
+    if (resultado.rejected?.length) {
+      throw new Error(
+        `El servidor de correo rechazó a ${resultado.rejected.join(', ')} ` +
+          `para el aviso ${entry.triggerKey}/${entry.audience}.`,
+      );
+    }
+
     this.logger.log(
       `Aviso ${entry.triggerKey}/${entry.audience} enviado para el ticket ${String(context.ticket.id)}.`,
     );
