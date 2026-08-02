@@ -213,7 +213,7 @@ interface FailureOutcome {
  * registrado detrás, ni hace falta una segunda réplica—: lo produce el camino
  * feliz. Y, de paso, las dos pasadas leerían `notify_attempts = 0` y las dos
  * escribirían `1`, falseando el presupuesto de reintentos justo cuando el SMTP
- * va mal. Ver `handleCron` y `running`.
+ * va mal. Ver `handleCron` y `runningSince`.
  *
  * ## Sobre el "exactamente una vez"
  *
@@ -222,7 +222,7 @@ interface FailureOutcome {
  * un correo repetido por un correo perdido en silencio, que es peor. Lo que sí
  * se acota es que ese duplicado no se repita para siempre: ver
  * `NOTIFY_MAX_WRITE_FAILURES`. Y con dos réplicas del backend tampoco lo hay:
- * el freno de `running` vive en memoria del proceso y no coordina nada entre
+ * el freno de `runningSince` vive en memoria del proceso y no coordina nada entre
  * instancias — es un compromiso aceptado, distinto del solapamiento de una
  * sola instancia, que sí se cierra aquí.
  */
