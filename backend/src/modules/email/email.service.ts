@@ -32,17 +32,26 @@ export class EmailService {
   /**
    * Prioriza la config SMTP de la BD (workspace_settings).
    * Cae al .env como respaldo si la DB no está configurada.
+   *
+   * Toda variable se lee con `|| valor por defecto`, nunca con `??`: el
+   * `docker-compose.yml` de producción declara `SMTP_HOST: ${SMTP_HOST}` y
+   * Compose **sustituye por cadena vacía** cuando la variable no está en el
+   * `.env`; no omite la clave. Con `??`, una variable en blanco pasaría por
+   * "configurada": el puerto saldría `NaN` —el `parseInt` de una cadena
+   * vacía— y el `From` iría vacío. Mismo criterio, y por la misma razón, que
+   * `resolveFrontendUrl` en el despachador de avisos.
    */
   private async getSmtpConfig(): Promise<ResolvedSmtpConfig> {
     const fromDb = await this.workspace.getSmtpConfig();
     if (fromDb) return fromDb;
 
-    const host = this.config.get<string>('SMTP_HOST');
-    const user = this.config.get<string>('SMTP_USER');
-    const pass = this.config.get<string>('SMTP_PASS');
-    const port = parseInt(this.config.get<string>('SMTP_PORT', '587'), 10);
-    const secure = this.config.get<string>('SMTP_SECURE', 'false') === 'true';
-    const from = this.config.get<string>('SMTP_FROM') ?? user ?? 'no-reply@kuboti.com';
+    const host = (this.config.get<string>('SMTP_HOST') || '').trim();
+    const user = (this.config.get<string>('SMTP_USER') || '').trim();
+    const pass = this.config.get<string>('SMTP_PASS') || '';
+    // `|| 587` cubre a la vez la cadena vacía y un valor que no sea un número.
+    const port = parseInt((this.config.get<string>('SMTP_PORT') || '').trim(), 10) || 587;
+    const secure = (this.config.get<string>('SMTP_SECURE') || '').trim() === 'true';
+    const from = (this.config.get<string>('SMTP_FROM') || '').trim() || user || 'no-reply@kuboti.com';
 
     if (!host || !user || !pass) {
       throw new BadGatewayException({

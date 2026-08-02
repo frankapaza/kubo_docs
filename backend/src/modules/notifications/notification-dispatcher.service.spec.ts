@@ -123,6 +123,8 @@ interface Opciones {
   fallaPara?: string | null;
   /** `null` = la variable de entorno no está puesta. */
   frontendUrl?: string | null;
+  /** Resto de variables de entorno visibles para el despachador. */
+  env?: Record<string, string>;
 }
 
 function montar(opciones: Opciones = {}) {
@@ -148,6 +150,7 @@ function montar(opciones: Opciones = {}) {
     enviaOk = true,
     fallaPara = null,
     frontendUrl = 'https://docs.kuboti.com',
+    env = {},
   } = opciones;
 
   const tickets = {
@@ -194,7 +197,7 @@ function montar(opciones: Opciones = {}) {
   };
   const config = {
     get: jest.fn((key: string) =>
-      key === 'FRONTEND_URL' ? frontendUrl ?? undefined : undefined,
+      key === 'FRONTEND_URL' ? frontendUrl ?? undefined : env[key],
     ),
   };
 
@@ -413,6 +416,25 @@ describe('a quién se le escribe', () => {
     await dispatcher.dispatchForEvent(unEvento({ type: 'SLA_AT_RISK', toStatus: null }));
 
     expect(enviados(email).map((c) => c.to)).toEqual([REMITENTE]);
+  });
+
+  /**
+   * Sin fila de SMTP en base, el remitente sale del `.env`. Y ahí las
+   * variables llegan vacías, no ausentes: el compose de producción declara
+   * `SMTP_FROM: ${SMTP_FROM}` y Compose sustituye por cadena vacía. Con `??`,
+   * ese vacío ganaría a `SMTP_USER` y el aviso interno se quedaría sin
+   * destinatario en silencio.
+   */
+  it('con el buzón y SMTP_FROM vacíos, el remitente sale de SMTP_USER', async () => {
+    const { dispatcher, email } = montar({
+      ticket: unTicket({ assigneeUserId: null }),
+      teamInbox: null,
+      smtpFrom: null,
+      env: { SMTP_FROM: '', SMTP_USER: 'ticket@kuboti.com' },
+    });
+    await dispatcher.dispatchForEvent(unEvento({ type: 'SLA_AT_RISK', toStatus: null }));
+
+    expect(enviados(email).map((c) => c.to)).toEqual(['ticket@kuboti.com']);
   });
 
   it('ticket nuevo desde el portal: el aviso de equipo va al buzón, aunque haya responsable', async () => {

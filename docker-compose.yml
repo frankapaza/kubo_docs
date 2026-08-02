@@ -92,6 +92,22 @@ services:
       WHISPER_MODEL: ${WHISPER_MODEL}
       WHISPER_LANGUAGE: ${WHISPER_LANGUAGE}
       CORS_ORIGINS: ${CORS_ORIGINS}
+      # SMTP de respaldo. La fuente buena es workspace_settings, que se edita
+      # desde Ajustes del area de trabajo y gana siempre; esto es lo que hace
+      # que el correo funcione ANTES de que nadie entre al panel. Importa
+      # porque el vigilante de avisos drena cada minuto: sin ninguna de las dos
+      # fuentes, cada aviso falla, gasta sus tres intentos en veinticinco
+      # minutos y queda abandonado sellado con error. No es un boton que falla,
+      # es una cola que se quema sola.
+      #
+      # Si no estan en el .env, Compose las inyecta como cadena vacia —no omite
+      # la clave—, y EmailService las trata como ausentes a proposito.
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_SECURE: ${SMTP_SECURE}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_FROM: ${SMTP_FROM}
       # Base de los enlaces que van dentro de los correos (ticket en el portal,
       # ticket en el panel, firma de documentos). El backend no la puede
       # deducir: las peticiones le llegan por Caddy, no desde el navegador.

@@ -490,12 +490,20 @@ export class NotificationDispatcher {
    * Prioriza la configuración de la base (la que usa de verdad
    * `EmailService`), y cae al `.env` con el mismo orden que él, para que el
    * aviso no se mande a un sitio distinto del que dice el `From`.
+   *
+   * `||` y no `??`, por lo mismo que `resolveFrontendUrl` unas líneas más
+   * arriba: el compose de producción declara `SMTP_FROM: ${SMTP_FROM}` y
+   * Compose sustituye por cadena vacía cuando no está en el `.env`. Con `??`,
+   * ese vacío ganaría a `SMTP_USER` y el aviso interno se quedaría sin
+   * destinatario — descartado en silencio como "no tiene destinatario".
    */
   private async senderAddress(): Promise<string | null> {
     const smtp = await this.workspace.getSmtpConfig();
     if (smtp?.from) return smtp.from;
     return (
-      this.config.get<string>('SMTP_FROM') ?? this.config.get<string>('SMTP_USER') ?? null
+      (this.config.get<string>('SMTP_FROM') || '').trim() ||
+      (this.config.get<string>('SMTP_USER') || '').trim() ||
+      null
     );
   }
 
