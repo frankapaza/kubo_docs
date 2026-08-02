@@ -25,6 +25,7 @@ import TicketDetailPage from './pages/TicketDetailPage';
 import WorkItemsBoardPage from './pages/WorkItemsBoardPage';
 import MonthlyReportPage from './pages/MonthlyReportPage';
 import SignaturePage from './pages/SignaturePage';
+import HelpPage from './pages/HelpPage';
 import PortalLoginPage from './pages/portal/PortalLoginPage';
 import PortalTicketsListPage from './pages/portal/PortalTicketsListPage';
 import PortalTicketDetailPage from './pages/portal/PortalTicketDetailPage';
@@ -115,6 +116,8 @@ export default function App() {
           <Route path="/admin/templates" element={<TemplatesPage />} />
           <Route path="/admin/workspace" element={<WorkspaceSettingsPage />} />
           <Route path="/documents/:documentId" element={<DocumentEditorPage />} />
+          {/* Manual del equipo interno; se enlaza desde el menú lateral. */}
+          <Route path="/help" element={<HelpPage />} />
         </Route>
       </Route>
       <Route path="/sign/:token" element={<SignaturePage />} />

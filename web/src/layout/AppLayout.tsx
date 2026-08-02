@@ -6,7 +6,7 @@ import { useIdleLogout } from '../auth/useIdleLogout';
 import { canManageUsers } from '../auth/permissions';
 import { workspaceApi } from '../api/workspace.api';
 import { roleLabels } from '../components/ui/Badge';
-import { ArchiveIcon, BotIcon, FileTextIcon, FolderIcon, InboxIcon, KuboLogo, LogOutIcon, SettingsIcon, SparklesIcon, UsersIcon, ZapIcon } from '../components/ui/Icon';
+import { ArchiveIcon, BookOpenIcon, BotIcon, FileTextIcon, FolderIcon, InboxIcon, KuboLogo, LogOutIcon, SettingsIcon, SparklesIcon, UsersIcon, ZapIcon } from '../components/ui/Icon';
 import { toast } from '../ui/Toast';
 // Nota: "UsersIcon" también se usa en la sección Clientes; es intencional.
 
@@ -143,6 +143,24 @@ export default function AppLayout() {
               </NavLink>
             </>
           )}
+
+          {/*
+            Sin condición de rol: el manual lo necesita sobre todo quien acaba
+            de entrar al equipo, que suele ser DEVELOPER. Va como último grupo
+            del menú y no al pie del `aside` con `mt-auto`: el aside crece con
+            la página, así que "al pie" queda fuera de pantalla en cualquier
+            vista larga.
+          */}
+          <p className="px-3 py-1 mt-4 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+            Ayuda
+          </p>
+          <NavLink
+            to="/help"
+            className={({ isActive }) => `${navItem} ${isActive ? navActive : navIdle}`}
+          >
+            <BookOpenIcon size={18} />
+            Manual del equipo
+          </NavLink>
         </nav>
 
         <div className="p-3 border-t border-slate-100">
