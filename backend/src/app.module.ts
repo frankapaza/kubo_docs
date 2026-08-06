@@ -34,6 +34,7 @@ import { WorkspaceModule } from './modules/workspace/workspace.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { EmailModule } from './modules/email/email.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { TicketMessagesModule } from './modules/ticket-messages/ticket-messages.module';
 
 @Module({
   imports: [
@@ -102,6 +103,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     ReportsModule,
     EmailModule,
     NotificationsModule,
+    TicketMessagesModule,
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },

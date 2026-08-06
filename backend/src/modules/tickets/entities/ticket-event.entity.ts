@@ -1,6 +1,20 @@
 import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 import { TicketStatus, TICKET_STATUSES } from '../domain/ticket-state-machine';
 
+/**
+ * `MESSAGE_POSTED` (migración 018) es el que escribe el servicio del hilo de
+ * mensajes -- respuesta pública o nota interna, `ticket_messages.visibility`
+ * decide cuál -- cada vez que se guarda uno. **Deliberadamente fuera** de
+ * `CLIENT_VISIBLE_EVENT_TYPES` (`notifications/domain/notification-rules.ts`)
+ * y de la lista blanca del timeline del portal
+ * (`PortalVisibleEventType`/`CLIENT_VISIBLE_EVENT_TYPES` en
+ * `portal-tickets.service.ts`): el hilo se enseña aparte, así que publicarlo
+ * ahí duplicaría cada mensaje -- y peor, revelaría que hubo una nota interna,
+ * porque esa también escribe su evento con el mismo tipo. Ambas listas son
+ * blancas (no lo publican por omisión), así que añadir este valor aquí no las
+ * ha roto; se deja esta nota para que quien las toque dentro de seis meses no
+ * lo publique por descuido.
+ */
 export type TicketEventType =
   | 'CREATED'
   | 'TRIAGED'
@@ -13,7 +27,8 @@ export type TicketEventType =
   | 'CLOSED'
   | 'REOPENED'
   | 'SLA_AT_RISK'
-  | 'PRIORITY_OVERRIDDEN';
+  | 'PRIORITY_OVERRIDDEN'
+  | 'MESSAGE_POSTED';
 
 export const TICKET_EVENT_TYPES: TicketEventType[] = [
   'CREATED',
@@ -28,6 +43,7 @@ export const TICKET_EVENT_TYPES: TicketEventType[] = [
   'REOPENED',
   'SLA_AT_RISK',
   'PRIORITY_OVERRIDDEN',
+  'MESSAGE_POSTED',
 ];
 
 /**
