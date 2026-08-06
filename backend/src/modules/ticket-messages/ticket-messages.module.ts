@@ -22,7 +22,12 @@ import { TicketsModule } from '../tickets/tickets.module';
  */
 @Module({
   imports: [TypeOrmModule.forFeature([TicketMessage, TicketAttachment]), TicketsModule],
+  // El repositorio **no** se exporta a propósito: es quien lee y escribe el
+  // hilo sin comprobar de quién es el ticket. Si otro módulo pudiera
+  // inyectarlo, se saltaría `loadVisibleOrFail` sin darse cuenta y la
+  // separación entre empresas pasaría a depender de que nadie se despiste. La
+  // única puerta al hilo es el servicio.
   providers: [TicketMessagesRepository, TicketMessagesService],
-  exports: [TicketMessagesRepository, TicketMessagesService],
+  exports: [TicketMessagesService],
 })
 export class TicketMessagesModule {}

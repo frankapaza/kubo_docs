@@ -1,4 +1,4 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 
 import { SlaService } from '../tickets/sla.service';
 import { TicketEventsService } from '../tickets/ticket-events.service';
@@ -15,6 +15,14 @@ const OTRA_EMPRESA = 99;
 
 const CLIENTE = { kind: 'CLIENT', clientUserId: 11, clientId: EMPRESA } as const;
 const EQUIPO = { kind: 'STAFF', userId: 5 } as const;
+
+/**
+ * El cuerpo del 404, comprobado en las cuatro direcciones (escribir y leer, lo
+ * ajeno y lo inexistente): que sean el mismo error no basta, tiene que ser
+ * también el mismo cuerpo. Cualquier diferencia entre los dos deja distinguir
+ * un ticket que existe de uno que no, que es justo lo que el 404 evita.
+ */
+const CUERPO_404 = { code: 'NOT_FOUND', message: 'Ticket no encontrado' };
 
 const ticketRow = (over: Partial<Ticket> = {}): Ticket =>
   ({
@@ -309,7 +317,7 @@ describe('post: de quién es el ticket', () => {
 
     expect(error).toBeInstanceOf(NotFoundException);
     // Mismo cuerpo que un ticket inexistente: un 403 confirmaría que existe.
-    expect(error.getResponse()).toEqual({ code: 'NOT_FOUND', message: 'Ticket no encontrado' });
+    expect(error.getResponse()).toEqual(CUERPO_404);
     expect(tickets.runInTransaction).not.toHaveBeenCalled();
   });
 
@@ -341,6 +349,65 @@ describe('post: de quién es el ticket', () => {
     await service.post(EQUIPO, 7, { bodyMd: 'Anotado.' });
 
     expect(confirmado.messages).toHaveLength(1);
+  });
+});
+
+/**
+ * Un guardia de pertenencia no puede apagarse solo cuando le falta su dato.
+ *
+ * Con el ámbito codificado como `number | null` -- `null` valiendo a la vez
+ * «es del equipo» y «no vino ningún clientId» -- un actor de cliente con
+ * `clientId` nulo se saltaba la comprobación **entera** y volvía a leer y
+ * escribir en cualquier empresa. Lo revelador es que `undefined`, `0` y `''`
+ * sí fallaban cerrado: solo `null` fallaba abierto, que es justo el valor que
+ * el informe daba por cubierto.
+ *
+ * Hoy quien construye el actor es la tarea siguiente y `ClientJwtStrategy`
+ * copia el `clientId` del payload del token sin validarlo, así que la frontera
+ * no puede darlo por bueno: un actor de cliente sin empresa utilizable lanza y
+ * no consulta nada.
+ */
+describe('un actor de cliente sin clientId utilizable', () => {
+  const inservibles: Array<[string, unknown]> = [
+    ['null', null],
+    ['undefined', undefined],
+    ['cero', 0],
+    ['cadena vacía', ''],
+  ];
+
+  it.each(inservibles)('no escribe en un ticket ajeno: %s', async (_nombre, clientId) => {
+    const { service, tickets, confirmado } = makeHarness(ticketRow({ clientId: OTRA_EMPRESA }));
+
+    await expect(
+      service.post({ kind: 'CLIENT', clientUserId: 11, clientId } as any, 7, { bodyMd: 'Hola.' }),
+    ).rejects.toThrow(UnauthorizedException);
+
+    // Ni siquiera llega a mirar el ticket, y menos a escribir.
+    expect(tickets.findById).not.toHaveBeenCalled();
+    expect(tickets.runInTransaction).not.toHaveBeenCalled();
+    expect(confirmado.messages).toHaveLength(0);
+  });
+
+  it.each(inservibles)('no lee el hilo de un ticket ajeno: %s', async (_nombre, clientId) => {
+    const { service, tickets, messages } = makeHarness(ticketRow({ clientId: OTRA_EMPRESA }));
+
+    await expect(
+      service.listThread({ kind: 'CLIENT', clientUserId: 11, clientId } as any, 7),
+    ).rejects.toThrow(UnauthorizedException);
+
+    expect(tickets.findById).not.toHaveBeenCalled();
+    expect(messages.listByTicket).not.toHaveBeenCalled();
+  });
+
+  it('tampoco escribe en un ticket de su propia empresa: no degrada, lanza', async () => {
+    const { service, tickets } = makeHarness(ticketRow());
+
+    await expect(
+      service.post({ kind: 'CLIENT', clientUserId: 11, clientId: null } as any, 7, {
+        bodyMd: 'Hola.',
+      }),
+    ).rejects.toThrow(UnauthorizedException);
+    expect(tickets.runInTransaction).not.toHaveBeenCalled();
   });
 });
 
@@ -495,7 +562,10 @@ describe('post: tickets que no admiten mensajes', () => {
   it('un ticket inexistente da NOT_FOUND sin abrir la transacción', async () => {
     const { service, tickets } = makeHarness(null);
 
-    await expect(service.post(EQUIPO, 404, { bodyMd: 'Hola.' })).rejects.toThrow(NotFoundException);
+    const error = await service.post(EQUIPO, 404, { bodyMd: 'Hola.' }).catch((e) => e);
+
+    expect(error).toBeInstanceOf(NotFoundException);
+    expect(error.getResponse()).toEqual(CUERPO_404);
     expect(tickets.runInTransaction).not.toHaveBeenCalled();
   });
 
@@ -598,7 +668,7 @@ describe('listThread', () => {
     const error = await service.listThread(CLIENTE, 7).catch((e) => e);
 
     expect(error).toBeInstanceOf(NotFoundException);
-    expect(error.getResponse()).toEqual({ code: 'NOT_FOUND', message: 'Ticket no encontrado' });
+    expect(error.getResponse()).toEqual(CUERPO_404);
     expect(messages.listByTicket).not.toHaveBeenCalled();
   });
 
@@ -613,7 +683,10 @@ describe('listThread', () => {
   it('un ticket inexistente da 404 sin consultar el hilo', async () => {
     const { service, messages } = makeHarness(null);
 
-    await expect(service.listThread(CLIENTE, 404)).rejects.toThrow(NotFoundException);
+    const error = await service.listThread(CLIENTE, 404).catch((e) => e);
+
+    expect(error).toBeInstanceOf(NotFoundException);
+    expect(error.getResponse()).toEqual(CUERPO_404);
     expect(messages.listByTicket).not.toHaveBeenCalled();
   });
 
