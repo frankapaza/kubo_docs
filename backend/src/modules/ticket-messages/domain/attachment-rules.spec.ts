@@ -1,10 +1,4 @@
-import {
-  ALLOWED_TYPES,
-  assertAcceptable,
-  detectMimeType,
-  MAX_FILE_BYTES,
-  MAX_TICKET_BYTES,
-} from './attachment-rules';
+import { ALLOWED_TYPES, assertAcceptable, detectMimeType, MAX_FILE_BYTES } from './attachment-rules';
 
 // --- Constructores de ficheros de prueba -----------------------------------
 //
@@ -13,14 +7,20 @@ import {
 // hace único a este módulo: si aquí se hiciera trampa con la firma, el test
 // central (bytes de otra cosa con extensión de imagen) dejaría de decir nada.
 
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
 function pngBytes(): Buffer {
-  // 89 50 4E 47 0D 0A 1A 0A -- firma completa de 8 bytes, más un IHDR
-  // cualquiera detrás para que se parezca a un PNG real (no hace falta que
-  // sea válido más allá de la firma: detectMimeType no mira más que eso).
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    Buffer.from([0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52]),
-  ]);
+  // Firma completa de 8 bytes, más un IHDR cualquiera detrás para que se
+  // parezca a un PNG real (no hace falta que sea válido más allá de la
+  // firma: detectMimeType no mira más que eso).
+  return Buffer.concat([Buffer.from(PNG_SIGNATURE), Buffer.from([0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52])]);
+}
+
+/** Un PNG cuyo tamaño TOTAL es exactamente `totalSize` bytes: firma real + relleno. */
+function pngBytesOfSize(totalSize: number): Buffer {
+  const buf = Buffer.alloc(totalSize, 0);
+  Buffer.from(PNG_SIGNATURE).copy(buf, 0);
+  return buf;
 }
 
 function jpegBytes(): Buffer {
@@ -54,13 +54,6 @@ function pdfBytes(): Buffer {
   return Buffer.from('%PDF-1.4\n%\xe2\xe3\xcf\xd3\n', 'latin1');
 }
 
-function svgBytes(): Buffer {
-  // Texto plano, no binario: es exactamente lo que hace peligroso al SVG.
-  // Ni siquiera hace falta el <script> para que no case ninguna firma, pero
-  // se incluye porque es la razón real de excluirlo.
-  return Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', 'utf-8');
-}
-
 function randomBinaryBytes(length = 64): Buffer {
   // Ni imagen, ni PDF, ni texto: la cabecera de un ejecutable cualquiera
   // (MZ, la firma de un .exe de Windows) rellenada con ruido.
@@ -74,13 +67,39 @@ function randomBinaryBytes(length = 64): Buffer {
 const VALID_NAME = 'captura.png';
 const VALID_MIME = 'image/png';
 
-describe('ALLOWED_TYPES -- la lista corta', () => {
+/** Helper: capta la excepción que lanza `assertAcceptable` y devuelve su `response`. */
+function captureRejection(run: () => unknown): { code: string; message: string } {
+  try {
+    run();
+  } catch (err) {
+    return (err as { response: { code: string; message: string } }).response;
+  }
+  throw new Error('se esperaba que assertAcceptable rechazara, y no rechazó');
+}
+
+describe('ALLOWED_TYPES -- la lista corta, y de verdad conectada a la detección', () => {
   it('contiene exactamente los cinco tipos aceptados, y ningún SVG', () => {
     expect([...ALLOWED_TYPES].sort()).toEqual(
       ['application/pdf', 'image/gif', 'image/jpeg', 'image/png', 'image/webp'].sort(),
     );
     expect(ALLOWED_TYPES).not.toContain('image/svg+xml');
   });
+
+  it.each([
+    ['PNG', pngBytes()],
+    ['JPEG', jpegBytes()],
+    ['WebP', webpBytes()],
+    ['GIF87a', gif87aBytes()],
+    ['GIF89a', gif89aBytes()],
+    ['PDF', pdfBytes()],
+  ])(
+    'lo que detectMimeType devuelve para %s está siempre en ALLOWED_TYPES: no hay un tipo detectable que la lista no reconozca',
+    (_label, buffer) => {
+      const detected = detectMimeType(buffer);
+      expect(detected).not.toBeNull();
+      expect(ALLOWED_TYPES).toContain(detected);
+    },
+  );
 });
 
 describe('detectMimeType -- por la firma de bytes, no por metadatos', () => {
@@ -96,13 +115,20 @@ describe('detectMimeType -- por la firma de bytes, no por metadatos', () => {
     expect(detectMimeType(webpBytes())).toBe('image/webp');
   });
 
-  it('un RIFF que no es WEBP (otro contenedor RIFF cualquiera) no se detecta como imagen', () => {
+  it('un RIFF que no es WEBP (otro contenedor RIFF cualquiera, p. ej. AVI) no se detecta como imagen', () => {
     const notWebp = Buffer.concat([
       Buffer.from('RIFF', 'ascii'),
       Buffer.from([0x24, 0x00, 0x00, 0x00]),
       Buffer.from('AVI ', 'ascii'),
     ]);
     expect(detectMimeType(notWebp)).toBeNull();
+  });
+
+  it('un RIFF truncado justo antes de llegar a la marca "WEBP" (offset 8) no se detecta: el segundo tramo nunca llega a comprobarse sobre datos completos', () => {
+    // "RIFF" + 4 bytes de tamaño = 8 bytes exactos, sin ningún byte de "WEBP" detrás.
+    const truncatedRiff = Buffer.concat([Buffer.from('RIFF', 'ascii'), Buffer.from([0x24, 0x00, 0x00, 0x00])]);
+    expect(truncatedRiff.length).toBe(8);
+    expect(detectMimeType(truncatedRiff)).toBeNull();
   });
 
   it('detecta GIF87a', () => {
@@ -117,8 +143,28 @@ describe('detectMimeType -- por la firma de bytes, no por metadatos', () => {
     expect(detectMimeType(pdfBytes())).toBe('application/pdf');
   });
 
-  it('un SVG no se detecta como ningún tipo permitido: es texto XML, no una firma binaria', () => {
-    expect(detectMimeType(svgBytes())).toBeNull();
+  it('un PDF cuya firma no está en el byte 0 (desplazada por basura previa) no se detecta: la especificación la exige al inicio', () => {
+    const shiftedPdf = Buffer.concat([Buffer.from([0x00, 0x00, 0x00]), pdfBytes()]);
+    expect(detectMimeType(shiftedPdf)).toBeNull();
+  });
+
+  it.each([
+    ['sin espacios', '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'],
+    ['con espacios y salto de línea antes de la etiqueta', '   \n<svg xmlns="http://www.w3.org/2000/svg"></svg>'],
+    ['con declaración XML delante', '<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg"></svg>'],
+    ['en mayúsculas', '<SVG XMLNS="http://www.w3.org/2000/svg"><SCRIPT>alert(1)</SCRIPT></SVG>'],
+    ['autocerrada, sin script visible', '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>'],
+  ])(
+    'un SVG no se detecta como ningún tipo permitido (variante: %s): es texto XML, no una firma binaria -- por ausencia en la lista blanca, no por una regla que lo prohíba explícitamente',
+    (_label, xml) => {
+      expect(detectMimeType(Buffer.from(xml, 'utf-8'))).toBeNull();
+    },
+  );
+
+  it('un SVG con BOM UTF-8 delante tampoco se detecta', () => {
+    const bom = Buffer.from([0xef, 0xbb, 0xbf]);
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>', 'utf-8');
+    expect(detectMimeType(Buffer.concat([bom, svg]))).toBeNull();
   });
 
   it('unos bytes que no casan con ninguna firma devuelven null', () => {
@@ -155,30 +201,29 @@ describe('detectMimeType -- por la firma de bytes, no por metadatos', () => {
 
 describe('assertAcceptable -- el test central', () => {
   it('un PNG real, con nombre y tipo declarado coherentes, se acepta', () => {
+    const buffer = pngBytes();
     const result = assertAcceptable({
-      buffer: pngBytes(),
+      buffer,
       declaredMime: VALID_MIME,
       filename: VALID_NAME,
-      size: pngBytes().length,
+      declaredSize: buffer.length,
     });
     expect(result.mimeType).toBe('image/png');
     expect(result.originalName).toBe(VALID_NAME);
+    expect(result.size).toBe(buffer.length);
   });
 
-  it('un fichero con extensión .png y tipo declarado image/png pero bytes de un ejecutable se rechaza', () => {
+  it('un fichero con extensión .png y tipo declarado image/png pero bytes de un ejecutable se rechaza, con código UNSUPPORTED_MEDIA_TYPE', () => {
     const buffer = randomBinaryBytes();
-    expect(() =>
+    const response = captureRejection(() =>
       assertAcceptable({
         buffer,
         declaredMime: 'image/png',
         filename: 'captura.png',
-        size: buffer.length,
-      }),
-    ).toThrow(
-      expect.objectContaining({
-        response: expect.objectContaining({ code: 'BAD_INPUT' }),
+        declaredSize: buffer.length,
       }),
     );
+    expect(response.code).toBe('UNSUPPORTED_MEDIA_TYPE');
   });
 
   it('el rechazo por firma no depende de qué diga la extensión o el mime declarado: mismos bytes, mismo resultado con cualquier disfraz', () => {
@@ -189,80 +234,126 @@ describe('assertAcceptable -- el test central', () => {
       { declaredMime: 'image/jpeg', filename: 'foto.jpg' },
     ];
     for (const disguise of disguises) {
-      expect(() =>
-        assertAcceptable({ buffer, size: buffer.length, ...disguise }),
-      ).toThrow();
+      expect(() => assertAcceptable({ buffer, declaredSize: buffer.length, ...disguise })).toThrow();
     }
   });
 
-  it('un SVG anunciado como imagen se rechaza', () => {
-    const buffer = svgBytes();
-    expect(() =>
+  it('un SVG anunciado como imagen se rechaza, con código UNSUPPORTED_MEDIA_TYPE', () => {
+    const buffer = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', 'utf-8');
+    const response = captureRejection(() =>
       assertAcceptable({
         buffer,
         declaredMime: 'image/svg+xml',
         filename: 'logo.svg',
-        size: buffer.length,
-      }),
-    ).toThrow(
-      expect.objectContaining({
-        response: expect.objectContaining({ code: 'BAD_INPUT' }),
+        declaredSize: buffer.length,
       }),
     );
+    expect(response.code).toBe('UNSUPPORTED_MEDIA_TYPE');
   });
 
-  it('un fichero vacío se rechaza sin reventar', () => {
-    expect(() =>
-      assertAcceptable({ buffer: Buffer.alloc(0), declaredMime: 'image/png', filename: 'vacio.png', size: 0 }),
-    ).toThrow(
-      expect.objectContaining({
-        response: expect.objectContaining({ code: 'BAD_INPUT' }),
-      }),
+  it('un fichero vacío se rechaza sin reventar, con código UNSUPPORTED_MEDIA_TYPE', () => {
+    const response = captureRejection(() =>
+      assertAcceptable({ buffer: Buffer.alloc(0), declaredMime: 'image/png', filename: 'vacio.png', declaredSize: 0 }),
     );
+    expect(response.code).toBe('UNSUPPORTED_MEDIA_TYPE');
   });
 
   it('un fichero más corto que cualquier firma se rechaza sin reventar', () => {
     const buffer = Buffer.from([0x89, 0x50]);
     expect(() =>
-      assertAcceptable({ buffer, declaredMime: 'image/png', filename: 'corto.png', size: buffer.length }),
+      assertAcceptable({ buffer, declaredMime: 'image/png', filename: 'corto.png', declaredSize: buffer.length }),
     ).toThrow();
   });
 
-  it('un fichero que supera MAX_FILE_BYTES se rechaza, y el mensaje da el límite en MB, no en bytes', () => {
-    const buffer = pngBytes();
-    let caught: unknown;
-    try {
-      assertAcceptable({
+  describe('el tamaño: buffer.length manda, no el declarado (ronda de corrección 1)', () => {
+    it('un fichero que supera MAX_FILE_BYTES de verdad se rechaza, con código PAYLOAD_TOO_LARGE y el mensaje en MB', () => {
+      const buffer = pngBytesOfSize(MAX_FILE_BYTES + 1);
+      const response = captureRejection(() =>
+        assertAcceptable({
+          buffer,
+          declaredMime: 'image/png',
+          filename: 'enorme.png',
+          declaredSize: buffer.length,
+        }),
+      );
+      expect(response.code).toBe('PAYLOAD_TOO_LARGE');
+      expect(response.message).toMatch(/MB/);
+      expect(response.message).not.toMatch(/\d{6,}/); // nada de una cifra en bytes crudos
+    });
+
+    it('el mensaje de límite superado no es contradictorio: el tamaño mostrado y el máximo mostrado nunca son la misma cifra', () => {
+      // Un byte por encima del máximo es el caso más habitual (el que se pasa
+      // por poco) y el que antes producía «pesa 10 MB, máximo 10 MB».
+      const buffer = pngBytesOfSize(MAX_FILE_BYTES + 1);
+      const response = captureRejection(() =>
+        assertAcceptable({ buffer, declaredMime: 'image/png', filename: 'enorme.png', declaredSize: buffer.length }),
+      );
+      const [, actualLabel] = response.message.match(/pesa ([\d.]+ MB)/) ?? [];
+      const [, maxLabel] = response.message.match(/máximo permitido por archivo es ([\d.]+ MB)/) ?? [];
+      expect(actualLabel).toBeDefined();
+      expect(maxLabel).toBeDefined();
+      expect(actualLabel).not.toBe(maxLabel);
+    });
+
+    it('un fichero justo en el límite (buffer.length === MAX_FILE_BYTES) se acepta: el límite es inclusivo', () => {
+      const buffer = pngBytesOfSize(MAX_FILE_BYTES);
+      const result = assertAcceptable({
         buffer,
         declaredMime: 'image/png',
-        filename: 'enorme.png',
-        size: MAX_FILE_BYTES + 1,
+        filename: 'justo.png',
+        declaredSize: buffer.length,
       });
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeDefined();
-    const response = (caught as { response: { code: string; message: string } }).response;
-    expect(response.code).toBe('BAD_INPUT');
-    expect(response.message).toMatch(/MB/);
-    expect(response.message).not.toMatch(/\d{6,}/); // nada de una cifra en bytes crudos
-  });
-
-  it('un fichero justo en el límite se acepta (el límite es inclusivo)', () => {
-    const buffer = pngBytes();
-    const result = assertAcceptable({
-      buffer,
-      declaredMime: 'image/png',
-      filename: 'justo.png',
-      size: MAX_FILE_BYTES,
+      expect(result.mimeType).toBe('image/png');
+      expect(result.size).toBe(MAX_FILE_BYTES);
     });
-    expect(result.mimeType).toBe('image/png');
+
+    it('declaredSize: -1 no cuela un fichero que por buffer.length sí pesa de más, ni resta del acumulado: el tamaño devuelto es el real', () => {
+      const buffer = pngBytesOfSize(MAX_FILE_BYTES + 1);
+      const response = captureRejection(() =>
+        assertAcceptable({ buffer, declaredMime: 'image/png', filename: 'miente.png', declaredSize: -1 }),
+      );
+      expect(response.code).toBe('PAYLOAD_TOO_LARGE');
+    });
+
+    it('declaredSize: NaN no evita el rechazo de un fichero que por buffer.length pesa de más', () => {
+      const buffer = pngBytesOfSize(MAX_FILE_BYTES + 1);
+      const response = captureRejection(() =>
+        assertAcceptable({ buffer, declaredMime: 'image/png', filename: 'nan.png', declaredSize: NaN }),
+      );
+      expect(response.code).toBe('PAYLOAD_TOO_LARGE');
+    });
+
+    it('un buffer real de 20 MB declarando declaredSize: 10 igual se rechaza por tamaño: la autoridad es el contenido, no el dato declarado', () => {
+      const twentyMb = 20 * 1024 * 1024;
+      const buffer = pngBytesOfSize(twentyMb);
+      const response = captureRejection(() =>
+        assertAcceptable({ buffer, declaredMime: 'image/png', filename: 'subdeclarado.png', declaredSize: 10 }),
+      );
+      expect(response.code).toBe('PAYLOAD_TOO_LARGE');
+    });
+
+    it('el tamaño devuelto en el resultado aceptado es siempre buffer.length, nunca declaredSize', () => {
+      const buffer = pngBytes();
+      const result = assertAcceptable({
+        buffer,
+        declaredMime: 'image/png',
+        filename: 'ok.png',
+        declaredSize: 999999, // deliberadamente distinto del tamaño real
+      });
+      expect(result.size).toBe(buffer.length);
+      expect(result.size).not.toBe(999999);
+    });
   });
 
   it('el nombre original se conserva tal cual, sin sanear -- con mayúsculas, espacios y tildes', () => {
     const buffer = pngBytes();
     const rawName = ' Captura de pantalla (áéí) #1.PNG ';
-    const result = assertAcceptable({ buffer, declaredMime: 'image/png', filename: rawName, size: buffer.length });
+    const result = assertAcceptable({
+      buffer,
+      declaredMime: 'image/png',
+      filename: rawName,
+      declaredSize: buffer.length,
+    });
     expect(result.originalName).toBe(rawName);
   });
 
@@ -272,7 +363,7 @@ describe('assertAcceptable -- el test central', () => {
       buffer,
       declaredMime: 'image/png',
       filename: '../../etc/passwd.png',
-      size: buffer.length,
+      declaredSize: buffer.length,
     });
     expect(Object.keys(result).sort()).toEqual(['mimeType', 'originalName', 'size'].sort());
     expect((result as unknown as Record<string, unknown>).key).toBeUndefined();
@@ -288,14 +379,27 @@ describe('assertAcceptable -- el test central', () => {
       buffer,
       declaredMime: 'image/png',
       filename: 'esto-dice-que-es-png.png',
-      size: buffer.length,
+      declaredSize: buffer.length,
     });
     expect(result.mimeType).toBe('application/pdf');
   });
-});
 
-describe('MAX_TICKET_BYTES -- presupuesto por ticket', () => {
-  it('es mayor que MAX_FILE_BYTES: un ticket admite más de un adjunto', () => {
-    expect(MAX_TICKET_BYTES).toBeGreaterThan(MAX_FILE_BYTES);
+  it('un filename y un declaredMime muy largos no inflan el mensaje de error sin límite', () => {
+    const buffer = randomBinaryBytes();
+    const longName = 'a'.repeat(500) + '.png';
+    const longMime = 'x'.repeat(500);
+    const response = captureRejection(() =>
+      assertAcceptable({ buffer, declaredMime: longMime, filename: longName, declaredSize: buffer.length }),
+    );
+    expect(response.message.length).toBeLessThan(300);
+  });
+
+  it('un filename vacío tiene un respaldo legible en el mensaje, no una cadena vacía', () => {
+    const buffer = randomBinaryBytes();
+    const response = captureRejection(() =>
+      assertAcceptable({ buffer, declaredMime: 'image/png', filename: '', declaredSize: buffer.length }),
+    );
+    expect(response.message).toMatch(/sin nombre/i);
   });
 });
+
