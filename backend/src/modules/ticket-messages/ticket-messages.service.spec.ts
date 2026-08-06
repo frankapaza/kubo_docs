@@ -9,9 +9,17 @@ import { TicketMessagesService } from './ticket-messages.service';
 
 const AHORA = new Date('2026-07-31T10:30:00.000Z');
 
+/** La empresa dueña de los tickets de estos tests. */
+const EMPRESA = 3;
+const OTRA_EMPRESA = 99;
+
+const CLIENTE = { kind: 'CLIENT', clientUserId: 11, clientId: EMPRESA } as const;
+const EQUIPO = { kind: 'STAFF', userId: 5 } as const;
+
 const ticketRow = (over: Partial<Ticket> = {}): Ticket =>
   ({
     id: 7,
+    clientId: EMPRESA,
     status: 'EN_ATENCION',
     createdAt: new Date('2026-07-31T08:00:00.000Z'),
     pausedAt: null,
@@ -55,7 +63,11 @@ const vacio = (): Escrituras => ({ messages: [], events: [], ticketPatches: [] }
  */
 const makeHarness = (
   ticket: Ticket | null,
-  opciones: { fallaEn?: 'mensaje' | 'evento-mensaje' | 'evento-transicion' | 'estado' } = {},
+  opciones: {
+    fallaEn?: 'mensaje' | 'evento-mensaje' | 'evento-transicion' | 'estado';
+    /** El UPDATE condicionado no encuentra la fila: alguien movió el ticket antes. */
+    carreraPerdida?: boolean;
+  } = {},
 ) => {
   let pendiente = vacio();
   const confirmado = vacio();
@@ -87,8 +99,11 @@ const makeHarness = (
   };
 
   const ticketRepoStub = {
-    update: jest.fn().mockImplementation((_id: unknown, patch: Partial<Ticket>) => {
+    // Misma forma que el UPDATE condicionado real: criterio y parche, y un
+    // `affected` que dice si la fila seguía donde se creía.
+    update: jest.fn().mockImplementation((_criterio: unknown, patch: Partial<Ticket>) => {
       if (opciones.fallaEn === 'estado') return Promise.reject(new Error('fallo al mover el estado'));
+      if (opciones.carreraPerdida) return Promise.resolve({ affected: 0 });
       pendiente.ticketPatches.push(patch);
       ticketState = { ...(ticketState as Ticket), ...patch };
       return Promise.resolve({ affected: 1 });
@@ -158,7 +173,7 @@ describe('post: mensaje de cliente sobre un ticket en espera', () => {
   it('deja el mensaje y el cambio de estado, los dos', async () => {
     const { service, confirmado } = makeHarness(enEspera());
 
-    await service.post({ kind: 'CLIENT', clientUserId: 11 }, 7, { bodyMd: 'Ya lo probé, sigue igual.' });
+    await service.post(CLIENTE, 7, { bodyMd: 'Ya lo probé, sigue igual.' });
 
     expect(confirmado.messages).toHaveLength(1);
     expect(confirmado.messages[0].bodyMd).toBe('Ya lo probé, sigue igual.');
@@ -178,9 +193,7 @@ describe('post: mensaje de cliente sobre un ticket en espera', () => {
       fallaEn: 'evento-transicion',
     });
 
-    await expect(
-      service.post({ kind: 'CLIENT', clientUserId: 11 }, 7, { bodyMd: 'Ya lo probé.' }),
-    ).rejects.toThrow();
+    await expect(service.post(CLIENTE, 7, { bodyMd: 'Ya lo probé.' })).rejects.toThrow();
 
     expect(confirmado.messages).toHaveLength(0);
     expect(confirmado.events).toHaveLength(0);
@@ -192,9 +205,7 @@ describe('post: mensaje de cliente sobre un ticket en espera', () => {
   it('si falla el cambio de estado tampoco queda el mensaje', async () => {
     const { service, confirmado } = makeHarness(enEspera(), { fallaEn: 'estado' });
 
-    await expect(
-      service.post({ kind: 'CLIENT', clientUserId: 11 }, 7, { bodyMd: 'Ya lo probé.' }),
-    ).rejects.toThrow();
+    await expect(service.post(CLIENTE, 7, { bodyMd: 'Ya lo probé.' })).rejects.toThrow();
 
     expect(confirmado.messages).toHaveLength(0);
     expect(confirmado.events).toHaveLength(0);
@@ -211,7 +222,7 @@ describe('post: mensaje de cliente sobre un ticket en espera', () => {
   it('desplaza los vencimientos por lo que duró la pausa, no los recalcula', async () => {
     const { service, confirmado, sla } = makeHarness(enEspera());
 
-    await service.post({ kind: 'CLIENT', clientUserId: 11 }, 7, { bodyMd: 'Respondo.' });
+    await service.post(CLIENTE, 7, { bodyMd: 'Respondo.' });
 
     expect(sla.applyPause).toHaveBeenCalledTimes(1);
     const patch = confirmado.ticketPatches[0];
@@ -224,7 +235,7 @@ describe('post: mensaje de cliente sobre un ticket en espera', () => {
   it('acumula la pausa sobre lo que ya llevaba pausado', async () => {
     const { service, confirmado } = makeHarness(enEspera({ pausedTotalSeconds: 600 }));
 
-    await service.post({ kind: 'CLIENT', clientUserId: 11 }, 7, { bodyMd: 'Respondo.' });
+    await service.post(CLIENTE, 7, { bodyMd: 'Respondo.' });
 
     expect(confirmado.ticketPatches[0].pausedTotalSeconds).toBe(6000);
   });
@@ -232,21 +243,104 @@ describe('post: mensaje de cliente sobre un ticket en espera', () => {
   it('el evento de la transición lleva de dónde a dónde y el actor de cliente', async () => {
     const { service, confirmado } = makeHarness(enEspera());
 
-    await service.post({ kind: 'CLIENT', clientUserId: 11 }, 7, { bodyMd: 'Respondo.' });
+    await service.post(CLIENTE, 7, { bodyMd: 'Respondo.' });
 
     const ev = confirmado.events[1];
     expect(ev.fromStatus).toBe('ESPERA_CLIENTE');
     expect(ev.toStatus).toBe('EN_ATENCION');
     expect(ev.actorUserId).toBeNull();
     expect(ev.actorClientUserId).toBe(11);
+    // Identificadores en inglés también dentro del payload persistido.
+    expect(ev.payload).toEqual({ messageId: 501, automatic: true });
   });
 
   it('no reescribe first_response_at: la primera respuesta es la del equipo', async () => {
     const { service, confirmado } = makeHarness(enEspera({ firstResponseAt: null }));
 
-    await service.post({ kind: 'CLIENT', clientUserId: 11 }, 7, { bodyMd: 'Respondo.' });
+    await service.post(CLIENTE, 7, { bodyMd: 'Respondo.' });
 
     expect(confirmado.ticketPatches[0].firstResponseAt).toBeUndefined();
+  });
+});
+
+/**
+ * El estado se lee con `findById` **fuera** de la transacción, así que entre la
+ * lectura y el UPDATE cabe otra escritura: dos mensajes simultáneos del mismo
+ * cliente (el doble clic en el portal) o el equipo resolviendo el ticket. Sin
+ * condicionar el UPDATE, lo primero desplaza los vencimientos dos veces y lo
+ * segundo devuelve a EN_ATENCION un ticket ya resuelto -- una reapertura sin
+ * motivo, que es justo lo que `requiresReason` impide por el camino normal.
+ */
+describe('post: la carrera con quien mueva el ticket a la vez', () => {
+  it('el UPDATE va condicionado al estado que se leyó', async () => {
+    const { service, ticketRepoStub } = makeHarness(enEspera());
+
+    await service.post(CLIENTE, 7, { bodyMd: 'Respondo.' });
+
+    expect(ticketRepoStub.update).toHaveBeenCalledWith(
+      { id: 7, status: 'ESPERA_CLIENTE' },
+      expect.objectContaining({ status: 'EN_ATENCION' }),
+    );
+  });
+
+  it('si el ticket ya no está en espera, el mensaje queda pero no se reactiva', async () => {
+    const { service, confirmado } = makeHarness(enEspera(), { carreraPerdida: true });
+
+    const salida = await service.post(CLIENTE, 7, { bodyMd: 'Respondo.' });
+
+    expect(salida.message.id).toBe(501);
+    expect(confirmado.messages).toHaveLength(1);
+    expect(confirmado.ticketPatches).toHaveLength(0);
+    // Y sin evento de una transición que no ha ocurrido.
+    expect(confirmado.events.map((e) => e.type)).toEqual(['MESSAGE_POSTED']);
+  });
+});
+
+/**
+ * Un actor de cliente solo existe dentro de su empresa. Sin esta comprobación
+ * podría escribir en el hilo de cualquier `ticketId` y leer los mensajes
+ * públicos del ticket de otra empresa a base de probar números.
+ */
+describe('post: de quién es el ticket', () => {
+  it('escribir en el ticket de otra empresa da 404, no 403', async () => {
+    const { service, tickets } = makeHarness(ticketRow({ clientId: OTRA_EMPRESA }));
+
+    const error = await service.post(CLIENTE, 7, { bodyMd: 'Hola.' }).catch((e) => e);
+
+    expect(error).toBeInstanceOf(NotFoundException);
+    // Mismo cuerpo que un ticket inexistente: un 403 confirmaría que existe.
+    expect(error.getResponse()).toEqual({ code: 'NOT_FOUND', message: 'Ticket no encontrado' });
+    expect(tickets.runInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('un ticket sin cliente no es de nadie del portal', async () => {
+    const { service, tickets } = makeHarness(ticketRow({ clientId: null }));
+
+    await expect(service.post(CLIENTE, 7, { bodyMd: 'Hola.' })).rejects.toThrow(NotFoundException);
+    expect(tickets.runInTransaction).not.toHaveBeenCalled();
+  });
+
+  /**
+   * TypeORM devuelve los `bigint` como cadena: con `===`, el `clientId` del
+   * token -- un número de verdad -- nunca igualaría al de la base y el dueño
+   * legítimo se comería un 404.
+   */
+  it('el dueño legítimo pasa aunque el clientId llegue como cadena', async () => {
+    const { service, confirmado } = makeHarness(
+      ticketRow({ clientId: String(EMPRESA) as unknown as number }),
+    );
+
+    await service.post(CLIENTE, 7, { bodyMd: 'Hola.' });
+
+    expect(confirmado.messages).toHaveLength(1);
+  });
+
+  it('el equipo escribe en cualquier ticket, sea de la empresa que sea', async () => {
+    const { service, confirmado } = makeHarness(ticketRow({ clientId: OTRA_EMPRESA }));
+
+    await service.post(EQUIPO, 7, { bodyMd: 'Anotado.' });
+
+    expect(confirmado.messages).toHaveLength(1);
   });
 });
 
@@ -254,7 +348,7 @@ describe('post: cuándo NO se mueve el estado', () => {
   it('un mensaje de cliente sobre un ticket en otro estado no cambia el estado', async () => {
     const { service, confirmado, ticketRepoStub } = makeHarness(ticketRow({ status: 'EN_ATENCION' }));
 
-    await service.post({ kind: 'CLIENT', clientUserId: 11 }, 7, { bodyMd: 'Un dato más.' });
+    await service.post(CLIENTE, 7, { bodyMd: 'Un dato más.' });
 
     expect(confirmado.messages).toHaveLength(1);
     expect(ticketRepoStub.update).not.toHaveBeenCalled();
@@ -264,7 +358,7 @@ describe('post: cuándo NO se mueve el estado', () => {
   it('un mensaje del equipo sobre un ticket en espera no lo reactiva', async () => {
     const { service, confirmado, ticketRepoStub } = makeHarness(enEspera());
 
-    await service.post({ kind: 'STAFF', userId: 5 }, 7, { bodyMd: 'Insisto, ¿nos confirmas?' });
+    await service.post(EQUIPO, 7, { bodyMd: 'Insisto, ¿nos confirmas?' });
 
     expect(confirmado.messages).toHaveLength(1);
     expect(ticketRepoStub.update).not.toHaveBeenCalled();
@@ -273,7 +367,7 @@ describe('post: cuándo NO se mueve el estado', () => {
   it('una nota interna del equipo sobre un ticket en espera no lo reactiva', async () => {
     const { service, ticketRepoStub } = makeHarness(enEspera());
 
-    await service.post({ kind: 'STAFF', userId: 5 }, 7, {
+    await service.post(EQUIPO, 7, {
       bodyMd: 'Revisar logs antes de insistir.',
       visibility: 'INTERNA',
     });
@@ -286,7 +380,7 @@ describe('post: visibilidad', () => {
   it('un actor de cliente pidiendo INTERNA no crea una nota interna', async () => {
     const { service, confirmado } = makeHarness(ticketRow());
 
-    await service.post({ kind: 'CLIENT', clientUserId: 11 }, 7, {
+    await service.post(CLIENTE, 7, {
       bodyMd: 'Esto no debería quedar oculto.',
       visibility: 'INTERNA',
     } as { bodyMd: string; visibility: 'INTERNA' });
@@ -297,7 +391,7 @@ describe('post: visibilidad', () => {
   it('un cliente pidiendo INTERNA sobre un ticket en espera igual lo reactiva', async () => {
     const { service, confirmado } = makeHarness(enEspera());
 
-    await service.post({ kind: 'CLIENT', clientUserId: 11 }, 7, {
+    await service.post(CLIENTE, 7, {
       bodyMd: 'Respondo.',
       visibility: 'INTERNA',
     } as { bodyMd: string; visibility: 'INTERNA' });
@@ -310,7 +404,7 @@ describe('post: visibilidad', () => {
   it('el equipo sí puede escribir una nota interna', async () => {
     const { service, confirmado } = makeHarness(ticketRow());
 
-    await service.post({ kind: 'STAFF', userId: 5 }, 7, {
+    await service.post(EQUIPO, 7, {
       bodyMd: 'Cliente reincidente, revisar contrato.',
       visibility: 'INTERNA',
     });
@@ -321,7 +415,7 @@ describe('post: visibilidad', () => {
   it('sin visibilidad explícita el mensaje es público', async () => {
     const { service, confirmado } = makeHarness(ticketRow());
 
-    await service.post({ kind: 'STAFF', userId: 5 }, 7, { bodyMd: 'Ya está desplegado.' });
+    await service.post(EQUIPO, 7, { bodyMd: 'Ya está desplegado.' });
 
     expect(confirmado.messages[0].visibility).toBe('PUBLICA');
   });
@@ -329,7 +423,7 @@ describe('post: visibilidad', () => {
   it('el evento del mensaje no filtra el cuerpo, solo la visibilidad y el id', async () => {
     const { service, confirmado } = makeHarness(ticketRow());
 
-    await service.post({ kind: 'STAFF', userId: 5 }, 7, {
+    await service.post(EQUIPO, 7, {
       bodyMd: 'Cliente reincidente, revisar contrato.',
       visibility: 'INTERNA',
     });
@@ -337,7 +431,7 @@ describe('post: visibilidad', () => {
     const ev = confirmado.events[0];
     expect(ev.type).toBe('MESSAGE_POSTED');
     expect(JSON.stringify(ev.payload)).not.toContain('reincidente');
-    expect(ev.payload).toMatchObject({ visibility: 'INTERNA' });
+    expect(ev.payload).toEqual({ messageId: 501, visibility: 'INTERNA' });
   });
 });
 
@@ -345,7 +439,7 @@ describe('post: columnas de autor', () => {
   it('un mensaje del equipo pone author_user_id y deja nulo el de cliente', async () => {
     const { service, confirmado } = makeHarness(ticketRow());
 
-    await service.post({ kind: 'STAFF', userId: 5 }, 7, { bodyMd: 'Hecho.' });
+    await service.post(EQUIPO, 7, { bodyMd: 'Hecho.' });
 
     const msg = confirmado.messages[0];
     expect(msg.authorUserId).toBe(5);
@@ -358,7 +452,7 @@ describe('post: columnas de autor', () => {
   it('un mensaje del portal pone el de cliente y deja nulo author_user_id', async () => {
     const { service, confirmado } = makeHarness(ticketRow());
 
-    await service.post({ kind: 'CLIENT', clientUserId: 11 }, 7, { bodyMd: 'Gracias.' });
+    await service.post(CLIENTE, 7, { bodyMd: 'Gracias.' });
 
     const msg = confirmado.messages[0];
     expect(msg.authorUserId).toBeNull();
@@ -369,10 +463,7 @@ describe('post: columnas de autor', () => {
   });
 
   it('nunca deja las dos columnas puestas ni las dos nulas', async () => {
-    for (const actor of [
-      { kind: 'STAFF', userId: 5 } as const,
-      { kind: 'CLIENT', clientUserId: 11 } as const,
-    ]) {
+    for (const actor of [EQUIPO, CLIENTE]) {
       const { service, confirmado } = makeHarness(ticketRow());
       await service.post(actor, 7, { bodyMd: 'Hola.' });
       const msg = confirmado.messages[0];
@@ -404,25 +495,23 @@ describe('post: tickets que no admiten mensajes', () => {
   it('un ticket inexistente da NOT_FOUND sin abrir la transacción', async () => {
     const { service, tickets } = makeHarness(null);
 
-    await expect(
-      service.post({ kind: 'STAFF', userId: 5 }, 404, { bodyMd: 'Hola.' }),
-    ).rejects.toThrow(NotFoundException);
+    await expect(service.post(EQUIPO, 404, { bodyMd: 'Hola.' })).rejects.toThrow(NotFoundException);
     expect(tickets.runInTransaction).not.toHaveBeenCalled();
   });
 
   it('un ticket cerrado no admite mensajes', async () => {
     const { service, tickets } = makeHarness(ticketRow({ status: 'CERRADO' }));
 
-    await expect(
-      service.post({ kind: 'STAFF', userId: 5 }, 7, { bodyMd: 'Una cosa más.' }),
-    ).rejects.toThrow(ConflictException);
+    await expect(service.post(EQUIPO, 7, { bodyMd: 'Una cosa más.' })).rejects.toThrow(
+      ConflictException,
+    );
     expect(tickets.runInTransaction).not.toHaveBeenCalled();
   });
 
   it('un ticket resuelto sí admite mensajes y no cambia de estado', async () => {
     const { service, confirmado, ticketRepoStub } = makeHarness(ticketRow({ status: 'RESUELTO' }));
 
-    await service.post({ kind: 'CLIENT', clientUserId: 11 }, 7, { bodyMd: 'Sigue fallando.' });
+    await service.post(CLIENTE, 7, { bodyMd: 'Sigue fallando.' });
 
     expect(confirmado.messages).toHaveLength(1);
     expect(ticketRepoStub.update).not.toHaveBeenCalled();
@@ -431,7 +520,7 @@ describe('post: tickets que no admiten mensajes', () => {
   it('un cuerpo vacío o en blanco no se guarda', async () => {
     const { service, tickets } = makeHarness(ticketRow());
 
-    await expect(service.post({ kind: 'STAFF', userId: 5 }, 7, { bodyMd: '   ' })).rejects.toThrow();
+    await expect(service.post(EQUIPO, 7, { bodyMd: '   ' })).rejects.toThrow();
     expect(tickets.runInTransaction).not.toHaveBeenCalled();
   });
 });
@@ -441,7 +530,7 @@ describe('post: disciplina de la transacción', () => {
     const { service, tickets, events, messageRepoStub, eventRepoStub, ticketRepoStub } =
       makeHarness(enEspera());
 
-    await service.post({ kind: 'CLIENT', clientUserId: 11 }, 7, { bodyMd: 'Respondo.' });
+    await service.post(CLIENTE, 7, { bodyMd: 'Respondo.' });
 
     expect(messageRepoStub.save).toHaveBeenCalledTimes(1);
     expect(eventRepoStub.save).toHaveBeenCalledTimes(2);
@@ -456,7 +545,7 @@ describe('post: disciplina de la transacción', () => {
   it('reutiliza el mapeo real de tipos de evento de la transición', async () => {
     const { service, events } = makeHarness(enEspera());
 
-    await service.post({ kind: 'CLIENT', clientUserId: 11 }, 7, { bodyMd: 'Respondo.' });
+    await service.post(CLIENTE, 7, { bodyMd: 'Respondo.' });
 
     expect(events.typeForTransition).toHaveBeenCalledWith('ESPERA_CLIENTE', 'EN_ATENCION');
   });
@@ -469,7 +558,7 @@ describe('post: disciplina de la transacción', () => {
   it('acepta el id del ticket como cadena, tal y como lo devuelve TypeORM', async () => {
     const { service, confirmado, tickets } = makeHarness(enEspera({ id: '7' as unknown as number }));
 
-    await service.post({ kind: 'CLIENT', clientUserId: 11 }, '7', { bodyMd: 'Respondo.' });
+    await service.post(CLIENTE, '7', { bodyMd: 'Respondo.' });
 
     expect(tickets.findById).toHaveBeenCalledWith('7');
     expect(confirmado.messages[0].ticketId).toBe('7');
@@ -479,9 +568,7 @@ describe('post: disciplina de la transacción', () => {
   it('devuelve el mensaje guardado y el ticket ya actualizado', async () => {
     const { service } = makeHarness(enEspera());
 
-    const salida = await service.post({ kind: 'CLIENT', clientUserId: 11 }, 7, {
-      bodyMd: 'Respondo.',
-    });
+    const salida = await service.post(CLIENTE, 7, { bodyMd: 'Respondo.' });
 
     expect(salida.message.id).toBe(501);
     expect(salida.ticket.status).toBe('EN_ATENCION');
@@ -492,7 +579,7 @@ describe('listThread', () => {
   it('un actor de cliente nunca pide las notas internas', async () => {
     const { service, messages } = makeHarness(ticketRow());
 
-    await service.listThread({ kind: 'CLIENT', clientUserId: 11 }, 7);
+    await service.listThread(CLIENTE, 7);
 
     expect(messages.listByTicket).toHaveBeenCalledWith(7, { includeInternal: false });
   });
@@ -500,9 +587,34 @@ describe('listThread', () => {
   it('el equipo ve el hilo completo', async () => {
     const { service, messages } = makeHarness(ticketRow());
 
-    await service.listThread({ kind: 'STAFF', userId: 5 }, 7);
+    await service.listThread(EQUIPO, 7);
 
     expect(messages.listByTicket).toHaveBeenCalledWith(7, { includeInternal: true });
+  });
+
+  it('leer el hilo de un ticket de otra empresa da 404, no 403', async () => {
+    const { service, messages } = makeHarness(ticketRow({ clientId: OTRA_EMPRESA }));
+
+    const error = await service.listThread(CLIENTE, 7).catch((e) => e);
+
+    expect(error).toBeInstanceOf(NotFoundException);
+    expect(error.getResponse()).toEqual({ code: 'NOT_FOUND', message: 'Ticket no encontrado' });
+    expect(messages.listByTicket).not.toHaveBeenCalled();
+  });
+
+  it('el equipo lee el hilo de cualquier empresa', async () => {
+    const { service, messages } = makeHarness(ticketRow({ clientId: OTRA_EMPRESA }));
+
+    await service.listThread(EQUIPO, 7);
+
+    expect(messages.listByTicket).toHaveBeenCalledWith(7, { includeInternal: true });
+  });
+
+  it('un ticket inexistente da 404 sin consultar el hilo', async () => {
+    const { service, messages } = makeHarness(null);
+
+    await expect(service.listThread(CLIENTE, 404)).rejects.toThrow(NotFoundException);
+    expect(messages.listByTicket).not.toHaveBeenCalled();
   });
 
   it('un actor.kind desconocido no lee nada', async () => {
