@@ -1,3 +1,4 @@
+import { validateHeaderValue } from 'http';
 import {
   BadRequestException,
   ConflictException,
@@ -299,6 +300,41 @@ describe('upload: el nombre que manda quien sube', () => {
     expect(filas[0].filename).toBe('_.._etc_passwd');
   });
 
+  /**
+   * El `%` es el carácter de escape de la forma codificada del nombre
+   * (`filename*=UTF-8''…`). Sobrevivía a todo lo demás, y un controlador que
+   * compusiera esa forma sin escapar dejaba una secuencia rota -- o elegida por
+   * quien subió el archivo.
+   */
+  it('el porcentaje no sobrevive', async () => {
+    const { service, filas } = makeHarness();
+
+    await service.upload(CLIENTE, 7, MENSAJE, archivo({ filename: '100%-descuento.png' }));
+
+    expect(filas[0].filename).toBe('100_-descuento.png');
+  });
+
+  /**
+   * `U+202E` da la vuelta al texto que le sigue: en la lista del portal,
+   * `informe<U+202E>gnp.exe` se **lee** `informeexe.png`. En la cabecera no
+   * llega a hacer daño (Node rechaza el valor entero por no ser ASCII), pero el
+   * hilo es justo donde alguien decide si se fía de un archivo.
+   */
+  it('el carácter de anulación de dirección no sobrevive', async () => {
+    const { service, filas } = makeHarness();
+    const anulacion = String.fromCharCode(0x202e);
+
+    await service.upload(
+      CLIENTE,
+      7,
+      MENSAJE,
+      archivo({ filename: `informe${anulacion}gnp.png` }),
+    );
+
+    expect(filas[0].filename).toBe('informegnp.png');
+    expect(filas[0].filename).not.toContain(anulacion);
+  });
+
   it('un nombre que se queda en nada cae en un rótulo genérico, no en una fila vacía', async () => {
     const { service, filas } = makeHarness();
 
@@ -569,6 +605,7 @@ describe('upload: dónde se puede colgar un adjunto', () => {
   it.each([
     ['null', null],
     ['undefined', undefined],
+    ['cadena vacía', ''],
   ])('subir sin mensaje se rechaza limpio y no toca el disco: %s', async (_n, messageId) => {
     const { service, storage, messages } = makeHarness();
 
@@ -731,6 +768,7 @@ describe('download', () => {
     expect(salida).toEqual({
       stream: streamFalso,
       filename: 'factura.png',
+      headerFilename: 'factura.png',
       // El tipo **detectado** en la subida, no el que declaró quien la hizo:
       // es lo que el controlador pone en `Content-Type` al forzar la descarga.
       mimeType: 'application/pdf',
@@ -848,14 +886,29 @@ describe('download', () => {
   });
 
   /**
-   * Las filas con `message_id` nulo ya no las puede crear `upload`, pero la
-   * consulta las sigue tratando como públicas por si existiera alguna: son las
-   * que se habrían subido al abrir el ticket, del propio cliente.
+   * Sin mensaje del que colgar **no hay visibilidad que heredar**, así que no
+   * se sirve. Antes la condición era `messageId !== null && …`, o sea que una
+   * fila así se saltaba entera la comprobación --decidir por la presencia de un
+   * dato, la misma forma corregida ya tres veces-- y encima había un test que
+   * fijaba ese hueco como comportamiento esperado. Que un descuido esté escrito
+   * como contrato es peor que el descuido: el día que alguien inserte por otra
+   * vía, el test dice que está bien.
    */
-  it('una fila sin mensaje la sigue descargando el cliente', async () => {
+  it('una fila sin mensaje no se le sirve al cliente: 404', async () => {
+    const { service, storage } = makeHarness({ adjunto: attachmentRow({ messageId: null }) });
+
+    const error = await service.download(CLIENTE, 77).catch((e) => e);
+
+    expect(error).toBeInstanceOf(NotFoundException);
+    expect(error.getResponse()).toEqual(CUERPO_404_ADJUNTO);
+    expect(storage.createReadStream).not.toHaveBeenCalled();
+  });
+
+  /** Al equipo sí: una fila anómala hay que poder mirarla, no esconderla. */
+  it('una fila sin mensaje sí la descarga el equipo', async () => {
     const { service } = makeHarness({ adjunto: attachmentRow({ messageId: null }) });
 
-    const salida = await service.download(CLIENTE, 77);
+    const salida = await service.download(EQUIPO, 77);
 
     expect(salida.size).toBe(1024);
   });
@@ -923,6 +976,79 @@ describe('download', () => {
     await expect(service.download({ kind: 'ROBOT' } as any, 77)).rejects.toThrow();
 
     expect(messages.findAttachment).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * La promesa que la tarea siguiente va a dar por buena sin comprobarla: lo que
+ * salga en `headerFilename` se puede meter en `Content-Disposition` sin pensar.
+ *
+ * No se comprueba contra una lista de caracteres inventada aquí, sino contra
+ * `http.validateHeaderValue`, que es **el mismo validador que hay debajo de
+ * `setHeader`**. Con una lista propia, la prueba solo diría que el saneado hace
+ * lo que el saneado cree que hace.
+ */
+describe('download: el nombre que va a la cabecera', () => {
+  const cabecera = (nombre: string) => `attachment; filename="${nombre}"`;
+
+  const conNombre = (filename: string) => makeHarness({ adjunto: attachmentRow({ filename }) });
+
+  it.each([
+    ['ideogramas', '文件.pdf'],
+    ['emoji', `foto${String.fromCodePoint(0x1f600)}.png`],
+    ['acentos', 'facturación.pdf'],
+    ['solo ASCII', 'informe-2026.pdf'],
+    ['comillas y punto y coma de una fila antigua', 'a";b;c.png'],
+    ['porcentaje de una fila antigua', '100%-descuento.pdf'],
+  ])('%s: la cabecera se puede escribir sin comprobar nada', async (_n, filename) => {
+    const { service } = conNombre(filename);
+
+    const salida = await service.download(CLIENTE, 77);
+
+    expect(() =>
+      validateHeaderValue('Content-Disposition', cabecera(salida.headerFilename)),
+    ).not.toThrow();
+    // ASCII imprimible y nada de la sintaxis de la cabecera.
+    expect(salida.headerFilename).toMatch(/^[ -~]+$/);
+    expect(salida.headerFilename).not.toMatch(/["'`\\/;:%]/);
+  });
+
+  /**
+   * El contraste que justifica que sean dos campos. Con uno solo --lo que
+   * había-- esto es el 500 que se comía la descarga de un archivo perfectamente
+   * legítimo.
+   */
+  it('el nombre para mostrar, en cambio, sí tumbaría la cabecera', () => {
+    expect(() => validateHeaderValue('Content-Disposition', cabecera('文件.pdf'))).toThrow(
+      expect.objectContaining({ code: 'ERR_INVALID_CHAR' }),
+    );
+  });
+
+  it('el nombre para mostrar conserva lo que el cliente escribió', async () => {
+    const { service } = conNombre('facturación 文件.pdf');
+
+    const salida = await service.download(CLIENTE, 77);
+
+    expect(salida.filename).toBe('facturación 文件.pdf');
+  });
+
+  /** Los acentos se pliegan a su letra base, que se lee; no se pierden en `_`. */
+  it('los acentos se pliegan en vez de convertirse en ruido', async () => {
+    const { service } = conNombre('facturación.pdf');
+
+    expect((await service.download(CLIENTE, 77)).headerFilename).toBe('facturacion.pdf');
+  });
+
+  it('lo que no tiene equivalente ASCII se sustituye, y la extensión sobrevive', async () => {
+    const { service } = conNombre('文件.pdf');
+
+    expect((await service.download(CLIENTE, 77)).headerFilename).toBe('__.pdf');
+  });
+
+  it('un nombre que se queda en nada cae en el rótulo genérico', async () => {
+    const { service } = conNombre('文件');
+
+    expect((await service.download(CLIENTE, 77)).headerFilename).toBe('__');
   });
 });
 

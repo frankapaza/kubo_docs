@@ -41,12 +41,36 @@ import { IStorageService, STORAGE_SERVICE } from '../audio/interfaces/storage.in
  * detección por cabecera no ve. Servir aquí el tipo declarado sería devolverle
  * al atacante el control de cómo interpreta el navegador su propio archivo.
  *
- * `filename` viene ya saneado de la subida (`sanitizeFilename`): quien escriba
- * la cabecera `Content-Disposition` puede ponerlo tal cual sin volver a pensar.
+ * **Los dos nombres son dos cosas distintas y no son intercambiables.** Antes
+ * había uno solo, con un comentario que prometía que se podía poner en la
+ * cabecera sin pensar; la promesa era falsa. `sanitizeFilename` despoja el
+ * ASCII problemático, pero deja pasar todo lo de arriba: `文件.pdf` y
+ * `foto😀.png` --nombres triviales y legítimos-- hacen que `setHeader` lance
+ * `ERR_INVALID_CHAR`, y `facturación.pdf` pasa la validación pero se emite como
+ * Latin-1 y llega hecho un desastre. Es decir, un cliente subía un archivo y la
+ * descarga reventaba con un 500 en cuanto el controlador escribía la cabecera.
  */
 export interface AttachmentDownload {
   stream: NodeJS.ReadableStream;
+  /**
+   * El nombre **para mostrar**: el que subió quien lo subió, saneado. Puede
+   * llevar acentos, ideogramas o emoji. Vale para el hilo y para un JSON;
+   * **no** vale para una cabecera tal cual, y si se usa para componer la forma
+   * codificada (`filename*=UTF-8''…`) hay que pasarlo por `encodeURIComponent`.
+   */
   filename: string;
+  /**
+   * El nombre **para la cabecera**: ASCII imprimible, sin comillas, sin
+   * barras, sin `;` y sin `%`. Se puede interpolar en
+   * `attachment; filename="…"` sin comprobar nada -- eso es lo que este campo
+   * promete, y hay un test que lo verifica contra `http.validateHeaderValue`,
+   * que es el mismo validador que usa `setHeader`.
+   *
+   * Si además se quiere que llegue el nombre de verdad, se añade la forma
+   * codificada con `filename`; pero eso es una mejora, nunca la condición para
+   * que la descarga no reviente.
+   */
+  headerFilename: string;
   mimeType: string;
   size: number;
 }
@@ -134,8 +158,26 @@ const MAX_FILENAME_LENGTH = 255;
  * - **Separadores y comodines de ruta** (`/ \ * ? < > |`). El nombre no toca el
  *   sistema de ficheros --la clave la genera el servidor--, pero tampoco tiene
  *   por qué parecer una ruta cuando alguien lo copie a una.
+ * - **El `%`**, que es el carácter de escape de la forma codificada del
+ *   nombre (`filename*=UTF-8''…`, RFC 5987). Sobrevivía a todo lo anterior, y
+ *   un controlador que compusiera esa forma sin escapar dejaría un `%` suelto
+ *   convertido en una secuencia de escape rota, o elegida por quien subió.
  */
-const CARACTERES_PROHIBIDOS = /[\u0000-\u001f\u007f"'`\\\/:;*?<>|]/g;
+const CARACTERES_PROHIBIDOS = /[\u0000-\u001f\u007f"'`\\\/:;*?<>|%]/g;
+
+/**
+ * Caracteres que no se ven pero cambian lo que se lee. Se **borran** en vez de
+ * sustituirse: poner un `_` donde había un espacio de ancho cero mete ruido
+ * visible en un nombre por lo demás legítimo.
+ *
+ * El que importa es `U+202E` (anulación de dirección de texto): da la vuelta
+ * al texto que le sigue, así que un archivo llamado `informe<U+202E>fdp.exe`
+ * se **lee** `informeexe.pdf` en la lista del portal. En la cabecera no llega
+ * a hacer daño --Node rechaza el valor entero por no ser ASCII--, pero en el
+ * hilo, que es donde alguien decide si se fía de un archivo, sí. Van con él las
+ * marcas de dirección, los aislantes, los espacios de ancho cero y la BOM.
+ */
+const CARACTERES_INVISIBLES = /[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
 
 /** Rótulo para un nombre que, una vez saneado, no dice nada. */
 const NOMBRE_POR_OMISION = 'archivo';
@@ -156,12 +198,49 @@ const NOMBRE_POR_OMISION = 'archivo';
  */
 function sanitizeFilename(raw: string): string {
   const limpio = (raw ?? '')
+    .replace(CARACTERES_INVISIBLES, '')
     .replace(CARACTERES_PROHIBIDOS, '_')
     .replace(/\s+/g, ' ')
     .replace(/^[.\s]+/, '')
     .replace(/[.\s]+$/, '');
 
   return limpio.length > 0 ? limpio : NOMBRE_POR_OMISION;
+}
+
+/**
+ * El mismo nombre, reducido a **ASCII imprimible**, para el `filename=` de la
+ * cabecera `Content-Disposition`.
+ *
+ * Hace falta porque despojar el ASCII problemático no basta: Node valida los
+ * valores de cabecera y rechaza con `ERR_INVALID_CHAR` cualquier byte fuera de
+ * ASCII. `文件.pdf` o `foto😀.png` --nombres triviales y legítimos-- tumbaban
+ * la descarga con un 500 en cuanto el controlador escribía la cabecera, y
+ * `facturación.pdf` pasaba la validación pero se emitía como Latin-1 y llegaba
+ * hecho un desastre. Comprobado contra `http.validateHeaderValue`, que es lo
+ * que hay debajo de `setHeader`.
+ *
+ * Antes de sustituir se descomponen los acentos (`NFKD`) y se quitan las
+ * marcas diacríticas sueltas, para que `facturación.pdf` acabe en
+ * `facturacion.pdf` --legible-- y no en `factura_i_n.pdf`. Lo que no tiene
+ * equivalente ASCII sí se sustituye: `文件.pdf` queda `__.pdf`, y para eso
+ * está el otro campo.
+ *
+ * Se vuelven a aplicar los prohibidos después de `NFKD`, porque la
+ * descomposición puede sacar caracteres nuevos (`½` -> `1⁄2`), y se acota al
+ * mismo largo que la columna: `NFKD` puede alargar la cadena (`ﬁ` -> `fi`).
+ */
+function toHeaderFilename(filename: string): string {
+  const ascii = (filename ?? '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\u0020-\u007e]/g, '_')
+    .replace(CARACTERES_PROHIBIDOS, '_')
+    .replace(/\s+/g, ' ')
+    .replace(/^[.\s]+/, '')
+    .replace(/[.\s]+$/, '')
+    .slice(0, MAX_FILENAME_LENGTH);
+
+  return ascii.length > 0 ? ascii : NOMBRE_POR_OMISION;
 }
 
 /**
@@ -318,15 +397,17 @@ export class TicketAttachmentsService {
   /**
    * El archivo que quien pregunta puede descargar, o 404.
    *
-   * Tres comprobaciones, y las tres acaban en el **mismo** cuerpo de error:
-   * que el adjunto exista, que su ticket sea de la empresa del token (regla 4)
-   * y que el mensaje del que cuelga sea público si quien pide es un cliente
-   * (regla 5). El adjunto de una nota interna no es que esté prohibido para el
-   * portal: es que **no existe**, y así se contesta.
+   * Cuatro comprobaciones, y las cuatro acaban en el **mismo** cuerpo de
+   * error: que el adjunto exista, que su ticket sea de la empresa del token
+   * (regla 4), que cuelgue de algún mensaje, y que ese mensaje sea público si
+   * quien pide es un cliente (regla 5). El adjunto de una nota interna no es
+   * que esté prohibido para el portal: es que **no existe**, y así se contesta.
    *
    * Devuelve el tipo detectado en la subida para que el controlador fuerce la
-   * descarga con él (regla 3). Este servicio nunca sirve nada en línea, y no
-   * porque no quiera: no tiene forma de hacerlo.
+   * descarga con él (regla 3), y **dos nombres**: el de mostrar y el que se
+   * puede escribir en la cabecera sin comprobar nada (ver `AttachmentDownload`).
+   * Este servicio nunca sirve nada en línea, y no porque no quiera: no tiene
+   * forma de hacerlo.
    */
   async download(actor: TicketMessageActor, attachmentId: Id): Promise<AttachmentDownload> {
     const { scope } = resolveScope(actor, 'de la descarga');
@@ -337,8 +418,22 @@ export class TicketAttachmentsService {
     const ticket = await this.tickets.findById(attachment.ticketId);
     if (!ticketIsVisible(ticket, scope)) throw new NotFoundException(ATTACHMENT_NOT_FOUND);
 
-    if (scope.restricted && attachment.messageId !== null && attachment.messageId !== undefined) {
-      const message = await this.messages.findMessage(attachment.messageId);
+    if (scope.restricted) {
+      // Sin mensaje del que colgar, **no hay visibilidad que heredar**, así que
+      // no se sirve. La condición era `messageId !== null && …`, o sea que una
+      // fila con el campo nulo se saltaba entera la comprobación: la cuarta
+      // aparición de decidir por la presencia de un dato en vez de por una
+      // regla. Hoy no es alcanzable --`upload` exige `messageId` y es el único
+      // que escribe-- pero lo era por contrato, y había un test que fijaba ese
+      // hueco como comportamiento esperado, que es peor que la rama.
+      //
+      // Solo se le niega al cliente: para el equipo una fila así es una
+      // anomalía que hay que poder mirar, no un archivo que esconder.
+      const message =
+        attachment.messageId === null || attachment.messageId === undefined
+          ? null
+          : await this.messages.findMessage(attachment.messageId);
+
       if (!this.isPublicMessageOf(message, attachment.ticketId)) {
         throw new NotFoundException(ATTACHMENT_NOT_FOUND);
       }
@@ -347,6 +442,7 @@ export class TicketAttachmentsService {
     return {
       stream: this.storage.createReadStream(attachment.storageKey),
       filename: attachment.filename,
+      headerFilename: toHeaderFilename(attachment.filename),
       mimeType: attachment.mimeType,
       size: attachment.sizeBytes,
     };
