@@ -479,6 +479,25 @@ describe('post: visibilidad', () => {
     expect(confirmado.messages[0].visibility).toBe('INTERNA');
   });
 
+  /**
+   * Quién es cliente lo dice el **`kind` del actor**, nunca la presencia de un
+   * dato. Con `author.clientUserId !== null` decidiendo, un actor de cliente al
+   * que le faltara el `clientUserId` --que `assertClientScope` no mira, porque
+   * solo comprueba el `clientId`-- pasaba por «no es cliente» y podía escribir
+   * una **nota interna** desde el portal. Es la misma forma de fallo abierto
+   * que `ClientScope` existe para erradicar.
+   */
+  it('un actor de cliente sin clientUserId tampoco escribe una nota interna', async () => {
+    const { service, confirmado } = makeHarness(ticketRow());
+
+    await service.post({ kind: 'CLIENT', clientUserId: null, clientId: EMPRESA } as any, 7, {
+      bodyMd: 'Esto no debería quedar oculto.',
+      visibility: 'INTERNA',
+    });
+
+    expect(confirmado.messages[0].visibility).toBe('PUBLICA');
+  });
+
   it('sin visibilidad explícita el mensaje es público', async () => {
     const { service, confirmado } = makeHarness(ticketRow());
 
@@ -650,6 +669,15 @@ describe('listThread', () => {
     const { service, messages } = makeHarness(ticketRow());
 
     await service.listThread(CLIENTE, 7);
+
+    expect(messages.listByTicket).toHaveBeenCalledWith(7, { includeInternal: false });
+  });
+
+  /** Mismo fallo abierto que en la visibilidad al escribir: el `kind`, no el dato. */
+  it('un actor de cliente sin clientUserId tampoco lee las notas internas', async () => {
+    const { service, messages } = makeHarness(ticketRow());
+
+    await service.listThread({ kind: 'CLIENT', clientUserId: null, clientId: EMPRESA } as any, 7);
 
     expect(messages.listByTicket).toHaveBeenCalledWith(7, { includeInternal: false });
   });

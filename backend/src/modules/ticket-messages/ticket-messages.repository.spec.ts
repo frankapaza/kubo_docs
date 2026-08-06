@@ -227,36 +227,4 @@ describe('TicketMessagesRepository', () => {
     });
   });
 
-  describe('sumBytes', () => {
-    it('suma sobre todos los adjuntos del ticket, sin distinguir origen', async () => {
-      const { repo, createQueryBuilder, llamadas } = montar({ getRawOne: { total: '4096' } });
-
-      const total = await repo.sumBytes(13);
-
-      expect(createQueryBuilder).toHaveBeenCalledWith('att');
-      expect(llamadas.select[0]).toEqual(['COALESCE(SUM(att.size_bytes), 0)', 'total']);
-      expect(llamadas.where[0]).toEqual(['att.ticket_id = :ticketId', { ticketId: 13 }]);
-      // Ningún join ni condición de visibilidad: cuenta también las notas internas.
-      expect(llamadas.leftJoin).toHaveLength(0);
-      expect(llamadas.andWhere).toHaveLength(0);
-      expect(total).toBe(4096);
-    });
-
-    it('sin adjuntos, COALESCE evita un NULL y el total es 0', async () => {
-      const { repo } = montar({ getRawOne: { total: '0' } });
-
-      const total = await repo.sumBytes(13);
-
-      expect(total).toBe(0);
-    });
-
-    it('convierte el total agregado (llega como cadena) a number', async () => {
-      const { repo } = montar({ getRawOne: { total: '104857600' } });
-
-      const total = await repo.sumBytes(13);
-
-      expect(total).toBe(104857600);
-      expect(typeof total).toBe('number');
-    });
-  });
 });

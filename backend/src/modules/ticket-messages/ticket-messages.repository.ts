@@ -83,12 +83,17 @@ export class TicketMessagesRepository {
    * Los adjuntos de un ticket, en orden de llegada.
    *
    * `ticket_attachments` no tiene columna de visibilidad propia: la hereda del
-   * mensaje del que cuelga (`message_id`), y un adjunto sin mensaje (subido al
-   * crear el ticket) siempre es visible -- nadie puede subirlo como nota
-   * interna antes de que exista el ticket. Por eso, cuando no se piden las
-   * notas internas, la condición es "sin mensaje, o con un mensaje PUBLICA":
-   * un `LEFT JOIN` con `ticket_messages` resuelto en el propio `WHERE`, no un
+   * mensaje del que cuelga (`message_id`). Cuando no se piden las notas
+   * internas, la condición es "sin mensaje, o con un mensaje PUBLICA": un
+   * `LEFT JOIN` con `ticket_messages` resuelto en el propio `WHERE`, no un
    * filtro posterior en memoria sobre el resultado ya traído.
+   *
+   * **La rama de `message_id IS NULL` deja pasar el adjunto siempre**, y por eso
+   * `TicketAttachmentsService.upload` ya no permite crear ninguno sin mensaje:
+   * un adjunto suelto es público incondicionalmente, y un técnico que subiera
+   * ahí el volcado de logs se lo estaría enseñando al cliente. La rama se
+   * mantiene solo por si existiera alguna fila previa; todo adjunto nuevo
+   * cuelga de un mensaje y hereda su visibilidad sin excepciones.
    */
   listAttachments(ticketId: Id, { includeInternal }: VisibilityFilter): Promise<TicketAttachment[]> {
     const qb = this.attachments
@@ -108,38 +113,21 @@ export class TicketMessagesRepository {
   }
 
   /**
-   * Bytes ya ocupados por los adjuntos de un ticket, **contando también las
-   * notas internas**: el disco que ocupa un fichero no distingue quién lo
-   * subió, así que la suma no puede fingir que las notas internas no pesan.
-   *
-   * Este método no decide ningún tope. `MAX_TICKET_BYTES`
-   * (`../domain/attachment-rules.ts`) aplica **solo** a lo que sube el
-   * cliente, y aplicar ese reparto exige saber quién subió cada fichero --
-   * algo que esta suma agregada no distingue y no debe fingir que distingue.
-   * Es la capa de servicio quien debe sumar aparte lo de origen cliente contra
-   * ese tope; quien llame aquí y lo compare directo contra `MAX_TICKET_BYTES`
-   * estaría cortando también las subidas del equipo, que no tienen tope.
-   */
-  async sumBytes(ticketId: Id): Promise<number> {
-    const row = await this.attachments
-      .createQueryBuilder('att')
-      .select('COALESCE(SUM(att.size_bytes), 0)', 'total')
-      .where('att.ticket_id = :ticketId', { ticketId })
-      .getRawOne<{ total: string }>();
-
-    return Number(row?.total ?? 0);
-  }
-
-  /**
    * Bytes que ocupan en un ticket **solo los adjuntos que subió el cliente**.
    * Es la suma contra la que se compara `MAX_TICKET_BYTES`, que por diseño no
    * afecta al equipo (ver el comentario de esa constante).
    *
-   * El reparto va en el `WHERE`, no restando después: `sumBytes` menos «lo del
-   * equipo» exigiría dos consultas que pueden verse en instantes distintos, y
-   * cualquier fila con las dos columnas de subida nulas -- que el esquema
-   * admite -- se contaría al cliente. Aquí solo suma quien tiene
-   * `uploaded_by_client_user_id`, que es exactamente la definición del tope.
+   * El reparto va en el `WHERE`, no restando después: sumar el total del ticket
+   * y quitarle «lo del equipo» exigiría dos consultas que pueden verse en
+   * instantes distintos, y cualquier fila con las dos columnas de subida nulas
+   * -- que el esquema admite -- se le contaría al cliente. Aquí solo suma quien
+   * tiene `uploaded_by_client_user_id`, que es exactamente la definición del
+   * tope.
+   *
+   * Hubo también un `sumBytes` que sumaba el ticket entero. Se borró al quedarse
+   * sin consumidores: era un arma cargada con la etiqueta puesta, porque
+   * compararlo contra `MAX_TICKET_BYTES` --lo que su nombre invita a hacer--
+   * cortaba también las subidas del equipo, que no tienen tope.
    */
   async sumClientBytes(ticketId: Id): Promise<number> {
     const row = await this.attachments

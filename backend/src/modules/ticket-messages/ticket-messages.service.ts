@@ -103,10 +103,18 @@ export class TicketMessagesService {
       });
     }
 
-    // Quien tiene `clientUserId` es el portal, y el portal nunca escribe notas
-    // internas. Se deriva del mismo reparto que las columnas de autor para que
-    // no haya dos maneras distintas de contestar «¿esto lo escribe un cliente?».
-    const esCliente = author.clientUserId !== null;
+    // Quien actúa acotado a una empresa es el portal, y el portal nunca escribe
+    // notas internas.
+    //
+    // Sale de `scope.restricted` --es decir, del `kind` del actor-- y **no** de
+    // `author.clientUserId !== null`, que era la versión anterior: esa se
+    // apagaba sola cuando le faltaba el dato. Un actor de cliente sin
+    // `clientUserId` (que `assertClientScope` no mira, porque solo comprueba el
+    // `clientId`) pasaba por «no es cliente» y podía escribir una nota interna
+    // desde el portal -- una fuga que no se puede retirar. Un guardia que se
+    // desactiva justo cuando le falta su dato no es un guardia; por eso
+    // `ClientScope` es una unión discriminada y no un valor que pueda faltar.
+    const esCliente = scope.restricted;
     const visibility: TicketMessageVisibility = esCliente
       ? 'PUBLICA'
       : (input.visibility ?? 'PUBLICA');
@@ -231,10 +239,15 @@ export class TicketMessagesService {
    * notas internas). Es la misma política que al escribir, y tenerla repartida
    * en dos capas es cómo se actualiza una y se olvida la otra. Un `kind` no
    * contemplado no lee nada -- `resolveActorIds` falla cerrado.
+   *
+   * El interruptor es `!scope.restricted`, o sea el `kind` del actor, y **no**
+   * `ids.clientUserId === null`, que era la versión anterior: un actor de
+   * cliente sin `clientUserId` --dato que `assertClientScope` no comprueba--
+   * salía con las notas internas incluidas. Mismo motivo que en `post`.
    */
   async listThread(actor: TicketMessageActor, ticketId: Id): Promise<TicketMessage[]> {
-    const { ids, scope } = resolveScope(actor, 'de la petición');
+    const { scope } = resolveScope(actor, 'de la petición');
     const ticket = await loadVisibleTicketOrFail(this.tickets, ticketId, scope);
-    return this.messages.listByTicket(ticket.id, { includeInternal: ids.clientUserId === null });
+    return this.messages.listByTicket(ticket.id, { includeInternal: !scope.restricted });
   }
 }
