@@ -1,9 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  InternalServerErrorException,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 
 import { TicketsRepository, TicketListFilters } from './tickets.repository';
 import { TicketEventsService } from './ticket-events.service';
@@ -17,22 +12,20 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { derivePriority } from './domain/ticket-priority';
 import { OPEN_STATUSES } from './domain/ticket-state-machine';
+import { TicketActor, resolveActorIds } from './domain/ticket-actor';
+
+/**
+ * Reexportado desde aquí porque es donde vivía antes de que el hilo de mensajes
+ * necesitara el mismo actor; la definición y su reparto están en
+ * `domain/ticket-actor.ts`.
+ */
+export type { TicketActor } from './domain/ticket-actor';
 
 export interface DecoratedTicket extends Ticket {
   slaLabel: string;
   slaPct: number | null;
   slaOverdue: boolean;
 }
-
-/**
- * Quién origina la escritura: un miembro del equipo o un usuario del portal
- * de clientes. Las dos columnas del actor en Ticket/TicketEvent nunca se
- * ponen a la vez -- decidido por `kind` -- para que la fila nunca quede en
- * un estado ambiguo sobre quién la creó.
- */
-export type TicketActor =
-  | { kind: 'STAFF'; userId: number }
-  | { kind: 'CLIENT'; clientUserId: number };
 
 /** Las dos columnas del actor, ya repartidas. Nunca van las dos a la vez. */
 interface ActorColumns {
@@ -41,35 +34,15 @@ interface ActorColumns {
 }
 
 /**
- * Reparte el actor en sus dos columnas, o se niega a escribir.
- *
- * Con los ternarios `actor.kind === 'STAFF' ? … : null` repartidos por dos
- * sitios, un tercer valor de `kind` producía un ticket **y** su evento CREATED
- * con las dos columnas nulas: un ticket sin autor, posible solo desde que la
- * 013 hizo `created_by` nullable, y que ya no se puede atribuir a nadie a
- * posteriori. La invariante la sostenía únicamente la unión de TypeScript, que
- * no existe en tiempo de ejecución: basta un `as any`, un JSON deserializado o
- * una variante nueva sin actualizar aquí.
- *
- * El `never` deja además el descuido en tiempo de compilación: añadir un
- * tercer `kind` a `TicketActor` sin decidir sus columnas no compila.
+ * Las columnas de autor del ticket, a partir del reparto compartido de
+ * `domain/ticket-actor.ts` -- el mismo que usa el hilo de mensajes para sus
+ * columnas hermanas `author_user_id` / `author_client_user_id`. Aquí solo se
+ * les pone el nombre que tienen en `tickets`: el `switch` con su `never` vive
+ * en un único sitio, porque duplicarlo es duplicar el descuido que impide.
  */
 function resolveActorColumns(actor: TicketActor): ActorColumns {
-  switch (actor.kind) {
-    case 'STAFF':
-      return { createdBy: actor.userId, createdByClientUserId: null };
-    case 'CLIENT':
-      return { createdBy: null, createdByClientUserId: actor.clientUserId };
-    default: {
-      const noContemplado: never = actor;
-      throw new InternalServerErrorException({
-        code: 'INTERNAL',
-        message:
-          'No se pudo determinar el autor del ticket: tipo de actor no contemplado ' +
-          `(${JSON.stringify((noContemplado as { kind?: unknown })?.kind)}).`,
-      });
-    }
-  }
+  const ids = resolveActorIds(actor, 'del ticket');
+  return { createdBy: ids.userId, createdByClientUserId: ids.clientUserId };
 }
 
 @Injectable()
