@@ -19,7 +19,7 @@ import { LocalStorageService } from '../../modules/audio/services/local-storage.
  *
  * Así que el proveedor se extrae aquí y `AudioModule` pasa a importarlo. No hay
  * cambio de comportamiento: es el mismo `LocalStorageService` y el mismo token,
- * y los tres consumidores que ya existían (`AudioService`,
+ * y los cuatro consumidores que ya existían (`AudioService`,
  * `AudioRetentionService`, `TranscriptionsService` y `ActasService`) lo siguen
  * recibiendo por la reexportación de `AudioModule`, que se mantiene a
  * propósito. Cambiarles el import a la vez habría convertido un movimiento

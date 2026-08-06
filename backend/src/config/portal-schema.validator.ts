@@ -204,7 +204,8 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
     this.logger.log(
       'Esquema del portal de clientes verificado: las migraciones ' +
         `${PortalSchemaValidator.MIGRATION_013}, ${PortalSchemaValidator.MIGRATION_014}, ` +
-        `${PortalSchemaValidator.MIGRATION_015} y ${PortalSchemaValidator.MIGRATION_018} ` +
+        `${PortalSchemaValidator.MIGRATION_015}, ${PortalSchemaValidator.MIGRATION_016} ` +
+        `y ${PortalSchemaValidator.MIGRATION_018} ` +
         'están aplicadas (client_users, notification_templates, ticket_messages, ' +
         'ticket_attachments y las columnas del actor y de notificación existen).',
     );

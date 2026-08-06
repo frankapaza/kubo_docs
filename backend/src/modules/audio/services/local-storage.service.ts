@@ -60,6 +60,14 @@ export class LocalStorageService implements IStorageService {
    * pase por empezar igual que `/uploads`; y exigirlo rechaza también la clave
    * que resuelve al propio `basePath` (`''`, `.`, `subdir/..`), que no nombra
    * ningún archivo y sobre la que `remove` borraría el directorio entero.
+   *
+   * **El límite de esta guarda**, para quien se apoye en ella: compara rutas
+   * resueltas, no reales. Un enlace simbólico que ya existiera **dentro** de
+   * `basePath` apuntando fuera seguiría escapando, porque `path.resolve` no
+   * sigue enlaces. Hoy no es alcanzable —nada crea enlaces ahí y las claves
+   * las genera el servidor—, pero si alguna vez se acepta una clave que
+   * nombre una entrada existente, esta comprobación no basta y hace falta
+   * `fs.realpath`.
    */
   getPath(key: string): string {
     const full = path.resolve(this.basePath, key);
