@@ -1,109 +1,23 @@
-import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  Logger,
-  NotFoundException,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 
 import { TicketMessagesRepository } from './ticket-messages.repository';
 import { TicketMessage, TicketMessageVisibility } from './entities/ticket-message.entity';
-import { sameId } from '../../common/ids';
+import { Id, TicketMessageActor, loadVisibleTicketOrFail, resolveScope } from './actor-scope';
 import { TicketsRepository } from '../tickets/tickets.repository';
 import { TicketEventsService } from '../tickets/ticket-events.service';
 import { SlaService } from '../tickets/sla.service';
 import { Ticket } from '../tickets/entities/ticket.entity';
 import { TicketEvent } from '../tickets/entities/ticket-event.entity';
-import { ActorIds, TicketActor, resolveActorIds } from '../tickets/domain/ticket-actor';
 import { TicketStatus, assertTransition } from '../tickets/domain/ticket-state-machine';
 
 /**
- * Identificador tal y como puede llegar del código que lo leyó: TypeORM hidrata
- * **toda** columna `bigint` como cadena aunque la entidad la declare `number`.
- * Se acepta como venga y no se compara nunca contra un número con `===`; para
- * escribir se usa siempre el `id` del ticket ya cargado, que es el mismo valor
- * que la propia base devolvió, y para comparar, `sameId`.
+ * El actor, su ámbito y la carga del ticket visible viven en `./actor-scope`:
+ * los comparte con `TicketAttachmentsService`, porque un adjunto y un mensaje
+ * se acotan con la misma regla y dos copias de una regla de pertenencia son dos
+ * reglas. Se reexporta el tipo del actor para no romper a quien ya lo importaba
+ * de aquí.
  */
-type Id = number | string;
-
-/**
- * El actor del hilo. Igual que `TicketActor`, pero el de cliente **tiene que
- * traer también su `clientId`**.
- *
- * No es un adorno: es lo único que separa a una empresa de otra. Sin él, un
- * usuario del portal podría escribir en el hilo de cualquier `ticketId` y leer
- * los mensajes públicos del ticket de otra empresa a base de probar números.
- * En el portal sale del token igual que el `clientUserId` (ver
- * `ClientJwtStrategy` y `portal-tickets.controller.ts`), nunca del cuerpo, la
- * URL ni la query.
- *
- * Las dos variantes se sacan de `TicketActor` con `Extract` para no redeclarar
- * la unión y para que el `clientId` sea lo **único** que añade este módulo.
- * Ojo con lo que eso no garantiza: un tercer `kind` añadido a `TicketActor`
- * quedaría fuera de este tipo en silencio, sin romper la compilación de este
- * fichero. Quien falla cerrado en ese caso es `resolveActorIds`, por su guardia
- * `never`, en tiempo de ejecución.
- */
-export type TicketMessageActor =
-  | Extract<TicketActor, { kind: 'STAFF' }>
-  | (Extract<TicketActor, { kind: 'CLIENT' }> & { clientId: number });
-
-/**
- * A qué empresa queda acotado quien actúa.
- *
- * Es una unión y no un `number | null` a propósito. Con `null` valiendo a la
- * vez "es del equipo, lo ve todo" y "no vino ningún `clientId`", el guardia de
- * pertenencia se **desactivaba solo** cuando le faltaba el dato: un actor de
- * cliente con `clientId` nulo se saltaba la comprobación entera y volvía a leer
- * y escribir en cualquier empresa. Lo que decide si hay que acotar es el `kind`
- * del actor, no la presencia del valor, y así queda escrito en el tipo.
- */
-type ClientScope = { restricted: false } | { restricted: true; clientId: number };
-
-/** El actor ya resuelto: sus columnas de autor y a qué empresa se limita. */
-interface ActorScope {
-  ids: ActorIds;
-  scope: ClientScope;
-}
-
-/**
- * Reparte el actor y calcula su ámbito, o se niega a seguir.
- *
- * `resolveActorIds` es quien falla cerrado ante un `kind` no contemplado -- el
- * mismo guardia `never` que usa el alta del ticket -- así que a partir de ahí
- * el `kind` es uno de los dos conocidos.
- */
-function resolveScope(actor: TicketMessageActor, sujeto: string): ActorScope {
-  const ids = resolveActorIds(actor, sujeto);
-  if (actor.kind !== 'CLIENT') return { ids, scope: { restricted: false } };
-  return { ids, scope: { restricted: true, clientId: assertClientScope(actor.clientId) } };
-}
-
-/**
- * El `clientId` de un actor de cliente, o se rechaza la petición sin consultar.
- *
- * Un actor de cliente sin empresa utilizable es un fallo de programación o un
- * token manipulado, y en los dos casos lo correcto es lanzar, nunca degradar a
- * "lo ve todo": el dato que falta es justo el que separa a una empresa de otra.
- * Mismo criterio y mismo cuerpo que `assertSessionScope` en
- * `portal-tickets.service.ts`. Quien construye el actor es el controlador del
- * portal, y `ClientJwtStrategy` copia el `clientId` del payload del token sin
- * validarlo, así que la frontera no puede darlo por bueno.
- */
-function assertClientScope(clientId: unknown): number {
-  if (typeof clientId === 'number' && Number.isInteger(clientId) && clientId > 0) return clientId;
-
-  // Qué llegó va al log, nunca a la respuesta: el cuerpo se queda en el
-  // `{ code, message }` de siempre.
-  new Logger(TicketMessagesService.name).error(
-    `Actor de cliente sin clientId utilizable (${String(clientId)}): se rechaza la petición sin consultar.`,
-  );
-  throw new UnauthorizedException({
-    code: 'UNAUTHORIZED',
-    message: 'La sesión no identifica a ninguna empresa.',
-  });
-}
+export type { TicketMessageActor } from './actor-scope';
 
 export interface PostMessageInput {
   bodyMd: string;
@@ -197,7 +111,7 @@ export class TicketMessagesService {
       ? 'PUBLICA'
       : (input.visibility ?? 'PUBLICA');
 
-    const ticket = await this.loadVisibleOrFail(ticketId, scope);
+    const ticket = await loadVisibleTicketOrFail(this.tickets, ticketId, scope);
 
     // Un ticket cerrado no admite mensajes: su hilo es evidencia cerrada, y
     // `CERRADO` no tiene ninguna transición de salida (ver el mapa de
@@ -308,33 +222,6 @@ export class TicketMessagesService {
   }
 
   /**
-   * El ticket que quien pregunta puede ver, o 404.
-   *
-   * Un ticket de otra empresa y un ticket inexistente dan el **mismo** error y
-   * el mismo cuerpo: un 403 confirmaría que el id existe y dejaría enumerar los
-   * tickets de las demás empresas a base de probar números. Es la misma regla,
-   * y la misma comparación `sameId`, que usa `PortalTicketsService.detail`.
-   *
-   * `sameId` compara **por valor** porque TypeORM devuelve los `bigint` como
-   * cadena: con `===`, el `clientId` del token -- un número de verdad -- nunca
-   * igualaría al de la base y el dueño legítimo se comería un 404. Y falla
-   * cerrado por el otro lado: un ticket sin cliente (`clientId` nulo) da
-   * `false`, es decir, 404.
-   *
-   * Que haya que acotar lo dice `scope.restricted`, que sale del `kind` del
-   * actor. Nunca la presencia de un valor: un guardia que se apaga solo cuando
-   * le falta el dato no es un guardia. El `clientId` ya viene validado de
-   * `assertClientScope`.
-   */
-  private async loadVisibleOrFail(ticketId: Id, scope: ClientScope): Promise<Ticket> {
-    const ticket = await this.tickets.findById(ticketId as number);
-    if (!ticket || (scope.restricted && !sameId(ticket.clientId, scope.clientId))) {
-      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Ticket no encontrado' });
-    }
-    return ticket;
-  }
-
-  /**
    * El hilo tal y como lo puede ver quien pregunta. El filtro de visibilidad lo
    * resuelve el repositorio en el `WHERE`, nunca en memoria.
    *
@@ -347,7 +234,7 @@ export class TicketMessagesService {
    */
   async listThread(actor: TicketMessageActor, ticketId: Id): Promise<TicketMessage[]> {
     const { ids, scope } = resolveScope(actor, 'de la petición');
-    const ticket = await this.loadVisibleOrFail(ticketId, scope);
+    const ticket = await loadVisibleTicketOrFail(this.tickets, ticketId, scope);
     return this.messages.listByTicket(ticket.id, { includeInternal: ids.clientUserId === null });
   }
 }

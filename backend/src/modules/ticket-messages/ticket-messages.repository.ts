@@ -50,8 +50,33 @@ export class TicketMessagesRepository {
     });
   }
 
+  /**
+   * Un mensaje suelto por su id, **sin filtrar por visibilidad**.
+   *
+   * Es deliberado: quien pregunta necesita saber si el mensaje es interno para
+   * decidir qué hacer -- el equipo cuelga y descarga adjuntos de sus notas
+   * internas, y al cliente hay que contestarle 404. Un buscador que devolviera
+   * `null` para las internas escondería esa diferencia a los dos por igual. La
+   * decisión la toma `TicketAttachmentsService`, que sí sabe quién pregunta.
+   */
+  findMessage(id: Id): Promise<TicketMessage | null> {
+    return this.messages.findOne({ where: { id: id as number } });
+  }
+
   findAttachment(id: Id): Promise<TicketAttachment | null> {
     return this.attachments.findOne({ where: { id: id as number } });
+  }
+
+  /**
+   * Inserta la fila de un adjunto.
+   *
+   * `storage_key` es única en el esquema: dos filas con la misma clave dejarían
+   * el borrado de una señalando el archivo de la otra. Un `ER_DUP_ENTRY` aquí
+   * es, por tanto, un `INSERT` que hay que dejar fallar -- nunca reintentar con
+   * la misma clave.
+   */
+  createAttachment(data: Partial<TicketAttachment>): Promise<TicketAttachment> {
+    return this.attachments.save(this.attachments.create(data));
   }
 
   /**
@@ -100,6 +125,28 @@ export class TicketMessagesRepository {
       .createQueryBuilder('att')
       .select('COALESCE(SUM(att.size_bytes), 0)', 'total')
       .where('att.ticket_id = :ticketId', { ticketId })
+      .getRawOne<{ total: string }>();
+
+    return Number(row?.total ?? 0);
+  }
+
+  /**
+   * Bytes que ocupan en un ticket **solo los adjuntos que subió el cliente**.
+   * Es la suma contra la que se compara `MAX_TICKET_BYTES`, que por diseño no
+   * afecta al equipo (ver el comentario de esa constante).
+   *
+   * El reparto va en el `WHERE`, no restando después: `sumBytes` menos «lo del
+   * equipo» exigiría dos consultas que pueden verse en instantes distintos, y
+   * cualquier fila con las dos columnas de subida nulas -- que el esquema
+   * admite -- se contaría al cliente. Aquí solo suma quien tiene
+   * `uploaded_by_client_user_id`, que es exactamente la definición del tope.
+   */
+  async sumClientBytes(ticketId: Id): Promise<number> {
+    const row = await this.attachments
+      .createQueryBuilder('att')
+      .select('COALESCE(SUM(att.size_bytes), 0)', 'total')
+      .where('att.ticket_id = :ticketId', { ticketId })
+      .andWhere('att.uploaded_by_client_user_id IS NOT NULL')
       .getRawOne<{ total: string }>();
 
     return Number(row?.total ?? 0);

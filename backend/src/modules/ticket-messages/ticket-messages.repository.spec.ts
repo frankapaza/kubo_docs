@@ -51,14 +51,16 @@ function montarQueryBuilder(resultado: { getMany?: unknown[]; getRawOne?: unknow
 function montar(resultado: { getMany?: unknown[]; getRawOne?: unknown } = {}) {
   const find = jest.fn().mockResolvedValue([]);
   const findOne = jest.fn().mockResolvedValue(null);
+  const create = jest.fn((data: unknown) => data);
+  const save = jest.fn((data: unknown) => Promise.resolve({ id: 77, ...(data as object) }));
   const { qb, llamadas } = montarQueryBuilder(resultado);
   const createQueryBuilder = jest.fn(() => qb);
 
   const messagesRepo = { find, findOne } as any;
-  const attachmentsRepo = { find, findOne, createQueryBuilder } as any;
+  const attachmentsRepo = { find, findOne, create, save, createQueryBuilder } as any;
 
   const repo = new TicketMessagesRepository(messagesRepo, attachmentsRepo);
-  return { repo, find, findOne, createQueryBuilder, qb, llamadas };
+  return { repo, find, findOne, create, save, createQueryBuilder, qb, llamadas };
 }
 
 describe('TicketMessagesRepository', () => {
@@ -108,6 +110,85 @@ describe('TicketMessagesRepository', () => {
 
       const opciones = findOne.mock.calls[0][0] as FindOneOptions<TicketAttachment>;
       expect(opciones.where).toEqual({ id: 7 });
+    });
+  });
+
+  describe('findMessage', () => {
+    it('busca por id sobre el repositorio de mensajes', async () => {
+      const { repo, findOne } = montar();
+
+      await repo.findMessage(501);
+
+      const opciones = findOne.mock.calls[0][0] as FindOneOptions<TicketMessage>;
+      expect(opciones.where).toEqual({ id: 501 });
+    });
+
+    /**
+     * Sin filtro de visibilidad a propósito: quien pregunta necesita **saber**
+     * si el mensaje es interno para decidir (colgar un adjunto, servirlo o
+     * negarlo con un 404). Un buscador que devolviera `null` para las notas
+     * internas escondería esa diferencia al equipo, que sí las ve.
+     */
+    it('no filtra por visibilidad: la decide quien llama', async () => {
+      const { repo, findOne } = montar();
+
+      await repo.findMessage(501);
+
+      const opciones = findOne.mock.calls[0][0] as FindOneOptions<TicketMessage>;
+      expect(opciones.where).not.toHaveProperty('visibility');
+    });
+  });
+
+  describe('createAttachment', () => {
+    it('crea y guarda la fila sobre el repositorio de adjuntos', async () => {
+      const { repo, create, save } = montar();
+
+      const fila = await repo.createAttachment({
+        ticketId: 13,
+        messageId: null,
+        filename: 'captura.png',
+        storageKey: 'tickets/13/uuid.png',
+        mimeType: 'image/png',
+        sizeBytes: 1024,
+      });
+
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ storageKey: 'tickets/13/uuid.png' }));
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(fila.id).toBe(77);
+    });
+  });
+
+  describe('sumClientBytes', () => {
+    /**
+     * `MAX_TICKET_BYTES` aplica **solo** a lo que sube el cliente (el equipo no
+     * tiene tope), así que el reparto tiene que ir en el `WHERE`: sumar todo y
+     * restar después es cómo se acaba cortando también al equipo.
+     */
+    it('suma solo los adjuntos de origen cliente, en el propio WHERE', async () => {
+      const { repo, createQueryBuilder, llamadas } = montar({ getRawOne: { total: '2048' } });
+
+      const total = await repo.sumClientBytes(13);
+
+      expect(createQueryBuilder).toHaveBeenCalledWith('att');
+      expect(llamadas.select[0]).toEqual(['COALESCE(SUM(att.size_bytes), 0)', 'total']);
+      expect(llamadas.where[0]).toEqual(['att.ticket_id = :ticketId', { ticketId: 13 }]);
+      expect(llamadas.andWhere[0]).toEqual(['att.uploaded_by_client_user_id IS NOT NULL']);
+      expect(total).toBe(2048);
+    });
+
+    it('sin adjuntos de cliente, COALESCE evita un NULL y el total es 0', async () => {
+      const { repo } = montar({ getRawOne: { total: '0' } });
+
+      expect(await repo.sumClientBytes(13)).toBe(0);
+    });
+
+    it('convierte el total agregado (llega como cadena) a number', async () => {
+      const { repo } = montar({ getRawOne: { total: '104857600' } });
+
+      const total = await repo.sumClientBytes(13);
+
+      expect(total).toBe(104857600);
+      expect(typeof total).toBe('number');
     });
   });
 

@@ -3,8 +3,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { TicketAttachment } from './entities/ticket-attachment.entity';
 import { TicketMessage } from './entities/ticket-message.entity';
+import { TicketAttachmentsService } from './ticket-attachments.service';
 import { TicketMessagesRepository } from './ticket-messages.repository';
 import { TicketMessagesService } from './ticket-messages.service';
+import { StorageModule } from '../../common/storage/storage.module';
 import { TicketsModule } from '../tickets/tickets.module';
 
 /**
@@ -16,18 +18,25 @@ import { TicketsModule } from '../tickets/tickets.module';
  * evento de la transición. La dependencia va en un solo sentido -- `tickets` no
  * conoce este módulo -- así que no hay ciclo.
  *
- * Falta la parte de adjuntos (reglas de admisión de `domain/attachment-rules.ts`
- * y tope por ticket) y los controladores que exponen todo esto: llegan en
- * tareas siguientes.
+ * Y `StorageModule` --no `AudioModule`-- para el `STORAGE_SERVICE` con el que
+ * el servicio de adjuntos escribe y lee archivos: ver la cabecera de ese módulo
+ * sobre por qué el proveedor se extrajo en vez de arrastrar aquí la cola de
+ * transcripción entera.
+ *
+ * Faltan los controladores que exponen todo esto: llegan en tareas siguientes.
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([TicketMessage, TicketAttachment]), TicketsModule],
+  imports: [
+    TypeOrmModule.forFeature([TicketMessage, TicketAttachment]),
+    TicketsModule,
+    StorageModule,
+  ],
   // El repositorio **no** se exporta a propósito: es quien lee y escribe el
   // hilo sin comprobar de quién es el ticket. Si otro módulo pudiera
   // inyectarlo, se saltaría `loadVisibleOrFail` sin darse cuenta y la
   // separación entre empresas pasaría a depender de que nadie se despiste. La
   // única puerta al hilo es el servicio.
-  providers: [TicketMessagesRepository, TicketMessagesService],
-  exports: [TicketMessagesService],
+  providers: [TicketMessagesRepository, TicketMessagesService, TicketAttachmentsService],
+  exports: [TicketMessagesService, TicketAttachmentsService],
 })
 export class TicketMessagesModule {}
