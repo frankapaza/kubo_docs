@@ -15,10 +15,17 @@ import { TicketMessagesRepository } from './ticket-messages.repository';
 
 /** Doble mínimo de un `SelectQueryBuilder` encadenable: cada método se apunta y devuelve `this`. */
 function montarQueryBuilder(resultado: { getMany?: unknown[]; getRawOne?: unknown }) {
-  const llamadas: { where: unknown[]; andWhere: unknown[]; leftJoin: unknown[]; select: unknown[] } = {
+  const llamadas: {
+    where: unknown[];
+    andWhere: unknown[];
+    leftJoin: unknown[];
+    innerJoin: unknown[];
+    select: unknown[];
+  } = {
     where: [],
     andWhere: [],
     leftJoin: [],
+    innerJoin: [],
     select: [],
   };
 
@@ -33,6 +40,10 @@ function montarQueryBuilder(resultado: { getMany?: unknown[]; getRawOne?: unknow
     }),
     leftJoin: jest.fn((...args: unknown[]) => {
       llamadas.leftJoin.push(args);
+      return qb;
+    }),
+    innerJoin: jest.fn((...args: unknown[]) => {
+      llamadas.innerJoin.push(args);
       return qb;
     }),
     select: jest.fn((...args: unknown[]) => {
@@ -193,18 +204,44 @@ describe('TicketMessagesRepository', () => {
   });
 
   describe('listAttachments', () => {
-    it('sin includeInternal, une con ticket_messages y exige mensaje público o sin mensaje', async () => {
+    /**
+     * Para un cliente, un adjunto existe **solo si existe su mensaje, es de
+     * este ticket y es público** -- exactamente la condición que aplica
+     * `TicketAttachmentsService.download`, para que la lista y la descarga no
+     * puedan discrepar.
+     *
+     * Antes era `att.message_id IS NULL OR msg.visibility = 'PUBLICA'` con un
+     * `LEFT JOIN`, y ese test fijaba esa rama como comportamiento esperado. Con
+     * la descarga ya cerrada, mantenerla dejaba lo peor de las dos opciones: un
+     * adjunto que salía en la lista del cliente y daba 404 al descargarlo.
+     */
+    it('sin includeInternal, exige mensaje público de este ticket con un INNER JOIN', async () => {
       const { repo, createQueryBuilder, llamadas } = montar();
 
       await repo.listAttachments(13, { includeInternal: false });
 
       expect(createQueryBuilder).toHaveBeenCalledWith('att');
       expect(llamadas.where[0]).toEqual(['att.ticket_id = :ticketId', { ticketId: 13 }]);
-      expect(llamadas.leftJoin[0]).toEqual([TicketMessage, 'msg', 'msg.id = att.message_id']);
-      expect(llamadas.andWhere[0]).toEqual([
-        '(att.message_id IS NULL OR msg.visibility = :visibility)',
-        { visibility: 'PUBLICA' },
+      expect(llamadas.innerJoin[0]).toEqual([
+        TicketMessage,
+        'msg',
+        'msg.id = att.message_id AND msg.ticket_id = att.ticket_id',
       ]);
+      expect(llamadas.andWhere[0]).toEqual(['msg.visibility = :visibility', { visibility: 'PUBLICA' }]);
+    });
+
+    /**
+     * Y el `LEFT JOIN` no vuelve por la puerta de atrás: con él, la fila sin
+     * mensaje volvería a salir en la lista del cliente aunque la condición de
+     * visibilidad se quedara igual.
+     */
+    it('sin includeInternal, no usa LEFT JOIN ni deja pasar el adjunto sin mensaje', async () => {
+      const { repo, llamadas } = montar();
+
+      await repo.listAttachments(13, { includeInternal: false });
+
+      expect(llamadas.leftJoin).toHaveLength(0);
+      expect(JSON.stringify(llamadas.andWhere)).not.toContain('IS NULL');
     });
 
     it('con includeInternal, no hace ningún join ni añade condición de visibilidad', async () => {
@@ -212,7 +249,9 @@ describe('TicketMessagesRepository', () => {
 
       await repo.listAttachments(13, { includeInternal: true });
 
+      // Al equipo le existe todo, incluidas las anomalías: es quien tiene que verlas.
       expect(llamadas.leftJoin).toHaveLength(0);
+      expect(llamadas.innerJoin).toHaveLength(0);
       expect(llamadas.andWhere).toHaveLength(0);
       expect(llamadas.where[0]).toEqual(['att.ticket_id = :ticketId', { ticketId: 13 }]);
     });

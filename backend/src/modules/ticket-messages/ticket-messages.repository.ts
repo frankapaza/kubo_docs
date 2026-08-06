@@ -84,16 +84,33 @@ export class TicketMessagesRepository {
    *
    * `ticket_attachments` no tiene columna de visibilidad propia: la hereda del
    * mensaje del que cuelga (`message_id`). Cuando no se piden las notas
-   * internas, la condición es "sin mensaje, o con un mensaje PUBLICA": un
-   * `LEFT JOIN` con `ticket_messages` resuelto en el propio `WHERE`, no un
-   * filtro posterior en memoria sobre el resultado ya traído.
+   * internas, un adjunto existe **solo si existe su mensaje, es de este ticket
+   * y es público** -- un `INNER JOIN` con `ticket_messages` resuelto en el
+   * propio `WHERE`, no un filtro posterior en memoria sobre el resultado ya
+   * traído.
    *
-   * **La rama de `message_id IS NULL` deja pasar el adjunto siempre**, y por eso
-   * `TicketAttachmentsService.upload` ya no permite crear ninguno sin mensaje:
-   * un adjunto suelto es público incondicionalmente, y un técnico que subiera
-   * ahí el volcado de logs se lo estaría enseñando al cliente. La rama se
-   * mantiene solo por si existiera alguna fila previa; todo adjunto nuevo
-   * cuelga de un mensaje y hereda su visibilidad sin excepciones.
+   * La condición era `att.message_id IS NULL OR msg.visibility = 'PUBLICA'`, y
+   * esa rama de `NULL` dejaba pasar **siempre** al adjunto que no colgara de
+   * ningún mensaje. Se escribió cuando lo único capaz de crear una fila así era
+   * el alta del ticket, premisa que dejó de valer con
+   * `TicketAttachmentsService.upload`, y que ya no vale de ninguna manera desde
+   * que `upload` exige `messageId`. Al cerrarse esa misma rama en la descarga,
+   * mantenerla aquí dejaba lo peor de las dos opciones: un adjunto que **salía
+   * en la lista del cliente y daba 404 al descargarlo**. Si todo adjunto cuelga
+   * de un mensaje, uno que no cuelgue de ninguno es una anomalía y no un
+   * adjunto público: para un cliente, no existe.
+   *
+   * El `INNER JOIN` dice esa regla con la forma de la consulta y no con una
+   * condición que haya que leer entera, y de paso hace fallar cerrado a la fila
+   * que apunte a un mensaje borrado. La igualdad de `ticket_id` va en el `ON`
+   * por el mismo motivo que `TicketAttachmentsService.download` la comprueba
+   * con `sameId`: un adjunto que colgara de un mensaje público **de otro
+   * ticket** heredaría una visibilidad que nadie eligió. Las dos puertas
+   * aplican exactamente la misma condición, así que no pueden discrepar.
+   *
+   * Para un actor interno no hay `JOIN` ni condición ninguna: al equipo le
+   * existe todo, incluidas las anomalías -- que es justo quien tiene que poder
+   * verlas.
    */
   listAttachments(ticketId: Id, { includeInternal }: VisibilityFilter): Promise<TicketAttachment[]> {
     const qb = this.attachments
@@ -103,10 +120,11 @@ export class TicketMessagesRepository {
       .addOrderBy('att.id', 'ASC');
 
     if (!includeInternal) {
-      qb.leftJoin(TicketMessage, 'msg', 'msg.id = att.message_id').andWhere(
-        '(att.message_id IS NULL OR msg.visibility = :visibility)',
-        { visibility: PUBLIC_VISIBILITY },
-      );
+      qb.innerJoin(
+        TicketMessage,
+        'msg',
+        'msg.id = att.message_id AND msg.ticket_id = att.ticket_id',
+      ).andWhere('msg.visibility = :visibility', { visibility: PUBLIC_VISIBILITY });
     }
 
     return qb.getMany();
