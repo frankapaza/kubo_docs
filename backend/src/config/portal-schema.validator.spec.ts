@@ -33,8 +33,16 @@ const COLUMNA_016 = { tableName: 'ticket_events', columnName: 'notify_next_attem
 
 const COLUMNAS_ESPERADAS = [...COLUMNAS_013, COLUMNA_014, ...COLUMNAS_015, COLUMNA_016];
 
-/** Las tablas que tienen que estar: client_users (013) y las plantillas (015). */
-const TABLAS_ESPERADAS = ['client_users', 'notification_templates'];
+/**
+ * Las tablas que tienen que estar: client_users (013), las plantillas (015) y
+ * las dos de la conversación (018).
+ */
+const TABLAS_ESPERADAS = [
+  'client_users',
+  'notification_templates',
+  'ticket_messages',
+  'ticket_attachments',
+];
 
 /**
  * DataSource de mentira: responde a la consulta de tablas y a la de columnas
@@ -106,7 +114,10 @@ describe('PortalSchemaValidator', () => {
   });
 
   it('atribuye a la 015 la tabla de plantillas, la bandeja y el buzon del equipo', async () => {
-    const error = await build(['client_users'], [...COLUMNAS_013, COLUMNA_014, COLUMNA_016])
+    const error = await build(
+      ['client_users', 'ticket_messages', 'ticket_attachments'],
+      [...COLUMNAS_013, COLUMNA_014, COLUMNA_016],
+    )
       .onApplicationBootstrap()
       .catch((e: Error) => e);
     const message = (error as Error).message;
@@ -119,6 +130,28 @@ describe('PortalSchemaValidator', () => {
     expect(message).not.toContain('013_portal_clientes.sql');
     expect(message).not.toContain('014_audit_client_user.sql');
     expect(message).not.toContain('016_notify_next_attempt.sql');
+    expect(message).not.toContain('018_conversacion_adjuntos.sql');
+  });
+
+  /**
+   * La 018 se atribuye sola, igual que la 016. Importa que no se confunda con
+   * la 015: las dos tocan `notification_templates` —una la crea, la otra le
+   * siembra dos filas— y mandar al operador a la 015 no le crearía nunca el
+   * hilo de mensajes.
+   */
+  it('atribuye a la 018 el hilo de mensajes y los adjuntos, sin culpar a la 015', async () => {
+    const error = await build(
+      ['client_users', 'notification_templates'],
+      COLUMNAS_ESPERADAS,
+    )
+      .onApplicationBootstrap()
+      .catch((e: Error) => e);
+    const message = (error as Error).message;
+    expect(message).toContain('018_conversacion_adjuntos.sql');
+    expect(message).toContain('ticket_messages');
+    expect(message).toContain('ticket_attachments');
+    expect(message).not.toContain('013_portal_clientes.sql');
+    expect(message).not.toContain('015_notificaciones.sql');
   });
 
   /**
@@ -137,7 +170,10 @@ describe('PortalSchemaValidator', () => {
   });
 
   it('avisa de que las columnas de la 015 no se anaden a mano: el sellado va dentro', async () => {
-    const error = await build(['client_users'], [...COLUMNAS_013, COLUMNA_014, COLUMNA_016])
+    const error = await build(
+      ['client_users', 'ticket_messages', 'ticket_attachments'],
+      [...COLUMNAS_013, COLUMNA_014, COLUMNA_016],
+    )
       .onApplicationBootstrap()
       .catch((e: Error) => e);
     // Crear notified_at a mano deja el historico sin sellar, y el vigilante

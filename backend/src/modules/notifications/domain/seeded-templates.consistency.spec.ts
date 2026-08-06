@@ -25,6 +25,16 @@ import { NotificationAudience, validateTemplate } from './template-renderer';
  * edición futura de estas plantillas) sin tocar `CLIENT_VARIABLES` /
  * `TEAM_VARIABLES` -- o al revés-- , una de las aserciones de este archivo
  * se pone en rojo.
+ *
+ * OJO: en la base hay NUEVE filas, no siete. La migración 018
+ * (`018_conversacion_adjuntos.sql`) sembró `TICKET_MESSAGE_FROM_CLIENT/TEAM` y
+ * `TICKET_MESSAGE_FROM_TEAM/CLIENT` para el hilo de mensajes, y el recuento
+ * exacto que comprueba `.github/workflows/deploy.yml` ya está en 9. Aquí no
+ * están todavía a propósito: las reglas que las disparan viven en
+ * `notification-rules.ts` y las escribe la tarea que cablea la conversación.
+ * Añadirlas a la lista de abajo ANTES que las reglas pondría en rojo las tres
+ * pruebas de "las claves cuadran", que son bidireccionales. Van juntas: las
+ * dos filas de aquí y las dos reglas, en el mismo cambio.
  */
 interface SeededTemplate {
   triggerKey: string;

@@ -134,7 +134,8 @@ jobs:
             # version vieja todavia usa. Se aplica a mano despues de validar.
             for m in 010_service_desk 012_work_items 013_portal_clientes \
                      014_audit_client_user 015_notificaciones \
-                     016_notify_next_attempt 017_plantillas_respuesta; do
+                     016_notify_next_attempt 017_plantillas_respuesta \
+                     018_conversacion_adjuntos; do
               echo "--- $m"
               sql_file "backend/sql/migrations/$m.sql"
             done
@@ -146,14 +147,19 @@ jobs:
             PENDIENTES=$(sql_query "SELECT COUNT(*) FROM ticket_events WHERE notified_at IS NULL;")
             PLANTILLAS=$(sql_query "SELECT COUNT(*) FROM notification_templates;")
             echo "Eventos pendientes de notificar: $PENDIENTES (tiene que ser 0)"
-            echo "Plantillas de aviso: $PLANTILLAS (tienen que ser 7)"
+            # Siete las sembro la 015; las dos de la conversacion, la 018.
+            # Este numero SUBE cada vez que una migracion siembra una plantilla
+            # nueva, y si no se sube aqui el despliegue se para en seco. Es
+            # deliberado que sea exacto: de menos significa que la siembra no
+            # corrio, de mas significa que alguien inserto filas a mano.
+            echo "Plantillas de aviso: $PLANTILLAS (tienen que ser 9)"
             if [ "$PENDIENTES" != "0" ]; then
               echo "ABORTA: el sellado del historico no funciono. No se despliega."
               echo "La version vieja sigue sirviendo, sin tocar."
               exit 1
             fi
-            if [ "$PLANTILLAS" != "7" ]; then
-              echo "ABORTA: se esperaban 7 plantillas sembradas y hay $PLANTILLAS."
+            if [ "$PLANTILLAS" != "9" ]; then
+              echo "ABORTA: se esperaban 9 plantillas sembradas y hay $PLANTILLAS."
               exit 1
             fi
 

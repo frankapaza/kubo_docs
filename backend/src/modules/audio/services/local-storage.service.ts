@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -38,8 +38,40 @@ export class LocalStorageService implements IStorageService {
     return { key, size };
   }
 
+  /**
+   * Ruta absoluta de una clave, **garantizando que cae dentro de `basePath`**.
+   *
+   * Antes era un `path.join` pelado, y `path.join` resuelve los `..` sin
+   * quejarse: la clave `../../etc/passwd` daba una ruta fuera del directorio de
+   * subidas. Todos los métodos de este servicio pasan por aquí, así que eso no
+   * era solo leer — `save` escribía y `remove` borraba fuera.
+   *
+   * Mientras el único consumidor fue el módulo de audio la clave la generaba
+   * siempre el servidor y no había por dónde entrar. Los adjuntos de tickets
+   * añaden un segundo consumidor, y una de sus reglas —que el nombre que sube
+   * el usuario no toque nunca el sistema de ficheros— se apoya en que esta
+   * comprobación exista aquí abajo y no en cada llamador. Una defensa que hay
+   * que acordarse de repetir es una defensa que un día falta.
+   *
+   * Se compara sobre la ruta **resuelta** (`path.resolve`), no sobre la cadena
+   * de entrada: buscar `..` en el texto se esquiva con separadores mezclados o
+   * segmentos raros, y resolver primero deja una sola forma canónica que
+   * comparar. El separador del prefijo es lo que impide que `/uploads-otro`
+   * pase por empezar igual que `/uploads`; y exigirlo rechaza también la clave
+   * que resuelve al propio `basePath` (`''`, `.`, `subdir/..`), que no nombra
+   * ningún archivo y sobre la que `remove` borraría el directorio entero.
+   */
   getPath(key: string): string {
-    return path.join(this.basePath, key);
+    const full = path.resolve(this.basePath, key);
+
+    if (!full.startsWith(this.basePath + path.sep)) {
+      throw new BadRequestException({
+        code: 'INVALID_STORAGE_KEY',
+        message: 'La ruta del archivo no es válida.',
+      });
+    }
+
+    return full;
   }
 
   createReadStream(key: string): NodeJS.ReadableStream {

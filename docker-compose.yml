@@ -34,6 +34,10 @@ services:
       - ./backend/sql/migrations/015_notificaciones.sql:/docker-entrypoint-initdb.d/015_notificaciones.sql:ro
       - ./backend/sql/migrations/016_notify_next_attempt.sql:/docker-entrypoint-initdb.d/016_notify_next_attempt.sql:ro
       - ./backend/sql/migrations/017_plantillas_respuesta.sql:/docker-entrypoint-initdb.d/017_plantillas_respuesta.sql:ro
+      # La 018 crea ticket_messages y ticket_attachments, amplia el enum de
+      # ticket_events.type y siembra dos plantillas mas. Va detras de la 015,
+      # que es la que crea notification_templates.
+      - ./backend/sql/migrations/018_conversacion_adjuntos.sql:/docker-entrypoint-initdb.d/018_conversacion_adjuntos.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s

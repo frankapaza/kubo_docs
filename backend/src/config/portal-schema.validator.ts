@@ -80,6 +80,7 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
   private static readonly MIGRATION_014 = 'migrations/014_audit_client_user.sql';
   private static readonly MIGRATION_015 = 'migrations/015_notificaciones.sql';
   private static readonly MIGRATION_016 = 'migrations/016_notify_next_attempt.sql';
+  private static readonly MIGRATION_018 = 'migrations/018_conversacion_adjuntos.sql';
 
   /**
    * Lo que hace falta para que exista `workspace_settings.team_inbox_email`, en
@@ -113,6 +114,20 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
     // 015: sin ella el vigilante no tiene plantillas que leer y no sale
     // ningún aviso; peor, la pantalla de administración responde 500.
     { table: 'notification_templates', files: [PortalSchemaValidator.MIGRATION_015] },
+    // 018: el hilo de mensajes y sus adjuntos. Sin ellas, el detalle del
+    // ticket —en el panel y en el portal— responde 500 al leer la
+    // conversación, y el cliente vuelve a quedarse sin poder escribir después
+    // de abrir el ticket, que es justo lo que la funcionalidad arregla.
+    //
+    // El valor `MESSAGE_POSTED` que la 018 añade a `ticket_events.type` no se
+    // comprueba aquí, y no por olvido: este validador mira `information_schema`
+    // por tabla y por columna, y un valor de enum no es ninguna de las dos
+    // cosas. Comprobarlo pediría leer y parsear `COLUMN_TYPE`, una consulta de
+    // otra forma para el único requisito que no encaja en el modelo. Además no
+    // hace falta: la 018 amplía el enum y crea estas dos tablas en el mismo
+    // fichero, así que exigir las tablas ya exige haber pasado la migración.
+    { table: 'ticket_messages', files: [PortalSchemaValidator.MIGRATION_018] },
+    { table: 'ticket_attachments', files: [PortalSchemaValidator.MIGRATION_018] },
   ];
 
   /**
@@ -188,9 +203,10 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
 
     this.logger.log(
       'Esquema del portal de clientes verificado: las migraciones ' +
-        `${PortalSchemaValidator.MIGRATION_013}, ${PortalSchemaValidator.MIGRATION_014} y ` +
-        `${PortalSchemaValidator.MIGRATION_015} están aplicadas (client_users, ` +
-        'notification_templates y las columnas del actor y de notificación existen).',
+        `${PortalSchemaValidator.MIGRATION_013}, ${PortalSchemaValidator.MIGRATION_014}, ` +
+        `${PortalSchemaValidator.MIGRATION_015} y ${PortalSchemaValidator.MIGRATION_018} ` +
+        'están aplicadas (client_users, notification_templates, ticket_messages, ' +
+        'ticket_attachments y las columnas del actor y de notificación existen).',
     );
   }
 
@@ -257,7 +273,9 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
       'el escaneo de SLA responden 500 (ER_BAD_FIELD_ERROR); sin la 014 se pierde toda la ' +
       'auditoría; sin la 015 no hay bandeja de salida ni plantillas, y no sale ningún aviso por ' +
       'correo. No añadas a mano las columnas de la 015: el sellado del histórico va dentro de esa ' +
-      'migración, y sin él el vigilante envía un correo por cada evento de meses atrás. ' +
+      'migración, y sin él el vigilante envía un correo por cada evento de meses atrás. Sin la ' +
+      '018 no hay hilo de mensajes ni adjuntos: el detalle del ticket responde 500 al leer la ' +
+      'conversación, en el panel y en el portal. ' +
       PortalSchemaValidator.notaBuzon(missing) +
       'Las migraciones solo se ejecutan por docker-entrypoint-initdb.d, y MySQL solo ' +
       'corre ese directorio sobre un datadir vacío: una base que ya tenía datos NO las recibe al ' +
