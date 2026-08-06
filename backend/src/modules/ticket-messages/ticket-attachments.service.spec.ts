@@ -687,6 +687,29 @@ describe('upload: columnas de quién subió y lo que devuelve', () => {
     expect(tickets.findById).not.toHaveBeenCalled();
     expect(storage.save).not.toHaveBeenCalled();
   });
+
+  /**
+   * El otro medio identificador. Sin él, la fila quedaría con **las dos
+   * columnas de subida nulas**: un archivo del que no se sabe si lo puso el
+   * cliente o el equipo, que además dejaría de contar contra el tope del
+   * cliente (`sumClientBytes` filtra por esa columna).
+   */
+  it.each([
+    ['null', null],
+    ['undefined', undefined],
+    ['cero', 0],
+    ['cadena vacía', ''],
+  ])('un actor de cliente sin clientUserId no sube nada: %s', async (_n, clientUserId) => {
+    const { service, tickets, storage, messages } = makeHarness();
+
+    await expect(
+      service.upload({ kind: 'CLIENT', clientUserId, clientId: EMPRESA } as any, 7, MENSAJE, archivo()),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    expect(tickets.findById).not.toHaveBeenCalled();
+    expect(storage.save).not.toHaveBeenCalled();
+    expect(messages.createAttachment).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -878,6 +901,22 @@ describe('download', () => {
     expect(storage.createReadStream).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['null', null],
+    ['undefined', undefined],
+    ['cero', 0],
+    ['cadena vacía', ''],
+  ])('un actor de cliente sin clientUserId no descarga nada: %s', async (_n, clientUserId) => {
+    const { service, messages, storage } = makeHarness({ adjunto: attachmentRow() });
+
+    await expect(
+      service.download({ kind: 'CLIENT', clientUserId, clientId: EMPRESA } as any, 77),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    expect(messages.findAttachment).not.toHaveBeenCalled();
+    expect(storage.createReadStream).not.toHaveBeenCalled();
+  });
+
   it('un actor.kind desconocido no descarga nada', async () => {
     const { service, messages } = makeHarness({ adjunto: attachmentRow() });
 
@@ -905,19 +944,26 @@ describe('list', () => {
   });
 
   /**
-   * El interruptor de visibilidad cuelga del `kind` del actor, **nunca de la
-   * presencia de un dato**. Con `ids.clientUserId === null` decidiendo, un
-   * actor de cliente al que le faltara el `clientUserId` --que `assertClientScope`
-   * no mira, porque solo comprueba el `clientId`-- salía con las notas internas
-   * incluidas: el guardia se apagaba solo justo cuando le faltaba su dato, que
-   * es la forma exacta del fallo que `ClientScope` existe para erradicar.
+   * Un actor de cliente sin `clientUserId` ya no llega hasta aquí: `resolveScope`
+   * exige los dos identificadores y lo rechaza antes de consultar nada. Antes
+   * pasaba --solo se comprobaba el `clientId`-- y, con el interruptor colgando
+   * de `ids.clientUserId === null`, salía con las notas internas incluidas.
+   * Ahora ni se le calcula el ámbito.
    */
-  it('un actor de cliente sin clientUserId tampoco ve los adjuntos internos', async () => {
-    const { service, messages } = makeHarness();
+  it.each([
+    ['null', null],
+    ['undefined', undefined],
+    ['cero', 0],
+    ['cadena vacía', ''],
+  ])('un actor de cliente sin clientUserId no lista nada: %s', async (_n, clientUserId) => {
+    const { service, tickets, messages } = makeHarness();
 
-    await service.list({ kind: 'CLIENT', clientUserId: null, clientId: EMPRESA } as any, 7);
+    await expect(
+      service.list({ kind: 'CLIENT', clientUserId, clientId: EMPRESA } as any, 7),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
 
-    expect(messages.listAttachments).toHaveBeenCalledWith(7, { includeInternal: false });
+    expect(tickets.findById).not.toHaveBeenCalled();
+    expect(messages.listAttachments).not.toHaveBeenCalled();
   });
 
   it('listar los de otra empresa da 404, no 403', async () => {

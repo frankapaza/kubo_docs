@@ -411,6 +411,66 @@ describe('un actor de cliente sin clientId utilizable', () => {
   });
 });
 
+/**
+ * El otro medio identificador del actor de cliente, y el que sostiene la
+ * invariante de las columnas de autor.
+ *
+ * `resolveActorIds` promete que exactamente una de las dos columnas va puesta,
+ * pero copia el `clientUserId` tal cual: un actor de cliente al que le faltara
+ * dejaba un mensaje con **las dos nulas**. Una fila así es un mensaje sin
+ * autor -- ya no se sabe si lo dijo el cliente o el equipo --, y un hilo de
+ * soporte es justo el registro de quién dijo qué. No se puede reparar después,
+ * así que se rechaza antes de escribir nada.
+ */
+describe('un actor de cliente sin clientUserId utilizable', () => {
+  const inservibles: Array<[string, unknown]> = [
+    ['null', null],
+    ['undefined', undefined],
+    ['cero', 0],
+    ['cadena vacía', ''],
+  ];
+
+  it.each(inservibles)('no escribe ningún mensaje: %s', async (_nombre, clientUserId) => {
+    const { service, tickets, confirmado } = makeHarness(ticketRow());
+
+    await expect(
+      service.post({ kind: 'CLIENT', clientUserId, clientId: EMPRESA } as any, 7, {
+        bodyMd: 'Hola.',
+      }),
+    ).rejects.toThrow(UnauthorizedException);
+
+    // Antes de escribir nada, y sin ni siquiera mirar el ticket.
+    expect(tickets.findById).not.toHaveBeenCalled();
+    expect(tickets.runInTransaction).not.toHaveBeenCalled();
+    expect(confirmado.messages).toHaveLength(0);
+  });
+
+  it.each(inservibles)('no lee ningún hilo: %s', async (_nombre, clientUserId) => {
+    const { service, tickets, messages } = makeHarness(ticketRow());
+
+    await expect(
+      service.listThread({ kind: 'CLIENT', clientUserId, clientId: EMPRESA } as any, 7),
+    ).rejects.toThrow(UnauthorizedException);
+
+    expect(tickets.findById).not.toHaveBeenCalled();
+    expect(messages.listByTicket).not.toHaveBeenCalled();
+  });
+
+  /** Mismo código y misma forma que el del `clientId`; distinto lo que falta. */
+  it('el cuerpo dice que la sesión no identifica a ningún usuario', async () => {
+    const { service } = makeHarness(ticketRow());
+
+    const error = await service
+      .post({ kind: 'CLIENT', clientUserId: null, clientId: EMPRESA } as any, 7, { bodyMd: 'Hola.' })
+      .catch((e) => e);
+
+    expect(error.getResponse()).toEqual({
+      code: 'UNAUTHORIZED',
+      message: 'La sesión no identifica a ningún usuario.',
+    });
+  });
+});
+
 describe('post: cuándo NO se mueve el estado', () => {
   it('un mensaje de cliente sobre un ticket en otro estado no cambia el estado', async () => {
     const { service, confirmado, ticketRepoStub } = makeHarness(ticketRow({ status: 'EN_ATENCION' }));
@@ -477,25 +537,6 @@ describe('post: visibilidad', () => {
     });
 
     expect(confirmado.messages[0].visibility).toBe('INTERNA');
-  });
-
-  /**
-   * Quién es cliente lo dice el **`kind` del actor**, nunca la presencia de un
-   * dato. Con `author.clientUserId !== null` decidiendo, un actor de cliente al
-   * que le faltara el `clientUserId` --que `assertClientScope` no mira, porque
-   * solo comprueba el `clientId`-- pasaba por «no es cliente» y podía escribir
-   * una **nota interna** desde el portal. Es la misma forma de fallo abierto
-   * que `ClientScope` existe para erradicar.
-   */
-  it('un actor de cliente sin clientUserId tampoco escribe una nota interna', async () => {
-    const { service, confirmado } = makeHarness(ticketRow());
-
-    await service.post({ kind: 'CLIENT', clientUserId: null, clientId: EMPRESA } as any, 7, {
-      bodyMd: 'Esto no debería quedar oculto.',
-      visibility: 'INTERNA',
-    });
-
-    expect(confirmado.messages[0].visibility).toBe('PUBLICA');
   });
 
   it('sin visibilidad explícita el mensaje es público', async () => {
@@ -669,15 +710,6 @@ describe('listThread', () => {
     const { service, messages } = makeHarness(ticketRow());
 
     await service.listThread(CLIENTE, 7);
-
-    expect(messages.listByTicket).toHaveBeenCalledWith(7, { includeInternal: false });
-  });
-
-  /** Mismo fallo abierto que en la visibilidad al escribir: el `kind`, no el dato. */
-  it('un actor de cliente sin clientUserId tampoco lee las notas internas', async () => {
-    const { service, messages } = makeHarness(ticketRow());
-
-    await service.listThread({ kind: 'CLIENT', clientUserId: null, clientId: EMPRESA } as any, 7);
 
     expect(messages.listByTicket).toHaveBeenCalledWith(7, { includeInternal: false });
   });
