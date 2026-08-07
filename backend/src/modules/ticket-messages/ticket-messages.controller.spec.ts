@@ -2,7 +2,6 @@ import { validateHeaderValue } from 'http';
 
 import {
   BadRequestException,
-  Logger,
   NotFoundException,
   PayloadTooLargeException,
   UnsupportedMediaTypeException,
@@ -299,6 +298,38 @@ describe('TicketMessagesController.upload', () => {
       expect(attachments.upload.mock.calls[0][3].filename).toBe('captura.png');
     });
 
+    /**
+     * **La colisión, documentada y aceptada.**
+     *
+     * Un fichero que de verdad se llame `Ã©.png` sale de aquí llamándose
+     * `é.png`. No es un descuido ni algo que se pueda arreglar: busboy entrega
+     * **los mismos bytes** para `Ã©.png` enviado en latin1 que para `é.png`
+     * enviado en UTF-8, así que no hay ninguna información con la que
+     * distinguirlos. Hay que elegir, y se elige el caso que ocurre: todo
+     * navegador actual manda UTF-8, y `é.png` es un nombre que la gente pone
+     * mientras que `Ã©.png` es lo que sale de un fallo de codificación.
+     *
+     * Existe este test para que quien se lo encuentre sepa que se miró y se
+     * decidió, y no lo tome por un fallo: sin él, la suite solo cubre el lado
+     * cómodo y el hallazgo parece nuevo.
+     *
+     * Que el error caiga de este lado tampoco cuesta nada real: el nombre es un
+     * dato decorativo. No participa en la clave de almacenamiento, ni en la
+     * detección del tipo, ni en ninguna decisión de visibilidad.
+     */
+    it('«Ã©.png» de verdad se colapsa a «é.png»: ambigüedad irreducible, aceptada', async () => {
+      const { controller, attachments } = makeController();
+      attachments.upload.mockResolvedValue({ id: 3 });
+
+      // Los dos casos llegan a multer **exactamente iguales**, y esa es la
+      // razón de la colisión.
+      expect(comoLoEntregaMulter('é.png')).toBe('Ã©.png');
+
+      await controller.upload(TECNICO, 4, 11, makeMulterFile({ originalname: 'Ã©.png' }));
+
+      expect(attachments.upload.mock.calls[0][3].filename).toBe('é.png');
+    });
+
     it('un nombre que de verdad era latin1 se deja como está, no se destroza', async () => {
       // `café.png` con la `é` en un solo byte (0xE9) no es UTF-8 válido:
       // reinterpretarlo metería un U+FFFD y dejaría el nombre peor que antes.
@@ -500,33 +531,63 @@ describe('TicketMessagesController.download — la cabecera', () => {
     expect(attachments.download).toHaveBeenCalledWith({ kind: 'STAFF', userId: 7 }, 3);
   });
 
-  it('un fallo del flujo no tumba el proceso: se escucha `error` antes de canalizar', async () => {
-    // Un `ENOENT` en un `ReadStream` sin oyente de `error` es una excepción no
-    // capturada, y eso mata el proceso entero: un adjunto con la fila escrita
-    // y el fichero perdido tiraría el backend, no solo esa descarga.
+  it('las dos cabeceras de seguridad se escriben antes que el tipo', async () => {
+    // Si componer el nombre llegara a lanzar, lo ya escrito tiene que obligar a
+    // descargar. Al revés, el filtro global serviría su JSON de error encima de
+    // un `Content-Type: image/png` sin `nosniff`. Hoy es inalcanzable --el
+    // servicio garantiza ASCII-- y por eso mismo el orden no puede apoyarse en
+    // esa garantía.
+    const { controller, attachments } = makeController();
+    attachments.download.mockResolvedValue(makeDownload());
+    const { res } = makeResponse();
+
+    await controller.download(TECNICO, 3, res as any);
+
+    const escritas = res.setHeader.mock.calls.map(([nombre]) => nombre.toLowerCase());
+    expect(escritas.indexOf('content-disposition')).toBeLessThan(escritas.indexOf('content-type'));
+    expect(escritas.indexOf('x-content-type-options')).toBeLessThan(
+      escritas.indexOf('content-type'),
+    );
+  });
+
+  it('corta la conexión si el flujo falla, sobre el oyente que ya trae del servicio', async () => {
+    // Con las cabeceras enviadas no cabe un JSON de error. Lo que impide que un
+    // `ENOENT` mate el proceso **no** es este oyente sino el que pone
+    // `TicketAttachmentsService.openOrFail` al crear el flujo: ahí hay un test
+    // que lo sujeta. Este solo añade lo que este lado puede hacer.
     const { controller, attachments } = makeController();
     const download = makeDownload();
     attachments.download.mockResolvedValue(download);
     const { res } = makeResponse();
-    const log = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
 
     await controller.download(TECNICO, 3, res as any);
 
     const oyente = download.stream.on.mock.calls.find(([evento]: [string]) => evento === 'error');
     expect(oyente).toBeDefined();
-    expect(() => oyente[1](new Error('ENOENT'))).not.toThrow();
-    expect(res.destroy).toHaveBeenCalled();
-    // Y queda registrado: una fila cuyo fichero se perdió hay que poder verla.
-    expect(log).toHaveBeenCalled();
-    log.mockRestore();
+    const causa = new Error('ENOENT');
+    expect(() => oyente[1](causa)).not.toThrow();
+    expect(res.destroy).toHaveBeenCalledWith(causa);
   });
 
-  it('un 404 del servicio sale sin haber escrito ninguna cabecera', async () => {
+  it('el 404 del servicio sale sin haber escrito ninguna cabecera', async () => {
+    // Con la excepción de verdad, no un `Error` pelado: `rejects.toThrow()` sin
+    // argumento pasa con cualquier cosa, y lo que aquí importa es que el 404
+    // del servicio llega entero al filtro global -- con su `{ code, message }`
+    // y su estado -- y no convertido en un 500 por el camino.
     const { controller, attachments } = makeController();
-    attachments.download.mockRejectedValue(new Error('Adjunto no encontrado'));
+    const cuerpo = { code: 'NOT_FOUND', message: 'Adjunto no encontrado' };
+    attachments.download.mockRejectedValue(new NotFoundException(cuerpo));
     const { res } = makeResponse();
 
-    await expect(controller.download(TECNICO, 3, res as any)).rejects.toThrow();
+    const error = (await controller
+      .download(TECNICO, 3, res as any)
+      .catch((e: unknown) => e)) as NotFoundException;
+
+    expect(error).toBeInstanceOf(NotFoundException);
+    expect(error.getStatus()).toBe(404);
+    expect(error.getResponse()).toEqual(cuerpo);
+    // Y ni una cabecera escrita: el filtro global puede componer su respuesta
+    // desde cero, sin un `Content-Type: image/png` heredado debajo.
     expect(res.setHeader).not.toHaveBeenCalled();
   });
 });

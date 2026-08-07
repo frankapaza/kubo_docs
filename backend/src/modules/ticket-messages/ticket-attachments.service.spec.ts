@@ -1,5 +1,7 @@
 import { validateHeaderValue } from 'http';
+import { PassThrough } from 'stream';
 import {
+  Logger,
   BadRequestException,
   ConflictException,
   InternalServerErrorException,
@@ -107,7 +109,15 @@ const makeHarness = (
   /** El orden real de las operaciones con efecto, para comprobar el reparto. */
   const orden: string[] = [];
 
-  const streamFalso = { falso: true } as unknown as NodeJS.ReadableStream;
+  /**
+   * Un flujo **de verdad** (un `PassThrough` vacío), no un objeto plano.
+   *
+   * Hace falta que lo sea: lo que se comprueba de la descarga es que el flujo
+   * sale con su oyente de `error` ya puesto, y un doble sin `EventEmitter`
+   * detrás no puede decir nada sobre eso -- ni reproducir lo que pasa cuando
+   * nadie escucha, que es que el proceso se muere.
+   */
+  const streamFalso = new PassThrough() as unknown as NodeJS.ReadableStream;
 
   const tickets = { findById: jest.fn().mockResolvedValue(ticket) };
 
@@ -988,6 +998,60 @@ describe('download', () => {
  * `setHeader`**. Con una lista propia, la prueba solo diría que el saneado hace
  * lo que el saneado cree que hace.
  */
+describe('download: el flujo sale con su oyente de `error` ya puesto', () => {
+  /**
+   * Un `'error'` emitido en un `EventEmitter` **sin ningún oyente** no se
+   * entrega: se relanza como excepción no capturada, y eso **mata el proceso
+   * entero**. Un adjunto cuya fila existe y cuyo fichero se perdió (un borrado
+   * a mano, un volumen desmontado, la basura que `discardOrphan` no pudo
+   * limpiar) se llevaría por delante el backend, no solo su descarga.
+   *
+   * **Por qué el oyente va aquí y no en el controlador.** Allí estaba, y allí
+   * funcionaba, pero solo por un invariante que nadie había escrito: que
+   * `createReadStream` es lo último que hace `download` y que no hay ningún
+   * `await` entre esa línea y el `return`. Basta con meter uno --y quien lo
+   * meta será quien toque este servicio, no el controlador-- para que el
+   * `ENOENT` llegue antes de que el controlador haya podido escuchar. La
+   * garantía tiene que viajar **con el objeto**, desde el instante en que
+   * existe, no depender del orden de dos líneas en otro fichero.
+   */
+  it('un ENOENT inmediato, antes de que nadie más escuche, no revienta el proceso', async () => {
+    const { service, storage } = makeHarness({ adjunto: attachmentRow() });
+    const log = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+    // Reproduce exactamente el escenario: el fichero no está, y el flujo lo
+    // dice en cuanto se crea -- antes de que `download` haya devuelto nada.
+    const roto = new PassThrough();
+    storage.createReadStream.mockImplementation(() => {
+      process.nextTick(() => roto.emit('error', new Error('ENOENT: no such file')));
+      return roto as unknown as NodeJS.ReadableStream;
+    });
+
+    const salida = await service.download(EQUIPO, 77);
+    // Si el servicio no hubiera escuchado, este `nextTick` ya habría lanzado.
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(salida.stream).toBe(roto);
+    // Y queda registrado con la clave concreta, que es lo que hace falta para
+    // saber qué fichero falta.
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining('tickets/7/9f2c-uuid.png'),
+      expect.anything(),
+    );
+    log.mockRestore();
+  });
+
+  it('el oyente está puesto ya en el objeto que se devuelve', async () => {
+    const { service } = makeHarness({ adjunto: attachmentRow() });
+
+    const salida = await service.download(EQUIPO, 77);
+
+    // La forma directa de decir «esto no puede matar a nadie»: quien lo reciba
+    // puede añadir los suyos, pero nunca parte de cero.
+    expect((salida.stream as unknown as PassThrough).listenerCount('error')).toBeGreaterThan(0);
+  });
+});
+
 describe('download: el nombre que va a la cabecera', () => {
   const cabecera = (nombre: string) => `attachment; filename="${nombre}"`;
 

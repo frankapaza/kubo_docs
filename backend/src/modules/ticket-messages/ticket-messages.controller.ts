@@ -3,7 +3,6 @@ import {
   Body,
   Controller,
   Get,
-  Logger,
   Param,
   ParseIntPipe,
   Post,
@@ -153,8 +152,6 @@ function contentDisposition(download: AttachmentDownload): string {
 @Controller()
 @UseGuards(JwtAuthGuard, StaffOnlyGuard, RolesGuard)
 export class TicketMessagesController {
-  private readonly logger = new Logger(TicketMessagesController.name);
-
   constructor(
     private readonly messages: TicketMessagesService,
     private readonly attachments: TicketAttachmentsService,
@@ -239,21 +236,24 @@ export class TicketMessagesController {
     // filtro global puede contestar con su JSON de siempre.
     const download = await this.attachments.download(staffActor(user), attachmentId);
 
+    // **Las dos de seguridad, primero.** Si escribir el nombre llegara a
+    // lanzar, lo que quedaría escrito en la respuesta ya obliga a descargar; al
+    // revés, el filtro global serviría su JSON de error encima de un
+    // `Content-Type: image/png` sin `nosniff`. Hoy es inalcanzable --el
+    // servicio garantiza que `headerFilename` es ASCII imprimible-- pero el
+    // orden no cuesta nada y no depende de esa garantía.
+    res.setHeader('Content-Disposition', contentDisposition(download));
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Type', download.mimeType);
     res.setHeader('Content-Length', String(download.size));
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Content-Disposition', contentDisposition(download));
 
-    // Un `error` sin oyente en un flujo de lectura es una excepción no
-    // capturada, y eso tumba el proceso entero: una fila cuyo fichero se perdió
-    // se llevaría por delante el backend, no solo su descarga. Con las
-    // cabeceras ya enviadas no se puede contestar un JSON, así que se corta la
-    // conexión -- el cliente ve una descarga truncada, que es lo honesto -- y
-    // queda la clave en el log.
-    download.stream.on('error', (cause: Error) => {
-      this.logger.error(`Falló la lectura del adjunto ${attachmentId} al servirlo.`, cause);
-      res.destroy(cause);
-    });
+    // El flujo llega **ya escuchado** por el servicio, que es quien lo abre:
+    // ahí está la garantía de que un `ENOENT` no mata el proceso, y ahí tiene
+    // que estar, porque aquí no se puede sostener (ver `openOrFail`). Esto se
+    // suma a aquello y hace lo único que este lado puede hacer: con las
+    // cabeceras ya enviadas no cabe un JSON, así que se corta la conexión y el
+    // cliente ve una descarga truncada, que es lo honesto.
+    download.stream.on('error', (cause: Error) => res.destroy(cause));
 
     download.stream.pipe(res);
   }

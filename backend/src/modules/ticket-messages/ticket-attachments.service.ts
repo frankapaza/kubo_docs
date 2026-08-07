@@ -51,6 +51,13 @@ import { IStorageService, STORAGE_SERVICE } from '../audio/interfaces/storage.in
  * descarga reventaba con un 500 en cuanto el controlador escribía la cabecera.
  */
 export interface AttachmentDownload {
+  /**
+   * El flujo del fichero, **ya con un oyente de `error`** (ver `openOrFail`):
+   * un `'error'` sin oyente mata el proceso, y esa garantía no puede depender
+   * de que quien lo reciba se acuerde de escuchar antes del siguiente tick.
+   * Quien lo sirva añade los suyos --para cortar la respuesta, por ejemplo--
+   * encima de este, nunca en lugar de él.
+   */
   stream: NodeJS.ReadableStream;
   /**
    * El nombre **para mostrar**: el que subió quien lo subió, saneado. Puede
@@ -440,12 +447,44 @@ export class TicketAttachmentsService {
     }
 
     return {
-      stream: this.storage.createReadStream(attachment.storageKey),
+      stream: this.openOrFail(attachment.storageKey),
       filename: attachment.filename,
       headerFilename: toHeaderFilename(attachment.filename),
       mimeType: attachment.mimeType,
       size: attachment.sizeBytes,
     };
+  }
+
+  /**
+   * El flujo del fichero, **con su oyente de `error` ya puesto**.
+   *
+   * Un `'error'` en un `EventEmitter` sin ningún oyente no se entrega: Node lo
+   * relanza como excepción no capturada y **se muere el proceso entero**. Un
+   * adjunto cuya fila existe y cuyo fichero no --un borrado a mano, un volumen
+   * desmontado, la basura que `discardOrphan` no logró limpiar-- se llevaría
+   * por delante el backend y no solo su propia descarga. Reproducido contra el
+   * backend real: sin este oyente, una sola descarga de un adjunto roto tumba
+   * el proceso con `ENOENT`.
+   *
+   * **Va aquí y no en el controlador**, que es donde estaba. Allí funcionaba,
+   * pero por un invariante que nadie había escrito: que `createReadStream` es
+   * lo último de `download` y que no hay ningún `await` entre esa línea y el
+   * `return`. Un solo `await` metido ahí en medio --y quien lo meta será quien
+   * toque este servicio, no el controlador-- deja el `ENOENT` llegando antes de
+   * que el controlador haya podido escuchar. Una garantía que depende del orden
+   * de dos líneas en otro fichero no es una garantía; esta viaja **con el
+   * objeto**, desde el instante en que existe.
+   *
+   * Solo registra. Cortar la respuesta es cosa de quien la tenga --este
+   * servicio no conoce ninguna--, y quien reciba el flujo puede añadir sus
+   * propios oyentes: lo que no puede es partir de cero.
+   */
+  private openOrFail(storageKey: string): NodeJS.ReadableStream {
+    const stream = this.storage.createReadStream(storageKey);
+    stream.on('error', (cause: Error) => {
+      this.logger.error(`No se pudo leer el adjunto «${storageKey}» al servirlo.`, cause);
+    });
+    return stream;
   }
 
   /**

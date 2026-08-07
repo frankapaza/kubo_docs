@@ -56,11 +56,28 @@ const dataSourceFalso = {
   getRepository: () => ({}),
 };
 
+/**
+ * **El `useMocker` sustituye el `DataSource` y nada más.**
+ *
+ * Devolvía `{}` para cualquier token que no supiera resolver, y eso convierte
+ * este test en un test que no puede fallar por lo único que viene a comprobar:
+ * una dependencia irresoluble --la que tumba el arranque en producción-- se
+ * satisface con ese `{}` y el grafo compila tan contento. Pasó de verdad: al
+ * escribir la Task 6 se le puso un parámetro al constructor de
+ * `MulterExceptionFilter`, que `AudioController` monta con `@UseFilters(Clase)`;
+ * Nest se quedó buscando un proveedor de `Number` y el backend no arrancó,
+ * **con la suite entera en verde**, porque este catch-all le dio su `{}`.
+ *
+ * Devolviendo `undefined`, Nest sigue con su resolución normal y falla como
+ * fallaría al arrancar. Lo que de verdad no se puede montar aquí --la cola de
+ * BullMQ, que abriría una conexión a Redis-- se sustituye **por su nombre**,
+ * que es la forma de que sustituir algo sea una decisión y no un descuido.
+ */
 const conDependenciasExternasSustituidas = (builder: TestingModuleBuilder): TestingModuleBuilder =>
   builder
     .overrideProvider(getQueueToken('transcription'))
     .useValue({})
-    .useMocker((token) => (token === getDataSourceToken() ? dataSourceFalso : {}));
+    .useMocker((token) => (token === getDataSourceToken() ? dataSourceFalso : undefined));
 
 describe('StorageModule', () => {
   it('provee STORAGE_SERVICE y es un LocalStorageService', async () => {
