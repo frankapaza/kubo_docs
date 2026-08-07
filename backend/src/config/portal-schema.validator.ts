@@ -128,6 +128,14 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
     // fichero, así que exigir las tablas ya exige haber pasado la migración.
     { table: 'ticket_messages', files: [PortalSchemaValidator.MIGRATION_018] },
     { table: 'ticket_attachments', files: [PortalSchemaValidator.MIGRATION_018] },
+    // La 019 tampoco está aquí, y por el mismo motivo que el enum de arriba
+    // más uno propio: no crea ninguna tabla ni ninguna columna --solo corrige
+    // el `COMMENT` de `ticket_attachments.message_id`--, así que no hay nada
+    // que exigir con este modelo. Y sobre todo: una base sin la 019 funciona
+    // exactamente igual. Abortar el arranque por un texto desactualizado sería
+    // dejar el servicio caído por algo que no rompe nada, que es justo lo que
+    // este validador no debe hacer. Se anota para que la ausencia se lea como
+    // una decisión y no como un descuido.
   ];
 
   /**

@@ -7,7 +7,7 @@
 --  migración pone la base de datos de eso:
 --
 --    · `ticket_messages`      el hilo, con notas internas que el cliente no ve
---    · `ticket_attachments`   imágenes y PDF, colgados del ticket o del mensaje
+--    · `ticket_attachments`   imágenes y PDF, colgados de un mensaje del hilo
 --    · `ticket_events.type`   un valor nuevo del enum para el mensaje
 --    · dos plantillas de aviso más en `notification_templates`
 --
@@ -76,11 +76,24 @@ CREATE TABLE IF NOT EXISTS ticket_messages (
 -- -------------------------------------------------------------------------
 -- 2) Los adjuntos
 -- -------------------------------------------------------------------------
---  `message_id` es nulo cuando el archivo se subió al crear el ticket, antes
---  de que exista ningún mensaje. Por eso el adjunto cuelga siempre del
---  ticket (`ticket_id NOT NULL`) y solo a veces de un mensaje: `ticket_id` es
---  lo que decide quién puede verlo, y no puede depender de una columna que a
---  veces está vacía.
+--  TODO ADJUNTO CUELGA DE UN MENSAJE
+--  Este bloque decía lo contrario --«`message_id` es nulo cuando el archivo se
+--  subió al crear el ticket… el adjunto cuelga siempre del ticket y solo a
+--  veces de un mensaje»--, y esa premisa se retiró antes de terminar la
+--  funcionalidad: el alta del ticket crea el ticket **con su primer mensaje**
+--  y `TicketAttachmentsService.upload` exige `message_id`, así que no queda
+--  ningún camino que escriba una fila sin él.
+--
+--  La columna se queda `NULL`-able por las filas anteriores a esa decisión,
+--  pero un nulo aquí es una **anomalía**, no un caso normal: sin mensaje el
+--  adjunto no hereda ninguna visibilidad, y uno cuya visibilidad nadie eligió
+--  no se le puede enseñar a un cliente. Para quien no es del equipo el
+--  huérfano no existe (`INNER JOIN` en `listAttachments`, 404 al descargar);
+--  al equipo sí, que es quien tiene que poder verlo.
+--
+--  El texto del `COMMENT` de la columna, más abajo, se queda como se aplicó:
+--  lo corrige la **019**, que es el registro de ese cambio. Reescribirlo aquí
+--  dejaría el fichero diciendo algo que nunca corrió con ese texto.
 --
 --  `filename` vs `storage_key` — son dos cosas distintas y no se pueden
 --  confundir:

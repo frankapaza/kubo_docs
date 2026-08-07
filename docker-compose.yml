@@ -38,6 +38,10 @@ services:
       # ticket_events.type y siembra dos plantillas mas. Va detras de la 015,
       # que es la que crea notification_templates.
       - ./backend/sql/migrations/018_conversacion_adjuntos.sql:/docker-entrypoint-initdb.d/018_conversacion_adjuntos.sql:ro
+      # La 019 solo corrige el COMMENT de ticket_attachments.message_id: no
+      # cambia datos ni tipos. Va detras de la 018, que es la que crea la
+      # columna.
+      - ./backend/sql/migrations/019_adjunto_cuelga_de_mensaje.sql:/docker-entrypoint-initdb.d/019_adjunto_cuelga_de_mensaje.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s

@@ -132,10 +132,12 @@ jobs:
 
             # La 011 NO esta aqui a proposito: borra client_requests, que la
             # version vieja todavia usa. Se aplica a mano despues de validar.
+            # La 019 solo corrige el COMMENT de una columna: no siembra nada,
+            # asi que el contador de plantillas de abajo NO sube por ella.
             for m in 010_service_desk 012_work_items 013_portal_clientes \
                      014_audit_client_user 015_notificaciones \
                      016_notify_next_attempt 017_plantillas_respuesta \
-                     018_conversacion_adjuntos; do
+                     018_conversacion_adjuntos 019_adjunto_cuelga_de_mensaje; do
               echo "--- $m"
               sql_file "backend/sql/migrations/$m.sql"
             done

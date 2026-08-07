@@ -174,7 +174,17 @@ export default function TicketThread({
     void load('refresh');
   }, [load]);
 
-  /** Los adjuntos, colgados de su mensaje. Los huérfanos no se pierden: van al final. */
+  /**
+   * Los adjuntos, colgados de su mensaje.
+   *
+   * **Todo adjunto cuelga de un mensaje**: el alta del ticket crea el ticket
+   * con su primer mensaje y la subida exige `messageId`, así que nada puede
+   * crear ya una fila sin él. El que no cuelgue de ninguno es una **anomalía**
+   * --una fila anterior a esa decisión, o algo que no debería existir--, y por
+   * eso no se pierde: se avisa. Al cliente esa fila no le llega siquiera (el
+   * `INNER JOIN` de `listAttachments` y el 404 de la descarga), así que el
+   * único sitio donde se puede ver es este.
+   */
   const byMessage = useMemo(() => {
     const map = new Map<number, TicketAttachment[]>();
     for (const attachment of attachments) {
@@ -272,11 +282,31 @@ export default function TicketThread({
           )}
 
           {orphans.length > 0 && (
-            <p className="mt-3 text-[11px] text-slate-500">
-              Hay {orphans.length}{' '}
-              {orphans.length === 1 ? 'adjunto sin mensaje' : 'adjuntos sin mensaje'} en este
-              ticket. Son filas anteriores a la conversación y no cuelgan de ningún mensaje.
-            </p>
+            // Aviso de anomalía, no nota al pie: en gris claro se leía como una
+            // explicación de algo normal --«son filas anteriores», y a otra
+            // cosa--, y ya no lo es. Nada puede crear un adjunto sin mensaje,
+            // así que si aparece uno hay algo que mirar.
+            //
+            // Ámbar en el trazo pero **fondo blanco**, a propósito: el relleno
+            // `bg-amber-50` es la piel de la tarjeta de nota interna
+            // (`message-visibility.ts` explica por qué ese color está reservado
+            // en esta pantalla), y repetirlo en un bloque que no es un mensaje
+            // erosionaría lo único que hace que un vistazo baste: «relleno
+            // ámbar = esto no sale de Kubo».
+            <div
+              role="status"
+              className="mt-3 rounded-lg border border-l-4 border-amber-400 bg-white px-3 py-2 text-[11px] text-amber-900"
+            >
+              <strong className="font-semibold">
+                {orphans.length === 1
+                  ? 'Hay 1 adjunto que no cuelga de ningún mensaje.'
+                  : `Hay ${orphans.length} adjuntos que no cuelgan de ningún mensaje.`}
+              </strong>{' '}
+              No debería poder existir: hoy todo adjunto se sube dentro de un mensaje. Sin mensaje
+              no hereda ninguna visibilidad, así que el cliente no los ve ni puede descargarlos, y
+              solo aparecen aquí. Si son filas antiguas, no hay nada que hacer; si son recientes,
+              conviene avisar.
+            </div>
           )}
         </>
       )}

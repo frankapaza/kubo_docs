@@ -1,18 +1,31 @@
 import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 
 /**
- * Un adjunto colgado de un ticket -- y a veces de un mensaje concreto de su
- * hilo. Tabla creada por la migración 018 (`ticket_attachments`); esta entidad
- * no la altera, solo la describe.
+ * Un adjunto colgado de un **mensaje** del hilo de un ticket. Tabla creada por
+ * la migración 018 (`ticket_attachments`); esta entidad no la altera, solo la
+ * describe.
  *
- * `messageId` es `null` cuando el archivo se subió al crear el ticket, antes
- * de que exista ningún mensaje. Por eso `ticketId` (nunca nulo) es lo que
- * decide quién puede ver el adjunto, y `messageId` solo aporta, cuando existe,
- * de qué mensaje concreto cuelga -- y por tanto si ese mensaje es
- * `PUBLICA` o `INTERNA`. Esta tabla no tiene columna de visibilidad propia:
- * `TicketMessagesRepository.listAttachments` la resuelve uniendo con
- * `ticket_messages` (un adjunto sin mensaje es siempre visible, porque nadie
- * puede subirlo como nota interna antes de que el ticket exista).
+ * **Todo adjunto cuelga de un mensaje**, y de ahí sale todo lo demás. Esta
+ * tabla no tiene columna de visibilidad propia: la hereda de la del mensaje.
+ * `TicketAttachmentsService.upload` exige `messageId` y el alta del ticket
+ * crea el ticket **con su primer mensaje** antes de subir nada, así que no
+ * queda ningún camino que escriba una fila sin él.
+ *
+ * `messageId` sigue siendo `NULL`-able en el esquema **solo por las filas
+ * anteriores a esa decisión**, y una fila así es una **anomalía**, no un caso
+ * normal: sin mensaje no hereda ninguna visibilidad, y un adjunto cuya
+ * visibilidad nadie eligió no se le puede enseñar a un cliente. Por eso
+ * `TicketMessagesRepository.listAttachments` resuelve la lista del cliente con
+ * un `INNER JOIN` contra `ticket_messages` --para quien no es del equipo, el
+ * huérfano no existe-- y la descarga contesta 404. Al equipo sí le existe, que
+ * es quien tiene que poder verlo.
+ *
+ * Este párrafo decía lo contrario --«`messageId` es `null` cuando el archivo se
+ * subió al crear el ticket… un adjunto sin mensaje es siempre visible»-- y se
+ * deja anotado a propósito: era la premisa de la que salió la rama
+ * `message_id IS NULL OR …` que dejaba pasar **siempre** al huérfano a la
+ * lista del cliente. La rama se cerró; el contrato que la justificaba seguía
+ * escrito aquí, que es lo que desactiva la sospecha del siguiente que lo lea.
  *
  * `filename` es lo que subió quien lo mandó -- solo para mostrar, nunca toca
  * el sistema de ficheros. `storageKey` la genera el servidor y es la única que
@@ -34,7 +47,12 @@ export class TicketAttachment {
   @Column({ name: 'ticket_id', type: 'bigint', unsigned: true })
   ticketId!: number;
 
-  /** `null` si el adjunto se subió al crear el ticket, antes de que exista ningún mensaje. */
+  /**
+   * El mensaje del que cuelga. **Ningún camino de escritura lo deja vacío**;
+   * es `NULL`-able solo por las filas anteriores a esa decisión, y un `null`
+   * aquí es una anomalía --un adjunto sin visibilidad heredada--, no el caso
+   * normal. Ver el comentario de la clase.
+   */
   @Column({ name: 'message_id', type: 'bigint', unsigned: true, nullable: true })
   messageId!: number | null;
 
