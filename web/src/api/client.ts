@@ -16,9 +16,40 @@ api.interceptors.request.use((config) => {
 // Shared refresh promise — varios 401 simultáneos usan el mismo intento de refresh.
 let refreshPromise: Promise<string> | null = null;
 
+/**
+ * ¿Estamos dentro del portal de clientes?
+ *
+ * Las dos sesiones conviven en el mismo navegador a propósito --tokens en claves
+ * distintas de `localStorage`, dos instancias de axios-- para que un miembro del
+ * equipo y un cliente puedan tener abiertas las dos superficies a la vez.
+ */
+function isPortalRoute(): boolean {
+  const path = window.location.pathname;
+  return path === '/portal' || path.startsWith('/portal/');
+}
+
 function doLogout() {
   localStorage.removeItem(TOKEN_STORAGE_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
+
+  /**
+   * **La sesión del panel no echa a nadie del portal.**
+   *
+   * `AuthProvider` (en `main.tsx`) arranca en toda la aplicación, así que un
+   * navegador que conserve un token de panel caducado dispara un `GET
+   * /users/me` **también al abrir una página del portal**. Sin esta condición,
+   * ese 401 acababa aquí y hacía una navegación dura a `/login`, que es la
+   * pantalla de acceso **del panel**: al cliente se le sacaba del portal de
+   * golpe, y una navegación dura se lleva por delante todo lo que hubiera en
+   * pantalla -- desde que el portal tiene hilo, el mensaje a medio escribir.
+   *
+   * Limpiar el token del panel sí se hace igualmente: está caducado y no sirve.
+   * Lo que no se hace es **redirigir**, porque quien está delante no es quien
+   * perdió esa sesión. La sesión del portal tiene su propio cierre en
+   * `portal.api.ts`, que manda a `/portal/login` y es el que sí corresponde.
+   */
+  if (isPortalRoute()) return;
+
   if (window.location.pathname !== '/login') window.location.href = '/login';
 }
 

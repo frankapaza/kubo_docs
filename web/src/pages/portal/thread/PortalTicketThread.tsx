@@ -91,6 +91,12 @@ export default function PortalTicketThread({
         console.warn('[PortalTicketThread] No se pudo traer la conversación del ticket.', failure);
         if (mode === 'initial') {
           setLoadError('No se pudo cargar la conversación de este ticket.');
+          // **También el otro.** Los dos avisos describen situaciones que se
+          // excluyen: si no hay conversación en pantalla, no puede haber además
+          // una «desactualizada». Dejar vivo el ámbar de un refresco anterior
+          // ponía dos cajas con dos botones idénticos, y la de arriba hablaba de
+          // «la conversación de abajo» cuando abajo no había nada.
+          setRefreshError(null);
         } else {
           setRefreshError(
             'La conversación de abajo puede estar desactualizada: no se pudo volver a cargar.',
@@ -111,9 +117,22 @@ export default function PortalTicketThread({
     void load('initial');
   }, [load]);
 
+  /**
+   * Volver a pedir el hilo. Lo llaman los dos botones de reintentar y el
+   * compositor cuando acaba de escribir.
+   *
+   * **El modo lo decide lo que hay en pantalla, no quién llamó.** «Inicial» y
+   * «refresco» no son dos orígenes, son dos situaciones distintas del usuario:
+   * en una no tiene conversación delante y en la otra sí. Con `reload` pidiendo
+   * siempre un refresco, el reintento del cuadro rojo que volvía a fallar
+   * escribía el aviso ámbar --«la conversación de abajo puede estar
+   * desactualizada»-- sin borrar el rojo, y quedaban dos cajas con dos botones
+   * iguales, una de ellas hablando de una lista que estaba suprimida. Si el
+   * fallo de carga está en pie, no hay nada abajo: se reintenta la carga.
+   */
   const reload = useCallback(() => {
-    void load('refresh');
-  }, [load]);
+    void load(loadError ? 'initial' : 'refresh');
+  }, [load, loadError]);
 
   const closed = ticketStatus === 'CERRADO';
 

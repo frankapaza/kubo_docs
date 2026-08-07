@@ -10,6 +10,7 @@ import {
   type RejectedAttachment,
 } from '../../../components/upload';
 import { Button } from '../../../components/ui/Button';
+import { TimeoutError, withTimeout } from '../../../lib/with-timeout';
 import { STATUS_LABELS } from '../../tickets/ticket-ui';
 // Tipo puro, sin nada ejecutable: el reparto «lo que se sabe» / «por qué» vale
 // igual en las dos superficies y duplicar la interfaz solo duplicaría el
@@ -51,13 +52,10 @@ interface PortalThreadComposerProps {
 }
 
 /**
- * Corte local de tiempo, porque la instancia de axios del portal no declara
- * ninguno. Sin él, una petición que no llega a responder nunca deja la pantalla
- * sin salida: el botón se queda en «Enviando…» para siempre y la única
- * escapatoria es recargar, que se lleva por delante el texto escrito.
- *
- * Gemelo del que hay en `ThreadComposer`: allí es una función privada y no se
- * puede compartir sin tocar el panel, que está cerrado.
+ * Cuánto se espera antes de rendirse. El mecanismo es compartido
+ * (`lib/with-timeout.ts`); lo que se decide aquí son los plazos y **el texto**,
+ * que es lo único que de verdad cambia entre las dos superficies: quien lee
+ * este es un cliente, no un técnico.
  */
 const POST_TIMEOUT_MS = 20_000;
 /** Los adjuntos pueden ser de 10 MB y van de uno en uno: se acota por archivo. */
@@ -85,14 +83,23 @@ export default function PortalThreadComposer({
   /** El mensaje sí se envió; alguno de sus archivos, no. */
   const [attachmentIssues, setAttachmentIssues] = useState<RejectedAttachment[]>([]);
   /**
-   * El ticket se movió al enviar. Es lo que hace visible la reactivación: el
-   * cliente que responde a un ticket en «Espera cliente» lo ve volver a «En
-   * atención» sin recargar. Se guarda la transición entera y no un booleano,
-   * para poder nombrar los dos extremos y no tener que afirmar cuál fue.
+   * El estado en el que queda el ticket, cuando resulta ser otro del que esta
+   * pantalla tenía. Es lo que hace visible la reactivación: el cliente que
+   * responde a un ticket en «Espera cliente» lo ve en «En atención» sin
+   * recargar.
+   *
+   * **Se guarda solo el estado resultante, y el aviso solo nombra ese.** Nombrar
+   * también el de partida --«pasó de X a Y»-- parecía más informativo y era una
+   * afirmación que este componente no puede sostener: el de partida sale del
+   * estado local, que la ficha carga una vez al abrirse y no vuelve a refrescar.
+   * Basta con que el técnico mueva el ticket desde el panel mientras la pestaña
+   * está abierta para que ese origen sea falso: el backend leería «En atención»
+   * dentro de su transacción, **no reactivaría nada**, devolvería «En atención»
+   * y aquí se le atribuiría al mensaje del cliente una transición que no
+   * ocurrió. El `POST` no devuelve el estado previo, así que lo honesto es decir
+   * dónde está el ticket y no de dónde viene ni por qué.
    */
-  const [statusChange, setStatusChange] = useState<{ from: TicketStatus; to: TicketStatus } | null>(
-    null,
-  );
+  const [resultingStatus, setResultingStatus] = useState<TicketStatus | null>(null);
 
   /**
    * Cambia con cada mensaje enviado y sirve de `key` del `FileDropZone`.
@@ -111,11 +118,11 @@ export default function PortalThreadComposer({
   const ready = trimmedBody.length > 0;
 
   const send = async () => {
-    // Los archivos y el estado de partida se capturan aquí: más abajo la lista
-    // se vacía en cuanto el mensaje existe, y `ticketStatus` habrá cambiado ya
-    // cuando toque compararlo.
+    // Los archivos y el estado que esta pantalla tenía se capturan aquí: más
+    // abajo la lista se vacía en cuanto el mensaje existe, y `ticketStatus`
+    // habrá cambiado ya cuando toque compararlo.
     const pending = files;
-    const before = ticketStatus;
+    const shownBefore = ticketStatus;
 
     setSending(true);
     // **Todo el estado del compositor se reinicia a la vez.** Limpiar unos
@@ -125,7 +132,7 @@ export default function PortalThreadComposer({
     // cliente.
     setWriteError(null);
     setAttachmentIssues([]);
-    setStatusChange(null);
+    setResultingStatus(null);
 
     let posted;
     try {
@@ -155,7 +162,11 @@ export default function PortalThreadComposer({
     // suponga: el backend condiciona la reactivación al estado que leyó, y
     // puede haber decidido no mover nada.
     onTicketStatus(posted.ticketStatus);
-    if (posted.ticketStatus !== before) setStatusChange({ from: before, to: posted.ticketStatus });
+    // La comparación es solo para decidir **si hay algo que decir**: si el
+    // distintivo de arriba ya enseñaba ese estado, un aviso no añadiría nada.
+    // Lo que se guarda --y lo único que el aviso nombra-- es el estado que
+    // vuelve; ver el comentario de `resultingStatus`.
+    if (posted.ticketStatus !== shownBefore) setResultingStatus(posted.ticketStatus);
 
     // El hilo se refresca ya, para que el mensaje aparezca aunque los adjuntos
     // tarden. Se vuelve a refrescar al final, cuando ya cuelgan de él.
@@ -233,17 +244,19 @@ export default function PortalThreadComposer({
         </p>
       )}
 
-      {statusChange && (
+      {resultingStatus && (
         // `role="status"` y no `alert`: es una buena noticia, no una
-        // interrupción. Va debajo del botón que la provocó, además del distintivo
+        // interrupción. Va junto al botón que lo provocó, además del distintivo
         // de la cabecera, que también ha cambiado ya.
+        //
+        // Se dice **dónde queda** el ticket, no de dónde venía ni por qué: es lo
+        // único que la respuesta del `POST` permite afirmar.
         <p
           role="status"
-          data-status-change={`${statusChange.from}->${statusChange.to}`}
+          data-resulting-status={resultingStatus}
           className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-[13px] text-emerald-900"
         >
-          Recibimos tu mensaje. El ticket pasó de «{STATUS_LABELS[statusChange.from]}» a «
-          {STATUS_LABELS[statusChange.to]}».
+          Recibimos tu mensaje. El ticket está ahora en «{STATUS_LABELS[resultingStatus]}».
         </p>
       )}
 
@@ -277,31 +290,6 @@ export default function PortalThreadComposer({
       </div>
     </div>
   );
-}
-
-/**
- * La misma promesa, pero que se rinde al cabo de un rato.
- *
- * No cancela la petición --no hay forma de hacerlo sin tocar la instancia de
- * axios compartida del portal--, así que el mensaje que se enseña **no afirma
- * que no se haya enviado**: con una respuesta que no llega, eso no se sabe.
- * Decir «no se envió» sería la forma más directa de provocar el duplicado.
- */
-class TimeoutError extends Error {
-  constructor() {
-    super(`${TIMEOUT_FAILURE.headline} ${TIMEOUT_FAILURE.detail}`);
-    this.name = 'TimeoutError';
-  }
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>;
-  const alarm = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new TimeoutError()), ms);
-  });
-  // `finally` y no `then`: el temporizador se apaga tanto si la petición sale
-  // bien como si falla, y sin él queda un `setTimeout` vivo por cada envío.
-  return Promise.race([promise, alarm]).finally(() => clearTimeout(timer));
 }
 
 /**

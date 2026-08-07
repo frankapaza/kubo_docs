@@ -3,6 +3,7 @@ import { useId, useRef, useState } from 'react';
 
 import { ticketMessagesApi } from '../../../api/ticket-messages.api';
 import type { TicketMessageVisibility } from '../../../api/types';
+import { TimeoutError, withTimeout } from '../../../lib/with-timeout';
 import {
   FileDropZone,
   uploadPendingAttachments,
@@ -347,33 +348,6 @@ export default function ThreadComposer({ ticketId, clientName, onPosted }: Threa
       />
     </div>
   );
-}
-
-/**
- * La misma promesa, pero que se rinde al cabo de un rato.
- *
- * No cancela la petición --no hay forma de hacerlo sin tocar la instancia de
- * axios compartida--, así que el mensaje que se enseña **no afirma que no se
- * haya publicado**: con una respuesta que no llega, eso no se sabe. Decir «no
- * se envió» sería la forma más directa de provocar el envío duplicado, que en
- * una respuesta pública son dos correos idénticos al cliente.
- */
-class TimeoutError extends Error {
-  constructor() {
-    super(`${TIMEOUT_FAILURE.headline} ${TIMEOUT_FAILURE.detail}`);
-    this.name = 'TimeoutError';
-  }
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>;
-  const alarm = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new TimeoutError()), ms);
-  });
-  // `finally` y no `then`: el temporizador se apaga tanto si la petición sale
-  // bien como si falla, y sin él el proceso se queda con un `setTimeout` vivo
-  // por cada mensaje enviado.
-  return Promise.race([promise, alarm]).finally(() => clearTimeout(timer));
 }
 
 /**
