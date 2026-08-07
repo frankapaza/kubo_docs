@@ -35,6 +35,29 @@ export function sameId(a: unknown, b: unknown): boolean {
 }
 
 /**
+ * Si ese valor es un identificador de verdad: un entero positivo, venga como
+ * número o como la cadena en que TypeORM convierte todo `bigint`.
+ *
+ * Junta las dos mitades que ya se exigían por separado y que no pueden
+ * discrepar: la **normalización** de `sameId` (por eso `"9"` vale, que es como
+ * llega una columna leída) y el **entero positivo** que exigen al escribir
+ * `resolveScope` y `assertSessionScope`. Un `0`, un `NaN`, un `''`, un `null` o
+ * un `undefined` no son un id en ninguna de las dos puntas.
+ *
+ * Lo usa la lectura de las columnas de autor de un mensaje
+ * (`portal-messages.controller.ts`), donde tener un `author_user_id` es lo
+ * único que atribuye un mensaje al equipo. Preguntarlo allí con un `!== null` a
+ * mano dejaría pasar justo las formas en que una fila rara llega de verdad.
+ *
+ * No sustituye a `sameId`: comparar dos ids sigue siendo cosa suya. Esto solo
+ * responde si **hay** un id.
+ */
+export function isUsableId(value: unknown): boolean {
+  const id = toComparableId(value);
+  return id !== null && Number.isInteger(id) && id > 0;
+}
+
+/**
  * Un identificador comparable, o `null` si el valor no es uno. Fuera quedan
  * `null`, `undefined`, la cadena vacía (que `Number` convertiría en 0) y todo
  * lo que no dé un número finito.
