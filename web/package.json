@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "sync:attachment-rules": "node scripts/sync-attachment-rules.mjs",
+    "check:attachment-rules": "node scripts/sync-attachment-rules.mjs --check",
+    "prebuild": "node scripts/sync-attachment-rules.mjs --check --skip-if-missing",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "lint": "eslint \"src/**/*.{ts,tsx}\" --fix"

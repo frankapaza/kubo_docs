@@ -666,3 +666,86 @@ export interface PortalSession {
   refreshToken: string;
   clientUser: PortalClientUser;
 }
+
+// ---------------------------------------------------------------------------
+// Conversación y adjuntos de un ticket.
+//
+// Son **dos juegos de tipos y no uno**, igual que en el backend, porque las dos
+// superficies no devuelven lo mismo: `TicketMessagesController` publica la
+// entidad (con `visibility` y los identificadores de autor) y
+// `PortalMessagesController` publica una proyección escrita campo por campo en
+// la que no existen ni la visibilidad ni el autor interno. Un tipo común
+// «con campos opcionales» prometería al portal datos que nunca le llegan, y es
+// exactamente la puerta por la que una nota interna acaba pintándose en la
+// pantalla de un cliente.
+// ---------------------------------------------------------------------------
+
+/** Los dos valores del enum `ticket_messages.visibility`. Solo existen en el panel. */
+export type TicketMessageVisibility = 'PUBLICA' | 'INTERNA';
+
+/** Un mensaje del hilo tal y como lo ve el **panel interno**. */
+export interface TicketMessage {
+  id: number;
+  ticketId: number;
+  bodyMd: string;
+  visibility: TicketMessageVisibility;
+  /** Quién lo firmó del equipo, si lo firmó el equipo. */
+  authorUserId: number | null;
+  /** Quién lo firmó del lado del cliente, si vino del portal. */
+  authorClientUserId: number | null;
+  createdAt: string;
+}
+
+/**
+ * Un adjunto tal y como lo ve el **panel interno** (`AttachmentSummary`). Sin
+ * `storageKey` ni quién lo subió: el backend no los publica.
+ */
+export interface TicketAttachment {
+  id: number;
+  messageId: number | null;
+  filename: string;
+  /** El tipo **detectado por firma de bytes** en la subida, nunca el declarado. */
+  mimeType: string;
+  /** Bytes reales del fichero guardado. */
+  size: number;
+  createdAt: string;
+}
+
+/**
+ * Lo que contesta el panel al escribir en el hilo: el mensaje y el ticket tal y
+ * como queda (un mensaje del cliente puede reactivarlo).
+ */
+export interface PostedTicketMessage {
+  message: TicketMessage;
+  ticket: Ticket;
+}
+
+/** De qué lado viene el mensaje, que es lo único que el portal publica del autor. */
+export type PortalMessageAuthor = 'CLIENT' | 'STAFF';
+
+/** Un adjunto tal y como lo ve el **portal** (`PortalAttachmentView`). Sin `messageId`. */
+export interface PortalTicketAttachment {
+  id: number;
+  filename: string;
+  mimeType: string;
+  size: number;
+  createdAt: string;
+}
+
+/**
+ * Un mensaje del hilo tal y como lo ve el **portal** (`PortalMessageView`). Sin
+ * `visibility` y sin identificadores de autor; los adjuntos viajan dentro.
+ */
+export interface PortalTicketMessage {
+  id: number;
+  bodyMd: string;
+  author: PortalMessageAuthor;
+  createdAt: string;
+  attachments: PortalTicketAttachment[];
+}
+
+/** Lo que contesta el portal al escribir: el mensaje y el estado en que queda el ticket. */
+export interface PortalPostedTicketMessage {
+  message: PortalTicketMessage;
+  ticketStatus: TicketStatus;
+}
