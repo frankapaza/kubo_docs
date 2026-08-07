@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import { ticketMessagesApi } from '../../../api/ticket-messages.api';
 import type { TicketMessageVisibility } from '../../../api/types';
@@ -117,6 +117,44 @@ export default function ThreadComposer({ ticketId, clientName, onPosted }: Threa
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const domId = useId();
 
+  /**
+   * Corta el camino tardío tras desmontar. La tienen `TicketThread`,
+   * `PortalTicketThread`, `ThreadAttachment` y `PortalThreadAttachment`; aquí
+   * faltaba, y una ausencia sin motivo escrito no deja saber a la siguiente
+   * revisión si fue decisión o descuido.
+   *
+   * Hace falta de verdad: entre el `POST` y el final de la subida de adjuntos
+   * pueden pasar minutos --el corte de tiempo de los archivos es de 60 s por
+   * archivo--, y en ese rato basta con cambiar de ticket o cerrar la ficha.
+   */
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+
+  /**
+   * Guarda **síncrona** contra el doble envío.
+   *
+   * Hasta ahora lo único que frenaba un segundo clic era `disabled={submitting}`
+   * en el botón de confirmar, y `submitting` sale de `sending`, que es estado de
+   * React: `setSending` no cambia nada hasta el siguiente render, así que dos
+   * clics dentro del mismo tick --un doble clic de verdad, o un `Enter`
+   * mantenido sobre el botón enfocado-- entran los dos y disparan dos `POST`.
+   *
+   * En cualquier otro sitio eso sería un duplicado molesto. Aquí es **el único
+   * camino de toda la pantalla que manda dos correos**, y un correo en la
+   * bandeja de un cliente no se retira. Un `ref` se escribe y se lee en el
+   * mismo tick, que es exactamente lo que el estado derivado no puede hacer.
+   *
+   * Cubre los dos botones y no solo el público: la nota interna no manda
+   * correo, pero duplicarla ensucia el registro de quién dijo qué, y una guarda
+   * que solo vale para un camino es la que alguien mueve sin darse cuenta.
+   */
+  const inFlight = useRef(false);
+
   const busy = sending !== null;
   /** El cuerpo tal y como va a viajar: lo mismo que se envía y lo que se previsualiza. */
   const trimmedBody = body.trim();
@@ -131,6 +169,20 @@ export default function ThreadComposer({ ticketId, clientName, onPosted }: Threa
   const skin = shown ? VISIBILITY_SKINS[shown] : null;
 
   const send = async (visibility: TicketMessageVisibility) => {
+    // La guarda, antes que nada y sin ningún `await` por delante: entre esta
+    // línea y la siguiente no puede colarse otro clic.
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      await post(visibility);
+    } finally {
+      // En el `finally` para que un fallo no deje el compositor bloqueado para
+      // siempre: el usuario tiene que poder reintentar.
+      inFlight.current = false;
+    }
+  };
+
+  const post = async (visibility: TicketMessageVisibility) => {
     // Los archivos se capturan aquí: más abajo se vacía la lista en cuanto el
     // mensaje existe, y la subida sigue necesitándolos.
     const pending = files;
@@ -147,6 +199,7 @@ export default function ThreadComposer({ ticketId, clientName, onPosted }: Threa
         POST_TIMEOUT_MS,
       );
     } catch (failure) {
+      if (!alive.current) return;
       // El error va donde el usuario está mirando. La respuesta pública se
       // manda siempre desde el diálogo, y el diálogo tapa el compositor:
       // escribir ahí detrás es dejar el fallo fuera de la vista, con el botón
@@ -158,6 +211,11 @@ export default function ThreadComposer({ ticketId, clientName, onPosted }: Threa
       setSending(null);
       return;
     }
+
+    // El mensaje ya está publicado --eso no se deshace-- pero si la ficha se
+    // cerró mientras tanto, aquí no queda nadie a quien contárselo ni ninguna
+    // lista que refrescar.
+    if (!alive.current) return;
 
     // ------------------------------------------------------------------
     // A partir de aquí el mensaje **existe**. Nada de lo que pase con los
@@ -191,8 +249,10 @@ export default function ThreadComposer({ ticketId, clientName, onPosted }: Threa
           uploadPendingAttachments(ticketMessagesApi, ticketId, posted.message.id, pending),
           UPLOAD_TIMEOUT_MS_PER_FILE * pending.length,
         );
+        if (!alive.current) return;
         setAttachmentIssues([...outcome.failed, ...outcome.skipped]);
       } catch {
+        if (!alive.current) return;
         // `uploadPendingAttachments` no rechaza por su cuenta --cuenta cada
         // rechazo dentro de su resultado--, así que caer aquí solo puede ser el
         // corte de tiempo. Se cuenta archivo por archivo y sin afirmar que no

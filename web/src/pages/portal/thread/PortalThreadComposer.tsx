@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import { portalTicketMessagesApi } from '../../../api/ticket-messages.api';
 import type { TicketStatus } from '../../../api/types';
@@ -114,10 +114,50 @@ export default function PortalThreadComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const domId = useId();
 
+  /**
+   * Corta el camino tardío tras desmontar, igual que `PortalTicketThread` y
+   * `PortalThreadAttachment`. Entre el `POST` y el final de la subida de
+   * adjuntos pueden pasar minutos --60 s de corte por archivo--, y en ese rato
+   * basta con que el cliente vuelva a «Mis tickets».
+   */
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+
+  /**
+   * Guarda **síncrona** contra el doble envío, la misma que `ThreadComposer`.
+   *
+   * `disabled={sending}` no basta: `sending` es estado de React y no cambia
+   * hasta el siguiente render, así que dos clics dentro del mismo tick entran
+   * los dos. Aquí no salen dos correos a un cliente --el peligro que hay en el
+   * panel-- pero sí dos mensajes idénticos en el hilo y dos avisos al buzón del
+   * equipo. Va también aquí porque la asimetría es justo lo que deja a la
+   * siguiente revisión sin saber si la ausencia era decisión o descuido.
+   */
+  const inFlight = useRef(false);
+
   const trimmedBody = body.trim();
   const ready = trimmedBody.length > 0;
 
   const send = async () => {
+    // Antes de cualquier `await`: entre esta línea y la siguiente no puede
+    // colarse otro clic.
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      await post();
+    } finally {
+      // En el `finally` para que un fallo no deje el compositor bloqueado para
+      // siempre: el cliente tiene que poder reintentar.
+      inFlight.current = false;
+    }
+  };
+
+  const post = async () => {
     // Los archivos y el estado que esta pantalla tenía se capturan aquí: más
     // abajo la lista se vacía en cuanto el mensaje existe, y `ticketStatus`
     // habrá cambiado ya cuando toque compararlo.
@@ -141,12 +181,17 @@ export default function PortalThreadComposer({
         POST_TIMEOUT_MS,
       );
     } catch (failure) {
+      if (!alive.current) return;
       // El fallo se cuenta justo encima del botón, que es donde está mirando
       // quien acaba de pulsarlo.
       setWriteError(describePostError(failure));
       setSending(false);
       return;
     }
+
+    // El mensaje ya está enviado --eso no se deshace-- pero si el cliente se
+    // fue de la ficha, aquí no queda nadie a quien contárselo.
+    if (!alive.current) return;
 
     // ------------------------------------------------------------------
     // A partir de aquí el mensaje **existe**. Nada de lo que pase con los
@@ -181,8 +226,10 @@ export default function PortalThreadComposer({
         // Con su código y con el texto del backend tal cual: el tope acumulado
         // de adjuntos del ticket llega **aquí**, después de intentar la subida,
         // y su mensaje es el único que dice cuánto queda y qué hacer.
+        if (!alive.current) return;
         setAttachmentIssues([...outcome.failed, ...outcome.skipped]);
       } catch {
+        if (!alive.current) return;
         // `uploadPendingAttachments` no rechaza por su cuenta --cuenta cada
         // rechazo dentro de su resultado--, así que caer aquí solo puede ser el
         // corte de tiempo. Se cuenta archivo por archivo y sin afirmar que no
