@@ -113,6 +113,19 @@ const ATTACHMENT_NOT_FOUND = { code: 'NOT_FOUND', message: 'Adjunto no encontrad
 /** Mismo criterio para el mensaje del que se quiere colgar un adjunto. */
 const MESSAGE_NOT_FOUND = { code: 'NOT_FOUND', message: 'Mensaje no encontrado' } as const;
 
+/**
+ * El identificador con el que se consulta cuando **no hay fila de la que
+ * sacarlo**: el adjunto no existía, o no colgaba de ningún mensaje.
+ *
+ * Ninguna fila puede tenerlo -- las claves son `bigint unsigned
+ * AUTO_INCREMENT` y empiezan en 1 --, así que la consulta se hace, cuesta lo
+ * mismo y no encuentra nada. Existe para que los tres caminos del 404 hagan el
+ * mismo trabajo (ver `download`), no para decidir: quien decide sigue siendo
+ * `ticketIsVisible` / `isPublicMessageOf`, y los dos fallan cerrados ante el
+ * `null` que esto devuelve.
+ */
+const SIN_FILA = 0;
+
 /** Lo que se le contesta a quien no pudo llegar a guardar. Nunca lleva detalles del fallo. */
 const NO_SE_PUDO_GUARDAR = {
   code: 'INTERNAL',
@@ -410,6 +423,21 @@ export class TicketAttachmentsService {
    * quien pide es un cliente (regla 5). El adjunto de una nota interna no es
    * que esté prohibido para el portal: es que **no existe**, y así se contesta.
    *
+   * **Se carga todo primero y se decide después**, y eso no es estilo: es la
+   * misma regla del 404 uniforme, medida con un reloj en vez de leída en el
+   * texto. Consultando conforme cada comprobación fallaba, un adjunto
+   * inexistente costaba **una** consulta, uno de otra empresa **dos** y uno de
+   * una nota interna **tres**: cuerpos idénticos y tiempos distintos, con lo
+   * que se vuelve a poder enumerar a base de probar números -- justo lo que el
+   * cuerpo único viene a impedir. Ya se cerró un canal así en el login del
+   * portal; dejarlo abierto aquí, que es la superficie que toca gente de
+   * fuera, sería incoherente. Ahora los tres caminos hacen el **mismo** trabajo
+   * antes de decidir nada, y hay un test que cuenta las consultas.
+   *
+   * Las dos segundas van en paralelo porque ninguna depende de la otra; lo que
+   * no se puede paralelizar es la primera, que es de donde salen sus dos
+   * identificadores.
+   *
    * Devuelve el tipo detectado en la subida para que el controlador fuerce la
    * descarga con él (regla 3), y **dos nombres**: el de mostrar y el que se
    * puede escribir en la cabecera sin comprobar nada (ver `AttachmentDownload`).
@@ -420,30 +448,41 @@ export class TicketAttachmentsService {
     const { scope } = resolveScope(actor, 'de la descarga');
 
     const attachment = await this.messages.findAttachment(attachmentId);
-    if (!attachment) throw new NotFoundException(ATTACHMENT_NOT_FOUND);
 
-    const ticket = await this.tickets.findById(attachment.ticketId);
-    if (!ticketIsVisible(ticket, scope)) throw new NotFoundException(ATTACHMENT_NOT_FOUND);
+    const [ticket, message] = await Promise.all([
+      this.tickets.findById((attachment?.ticketId ?? SIN_FILA) as number),
+      // Al equipo no le hace falta la visibilidad del mensaje -- lo ve todo --,
+      // así que tampoco la consulta. Su camino también es uniforme: dos
+      // consultas siempre, exista o no el adjunto. Quien tiene que ser
+      // indistinguible consigo mismo es cada clase de actor, y un atacante solo
+      // sostiene un tipo de token.
+      scope.restricted
+        ? this.messages.findMessage(attachment?.messageId ?? SIN_FILA)
+        : Promise.resolve(null),
+    ]);
 
-    if (scope.restricted) {
-      // Sin mensaje del que colgar, **no hay visibilidad que heredar**, así que
-      // no se sirve. La condición era `messageId !== null && …`, o sea que una
-      // fila con el campo nulo se saltaba entera la comprobación: la cuarta
-      // aparición de decidir por la presencia de un dato en vez de por una
-      // regla. Hoy no es alcanzable --`upload` exige `messageId` y es el único
-      // que escribe-- pero lo era por contrato, y había un test que fijaba ese
-      // hueco como comportamiento esperado, que es peor que la rama.
-      //
-      // Solo se le niega al cliente: para el equipo una fila así es una
-      // anomalía que hay que poder mirar, no un archivo que esconder.
-      const message =
-        attachment.messageId === null || attachment.messageId === undefined
-          ? null
-          : await this.messages.findMessage(attachment.messageId);
+    if (!attachment || !ticketIsVisible(ticket, scope)) {
+      throw new NotFoundException(ATTACHMENT_NOT_FOUND);
+    }
 
-      if (!this.isPublicMessageOf(message, attachment.ticketId)) {
-        throw new NotFoundException(ATTACHMENT_NOT_FOUND);
-      }
+    // Sin mensaje del que colgar, **no hay visibilidad que heredar**, así que
+    // no se sirve. La condición era `messageId !== null && …`, o sea que una
+    // fila con el campo nulo se saltaba entera la comprobación: la cuarta
+    // aparición de decidir por la presencia de un dato en vez de por una regla.
+    // Hoy no es alcanzable --`upload` exige `messageId` y es el único que
+    // escribe-- pero lo era por contrato, y había un test que fijaba ese hueco
+    // como comportamiento esperado, que es peor que la rama.
+    //
+    // Quien decide sigue siendo `isPublicMessageOf`, que exige que el mensaje
+    // exista, sea **de este ticket** y sea público: el id de relleno de arriba
+    // sirve para que la consulta ocurra, nunca para que decida. Una fila sin
+    // mensaje busca un id que ninguna tiene, no encuentra nada, y falla cerrada
+    // por la misma puerta que las demás.
+    //
+    // Solo se le niega al cliente: para el equipo una fila así es una anomalía
+    // que hay que poder mirar, no un archivo que esconder.
+    if (scope.restricted && !this.isPublicMessageOf(message, attachment.ticketId)) {
+      throw new NotFoundException(ATTACHMENT_NOT_FOUND);
     }
 
     return {

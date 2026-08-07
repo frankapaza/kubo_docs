@@ -18,12 +18,10 @@ import { ROLES_KEY } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
-import { MAX_FILE_BYTES } from './domain/attachment-rules';
+import { ATTACHMENT_UPLOAD_LIMITS, MAX_FILE_BYTES } from './domain/attachment-rules';
 import { AttachmentUploadErrorsInterceptor } from './interceptors/attachment-upload-errors.interceptor';
-import {
-  ATTACHMENT_UPLOAD_LIMITS,
-  TicketMessagesController,
-} from './ticket-messages.controller';
+import { PortalMessagesController } from './portal-messages.controller';
+import { TicketMessagesController } from './ticket-messages.controller';
 import { TicketMessagesModule } from './ticket-messages.module';
 
 /** El `DataSource` del que cuelgan todos los repositorios, para no necesitar MySQL. */
@@ -292,9 +290,30 @@ describe('TicketMessagesController.upload', () => {
 
   it('el límite de multer es el mismo tope por fichero que aplica el dominio', () => {
     // La primera criba, para no tragarse en memoria un fichero enorme. No
-    // sustituye a `assertAcceptable`, que sigue midiendo `buffer.length`: si
-    // este límite y el del dominio divergieran, uno de los dos mentiría.
+    // sustituye a `assertAcceptable`, que sigue midiendo `buffer.length`.
+    //
+    // Desde que la constante vive en el dominio y se deriva de `MAX_FILE_BYTES`
+    // esto ya no puede divergir, y el test se queda para lo que sí puede pasar:
+    // que alguien vuelva a escribir un literal en el `limits` de un
+    // controlador. Ese día este test no basta -- por eso lo que se comprueba
+    // abajo es que **los dos** controladores montan este mismo objeto.
     expect(ATTACHMENT_UPLOAD_LIMITS.fileSize).toBe(MAX_FILE_BYTES);
+  });
+
+  it('las dos puertas de subida cortan por el mismo tope, no por dos literales', () => {
+    // Se lee de la instancia del interceptor porque es el único sitio por el
+    // que el número llega de verdad a multer: `FileInterceptor` se queda las
+    // opciones en el `Multer` que construye. Comprobarlo sobre la constante
+    // importada solo diría que la constante vale lo que vale, y no diría nada
+    // de lo que cada controlador le pasa.
+    const limitsDe = (controller: unknown, metodo: string) => {
+      const prototipo = (controller as { prototype: Record<string, object> }).prototype;
+      const [, fileInterceptor] = Reflect.getMetadata(INTERCEPTORS_METADATA, prototipo[metodo]);
+      return new (fileInterceptor as new () => { multer: { limits: unknown } })().multer.limits;
+    };
+
+    expect(limitsDe(TicketMessagesController, 'upload')).toEqual({ fileSize: MAX_FILE_BYTES });
+    expect(limitsDe(PortalMessagesController, 'upload')).toEqual({ fileSize: MAX_FILE_BYTES });
   });
 
   /**

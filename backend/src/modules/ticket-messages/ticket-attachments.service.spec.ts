@@ -11,6 +11,7 @@ import {
   UnsupportedMediaTypeException,
 } from '@nestjs/common';
 
+import { sameId } from '../../common/ids';
 import { AttachmentCandidate, MAX_FILE_BYTES, MAX_TICKET_BYTES } from './domain/attachment-rules';
 import { Ticket } from '../tickets/entities/ticket.entity';
 import { TicketAttachment } from './entities/ticket-attachment.entity';
@@ -122,7 +123,16 @@ const makeHarness = (
   const tickets = { findById: jest.fn().mockResolvedValue(ticket) };
 
   const messages = {
-    findMessage: jest.fn().mockResolvedValue(mensaje),
+    /**
+     * Busca **por id**, como el repositorio de verdad. Devolver la fila fuera
+     * cual fuera el id parecía cómodo y era mentira, y la mentira tapaba justo
+     * lo que hay que vigilar: desde que `download` consulta también cuando la
+     * fila no trae `message_id` --para que los tres caminos del 404 cuesten lo
+     * mismo--, un doble que contesta a cualquier id le serviría al cliente un
+     * adjunto que no cuelga de ningún mensaje. En la base, ese id de relleno no
+     * lo tiene ninguna fila.
+     */
+    findMessage: jest.fn(async (id: unknown) => (sameId(id, mensaje?.id) ? mensaje : null)),
     findAttachment: jest.fn().mockResolvedValue(opciones.adjunto ?? null),
     listAttachments: jest.fn().mockResolvedValue(opciones.adjuntos ?? []),
     sumClientBytes: jest.fn().mockResolvedValue(opciones.bytesDeCliente ?? 0),
@@ -986,6 +996,84 @@ describe('download', () => {
     await expect(service.download({ kind: 'ROBOT' } as any, 77)).rejects.toThrow();
 
     expect(messages.findAttachment).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * **El 404 uniforme, medido con un reloj.**
+ *
+ * Los cuerpos son idénticos desde el principio, pero el coste no lo era:
+ * consultando conforme cada comprobación fallaba, un adjunto inexistente hacía
+ * **una** consulta, uno de otra empresa **dos** y uno de una nota interna
+ * **tres**. Un atacante no necesita leer ninguna diferencia en el texto si se la
+ * cronometra: con eso vuelve a distinguir lo que existe de lo que no y a
+ * enumerar a base de probar números, que es exactamente lo que el cuerpo único
+ * viene a impedir (spec §4, regla 2). Es el mismo canal que ya se cerró en el
+ * login del portal.
+ *
+ * Se cuentan las consultas y no los milisegundos a propósito: un test de tiempos
+ * es inestable por definición, y lo que de verdad se quiere sujetar --que los
+ * tres caminos hagan el mismo trabajo-- es exactamente esto.
+ */
+describe('download: los tres caminos del 404 cuestan lo mismo', () => {
+  type Harness = ReturnType<typeof makeHarness>;
+
+  /** Consultas a la base, sea a la tabla que sea. */
+  const consultas = (h: Harness): number =>
+    h.messages.findAttachment.mock.calls.length +
+    h.tickets.findById.mock.calls.length +
+    h.messages.findMessage.mock.calls.length;
+
+  const caminos: Array<[string, () => Harness]> = [
+    ['el adjunto no existe', () => makeHarness({ adjunto: null })],
+    [
+      'el adjunto es de otra empresa',
+      () => makeHarness({ adjunto: attachmentRow(), ticket: ticketRow({ clientId: OTRA_EMPRESA }) }),
+    ],
+    [
+      'el adjunto cuelga de una nota interna',
+      () =>
+        makeHarness({
+          adjunto: attachmentRow({ messageId: MENSAJE }),
+          mensaje: messageRow({ visibility: 'INTERNA' }),
+        }),
+    ],
+    ['la fila no cuelga de ningún mensaje', () => makeHarness({ adjunto: attachmentRow({ messageId: null }) })],
+  ];
+
+  it.each(caminos)('%s: tres consultas, y el mismo cuerpo', async (_nombre, harness) => {
+    const h = harness();
+
+    const error = await h.service.download(CLIENTE, 77).catch((e) => e);
+
+    expect(error.getResponse()).toEqual(CUERPO_404_ADJUNTO);
+    expect(consultas(h)).toBe(3);
+  });
+
+  it('una descarga que sí sale cuesta lo mismo que las que no', async () => {
+    // Si el camino bueno costara distinto, el reloj volvería a separar «existe
+    // y es tuyo» de todo lo demás.
+    const h = makeHarness({ adjunto: attachmentRow({ messageId: MENSAJE }) });
+
+    await h.service.download(CLIENTE, 77);
+
+    expect(consultas(h)).toBe(3);
+  });
+
+  /**
+   * El equipo tiene su propio coste --no necesita mirar la visibilidad del
+   * mensaje-- y también es uniforme. No hace falta que las dos clases de actor
+   * cuesten igual entre sí: quien mide solo sostiene un tipo de token.
+   */
+  it.each([
+    ['el adjunto no existe', () => makeHarness({ adjunto: null })],
+    ['el adjunto existe', () => makeHarness({ adjunto: attachmentRow() })],
+  ])('para el equipo, %s: dos consultas', async (_nombre, harness) => {
+    const h = harness();
+
+    await h.service.download(EQUIPO, 77).catch(() => undefined);
+
+    expect(consultas(h)).toBe(2);
   });
 });
 

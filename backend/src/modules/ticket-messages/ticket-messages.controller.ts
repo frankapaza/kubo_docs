@@ -20,23 +20,11 @@ import { CurrentUser, AuthUser } from '../../common/decorators/current-user.deco
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
-import { MAX_FILE_BYTES } from './domain/attachment-rules';
+import { ATTACHMENT_UPLOAD_LIMITS } from './domain/attachment-rules';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { AttachmentUploadErrorsInterceptor } from './interceptors/attachment-upload-errors.interceptor';
 import { TicketAttachmentsService } from './ticket-attachments.service';
 import { TicketMessageActor, TicketMessagesService } from './ticket-messages.service';
-
-/**
- * El tope que multer aplica **antes** de tener el fichero entero en memoria.
- *
- * Es la primera criba y nada más: sirve para no tragarse 500 MB en RAM por una
- * petición, no para decidir si el adjunto entra. Quien decide eso es
- * `assertAcceptable`, midiendo `buffer.length` -- el tamaño real, nunca el
- * declarado -- y mirando la firma de bytes. Se exporta para que un test pueda
- * sujetar que los dos topes son **el mismo número**: si divergieran, uno de los
- * dos le estaría mintiendo a quien sube.
- */
-export const ATTACHMENT_UPLOAD_LIMITS = { fileSize: MAX_FILE_BYTES } as const;
 
 /**
  * `ParseIntPipe` de serie contesta «Validation failed (numeric string is

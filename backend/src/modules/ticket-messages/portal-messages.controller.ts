@@ -20,6 +20,9 @@ import { isUsableId } from '../../common/ids';
 import { CurrentClientUser } from '../portal/decorators/current-client-user.decorator';
 import { ClientJwtGuard } from '../portal/guards/client-jwt.guard';
 import { AuthClientUser } from '../portal/strategies/client-jwt.strategy';
+// El mismo tope que aplica el panel, derivado de `MAX_FILE_BYTES` en el
+// dominio: la primera criba de multer, no la validación.
+import { ATTACHMENT_UPLOAD_LIMITS } from './domain/attachment-rules';
 import { CreatePortalMessageDto } from './dto/create-message.dto';
 import {
   PortalAttachmentView,
@@ -30,10 +33,6 @@ import {
 import { TicketMessage } from './entities/ticket-message.entity';
 import { AttachmentUploadErrorsInterceptor } from './interceptors/attachment-upload-errors.interceptor';
 import { AttachmentSummary, TicketAttachmentsService } from './ticket-attachments.service';
-// El mismo tope que aplica el panel, y el mismo objeto: dos literales serían
-// dos topes, y el día que uno cambiara la subida del portal cortaría por un
-// número distinto del que dice su propio mensaje de error.
-import { ATTACHMENT_UPLOAD_LIMITS } from './ticket-messages.controller';
 import { TicketMessageActor, TicketMessagesService } from './ticket-messages.service';
 
 /**

@@ -122,6 +122,24 @@ export const ALLOWED_TYPES: readonly AllowedMimeType[] = SIGNATURE_RULES.map((ru
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 /**
+ * El mismo tope, con la forma que espera multer (`limits` de `FileInterceptor`).
+ *
+ * Es la criba que multer aplica **antes** de tener el fichero entero en
+ * memoria: sirve para no tragarse 500 MB en RAM por una petición, no para
+ * decidir si el adjunto entra. Quien decide eso es `assertAcceptable`, midiendo
+ * `buffer.length` --el tamaño real, nunca el declarado-- y mirando la firma de
+ * bytes.
+ *
+ * Vive aquí, junto a `MAX_FILE_BYTES`, y no en un controlador: las **dos**
+ * puertas de subida --el panel y el portal-- tienen que cortar por el mismo
+ * número que dice el mensaje de error del dominio, y con la constante en uno de
+ * los dos controladores el otro acababa importando la clase del panel entera
+ * para leer un número. Derivándola de su origen, divergir deja de ser posible
+ * en vez de ser algo que un test tenga que vigilar.
+ */
+export const ATTACHMENT_UPLOAD_LIMITS = { fileSize: MAX_FILE_BYTES } as const;
+
+/**
  * Tope acumulado por ticket, **contando solo lo que sube el cliente**. El
  * equipo no tiene tope.
  *
