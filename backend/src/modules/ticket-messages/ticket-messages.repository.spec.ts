@@ -59,79 +59,170 @@ function montarQueryBuilder(resultado: { getMany?: unknown[]; getRawOne?: unknow
   return { qb, llamadas };
 }
 
+/**
+ * **Un doble por tabla, y nunca el mismo `jest.fn` en los dos.**
+ *
+ * Los dos repositorios compartían `find` y `findOne`, y con eso los tests que
+ * dicen «busca por id sobre el repositorio de adjuntos» y «…sobre el de
+ * mensajes» comprobaban lo mismo: las opciones que se le pasaron *a alguien*.
+ * Comprobado por mutación --`findMessage` reescrito para leer de
+ * `this.attachments`--: los quince tests seguían en verde.
+ *
+ * Y no es un detalle de higiene. La descarga de un adjunto cuelga su decisión
+ * **entera** de estas dos búsquedas: localiza el adjunto, carga el mensaje del
+ * que cuelga y decide desde su `visibility` si quien pregunta puede verlo. Si
+ * las dos pueden intercambiarse sin que nada se ponga rojo, lo que no está
+ * cubierto es justo la distinción de la que depende que una nota interna no se
+ * sirva a un cliente.
+ *
+ * Cada test dice ahora de qué tabla lee **y de cuál no**: la aserción negativa
+ * es la que tiene los dientes.
+ */
 function montar(resultado: { getMany?: unknown[]; getRawOne?: unknown } = {}) {
-  const find = jest.fn().mockResolvedValue([]);
-  const findOne = jest.fn().mockResolvedValue(null);
+  const findMessages = jest.fn().mockResolvedValue([]);
+  const findOneMessage = jest.fn().mockResolvedValue(null);
+  const findAttachments = jest.fn().mockResolvedValue([]);
+  const findOneAttachment = jest.fn().mockResolvedValue(null);
   const create = jest.fn((data: unknown) => data);
   const save = jest.fn((data: unknown) => Promise.resolve({ id: 77, ...(data as object) }));
   const { qb, llamadas } = montarQueryBuilder(resultado);
   const createQueryBuilder = jest.fn(() => qb);
+  // Solo lo tiene el de adjuntos: si el código lo llamara sobre el de
+  // mensajes, reventaría en vez de pasar desapercibido.
+  const createQueryBuilderMessages = jest.fn(() => {
+    throw new Error('createQueryBuilder sobre el repositorio de MENSAJES');
+  });
 
-  const messagesRepo = { find, findOne } as any;
-  const attachmentsRepo = { find, findOne, create, save, createQueryBuilder } as any;
+  const messagesRepo = {
+    find: findMessages,
+    findOne: findOneMessage,
+    createQueryBuilder: createQueryBuilderMessages,
+  } as any;
+  const attachmentsRepo = {
+    find: findAttachments,
+    findOne: findOneAttachment,
+    create,
+    save,
+    createQueryBuilder,
+  } as any;
 
   const repo = new TicketMessagesRepository(messagesRepo, attachmentsRepo);
-  return { repo, find, findOne, create, save, createQueryBuilder, qb, llamadas };
+  return {
+    repo,
+    findMessages,
+    findOneMessage,
+    findAttachments,
+    findOneAttachment,
+    create,
+    save,
+    createQueryBuilder,
+    createQueryBuilderMessages,
+    qb,
+    llamadas,
+  };
 }
 
 describe('TicketMessagesRepository', () => {
   describe('listByTicket', () => {
     it('sin includeInternal, filtra por PUBLICA en el propio WHERE', async () => {
-      const { repo, find } = montar();
+      const { repo, findMessages } = montar();
 
       await repo.listByTicket(13, { includeInternal: false });
 
-      const opciones = find.mock.calls[0][0] as FindManyOptions<TicketMessage>;
+      const opciones = findMessages.mock.calls[0][0] as FindManyOptions<TicketMessage>;
       expect(opciones.where).toEqual({ ticketId: 13, visibility: 'PUBLICA' });
     });
 
     it('con includeInternal, no restringe por visibilidad', async () => {
-      const { repo, find } = montar();
+      const { repo, findMessages } = montar();
 
       await repo.listByTicket(13, { includeInternal: true });
 
-      const opciones = find.mock.calls[0][0] as FindManyOptions<TicketMessage>;
+      const opciones = findMessages.mock.calls[0][0] as FindManyOptions<TicketMessage>;
       expect(opciones.where).toEqual({ ticketId: 13 });
     });
 
     it('ordena el hilo por llegada: created_at y luego id, ambos ascendentes', async () => {
-      const { repo, find } = montar();
+      const { repo, findMessages } = montar();
 
       await repo.listByTicket(13, { includeInternal: false });
 
-      const opciones = find.mock.calls[0][0] as FindManyOptions<TicketMessage>;
+      const opciones = findMessages.mock.calls[0][0] as FindManyOptions<TicketMessage>;
       expect(opciones.order).toEqual({ createdAt: 'ASC', id: 'ASC' });
     });
 
     it('acepta el ticketId como cadena, que es como puede llegar de otra fila ya leída', async () => {
-      const { repo, find } = montar();
+      const { repo, findMessages } = montar();
 
       await repo.listByTicket('13', { includeInternal: false });
 
-      const opciones = find.mock.calls[0][0] as FindManyOptions<TicketMessage>;
+      const opciones = findMessages.mock.calls[0][0] as FindManyOptions<TicketMessage>;
       expect((opciones.where as any).ticketId).toBe('13');
+    });
+
+    it('lee de la tabla de mensajes y no de la de adjuntos', async () => {
+      const { repo, findMessages, findAttachments } = montar();
+
+      await repo.listByTicket(13, { includeInternal: false });
+
+      expect(findMessages).toHaveBeenCalledTimes(1);
+      expect(findAttachments).not.toHaveBeenCalled();
     });
   });
 
   describe('findAttachment', () => {
     it('busca por id sobre el repositorio de adjuntos', async () => {
-      const { repo, findOne } = montar();
+      const { repo, findOneAttachment } = montar();
 
       await repo.findAttachment(7);
 
-      const opciones = findOne.mock.calls[0][0] as FindOneOptions<TicketAttachment>;
+      const opciones = findOneAttachment.mock.calls[0][0] as FindOneOptions<TicketAttachment>;
       expect(opciones.where).toEqual({ id: 7 });
+    });
+
+    /**
+     * La aserción que da sentido a la de arriba. Los dos repositorios
+     * compartían el mismo doble, así que «sobre el repositorio de adjuntos» no
+     * comprobaba nada: leer de `ticket_messages` con este id habría pasado
+     * igual, y habría devuelto un mensaje disfrazado de adjunto a la descarga.
+     */
+    it('no toca el repositorio de mensajes', async () => {
+      const { repo, findOneAttachment, findOneMessage } = montar();
+
+      await repo.findAttachment(7);
+
+      expect(findOneAttachment).toHaveBeenCalledTimes(1);
+      expect(findOneMessage).not.toHaveBeenCalled();
     });
   });
 
   describe('findMessage', () => {
     it('busca por id sobre el repositorio de mensajes', async () => {
-      const { repo, findOne } = montar();
+      const { repo, findOneMessage } = montar();
 
       await repo.findMessage(501);
 
-      const opciones = findOne.mock.calls[0][0] as FindOneOptions<TicketMessage>;
+      const opciones = findOneMessage.mock.calls[0][0] as FindOneOptions<TicketMessage>;
       expect(opciones.where).toEqual({ id: 501 });
+    });
+
+    /**
+     * La otra mitad, y la que más pesa: `TicketAttachmentsService.download`
+     * decide si sirve el fichero **desde el `visibility` del mensaje que
+     * devuelve esta función**. Una fila de `ticket_attachments` no tiene esa
+     * columna, así que leer de la tabla equivocada dejaría la comprobación
+     * mirando un `undefined` -- y `undefined !== 'PUBLICA'` falla cerrado, sí,
+     * pero por accidente y negando adjuntos legítimos. Al revés (que el
+     * huérfano heredara la visibilidad de otra fila) es lo que no se puede
+     * dejar sin cubrir.
+     */
+    it('no toca el repositorio de adjuntos', async () => {
+      const { repo, findOneMessage, findOneAttachment } = montar();
+
+      await repo.findMessage(501);
+
+      expect(findOneMessage).toHaveBeenCalledTimes(1);
+      expect(findOneAttachment).not.toHaveBeenCalled();
     });
 
     /**
@@ -141,11 +232,11 @@ describe('TicketMessagesRepository', () => {
      * internas escondería esa diferencia al equipo, que sí las ve.
      */
     it('no filtra por visibilidad: la decide quien llama', async () => {
-      const { repo, findOne } = montar();
+      const { repo, findOneMessage } = montar();
 
       await repo.findMessage(501);
 
-      const opciones = findOne.mock.calls[0][0] as FindOneOptions<TicketMessage>;
+      const opciones = findOneMessage.mock.calls[0][0] as FindOneOptions<TicketMessage>;
       expect(opciones.where).not.toHaveProperty('visibility');
     });
   });
