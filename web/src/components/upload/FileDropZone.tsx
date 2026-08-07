@@ -108,12 +108,19 @@ export function FileDropZone({
   /**
    * Una URL de objeto por cada imagen todavía sin subir.
    *
-   * El `Blob` se construye con el tipo **de la lista blanca** (el que dejó la
-   * criba), no con `file.type` en crudo, y la URL se usa solo como `src` de un
-   * `<img>`: nunca se navega a ella. Una `blob:` hereda el origen de la
-   * aplicación y no arrastra ni `Content-Disposition` ni `nosniff`, así que
-   * abrirla en una pestaña ejecutaría en este dominio un archivo que sea a la
-   * vez imagen válida y HTML válido.
+   * La URL se saca **del propio `File`**, sin envolverlo en un `Blob` nuevo.
+   * Envolverlo era copiar el fichero entero en memoria para acabar con el mismo
+   * tipo que ya tenía: `PendingAttachment.mimeType` **es** `file.type`, porque
+   * de ahí lo saca `screenFile` al comprobarlo contra la lista blanca. Con diez
+   * ficheros de 10 MB eran 100 MB de copia, rehechos en cada cambio de la
+   * lista, a cambio de nada. (De ahí que los `PendingAttachment` deban venir
+   * siempre de `screenFile` y no construirse a mano.)
+   *
+   * La URL se usa solo como `src` de un `<img>`: nunca se navega a ella. Una
+   * `blob:` hereda el origen de la aplicación y no arrastra ni
+   * `Content-Disposition` ni `nosniff`, así que abrirla en una pestaña
+   * ejecutaría en este dominio un archivo que sea a la vez imagen válida y
+   * HTML válido.
    *
    * Se rehacen enteras en cada cambio de la lista en vez de llevar la cuenta de
    * cuáles sobreviven: la limpieza de este efecto revoca **todas** las que él
@@ -125,7 +132,7 @@ export function FileDropZone({
     const created: Record<string, string> = {};
     for (const item of files) {
       if (!isPreviewableImage(item.mimeType)) continue;
-      created[item.id] = URL.createObjectURL(new Blob([item.file], { type: item.mimeType }));
+      created[item.id] = URL.createObjectURL(item.file);
     }
     setPreviews(created);
 

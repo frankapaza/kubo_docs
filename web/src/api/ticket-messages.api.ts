@@ -327,9 +327,20 @@ export interface AttachmentBlobFetcher {
  * documento -- `click()` funciona igual sobre un elemento suelto --, así que en
  * el DOM no aparece nunca una URL `blob:` sobre la que alguien pueda pinchar.
  *
- * La URL se revoca en el mismo turno. La descarga ya está en marcha para
- * entonces: el navegador se queda con una referencia al objeto y no la pierde
- * por revocar el identificador.
+ * **Aviso para quien la llame**: es pública y acepta cualquier `Blob`. La
+ * garantía de que el objeto lleva un tipo de la lista blanca la da
+ * `fetchAttachmentBlob`, que es quien comprueba el `Content-Type` de la
+ * respuesta y reconstruye el objeto con él. Un `Blob` construido por otra vía
+ * --uno tomado de un `File` del usuario, uno con el tipo que adivinó el
+ * navegador-- entra aquí igual y con él esa garantía desaparece. Pásale
+ * siempre lo que devuelve `fetchAttachmentBlob`.
+ *
+ * **La URL se revoca un turno después, no en el mismo.** Revocarla acto seguido
+ * funciona en Chrome, pero en Firefox y en Safari es una causa conocida de
+ * descargas que se abortan a medias -- y sin decir nada: al usuario le queda un
+ * archivo a cero o ningún archivo, y en la consola no aparece nada. Un
+ * `setTimeout` de cero cuesta lo mismo y le da al navegador el turno que
+ * necesita para quedarse con su referencia al objeto.
  */
 export function saveAttachmentToDisk(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
@@ -341,6 +352,7 @@ export function saveAttachmentToDisk(blob: Blob, filename: string): void {
     // convertiría esto justamente en lo que no puede ser.
     anchor.click();
   } finally {
-    URL.revokeObjectURL(url);
+    // En `finally` para que también se libere si `click()` llegara a lanzar.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   }
 }

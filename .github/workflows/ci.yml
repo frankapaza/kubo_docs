@@ -1,0 +1,49 @@
+name: CI
+
+# -----------------------------------------------------------------------------
+#  Las comprobaciones que necesitan **el repositorio entero**.
+#
+#  Existe por un caso concreto: `web/package.json` tiene un `prebuild` que
+#  verifica que `web/src/api/attachment-rules.generated.ts` sigue coincidiendo
+#  con `backend/src/modules/ticket-messages/domain/attachment-rules.ts`, que es
+#  donde de verdad se deciden los tipos de adjunto aceptados y sus topes.
+#
+#  Ese `prebuild` no puede ser la garantía, y conviene tenerlo escrito:
+#  `docker-compose.yml` le da al servicio `web` el contexto `./web`, donde
+#  `backend/` NO está. Allí el script se salta la comprobación
+#  (`--skip-if-missing`, que existe justo para que la imagen no se caiga por no
+#  poder comprobar algo que ya viene comprobado del repositorio) y se queda en
+#  un aviso por consola. Es decir: en producción, donde de verdad se construye,
+#  el `prebuild` no aplica nada. Lo único que quedaba era un desarrollador
+#  compilando fuera de Docker, y nada obliga a eso.
+#
+#  Aquí sí están las dos carpetas, así que aquí se ejecuta **sin**
+#  `--skip-if-missing`: si por lo que sea la fuente no estuviera, el trabajo
+#  falla en vez de aprobar por ausencia.
+#
+#  Lo que una divergencia provoca no es un agujero --el servidor sigue siendo la
+#  autoridad, `assertAcceptable` decide por la firma de bytes-- sino que la criba
+#  del navegador prediga mal: aceptar en pantalla lo que el servidor rechazará
+#  después de subir, o al revés. Es un fallo de interfaz, y este trabajo es lo
+#  que impide que llegue a nacer.
+# -----------------------------------------------------------------------------
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  attachment-rules:
+    name: Los adjuntos del frontend siguen al dominio del backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Sin `npm ci`: el script no tiene dependencias, solo módulos de Node.
+      - name: Comprobar que el fichero generado está al día
+        working-directory: web
+        run: node scripts/sync-attachment-rules.mjs --check

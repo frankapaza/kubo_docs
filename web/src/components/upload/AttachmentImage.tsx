@@ -43,7 +43,17 @@ interface AttachmentImageProps {
   filename: string;
   /** El tipo que publicó el backend. Decide si hay algo que previsualizar. */
   mimeType: string;
-  /** El lado que pregunta: `ticketMessagesApi` o `portalTicketMessagesApi`. */
+  /**
+   * El lado que pregunta: `ticketMessagesApi` o `portalTicketMessagesApi`.
+   *
+   * **Tiene que ser una referencia estable.** Está en las dependencias del
+   * efecto que trae los bytes, así que un objeto creado en línea
+   * (`fetcher={{ fetchAttachmentBlob: (id) => … }}`) es distinto en cada
+   * renderizado: el efecto se vuelve a lanzar, `setObjectUrl` provoca otro
+   * renderizado y la miniatura entra en un bucle de descarga que no para. Los
+   * dos objetos de `ticket-messages.api.ts` son constantes de módulo y valen
+   * tal cual; cualquier otra cosa, por `useMemo`.
+   */
   fetcher: AttachmentBlobFetcher;
   className?: string;
 }
@@ -63,20 +73,37 @@ export function AttachmentImage({
   useEffect(() => {
     if (!previewable) return;
 
-    // `cancelled` para no tocar el estado de un componente que ya no está, y
-    // `created` para poder revocar el objeto **también** cuando la respuesta
-    // llega después de desmontar: sin esa segunda variable, esa URL se quedaría
-    // creada y sin dueño, y cada hilo abierto y cerrado dejaría memoria
-    // retenida hasta recargar la página.
+    // `cancelled` corta el camino tardío y `created` guarda la URL para que la
+    // limpieza la revoque en el camino normal.
     let cancelled = false;
     let created: string | null = null;
 
     fetcher
       .fetchAttachmentBlob(attachmentId)
       .then((blob) => {
-        created = URL.createObjectURL(blob);
-        if (cancelled) return;
-        setObjectUrl(created);
+        const url = URL.createObjectURL(blob);
+
+        // **La revocación del camino tardío se hace aquí, no en la limpieza.**
+        //
+        // Si la respuesta llega después de desmontar, la limpieza ya corrió
+        // --con `created` todavía a `null`, así que no revocó nada-- y no
+        // vuelve a correr nunca. Una URL creada a partir de este punto no
+        // tendría a nadie que la liberase y se quedaría viva hasta recargar la
+        // página, reteniendo el objeto entero: abrir un hilo con imágenes y
+        // salir antes de que terminen de cargar deja hasta 10 MB por adjunto
+        // colgados. Guardarla en `created` tampoco valdría: la limpieza que la
+        // leería ya pasó.
+        //
+        // Se crea y se revoca en vez de mirar `cancelled` antes de crear porque
+        // así la protección no depende de que entre la comprobación y el
+        // `setObjectUrl` no llegue nunca a colarse un `await`.
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+
+        created = url;
+        setObjectUrl(url);
         setError(null);
       })
       .catch(async (failure: unknown) => {

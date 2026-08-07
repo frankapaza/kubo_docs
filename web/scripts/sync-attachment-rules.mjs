@@ -50,7 +50,24 @@ if (!existsSync(SOURCE)) {
   fail(`No se encuentra la fuente de verdad: ${SOURCE}`);
 }
 
-const source = readFileSync(SOURCE, 'utf8');
+/**
+ * Se lee el fichero **sin sus comentarios**, y no es un detalle de limpieza.
+ *
+ * Una regla comentada es código que no existe: el backend no la aplica. Pero
+ * para una expresión regular sigue siendo texto que casa, así que una línea
+ * como `// Pendiente: { mimeType: 'image/svg+xml', … }` dejada dentro del
+ * bloque de reglas se colaba **en la lista blanca del frontend** -- y encima el
+ * SVG, que es justo el tipo que el dominio excluye a propósito por no tener
+ * firma binaria y admitir `<script>` dentro. De todas las formas de romper esta
+ * extracción es la única que pasaba en silencio: las demás (renombrar una
+ * constante, cambiar la forma de la lista) fallan alto y paran el build.
+ *
+ * Se quitan de **todo** el fichero, no solo del bloque de reglas: el propio
+ * comentario de cabecera menciona `MAX_FILE_BYTES` varias veces, y basta con
+ * que alguien deje ahí un `export const MAX_FILE_BYTES = …` de ejemplo para que
+ * la extracción del tope lea el ejemplo en vez del valor real.
+ */
+const source = stripComments(readFileSync(SOURCE, 'utf8'));
 
 /**
  * Los tipos salen de `SIGNATURE_RULES` y no de `ALLOWED_TYPES`, por el mismo
@@ -86,6 +103,22 @@ console.log(
 );
 
 // ---------------------------------------------------------------------------
+
+/**
+ * Quita los comentarios de bloque y los de línea, dejando los saltos de línea en
+ * su sitio para que los mensajes de error sigan teniendo sentido.
+ *
+ * El `//` solo se reconoce al principio de la línea o precedido de un espacio,
+ * de modo que no se coma el `//` de un `https://` ni la barra de un
+ * `'image/png'`. No es un analizador de TypeScript --no hace falta serlo para
+ * un fichero de constantes-- pero cubre las dos formas en las que alguien deja
+ * una regla «para más adelante».
+ */
+function stripComments(text) {
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, ' '))
+    .replace(/(^|\s)\/\/[^\n]*/g, '$1');
+}
 
 /** El trozo de `text` entre el primer `start` y el `end` que le sigue. Falla si falta alguno. */
 function between(text, start, end) {
