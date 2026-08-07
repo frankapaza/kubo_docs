@@ -17,6 +17,7 @@ import { TicketEvent } from '../tickets/entities/ticket-event.entity';
 import { CreatePortalTicketDto } from './dto/create-portal-ticket.dto';
 import {
   PortalClientSystemView,
+  PortalCreatedTicketView,
   PortalTicketEventView,
   PortalTicketView,
   PortalVisibleEventType,
@@ -170,13 +171,20 @@ export class PortalTicketsService {
    * `clientUserId` y `clientId` vienen de la sesión ya validada por
    * `ClientJwtGuard`; el dto solo aporta texto. La escritura entera se delega
    * en `TicketsService.create`, que ya la hace transaccional junto con el
-   * evento CREATED: aquí no se abre un segundo camino de escritura.
+   * evento CREATED y el primer mensaje del hilo: aquí no se abre un segundo
+   * camino de escritura.
+   *
+   * Devuelve además el `firstMessageId` que trae ese alta, porque es contra ese
+   * mensaje contra el que el diálogo sube los adjuntos. Se añade **aquí y solo
+   * aquí**, sobre la proyección de siempre: `toPortalView` sigue siendo la única
+   * lista blanca de lo que el portal publica de un ticket, y el listado y el
+   * detalle no cambian.
    */
   async create(
     clientUserId: number,
     clientId: number,
     dto: CreatePortalTicketDto,
-  ): Promise<PortalTicketView> {
+  ): Promise<PortalCreatedTicketView> {
     // Los dos: el `clientId` acota el ticket y el `clientUserId` queda grabado
     // como su autor. Un cero o un NaN aquí crearía una fila huérfana.
     assertSessionScope(clientId, 'clientId');
@@ -194,7 +202,7 @@ export class PortalTicketsService {
         origin: 'PORTAL',
       },
     );
-    return this.toPortalView(ticket);
+    return { ...this.toPortalView(ticket), firstMessageId: Number(ticket.firstMessageId) };
   }
 
   async systems(clientId: number): Promise<PortalClientSystemView[]> {

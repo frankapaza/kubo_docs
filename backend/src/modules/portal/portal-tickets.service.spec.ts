@@ -134,7 +134,9 @@ const makeService = (ticketOver: Record<string, unknown> = {}) => {
       fullEvent({ id: 111, type: 'CLOSED', fromStatus: 'RESUELTO', toStatus: 'CERRADO' }),
     ]),
   };
-  const tickets = { create: jest.fn().mockResolvedValue(ticket) };
+  // `TicketsService.create` devuelve el ticket **y** el identificador del
+  // primer mensaje de su hilo, que es de donde cuelgan los adjuntos del alta.
+  const tickets = { create: jest.fn().mockResolvedValue({ ...ticket, firstMessageId: 700 }) };
   const systems = {
     listByClient: jest.fn().mockResolvedValue([
       { id: 5, clientId: 7, name: 'ERP', isActive: 1 },
@@ -259,6 +261,31 @@ describe('la frontera', () => {
   it('el detalle compara el cliente por valor, no por tipo (bigint llega como cadena)', async () => {
     const { service } = makeService({ id: 1, clientId: '7' });
     await expect(service.detail(7, 1)).resolves.toBeDefined();
+  });
+
+  /**
+   * El cliente adjunta al crear el ticket, y esos archivos se suben **después**
+   * del alta contra el primer mensaje del hilo. Sin este identificador en la
+   * respuesta, la pantalla de subida no tiene de dónde colgarlos.
+   */
+  it('la respuesta del alta trae el identificador del primer mensaje', async () => {
+    const { service } = makeService();
+    const creado = await service.create(11, 7, { subject: 'x', description: 'y' } as any);
+    expect(creado.firstMessageId).toBe(700);
+  });
+
+  /**
+   * Y **solo** en la respuesta del alta: ni el listado ni el detalle lo
+   * publican. La proyección del portal es una lista blanca escrita a mano, y
+   * este campo solo sirve para colgar los adjuntos del alta que se acaba de
+   * hacer -- en cualquier otra respuesta sería un identificador de más.
+   */
+  it('ni el listado ni el detalle publican el identificador del primer mensaje', async () => {
+    const { service } = makeService();
+    const listados = await service.list(7);
+    const detalle = await service.detail(7, 1);
+    expect(listados[0]).not.toHaveProperty('firstMessageId');
+    expect(detalle).not.toHaveProperty('firstMessageId');
   });
 
   it('crear manda origin PORTAL y el texto del cliente como rawText', async () => {

@@ -57,6 +57,25 @@ export interface PortalTicketView {
   timeline?: PortalTicketEventView[];
 }
 
+/**
+ * Lo que devuelve el **alta**: el ticket recién creado más el identificador de
+ * su primer mensaje.
+ *
+ * Es un tipo aparte y no un campo opcional de `PortalTicketView` a propósito.
+ * Los adjuntos del alta se suben después contra ese mensaje
+ * (`POST /portal/tickets/:id/messages/:messageId/attachments`), así que el dato
+ * hace falta **una sola vez**, justo después de crear; publicarlo también en el
+ * listado y en el detalle sería un identificador interno viajando en respuestas
+ * que no lo necesitan, y la proyección del portal es una lista blanca escrita a
+ * mano precisamente para que nada salga "de paso".
+ *
+ * No es opcional: el alta escribe siempre su primer mensaje, así que quien
+ * reciba esto siempre tiene dónde colgar los archivos.
+ */
+export interface PortalCreatedTicketView extends PortalTicketView {
+  firstMessageId: number;
+}
+
 /** Los sistemas del cliente, solo lo imprescindible para poblar un selector. */
 export interface PortalClientSystemView {
   id: number;
