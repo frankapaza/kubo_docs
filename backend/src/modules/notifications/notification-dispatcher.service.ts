@@ -169,16 +169,45 @@ function messageVisibilityOf(event: TicketEvent): TicketMessageVisibility | null
 }
 
 /**
+ * Si una columna de autor **trae algo**, sea o no utilizable.
+ *
+ * Es la distinción que sostiene `actorKindOf`: "columna vacía" y "columna
+ * ilegible" son cosas distintas. `null` y `undefined` son la ausencia -- la
+ * columna es `NULL` en base, que es el caso normal, porque las dos de autor son
+ * excluyentes--. Cualquier otra cosa, incluida la cadena vacía y el cero, es
+ * una fila que dice haber tenido un autor y cuyo id no podemos leer.
+ */
+function hasActorColumn(value: unknown): boolean {
+  return value !== null && value !== undefined;
+}
+
+/**
  * De qué lado es quien firmó el evento, leído de las dos columnas de autor.
  *
- * El cliente gana cuando --por un dato corrupto-- estuvieran puestas las dos.
- * No es indiferencia: de los dos avisos del hilo, el del cliente escribiendo va
- * al equipo, correo interno; el otro sale hacia fuera. Ante una fila que no
- * entendemos, la salida menos mala es la que se queda en casa.
+ * Se mira **columna a columna, no id a id**, y ahí está todo el asunto. La
+ * versión ingenua --"si el id de cliente no se puede leer, entonces escribió el
+ * equipo"-- confunde una columna vacía con una ilegible: un
+ * `actor_client_user_id` con `'abc'`, `'0'` o la cadena vacía, junto a un
+ * `actor_user_id` válido, clasificaba como del equipo un mensaje **que escribió
+ * un cliente**, y ese aviso sale hacia fuera, a la bandeja del autor del
+ * ticket. Falla abierto y en la dirección peligrosa.
+ *
+ * Aquí, una columna que trae algo pero no un id utilizable devuelve `null`: la
+ * fila no se entiende, así que no se avisa a nadie. Un correo no se retira; el
+ * silencio sí se puede investigar después con la fila delante.
+ *
+ * Cuando las dos son legibles gana el cliente. No es indiferencia: de los dos
+ * avisos del hilo, el del cliente escribiendo va al equipo --correo interno-- y
+ * el otro sale de casa. Ante una fila ambigua, la salida menos mala es la que
+ * se queda dentro.
  */
 function actorKindOf(event: TicketEvent): NotificationActorKind | null {
-  if (toId(event.actorClientUserId) !== null) return 'CLIENT';
-  if (toId(event.actorUserId) !== null) return 'TEAM';
+  if (hasActorColumn(event.actorClientUserId)) {
+    return toId(event.actorClientUserId) !== null ? 'CLIENT' : null;
+  }
+  if (hasActorColumn(event.actorUserId)) {
+    return toId(event.actorUserId) !== null ? 'TEAM' : null;
+  }
   return null;
 }
 
@@ -322,17 +351,21 @@ export class NotificationDispatcher {
     const clientAuthorId = toId(ticket.createdByClientUserId);
     const assigneeId = toId(ticket.assigneeUserId);
 
+    // Los dos que distinguen una nota interna de una respuesta pública, y a la
+    // respuesta del equipo de la del cliente. Van por parámetro porque
+    // `plansForEvent` es dominio puro; quien tiene la fila delante es esto.
+    const messageVisibility = messageVisibilityOf(event);
+    const actorKind = actorKindOf(event);
+    this.warnUnreadableMessageRow(event, messageVisibility, actorKind);
+
     const plan = plansForEvent({
       type: event.type,
       toStatus: event.toStatus,
       origin: ticket.origin,
       hasClientAuthor: clientAuthorId !== null,
       hasAssignee: assigneeId !== null,
-      // Los dos que distinguen una nota interna de una respuesta pública, y a
-      // la respuesta del equipo de la del cliente. Van por parámetro porque
-      // `plansForEvent` es dominio puro; quien tiene la fila delante es esto.
-      messageVisibility: messageVisibilityOf(event),
-      actorKind: actorKindOf(event),
+      messageVisibility,
+      actorKind,
     });
 
     if (plan.length === 0) {
@@ -366,6 +399,45 @@ export class NotificationDispatcher {
     }
 
     return { sent: enviados.length, skipped: razones.length > 0 ? razones.join(' ') : null };
+  }
+
+  /**
+   * Deja rastro de una fila de mensaje que no se pudo interpretar.
+   *
+   * Callarse ante un dato corrupto es lo correcto --ver `actorKindOf`--, pero
+   * un silencio sin rastro es indistinguible de una nota interna, que es el
+   * caso normal y mayoritario. Sin esto, una fila mal migrada dejaría de avisar
+   * para siempre y nadie se enteraría nunca. El aviso no sale igual; lo único
+   * que cambia es que se puede investigar con la fila delante.
+   */
+  private warnUnreadableMessageRow(
+    event: TicketEvent,
+    messageVisibility: TicketMessageVisibility | null,
+    actorKind: NotificationActorKind | null,
+  ): void {
+    if (event.type !== 'MESSAGE_POSTED') return;
+
+    const referencia = `evento ${String(event.id)} (ticket ${String(event.ticketId)})`;
+
+    if (messageVisibility === null) {
+      this.logger.warn(
+        `El ${referencia} es un mensaje cuya visibilidad no se pudo leer del payload ` +
+          `(${JSON.stringify(event.payload?.visibility ?? null)}): no se avisa a nadie. ` +
+          'Se trata como no publicable a propósito: lo desconocido no puede salir por correo.',
+      );
+    }
+
+    const teniaAutor =
+      hasActorColumn(event.actorClientUserId) || hasActorColumn(event.actorUserId);
+
+    if (actorKind === null && teniaAutor) {
+      this.logger.warn(
+        `El ${referencia} es un mensaje con una columna de autor ilegible ` +
+          `(actor_client_user_id=${String(event.actorClientUserId)}, ` +
+          `actor_user_id=${String(event.actorUserId)}): no se avisa a nadie. ` +
+          'No se degrada al otro autor: eso mandaría hacia fuera el mensaje de un cliente.',
+      );
+    }
   }
 
   /**

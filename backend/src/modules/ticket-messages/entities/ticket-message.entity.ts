@@ -12,7 +12,17 @@ import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 
  */
 export type TicketMessageVisibility = 'PUBLICA' | 'INTERNA';
 
-export const TICKET_MESSAGE_VISIBILITIES: TicketMessageVisibility[] = ['PUBLICA', 'INTERNA'];
+/**
+ * De solo lectura, y no por higiene: es la fuente de verdad del filtro con el
+ * que `NotificationDispatcher` decide si un `MESSAGE_POSTED` fue público, y de
+ * ahí sale si un correo va hacia fuera. Un `push` desde cualquier otro módulo
+ * --o un `sort` en un test-- cambiaría en caliente qué se considera una
+ * visibilidad legítima. El `readonly` lo impide en tiempo de compilación.
+ */
+export const TICKET_MESSAGE_VISIBILITIES: readonly TicketMessageVisibility[] = [
+  'PUBLICA',
+  'INTERNA',
+];
 
 /**
  * Un mensaje del hilo de un ticket -- respuesta pública o nota interna, según

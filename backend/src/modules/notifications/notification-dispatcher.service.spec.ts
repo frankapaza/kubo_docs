@@ -3,6 +3,7 @@ import {
   NotificationDispatcher,
 } from './notification-dispatcher.service';
 import { CLIENT_VARIABLES, TEAM_VARIABLES } from './domain/template-renderer';
+import { TICKET_STATUSES } from '../tickets/domain/ticket-state-machine';
 
 /**
  * Los identificadores van como **cadena** a propósito en todos los dobles:
@@ -914,8 +915,14 @@ describe('avisos del hilo de mensajes', () => {
      * `RESUELTO` es el estado del ticket base de este archivo, así que las
      * pruebas de arriba ya salen de ahí; esta lo recorre entero para que nadie
      * pueda apagarlo condicionando el aviso a un estado concreto.
+     *
+     * Recorre `TICKET_STATUSES`, no una lista escrita a mano: un estado nuevo
+     * en el enum tiene que entrar solo. `CERRADO` va incluido aunque hoy
+     * `TicketMessagesService` no deje escribir ahí -- el aviso no mira el
+     * estado, y que siga sin mirarlo el día en que esa regla cambie es
+     * justamente lo que se está fijando.
      */
-    it.each(['NUEVO', 'TRIAJE', 'ASIGNADO', 'EN_ATENCION', 'ESPERA_CLIENTE', 'DERIVADO', 'RESUELTO'])(
+    it.each(TICKET_STATUSES)(
       'con el ticket en %s',
       async (status) => {
         const { dispatcher, email } = montar({ ticket: unTicket({ status }) });
@@ -980,36 +987,56 @@ describe('avisos del hilo de mensajes', () => {
    * `payload` de la fila.
    */
   describe('una nota interna no manda ningún correo', () => {
-    it('ni al cliente ni al equipo: no se llega ni a buscar plantilla', async () => {
-      const { dispatcher, email, templates } = montar();
-      const resultado = await dispatcher.dispatchForEvent(
-        unMensajeDelEquipo({ payload: { messageId: '57', visibility: 'INTERNA' } }),
-      );
+    it.each([
+      ['del equipo', unMensajeDelEquipo],
+      ['del cliente', unMensajeDeCliente],
+    ])(
+      'la nota %s no avisa a nadie: no se llega ni a buscar plantilla',
+      async (_lado, fabrica) => {
+        const { dispatcher, email, templates } = montar();
+        const resultado = await dispatcher.dispatchForEvent(
+          fabrica({ payload: { messageId: '57', visibility: 'INTERNA' } }),
+        );
 
-      expect(email.send).not.toHaveBeenCalled();
-      expect(templates.findActive).not.toHaveBeenCalled();
-      expect(resultado.sent).toBe(0);
-      expect(resultado.skipped).not.toBeNull();
-    });
+        expect(email.send).not.toHaveBeenCalled();
+        expect(templates.findActive).not.toHaveBeenCalled();
+        expect(resultado.sent).toBe(0);
+        expect(resultado.skipped).not.toBeNull();
+      },
+    );
 
     /**
      * Y se falla hacia el silencio cuando el dato no está o no se entiende. Al
      * revés -- tratar lo desconocido como público -- es exactamente cómo una
      * nota interna acabaría en la bandeja de un cliente el día en que una fila
      * llegue con el `payload` incompleto, y un correo no se retira.
+     *
+     * **Se recorre en las dos direcciones a propósito.** El caso del cliente
+     * escribiendo produce correo interno; el del equipo sale hacia fuera, a la
+     * bandeja de una persona ajena a la empresa. Atar solo el interno dejaría
+     * sin red justo la dirección de máximo riesgo -- que es la que hay que
+     * poder romper y ver en rojo.
      */
-    it.each([
-      ['sin payload', null],
-      ['con el payload vacío', {}],
-      ['sin la clave visibility', { messageId: '58' }],
-      ['con una visibilidad desconocida', { messageId: '58', visibility: 'PUBLICO' }],
-      ['con la visibilidad en otro tipo', { messageId: '58', visibility: 1 }],
-    ])('%s tampoco manda nada', async (_caso, payload) => {
-      const { dispatcher, email } = montar();
-      const resultado = await dispatcher.dispatchForEvent(unMensajeDeCliente({ payload }));
+    describe.each([
+      ['cliente -> equipo (correo interno)', unMensajeDeCliente],
+      ['equipo -> cliente (sale hacia fuera)', unMensajeDelEquipo],
+    ])('%s', (_direccion, fabrica) => {
+      it.each([
+        ['sin payload', null],
+        ['con el payload vacío', {}],
+        ['sin la clave visibility', { messageId: '58' }],
+        ['con la visibilidad nula', { messageId: '58', visibility: null }],
+        ['con una visibilidad desconocida', { messageId: '58', visibility: 'PUBLICO' }],
+        ['con la visibilidad en minúsculas', { messageId: '58', visibility: 'publica' }],
+        ['con la visibilidad rodeada de espacios', { messageId: '58', visibility: ' PUBLICA ' }],
+        ['con la visibilidad en otro tipo', { messageId: '58', visibility: 1 }],
+      ])('%s no manda nada', async (_caso, payload) => {
+        const { dispatcher, email } = montar();
+        const resultado = await dispatcher.dispatchForEvent(fabrica({ payload }));
 
-      expect(email.send).not.toHaveBeenCalled();
-      expect(resultado.sent).toBe(0);
+        expect(email.send).not.toHaveBeenCalled();
+        expect(resultado.sent).toBe(0);
+      });
     });
 
     it('un mensaje sin autor en ninguna de las dos columnas tampoco manda nada', async () => {
@@ -1024,20 +1051,98 @@ describe('avisos del hilo de mensajes', () => {
   });
 
   /**
+   * UNA COLUMNA DE AUTOR ILEGIBLE NO PUEDE DEGRADARSE A "LA OTRA".
+   *
+   * `actor_client_user_id` y `actor_user_id` son excluyentes, y de cuál de las
+   * dos venga el id sale la dirección del aviso. Si la del cliente trae algo
+   * que no es un id utilizable —`'abc'`, `'0'`, la cadena vacía— y la del
+   * equipo sí es válida, leer «la del cliente está vacía, luego escribió el
+   * equipo» clasifica como del equipo un mensaje **que escribió un cliente**, y
+   * el aviso sale hacia fuera, al autor del ticket.
+   *
+   * Es la diferencia entre "columna vacía" y "columna ilegible". La primera es
+   * un dato; la segunda es una fila que no entendemos, y ante eso lo único
+   * aceptable es callar: un correo no se retira.
+   */
+  describe('una columna de autor ilegible produce silencio, no el aviso contrario', () => {
+    it.each([
+      ['una cadena que no es un número', 'abc'],
+      ['un cero, que no es un id válido', '0'],
+      ['la cadena vacía', ''],
+      ['un cero numérico', 0],
+      ['un número negativo', -1],
+    ])(
+      'actor_client_user_id con %s y actor_user_id válido no manda ningún correo',
+      async (_caso, basura) => {
+        const { dispatcher, email } = montar();
+        const resultado = await dispatcher.dispatchForEvent(
+          unMensajeDeCliente({ actorClientUserId: basura, actorUserId: ASSIGNEE_ID }),
+        );
+
+        // Lo que no puede pasar bajo ningún concepto: que salga hacia fuera.
+        expect(enviados(email).map((c) => c.to)).not.toContain(AUTOR_EMAIL);
+        expect(email.send).not.toHaveBeenCalled();
+        expect(resultado.sent).toBe(0);
+      },
+    );
+
+    /** Y la simétrica: la del equipo ilegible tampoco cae a la del cliente. */
+    it.each([
+      ['una cadena que no es un número', 'abc'],
+      ['un cero, que no es un id válido', '0'],
+      ['la cadena vacía', ''],
+    ])(
+      'actor_user_id con %s y actor_client_user_id nulo no manda ningún correo',
+      async (_caso, basura) => {
+        const { dispatcher, email } = montar();
+        const resultado = await dispatcher.dispatchForEvent(
+          unMensajeDelEquipo({ actorUserId: basura, actorClientUserId: null }),
+        );
+
+        expect(email.send).not.toHaveBeenCalled();
+        expect(resultado.sent).toBe(0);
+      },
+    );
+
+    /**
+     * El desempate documentado sigue en pie cuando **las dos son legibles**:
+     * gana el cliente, porque su aviso es el interno. Lo que se arregla arriba
+     * es el caso en que una de las dos no se puede leer, no este.
+     */
+    it('con las dos columnas legibles gana el cliente: el aviso se queda en casa', async () => {
+      const { dispatcher, email } = montar();
+      const resultado = await dispatcher.dispatchForEvent(
+        unMensajeDeCliente({ actorClientUserId: CLIENT_USER_ID, actorUserId: ASSIGNEE_ID }),
+      );
+
+      expect(resultado.sent).toBe(1);
+      expect(enviados(email).map((c) => c.to)).toEqual([RESPONSABLE_EMAIL]);
+      expect(enviados(email).map((c) => c.to)).not.toContain(AUTOR_EMAIL);
+    });
+  });
+
+  /**
    * El cuerpo del mensaje no viaja en el correo: el aviso dice que hay
    * respuesta y manda al portal o al panel. Las razones están escritas en
    * `seeded-templates.consistency.spec.ts`; aquí se ata el otro extremo, que es
    * por donde se rompería de verdad -- alguien copia el texto al `payload` del
    * evento y el despachador lo arrastra sin querer al correo.
+   *
+   * En las dos direcciones: la del equipo hacia el cliente es la que sale de
+   * casa, y es la que más falta hace tener atada.
    */
-  it('nada del payload del evento acaba dentro del correo', async () => {
+  it.each([
+    ['cliente -> equipo (correo interno)', unMensajeDeCliente],
+    ['equipo -> cliente (sale hacia fuera)', unMensajeDelEquipo],
+  ])('nada del payload del evento acaba dentro del correo: %s', async (_direccion, fabrica) => {
     const SECRETO = 'la clave del servidor de contabilidad es Andina2026';
     const { dispatcher, email } = montar();
 
     await dispatcher.dispatchForEvent(
-      unMensajeDeCliente({ payload: { messageId: '55', visibility: 'PUBLICA', bodyMd: SECRETO } }),
+      fabrica({ payload: { messageId: '55', visibility: 'PUBLICA', bodyMd: SECRETO } }),
     );
 
+    expect(email.send).toHaveBeenCalledTimes(1);
     const [correo] = enviados(email);
     expect(`${correo.subject}\n${correo.html}\n${correo.text ?? ''}`).not.toContain(SECRETO);
   });
