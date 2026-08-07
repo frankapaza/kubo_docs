@@ -3,28 +3,66 @@ import { Ticket } from './entities/ticket.entity';
 import { TicketEvent } from './entities/ticket-event.entity';
 import { TicketMessage } from '../ticket-messages/entities/ticket-message.entity';
 
+/** Lo que una ejecución de `create` llega a escribir, por entidad. */
+interface Escrituras {
+  tickets: Partial<Ticket>[];
+  events: Partial<TicketEvent>[];
+  messages: Partial<TicketMessage>[];
+}
+
+const vacio = (): Escrituras => ({ tickets: [], events: [], messages: [] });
+
+/** En qué punto de la transacción revienta la base, para los tests de fallo a mitad. */
+type PuntoDeFallo = 'ticket' | 'codigo' | 'evento' | 'mensaje';
+
 /**
- * create() escribe el ticket, le asigna código, registra el evento CREATED y
- * escribe el primer mensaje del hilo dentro de una única transacción (ver
- * comentario en tickets.service.ts), por eso el manager falso expone un stub
- * por entidad -- igual que en ticket-transitions.service.spec.ts -- en vez de
+ * `create` escribe el ticket, le asigna código, registra el evento CREATED y
+ * escribe el primer mensaje del hilo **dentro de una única transacción** (ver el
+ * docblock de `TicketsService.create`), así que el manager falso expone un stub
+ * por entidad -- igual que en `ticket-transitions.service.spec.ts` -- en vez de
  * un único mock compartido.
+ *
+ * Y, sobre todo, **imita la transacción de verdad**, con el mismo patrón que
+ * `ticket-messages.service.spec.ts`: lo que el callback escribe queda en
+ * `pendiente`, y solo pasa a `confirmado` si el callback termina bien; si lanza,
+ * `pendiente` se descarta. Eso es lo que hace un ROLLBACK, y es lo único que
+ * permite afirmar en un test unitario que de un alta a medio escribir **no queda
+ * ni el ticket, ni el evento, ni el mensaje**. Con un doble que se limitara a
+ * llamar al trabajo a pelo y a acumular en listas incondicionales, ese
+ * invariante -- el que esta tarea declara indispensable -- no estaría sujeto por
+ * nada: las listas seguirían llenas después del fallo.
+ *
+ * `fuera` recoge lo que se escriba **con la transacción cerrada**. No es un
+ * adorno: una escritura ahí sobrevive a cualquier rollback, así que es
+ * exactamente la forma que tendría el fallo que se quiere impedir -- guardar el
+ * mensaje por su cuenta, antes o después del `runInTransaction`, en vez de con
+ * el manager. Comprobar solo que se pidió el repositorio al manager no lo
+ * distinguiría: pedirlo y luego guardar por otro sitio pasaría igual.
  */
-const makeService = () => {
-  const savedTickets: Partial<Ticket>[] = [];
-  const savedEvents: Partial<TicketEvent>[] = [];
-  const savedMessages: Partial<TicketMessage>[] = [];
+const makeService = (fallaEn?: PuntoDeFallo) => {
+  let pendiente = vacio();
+  const confirmado = vacio();
+  const fuera = vacio();
+  let dentroDeLaTransaccion = false;
   let ticketState: Partial<Ticket> = {};
+
+  /** Apunta la escritura donde toque: al buffer de la transacción, o al de fuera. */
+  const anotar = <T>(lista: keyof Escrituras, saved: T): T => {
+    (dentroDeLaTransaccion ? pendiente : fuera)[lista].push(saved as never);
+    return saved;
+  };
 
   const ticketRepoStub = {
     create: jest.fn().mockImplementation((data: Partial<Ticket>) => data),
     save: jest.fn().mockImplementation((data: Partial<Ticket>) => {
+      if (fallaEn === 'ticket') return Promise.reject(new Error('fallo al guardar el ticket'));
       const saved = { id: 99, ...data };
-      savedTickets.push(saved);
+      anotar('tickets', saved);
       ticketState = saved;
       return Promise.resolve(saved);
     }),
     update: jest.fn().mockImplementation((_id: number, patch: Partial<Ticket>) => {
+      if (fallaEn === 'codigo') return Promise.reject(new Error('fallo al asignar el código'));
       ticketState = { ...ticketState, ...patch };
       return Promise.resolve({ affected: 1 });
     }),
@@ -34,18 +72,16 @@ const makeService = () => {
   const eventRepoStub = {
     create: jest.fn().mockImplementation((data: Partial<TicketEvent>) => data),
     save: jest.fn().mockImplementation((data: Partial<TicketEvent>) => {
-      const saved = { id: savedEvents.length + 1, ...data };
-      savedEvents.push(saved);
-      return Promise.resolve(saved);
+      if (fallaEn === 'evento') return Promise.reject(new Error('fallo al escribir el evento'));
+      return Promise.resolve(anotar('events', { id: pendiente.events.length + 1, ...data }));
     }),
   };
 
   const messageRepoStub = {
     create: jest.fn().mockImplementation((data: Partial<TicketMessage>) => data),
     save: jest.fn().mockImplementation((data: Partial<TicketMessage>) => {
-      const saved = { id: 700 + savedMessages.length, ...data };
-      savedMessages.push(saved);
-      return Promise.resolve(saved);
+      if (fallaEn === 'mensaje') return Promise.reject(new Error('fallo al guardar el mensaje'));
+      return Promise.resolve(anotar('messages', { id: 700 + pendiente.messages.length, ...data }));
     }),
   };
 
@@ -59,10 +95,30 @@ const makeService = () => {
   };
 
   const repo = {
-    runInTransaction: jest.fn().mockImplementation((work: (m: unknown) => Promise<unknown>) => work(manager)),
-    savedTickets,
-    savedEvents,
-    savedMessages,
+    runInTransaction: jest.fn().mockImplementation(async (work: (m: unknown) => Promise<unknown>) => {
+      pendiente = vacio();
+      dentroDeLaTransaccion = true;
+      try {
+        const salida = await work(manager);
+        confirmado.tickets.push(...pendiente.tickets);
+        confirmado.events.push(...pendiente.events);
+        confirmado.messages.push(...pendiente.messages);
+        return salida;
+      } catch (e) {
+        // El ROLLBACK: lo escrito a medias no llega a existir.
+        pendiente = vacio();
+        throw e;
+      } finally {
+        dentroDeLaTransaccion = false;
+      }
+    }),
+    // Lo que de verdad quedó escrito, que es lo único sobre lo que se puede
+    // afirmar nada. Los nombres se conservan por los tests que ya los usaban.
+    savedTickets: confirmado.tickets,
+    savedEvents: confirmado.events,
+    savedMessages: confirmado.messages,
+    /** Escrituras hechas con la transacción cerrada: siempre tiene que estar vacío. */
+    fuera,
   };
   const events = { listByTicket: jest.fn() };
   const sla = {
@@ -158,12 +214,17 @@ describe('el primer mensaje del alta', () => {
     expect(repo.savedMessages[0].bodyMd).toBe('se cayó el ERP');
   });
 
-  it('el mensaje se escribe en la misma transacción que el ticket y su evento', async () => {
-    const { service, manager } = makeService();
+  it('el mensaje se escribe con el manager de la transacción, no por su cuenta', async () => {
+    const { service, repo, manager } = makeService();
     await service.create({ kind: 'STAFF', userId: 5 }, { rawText: 'algo' } as any);
-    // Del `manager` de la transacción, nunca de un repositorio inyectado: si
-    // saliera de fuera, el mensaje sobreviviría al rollback del ticket.
     expect(manager.getRepository).toHaveBeenCalledWith(TicketMessage);
+    // Y de verdad se guardó **dentro**: nada escrito con la transacción
+    // cerrada, que es lo que sobreviviría a un rollback. Pedirle el repositorio
+    // al manager y luego guardar por otro sitio pasaría la primera aserción y
+    // no esta.
+    expect(repo.fuera.messages).toHaveLength(0);
+    expect(repo.fuera.tickets).toHaveLength(0);
+    expect(repo.fuera.events).toHaveLength(0);
   });
 
   it('el primer mensaje cuelga del ticket recién creado', async () => {
@@ -240,5 +301,102 @@ describe('el primer mensaje del alta', () => {
     const { service, repo } = makeService();
     const created = await service.create({ kind: 'STAFF', userId: 5 }, { rawText: 'algo' } as any);
     expect(created.firstMessageId).toBe(repo.savedMessages[0].id);
+  });
+});
+
+/**
+ * Los dos DTO exigen **un carácter**, no un carácter que se vea: `"   "` pasa
+ * la validación y al recortarlo no queda nada.
+ *
+ * `TicketMessagesService.post` rechaza exactamente ese cuerpo con `BAD_INPUT`
+ * («El mensaje no puede estar vacío»), así que el alta no puede escribirlo por
+ * detrás: sería la misma fila que el hilo prohíbe, entrando por la otra puerta,
+ * y en el portal se vería como una burbuja vacía firmada por el cliente.
+ *
+ * Se **rechaza el alta**, y no se escribe un ticket sin mensaje. Saltarse el
+ * mensaje dejaría un `firstMessageId` que a veces falta, y de ahí sale otra vez
+ * la pregunta «¿y si este ticket no tiene mensaje?» que se contesta con un
+ * adjunto sin visibilidad heredada -- justo el agujero que esta tarea cierra.
+ * Un ticket cuya solicitud está en blanco no es un ticket: es un formulario
+ * enviado sin rellenar.
+ */
+describe('el texto de la solicitud tiene que decir algo', () => {
+  it.each([
+    ['solo espacios', '   '],
+    ['solo saltos de línea', '\n\n'],
+    ['espacios y tabuladores', ' \t \t '],
+  ])('rechaza un rawText de %s sin escribir nada', async (_etiqueta, texto) => {
+    const { service, repo } = makeService();
+
+    const error = await service
+      .create({ kind: 'CLIENT', clientUserId: 11 }, { rawText: texto, clientId: 1 } as any)
+      .catch((e: any) => e);
+
+    expect(error.getResponse()).toEqual({
+      code: 'BAD_INPUT',
+      message: 'El texto de la solicitud no puede estar vacío.',
+    });
+    // Antes de abrir la transacción: no se consulta ni se escribe nada.
+    expect(repo.runInTransaction).not.toHaveBeenCalled();
+    expect(repo.savedTickets).toHaveLength(0);
+    expect(repo.savedMessages).toHaveLength(0);
+  });
+
+  it('un texto con espacios alrededor sí vale, y se guarda recortado en los dos sitios', async () => {
+    const { service, repo } = makeService();
+    await service.create({ kind: 'STAFF', userId: 5 }, { rawText: '  hay texto  ' } as any);
+    expect(repo.savedTickets[0].rawText).toBe('hay texto');
+    expect(repo.savedMessages[0].bodyMd).toBe('hay texto');
+  });
+});
+
+/**
+ * **El invariante que esta tarea declara indispensable**: un ticket sin su
+ * primer mensaje --o un mensaje sin su ticket-- es un estado que no debe
+ * existir. La pantalla de subida cuelga los adjuntos del alta del
+ * `firstMessageId`, así que un ticket que naciera sin él dejaría los archivos
+ * sin destino y sin forma de recuperarlos.
+ *
+ * Se prueba reventando la base en cada uno de los cuatro puntos de escritura y
+ * comprobando que **no queda nada de nada**. Puede afirmarse porque el doble de
+ * `runInTransaction` descarta lo pendiente cuando el callback lanza, que es lo
+ * que hace un ROLLBACK.
+ */
+describe('el alta es todo o nada', () => {
+  it.each([
+    ['al guardar el ticket', 'ticket'],
+    ['al asignar el código', 'codigo'],
+    ['al escribir el evento CREATED', 'evento'],
+    ['al escribir el primer mensaje', 'mensaje'],
+  ] as const)('si falla %s no queda ni ticket, ni evento, ni mensaje', async (_donde, punto) => {
+    const { service, repo } = makeService(punto);
+
+    await expect(
+      service.create({ kind: 'CLIENT', clientUserId: 11 }, { rawText: 'algo', clientId: 1 } as any),
+    ).rejects.toThrow();
+
+    expect(repo.savedTickets).toHaveLength(0);
+    expect(repo.savedEvents).toHaveLength(0);
+    expect(repo.savedMessages).toHaveLength(0);
+    // Y tampoco por la puerta de atrás: nada escrito fuera de la transacción,
+    // que es lo único que sobreviviría al rollback.
+    expect(repo.fuera.tickets).toHaveLength(0);
+    expect(repo.fuera.events).toHaveLength(0);
+    expect(repo.fuera.messages).toHaveLength(0);
+  });
+
+  /**
+   * El caso que da nombre a todo esto, escrito aparte porque es el que se
+   * añadió con esta tarea y el que se puede romper sin darse cuenta: si el
+   * mensaje reventara, el ticket **tampoco** puede quedar. Antes de que el alta
+   * escribiera el hilo, un fallo aquí no existía; ahora es la mitad nueva del
+   * invariante.
+   */
+  it('un fallo del mensaje se lleva por delante el ticket que ya estaba escrito', async () => {
+    const { service, repo } = makeService('mensaje');
+    await expect(
+      service.create({ kind: 'STAFF', userId: 5 }, { rawText: 'algo' } as any),
+    ).rejects.toThrow('fallo al guardar el mensaje');
+    expect(repo.savedTickets).toHaveLength(0);
   });
 });

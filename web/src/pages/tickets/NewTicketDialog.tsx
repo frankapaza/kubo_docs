@@ -91,10 +91,14 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
   }, []);
 
   /**
-   * Guarda **síncrona** contra el doble envío. `disabled={busy}` no basta:
-   * `busy` es estado de React y no cambia hasta el siguiente render, así que un
-   * doble clic de verdad entra dos veces y crea **dos tickets**. Misma guarda
-   * que los dos compositores del hilo y que el diálogo de alta del portal.
+   * Guarda **síncrona** contra el doble envío, además del `disabled={busy}`.
+   *
+   * El doble clic corriente ya lo cubre `disabled` --el clic es discreto y React
+   * 18 vacía el estado antes del segundo--, así que **no hay un duplicado
+   * demostrado**. Se queda porque cuesta una línea y porque crear un ticket no
+   * se deshace, y porque esa cobertura depende de cómo React despache los
+   * eventos y no de nada que se afirme aquí. Misma guarda que los compositores
+   * del hilo y que el diálogo de alta del portal.
    */
   const inFlight = useRef(false);
 

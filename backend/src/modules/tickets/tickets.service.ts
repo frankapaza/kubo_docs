@@ -165,6 +165,17 @@ export class TicketsService {
    * - La **descripción** (`description_md`, y `raw_text` como respaldo) es el
    *   resumen de trabajo, y el triaje con IA la reescribe (`TicketAIService`).
    *
+   * ## Un texto en blanco no da de alta nada
+   *
+   * Los dos DTO exigen un carácter, no un carácter que se vea: `"   "` pasa la
+   * validación y al recortarlo no queda nada.
+   * `TicketMessagesService.post` rechaza ese cuerpo con `BAD_INPUT`, así que el
+   * alta no puede escribirlo por detrás -- sería la misma fila que el hilo
+   * prohíbe, entrando por la otra puerta. Se rechaza el alta entera en vez de
+   * saltarse el mensaje: un `firstMessageId` que a veces faltara devolvería la
+   * pregunta «¿y si este ticket no tiene mensaje?», que se contesta con un
+   * adjunto sin visibilidad heredada.
+   *
    * Que diverjan no es un fallo, es la razón de ser de las dos: el cliente tiene
    * que seguir viendo en su hilo lo que él escribió aunque la IA lo reformule
    * para el equipo. Unificarlas -- hacer que el mensaje lea de `raw_text`, o que
@@ -184,6 +195,17 @@ export class TicketsService {
     // Lo primero: sin autor no se escribe nada, ni ticket, ni evento, ni mensaje.
     const actorColumns = resolveActorColumns(actor);
     const visibility = firstMessageVisibility(actor);
+
+    // Lo segundo, y antes de consultar nada: el texto tiene que decir algo. Se
+    // recorta una sola vez y es el que va a las dos filas -- el `raw_text` del
+    // ticket y el cuerpo del mensaje --, para que no puedan diferir.
+    const rawText = dto.rawText?.trim();
+    if (!rawText) {
+      throw new BadRequestException({
+        code: 'BAD_INPUT',
+        message: 'El texto de la solicitud no puede estar vacío.',
+      });
+    }
 
     if (dto.clientId) await this.clients.findByIdOrFail(dto.clientId);
     if (dto.projectId) await this.projects.findById(dto.projectId);
@@ -225,7 +247,7 @@ export class TicketsService {
           requestType: dto.requestType ?? null,
           serviceCategory: dto.serviceCategory ?? null,
           subject: dto.subject?.trim() || null,
-          rawText: dto.rawText.trim(),
+          rawText,
           rawAudioFilename: dto.rawAudioFilename ?? null,
           labels: dto.labels ?? null,
           impact: dto.impact ?? null,

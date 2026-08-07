@@ -94,15 +94,19 @@ export default function NewPortalTicketDialog({ open, onCancel, onCreated }: Pro
   }, []);
 
   /**
-   * Guarda **síncrona** contra el doble envío.
+   * Guarda **síncrona** contra el doble envío, además del `disabled={busy}`.
    *
-   * `disabled={busy}` no basta: `busy` es estado de React y no cambia hasta el
-   * siguiente render, así que dos clics dentro del mismo tick --un doble clic de
-   * verdad-- entran los dos y crean **dos tickets**. Y cada alta del portal le
-   * manda un correo al equipo y un acuse de recibo al cliente: sería la misma
-   * duplicación de avisos que esta tarea viene a evitar, por la otra puerta. Un
-   * `ref` se escribe y se lee en el mismo tick, que es lo que el estado derivado
-   * no puede hacer. Es la misma guarda que llevan los dos compositores del hilo.
+   * El doble clic corriente ya lo cubre `disabled`: el clic es un evento
+   * discreto, así que React 18 vacía el estado antes de despachar el segundo y
+   * el botón ya está deshabilitado. **No hay un duplicado demostrado**; esto no
+   * arregla un fallo observado.
+   *
+   * Se queda porque es una línea y porque lo que protege no se deshace: un alta
+   * del portal escribe un ticket y manda dos correos, y un correo no se retira.
+   * Que hoy no haya hueco depende de cómo React agrupe y despache los eventos
+   * --de la versión, del modo y de que el manejador siga siendo discreto--, y
+   * eso es una garantía prestada. Un `ref` se escribe y se lee en el mismo tick
+   * y no depende de nada de eso. Misma guarda que los dos compositores del hilo.
    */
   const inFlight = useRef(false);
 
