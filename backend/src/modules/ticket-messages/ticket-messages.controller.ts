@@ -157,9 +157,12 @@ export class TicketMessagesController {
  * El actor del equipo, y el único que este controlador sabe construir.
  *
  * Sale del `id` que `JwtAuthGuard` dejó en la petición, sin ninguna rama: no
- * hay aquí ningún «si falta tal cosa, entonces…». Un token sin usuario no llega
- * hasta aquí (lo para el guard) y, si llegara, `resolveActorIds` falla cerrado
- * en el servicio.
+ * hay aquí ningún «si falta tal cosa, entonces…». Y no lo hay porque el `if`
+ * está donde tiene que estar, no porque no haga falta: `JwtStrategy.validate`
+ * copia el `sub` del payload **sin comprobarlo**, así que un token manipulado
+ * con `sub: 0` sí llega hasta aquí. Quien falla cerrado es `resolveScope` en el
+ * servicio, que exige un entero positivo a los dos lados --no `resolveActorIds`,
+ * que reparte el valor tal cual sin mirarlo.
  */
 function staffActor(user: AuthUser): TicketMessageActor {
   return { kind: 'STAFF', userId: user.id };

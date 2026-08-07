@@ -86,33 +86,62 @@ export const TICKET_NOT_FOUND = { code: 'NOT_FOUND', message: 'Ticket no encontr
  * mismo guardia `never` que usa el alta del ticket -- así que a partir de ahí
  * el `kind` es uno de los dos conocidos.
  *
- * De un actor de cliente se exigen **sus dos identificadores**, y por motivos
- * distintos:
+ * **Se exige el identificador de quien escribe, venga del lado que venga.** Del
+ * actor de cliente, además, su empresa:
  *
+ * - **`clientUserId` / `userId`** es quien escribe. Sin él, el mensaje se
+ *   guardaría con las **dos columnas de autor ilegibles** -- exactamente la
+ *   invariante que `resolveActorIds` dice sostener --, y una fila así es un
+ *   mensaje sin autor: ya no se sabe si lo dijo el cliente o el equipo. En un
+ *   hilo de soporte, que es un registro de quién dijo qué, eso es lo único que
+ *   de verdad importa, y no se puede reparar después.
  * - **`clientId`** es lo único que separa a una empresa de otra. Sin él, el
- *   ámbito no puede acotar nada.
- * - **`clientUserId`** es quien escribe. Sin él, el mensaje se guardaría con
- *   las **dos columnas de autor nulas** -- exactamente la invariante que
- *   `resolveActorIds` dice sostener --, y una fila así es un mensaje sin autor:
- *   ya no se sabe si lo dijo el cliente o el equipo. En un hilo de soporte, que
- *   es un registro de quién dijo qué, eso es lo único que de verdad importa, y
- *   no se puede reparar después.
+ *   ámbito no puede acotar nada. Solo lo tiene el actor de cliente; al del
+ *   equipo no se le acota nada por diseño.
  *
- * Ninguno de los dos se degrada a un valor por omisión: los dos faltan solo por
- * un fallo de programación o un token manipulado, y en ambos casos lo correcto
- * es rechazar la petición sin consultar nada.
+ * **Las dos mitades, y no solo la del cliente.** El argumento de arriba no
+ * dependía nunca del lado del que venga el actor, pero durante un tiempo la
+ * guarda sí: el `kind !== 'CLIENT'` devolvía sin comprobar nada. Con un
+ * `userId` inservible --un `sub: 0` en el token-- se escribía
+ * `author_user_id = 0`, y esa fila no es solo un mensaje sin autor: es un
+ * mensaje **que dos módulos leen de forma distinta**.
+ * `portal-messages.controller.ts` atribuye el autor con `isUsableId`, así que
+ * el `0` no le consta como del equipo y el portal le enseña al cliente un
+ * mensaje de Kubo **firmado como suyo**; el despachador de correos, que
+ * pregunta lo mismo por su cuenta, no lo clasifica y no manda el aviso. Dos
+ * respuestas para la misma fila, y la que ve el cliente es la peor.
  *
- * El `ids` que sale lleva el `clientUserId` **ya validado**, no el que venía en
+ * La frontera no puede dar por bueno lo que le llega por ninguno de los dos
+ * lados: `JwtStrategy.validate` copia el `sub` del payload **sin comprobarlo**,
+ * exactamente igual que hace `ClientJwtStrategy` con los suyos -- que es justo
+ * el motivo por el que existía ya la guarda del otro lado --, y
+ * `ticket-messages.controller.ts` construye el actor del equipo con ese `id`
+ * sin ninguna rama.
+ *
+ * Ninguno se degrada a un valor por omisión: faltan solo por un fallo de
+ * programación o un token manipulado, y en ambos casos lo correcto es rechazar
+ * la petición sin consultar nada.
+ *
+ * El `ids` que sale lleva el identificador **ya validado**, no el que venía en
  * el actor, para que lo que se escriba en las columnas de autor sea justo lo
- * que pasó por la comprobación. El `userId` sigue saliendo del reparto de
- * `resolveActorIds`, que es quien decide qué columna va nula.
+ * que pasó por la comprobación. Qué columna va nula lo sigue decidiendo el
+ * reparto de `resolveActorIds`.
  */
 export function resolveScope(actor: TicketMessageActor, sujeto: string): ActorScope {
   const ids = resolveActorIds(actor, sujeto);
-  if (actor.kind !== 'CLIENT') return { ids, scope: { restricted: false } };
 
-  const clientUserId = assertUsableActorId(actor.clientUserId, 'clientUserId', SIN_USUARIO);
-  const clientId = assertUsableActorId(actor.clientId, 'clientId', SIN_EMPRESA);
+  if (actor.kind !== 'CLIENT') {
+    const userId = assertUsableActorId(actor.userId, 'userId', SIN_USUARIO, 'del equipo');
+    return { ids: { ...ids, userId }, scope: { restricted: false } };
+  }
+
+  const clientUserId = assertUsableActorId(
+    actor.clientUserId,
+    'clientUserId',
+    SIN_USUARIO,
+    'de cliente',
+  );
+  const clientId = assertUsableActorId(actor.clientId, 'clientId', SIN_EMPRESA, 'de cliente');
 
   return { ids: { ...ids, clientUserId }, scope: { restricted: true, clientId } };
 }
@@ -129,21 +158,33 @@ const SIN_EMPRESA = 'La sesión no identifica a ninguna empresa.';
 const SIN_USUARIO = 'La sesión no identifica a ningún usuario.';
 
 /**
- * Un identificador de un actor de cliente, o se rechaza la petición sin
- * consultar.
+ * Un identificador de un actor, o se rechaza la petición sin consultar.
  *
- * Quien construye el actor es el controlador del portal, y `ClientJwtStrategy`
- * copia los identificadores del payload del token **sin validarlos**, así que
- * la frontera no puede darlos por buenos. Se exige un entero positivo: `null`,
- * `undefined`, `0`, `''` y cualquier otra cosa fallan cerrado.
+ * Una sola función para los dos lados a propósito: es la misma comprobación y
+ * tener dos copias es tener dos reglas, de las cuales la que se olvide de
+ * actualizar es la que deja escribir un mensaje sin autor. Quien construye el
+ * actor es un controlador --el del portal o el del panel--, y **las dos**
+ * estrategias de JWT copian los identificadores del payload del token **sin
+ * validarlos**, así que ninguna frontera puede darlos por buenos. Se exige un
+ * entero positivo: `null`, `undefined`, `0`, `''`, `NaN`, un negativo y
+ * cualquier otra cosa fallan cerrado.
+ *
+ * `lado` solo viaja al log: quien depure un 401 necesita saber si el token que
+ * llegó mal era el del portal o el del panel, y eso no puede deducirse del
+ * cuerpo --que es el mismo a propósito.
  */
-function assertUsableActorId(value: unknown, campo: string, message: string): number {
+function assertUsableActorId(
+  value: unknown,
+  campo: string,
+  message: string,
+  lado: string,
+): number {
   if (typeof value === 'number' && Number.isInteger(value) && value > 0) return value;
 
   // Qué llegó va al log, nunca a la respuesta: el cuerpo se queda en el
   // `{ code, message }` de siempre.
   new Logger('TicketMessagesScope').error(
-    `Actor de cliente sin ${campo} utilizable (${String(value)}): se rechaza la petición sin consultar.`,
+    `Actor ${lado} sin ${campo} utilizable (${String(value)}): se rechaza la petición sin consultar.`,
   );
   throw new UnauthorizedException({ code: 'UNAUTHORIZED', message });
 }

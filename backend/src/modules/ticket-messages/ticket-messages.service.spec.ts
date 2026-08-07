@@ -471,6 +471,98 @@ describe('un actor de cliente sin clientUserId utilizable', () => {
   });
 });
 
+/**
+ * La otra mitad de la misma guarda, la del **actor del equipo**.
+ *
+ * El argumento del lado cliente vale aquí palabra por palabra: sin un `userId`
+ * utilizable, `resolveActorIds` reparte `{ userId: 0, clientUserId: null }` y el
+ * mensaje se escribe con las **dos columnas de autor ilegibles**. Y esa fila no
+ * es solo un mensaje sin autor: es un mensaje **que dos módulos leen de forma
+ * distinta**. `portal-messages.controller.ts` atribuye con `isUsableId`, así que
+ * un `author_user_id = 0` no le consta como del equipo y el portal se lo enseña
+ * al cliente **firmado como suyo**; el despachador de correos, que pregunta lo
+ * mismo por su cuenta, no lo clasifica y no manda nada. Dos respuestas para la
+ * misma fila.
+ *
+ * Que no se viera antes tiene una causa exacta y conviene dejarla escrita: el
+ * `EQUIPO` de estos specs siempre trae un `userId` bueno, así que ningún test
+ * ejercía la rama. `JwtStrategy.validate` copia el `sub` del payload sin
+ * comprobarlo --igual que `ClientJwtStrategy`, que es justo por lo que existe la
+ * guarda del otro lado-- y `staffActor` lo pasa tal cual.
+ */
+describe('un actor del equipo sin userId utilizable', () => {
+  const inservibles: Array<[string, unknown]> = [
+    ['null', null],
+    ['undefined', undefined],
+    ['cero', 0],
+    ['cadena vacía', ''],
+    ['NaN', NaN],
+    ['negativo', -1],
+    ['no entero', 1.5],
+  ];
+
+  it.each(inservibles)('no escribe ningún mensaje: %s', async (_nombre, userId) => {
+    const { service, tickets, confirmado } = makeHarness(ticketRow());
+
+    await expect(
+      service.post({ kind: 'STAFF', userId } as any, 7, { bodyMd: 'Anotado.' }),
+    ).rejects.toThrow(UnauthorizedException);
+
+    // Antes de escribir nada, y sin ni siquiera mirar el ticket.
+    expect(tickets.findById).not.toHaveBeenCalled();
+    expect(tickets.runInTransaction).not.toHaveBeenCalled();
+    expect(confirmado.messages).toHaveLength(0);
+  });
+
+  it.each(inservibles)('no lee ningún hilo: %s', async (_nombre, userId) => {
+    const { service, tickets, messages } = makeHarness(ticketRow());
+
+    await expect(service.listThread({ kind: 'STAFF', userId } as any, 7)).rejects.toThrow(
+      UnauthorizedException,
+    );
+
+    expect(tickets.findById).not.toHaveBeenCalled();
+    expect(messages.listByTicket).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Una nota interna tampoco. Es la tentación evidente --«no sale de Kubo, deja
+   * pasar»--, pero el hilo es el registro de quién dijo qué y una nota sin autor
+   * lo rompe igual; y quien la escribe puede convertirla en respuesta pública
+   * copiándola, con la firma ya perdida.
+   */
+  it('tampoco guarda una nota interna', async () => {
+    const { service, confirmado } = makeHarness(ticketRow());
+
+    await expect(
+      service.post({ kind: 'STAFF', userId: 0 } as any, 7, {
+        bodyMd: 'Revisar logs.',
+        visibility: 'INTERNA',
+      }),
+    ).rejects.toThrow(UnauthorizedException);
+
+    expect(confirmado.messages).toHaveLength(0);
+  });
+
+  /**
+   * El mismo cuerpo que el del lado cliente cuando falta el usuario: es la misma
+   * situación --la sesión no dice quién escribe-- y dos textos distintos solo
+   * sirven para que quien depure crea que son dos situaciones.
+   */
+  it('el cuerpo dice que la sesión no identifica a ningún usuario', async () => {
+    const { service } = makeHarness(ticketRow());
+
+    const error = await service
+      .post({ kind: 'STAFF', userId: 0 } as any, 7, { bodyMd: 'Anotado.' })
+      .catch((e) => e);
+
+    expect(error.getResponse()).toEqual({
+      code: 'UNAUTHORIZED',
+      message: 'La sesión no identifica a ningún usuario.',
+    });
+  });
+});
+
 describe('post: cuándo NO se mueve el estado', () => {
   it('un mensaje de cliente sobre un ticket en otro estado no cambia el estado', async () => {
     const { service, confirmado, ticketRepoStub } = makeHarness(ticketRow({ status: 'EN_ATENCION' }));
