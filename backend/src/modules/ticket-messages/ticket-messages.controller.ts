@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
+import { pipeline } from 'stream/promises';
 
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -247,15 +248,29 @@ export class TicketMessagesController {
     res.setHeader('Content-Type', download.mimeType);
     res.setHeader('Content-Length', String(download.size));
 
-    // El flujo llega **ya escuchado** por el servicio, que es quien lo abre:
-    // ahí está la garantía de que un `ENOENT` no mata el proceso, y ahí tiene
-    // que estar, porque aquí no se puede sostener (ver `openOrFail`). Esto se
-    // suma a aquello y hace lo único que este lado puede hacer: con las
-    // cabeceras ya enviadas no cabe un JSON, así que se corta la conexión y el
-    // cliente ve una descarga truncada, que es lo honesto.
-    download.stream.on('error', (cause: Error) => res.destroy(cause));
-
-    download.stream.pipe(res);
+    // `pipeline` y no `stream.pipe(res)`.
+    //
+    // `pipe` no limpia: si el cliente se va a mitad de la descarga --cerrar la
+    // pestaña, perder la cobertura, pulsar atrás: lo más normal que hace un
+    // usuario-- la respuesta muere y **el flujo de lectura se queda abierto**,
+    // con su descriptor de fichero. Los descriptores no se recuperan solos: se
+    // acumulan hasta el límite del proceso y entonces falla *todo*, no solo las
+    // descargas, semanas después y sin parecerse a su causa. `pipeline`
+    // destruye los dos extremos en todos los caminos -- fin normal, error de
+    // origen y cliente que se va -- y ese es el motivo principal de usarlo.
+    //
+    // De paso resuelve el otro: `pipeline` mira el estado del origen en vez de
+    // esperar un evento, así que un flujo que **ya** falló --el `ENOENT` que
+    // llega antes de que nadie más escuche-- se ve igual y la petición se
+    // cierra en vez de quedarse colgada con su `Content-Length` y sin cuerpo.
+    //
+    // El rechazo se traga **a propósito**, y aquí sí que no se pierde nada: el
+    // fallo de lectura ya lo registró el servicio con la clave concreta (ver
+    // `openOrFail`), y el otro caso --`ERR_STREAM_PREMATURE_CLOSE`, el cliente
+    // que aborta-- no es un error, es un martes. Dejarlo escapar sería peor que
+    // inútil: las cabeceras ya salieron, así que el filtro global intentaría
+    // escribir su JSON sobre una respuesta que `pipeline` acaba de destruir.
+    await pipeline(download.stream, res).catch(() => undefined);
   }
 }
 

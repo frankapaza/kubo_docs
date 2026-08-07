@@ -10,7 +10,9 @@ import { GUARDS_METADATA, INTERCEPTORS_METADATA } from '@nestjs/common/constants
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { getDataSourceToken } from '@nestjs/typeorm';
+import { Response } from 'express';
 import { lastValueFrom, throwError } from 'rxjs';
+import { PassThrough, Writable } from 'stream';
 
 import { ROLES_KEY } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -56,27 +58,65 @@ function makeController() {
 }
 
 /**
- * Un doble de `Response` que se comporta como el de verdad **en lo que
- * importa aquí**: guarda las cabeceras y deja inspeccionarlas. La validación
- * de que el valor es escribible no se simula -- se hace aparte con
- * `http.validateHeaderValue`, que es el mismo validador que hay debajo de
- * `res.setHeader`.
+ * Un doble de `Response` que es un `Writable` **de verdad**, con `setHeader`
+ * encima.
+ *
+ * Tiene que serlo: el controlador usa `stream.pipeline`, y lo que hay que
+ * comprobar de él --que suelta el origen cuando el destino se va-- es
+ * comportamiento real de flujos, no algo que un `jest.fn()` pueda fingir. Las
+ * cabeceras se guardan aparte para poder mirar cuáles se escribieron y **en
+ * qué orden**; que el valor sea escribible se comprueba con
+ * `http.validateHeaderValue`, el mismo validador que hay debajo del `setHeader`
+ * auténtico.
+ *
+ * `seVaAlPrimerByte` reproduce al cliente que aborta: la respuesta se destruye
+ * en cuanto le llega el primer trozo.
  */
-function makeResponse() {
+function makeResponse({ seVaAlPrimerByte = false } = {}) {
   const headers = new Map<string, string>();
-  const res = {
-    setHeader: jest.fn((name: string, value: string) => {
-      headers.set(name.toLowerCase(), value);
-    }),
-    on: jest.fn(),
-    destroy: jest.fn(),
+  const recibido: Buffer[] = [];
+
+  const res = new Writable({
+    write(chunk: Buffer, _enc, cb) {
+      if (seVaAlPrimerByte) {
+        this.destroy(new Error('el cliente cerró la pestaña'));
+        return;
+      }
+      recibido.push(Buffer.from(chunk));
+      cb();
+    },
+  });
+
+  const setHeader = jest.fn((name: string, value: string) => {
+    headers.set(name.toLowerCase(), value);
+  });
+  Object.assign(res, { setHeader });
+
+  // Un `error` sin oyente en el destino también mataría el proceso; el `res` de
+  // verdad de Node ya trae los suyos.
+  res.on('error', () => undefined);
+
+  return {
+    res: res as unknown as Response & { setHeader: typeof setHeader },
+    headers,
+    setHeader,
+    cuerpo: () => Buffer.concat(recibido),
   };
-  return { res, headers };
 }
 
-/** Un flujo de lectura de mentira, solo para comprobar que se canaliza. */
-function makeStream() {
-  return { pipe: jest.fn(), on: jest.fn(), destroy: jest.fn() };
+/**
+ * Un flujo de lectura **de verdad**, ya escuchado.
+ *
+ * El doble respeta el contrato que `TicketAttachmentsService.openOrFail`
+ * garantiza --el flujo sale con su oyente de `error` puesto-- porque es
+ * justamente de lo que depende el controlador para no tener que ponerlo él.
+ */
+function makeStream(contenido: string | null = 'los bytes del fichero') {
+  const stream = new PassThrough();
+  stream.on('error', () => undefined);
+  // `null` deja el flujo abierto: la descarga larga que el cliente puede cortar.
+  if (contenido !== null) stream.end(contenido);
+  return stream;
 }
 
 /** Lo que devuelve `TicketAttachmentsService.download`, con los dos nombres. */
@@ -519,15 +559,15 @@ describe('TicketMessagesController.download — la cabecera', () => {
     expect(decodeURIComponent(codificado)).toBe('captura (1)!.png');
   });
 
-  it('canaliza el flujo del servicio hacia la respuesta', async () => {
+  it('canaliza el flujo del servicio hacia la respuesta, entero y sin tocarlo', async () => {
     const { controller, attachments } = makeController();
-    const download = makeDownload();
+    const download = makeDownload({ stream: makeStream('los bytes exactos del fichero') });
     attachments.download.mockResolvedValue(download);
-    const { res } = makeResponse();
+    const { res, cuerpo } = makeResponse();
 
     await controller.download(TECNICO, 3, res as any);
 
-    expect(download.stream.pipe).toHaveBeenCalledWith(res);
+    expect(cuerpo().toString()).toBe('los bytes exactos del fichero');
     expect(attachments.download).toHaveBeenCalledWith({ kind: 'STAFF', userId: 7 }, 3);
   });
 
@@ -539,34 +579,90 @@ describe('TicketMessagesController.download — la cabecera', () => {
     // esa garantía.
     const { controller, attachments } = makeController();
     attachments.download.mockResolvedValue(makeDownload());
-    const { res } = makeResponse();
+    const { res, setHeader } = makeResponse();
 
     await controller.download(TECNICO, 3, res as any);
 
-    const escritas = res.setHeader.mock.calls.map(([nombre]) => nombre.toLowerCase());
-    expect(escritas.indexOf('content-disposition')).toBeLessThan(escritas.indexOf('content-type'));
-    expect(escritas.indexOf('x-content-type-options')).toBeLessThan(
-      escritas.indexOf('content-type'),
-    );
+    const escritas = setHeader.mock.calls.map(([nombre]) => nombre.toLowerCase());
+    expect(escritas).toEqual([
+      'content-disposition',
+      'x-content-type-options',
+      'content-type',
+      'content-length',
+    ]);
   });
 
-  it('corta la conexión si el flujo falla, sobre el oyente que ya trae del servicio', async () => {
-    // Con las cabeceras enviadas no cabe un JSON de error. Lo que impide que un
-    // `ENOENT` mate el proceso **no** es este oyente sino el que pone
-    // `TicketAttachmentsService.openOrFail` al crear el flujo: ahí hay un test
-    // que lo sujeta. Este solo añade lo que este lado puede hacer.
+  /**
+   * **La fuga que motivó pasar de `.pipe()` a `stream.pipeline`.**
+   *
+   * `pipe` no limpia: cuando la respuesta muere, el flujo de lectura se queda
+   * abierto con su descriptor de fichero. Y abortar una descarga es lo más
+   * normal del mundo -- cerrar la pestaña, quedarse sin cobertura, pulsar
+   * atrás --, así que los descriptores se acumulan hasta el límite del proceso
+   * y entonces falla *todo*, no solo las descargas.
+   */
+  it('si el cliente aborta a mitad, el flujo de lectura se cierra: no fuga el descriptor', async () => {
     const { controller, attachments } = makeController();
-    const download = makeDownload();
-    attachments.download.mockResolvedValue(download);
+    // Un flujo abierto, sin `end`: la descarga larga que se puede cortar.
+    const origen = makeStream(null);
+    attachments.download.mockResolvedValue(makeDownload({ stream: origen }));
+    const { res } = makeResponse({ seVaAlPrimerByte: true });
+
+    const descarga = controller.download(TECNICO, 3, res as any);
+    origen.write('el primer trozo, y aquí el cliente se va');
+    await descarga;
+
+    expect(origen.destroyed).toBe(true);
+  });
+
+  it('una descarga que termina bien también cierra el flujo de lectura', async () => {
+    const { controller, attachments } = makeController();
+    const origen = makeStream('contenido');
+    attachments.download.mockResolvedValue(makeDownload({ stream: origen }));
     const { res } = makeResponse();
 
     await controller.download(TECNICO, 3, res as any);
 
-    const oyente = download.stream.on.mock.calls.find(([evento]: [string]) => evento === 'error');
-    expect(oyente).toBeDefined();
-    const causa = new Error('ENOENT');
-    expect(() => oyente[1](causa)).not.toThrow();
-    expect(res.destroy).toHaveBeenCalledWith(causa);
+    expect(origen.destroyed).toBe(true);
+  });
+
+  /**
+   * El otro caso que `pipeline` resuelve de propina: un flujo que **ya** falló
+   * antes de que se canalice --el `ENOENT` que llega mientras el servicio
+   * todavía no ha devuelto-- se ve mirando su estado, no esperando un evento
+   * que ya pasó. Con `.pipe()` y un oyente puesto después, la petición se
+   * quedaba colgada con su `Content-Length` y sin cuerpo.
+   */
+  it('un flujo que ya venía roto no cuelga la petición: se cierra la respuesta', async () => {
+    const { controller, attachments } = makeController();
+    const roto = makeStream(null);
+    roto.destroy(new Error('ENOENT: no such file or directory'));
+    // El error ya se emitió y lo consumió el oyente del servicio.
+    await new Promise((resolve) => setImmediate(resolve));
+    attachments.download.mockResolvedValue(makeDownload({ stream: roto }));
+    const { res, cuerpo } = makeResponse();
+
+    // Que resuelva --y no se quede esperando para siempre-- es lo que se
+    // comprueba: si colgara, el test moriría por timeout.
+    await expect(controller.download(TECNICO, 3, res as any)).resolves.toBeUndefined();
+
+    expect(cuerpo()).toHaveLength(0);
+    expect((res as unknown as Writable).destroyed).toBe(true);
+  });
+
+  it('el fallo del flujo no sale del método: el filtro global no escribe sobre una respuesta muerta', async () => {
+    // Las cabeceras ya salieron, así que no cabe un JSON de error. Si el
+    // rechazo de `pipeline` escapara, el filtro global intentaría componer su
+    // respuesta sobre lo que `pipeline` acaba de destruir.
+    const { controller, attachments } = makeController();
+    const origen = makeStream(null);
+    attachments.download.mockResolvedValue(makeDownload({ stream: origen }));
+    const { res } = makeResponse();
+
+    const descarga = controller.download(TECNICO, 3, res as any);
+    origen.destroy(new Error('ENOENT a mitad de la lectura'));
+
+    await expect(descarga).resolves.toBeUndefined();
   });
 
   it('el 404 del servicio sale sin haber escrito ninguna cabecera', async () => {
