@@ -110,6 +110,58 @@ const PLANTILLA_CLIENTE_ALTA = {
   isActive: 1,
 };
 
+/** Las dos del hilo de mensajes, con las mismas variables que sembró la 018. */
+const PLANTILLA_EQUIPO_MENSAJE = {
+  id: 43,
+  triggerKey: 'TICKET_MESSAGE_FROM_CLIENT',
+  audience: 'TEAM',
+  subject: '[{{codigo}}] El cliente escribió en el ticket — {{razon_social}}',
+  bodyMd:
+    '{{razon_social}} dejó un mensaje nuevo el {{fecha}}.\n\n- **Estado:** {{estado}}\n' +
+    '- **Prioridad:** {{prioridad}}\n- **Vence:** {{sla}}\n- **Responsable:** {{responsable}}\n\n' +
+    'El mensaje no va en este correo: léelo en el panel.\n{{enlace_panel}}',
+  isActive: 1,
+};
+
+const PLANTILLA_CLIENTE_MENSAJE = {
+  id: 44,
+  triggerKey: 'TICKET_MESSAGE_FROM_TEAM',
+  audience: 'CLIENT',
+  subject: '[{{codigo}}] Te respondimos: {{asunto}}',
+  bodyMd:
+    'Te dejamos una respuesta en tu ticket **{{codigo}}** el {{fecha}}.\n\n' +
+    '- **Estado:** {{estado}}\n- **Empresa:** {{razon_social}}\n\n' +
+    'Por seguridad no copiamos el mensaje aquí. Ábrelo en el portal:\n{{enlace_portal}}',
+  isActive: 1,
+};
+
+/** Lo que escribe `TicketMessagesService`: id del mensaje y su visibilidad. */
+function unMensajeDeCliente(overrides: Record<string, unknown> = {}): any {
+  return unEvento({
+    type: 'MESSAGE_POSTED',
+    fromStatus: null,
+    toStatus: null,
+    reason: null,
+    actorUserId: null,
+    actorClientUserId: CLIENT_USER_ID,
+    payload: { messageId: '55', visibility: 'PUBLICA' },
+    ...overrides,
+  });
+}
+
+function unMensajeDelEquipo(overrides: Record<string, unknown> = {}): any {
+  return unEvento({
+    type: 'MESSAGE_POSTED',
+    fromStatus: null,
+    toStatus: null,
+    reason: null,
+    actorUserId: ASSIGNEE_ID,
+    actorClientUserId: null,
+    payload: { messageId: '56', visibility: 'PUBLICA' },
+    ...overrides,
+  });
+}
+
 interface Opciones {
   ticket?: any | null;
   plantillas?: any[];
@@ -130,7 +182,14 @@ interface Opciones {
 function montar(opciones: Opciones = {}) {
   const {
     ticket = unTicket(),
-    plantillas = [PLANTILLA_CLIENTE, PLANTILLA_EQUIPO_ALTA, PLANTILLA_EQUIPO_SLA, PLANTILLA_CLIENTE_ALTA],
+    plantillas = [
+      PLANTILLA_CLIENTE,
+      PLANTILLA_EQUIPO_ALTA,
+      PLANTILLA_EQUIPO_SLA,
+      PLANTILLA_CLIENTE_ALTA,
+      PLANTILLA_EQUIPO_MENSAJE,
+      PLANTILLA_CLIENTE_MENSAJE,
+    ],
     clientUser = {
       id: CLIENT_USER_ID,
       clientId: CLIENT_ID,
@@ -806,6 +865,181 @@ describe('cómo se compone el correo', () => {
     expect(href).not.toContain('<');
     // La negrita de fuera del enlace sí se sigue convirtiendo.
     expect(correo.html).toContain('<strong>aquí</strong>');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// El hilo de mensajes (migración 018)
+// ---------------------------------------------------------------------------
+
+describe('avisos del hilo de mensajes', () => {
+  describe('un mensaje público del cliente avisa al equipo', () => {
+    it('al responsable cuando lo hay', async () => {
+      const { dispatcher, email } = montar();
+      const resultado = await dispatcher.dispatchForEvent(unMensajeDeCliente());
+
+      expect(resultado.sent).toBe(1);
+      expect(enviados(email).map((c) => c.to)).toEqual([RESPONSABLE_EMAIL]);
+    });
+
+    it('al buzón del equipo cuando no hay responsable', async () => {
+      const { dispatcher, email } = montar({ ticket: unTicket({ assigneeUserId: null }) });
+      await dispatcher.dispatchForEvent(unMensajeDeCliente());
+
+      expect(enviados(email).map((c) => c.to)).toEqual([BUZON_EQUIPO]);
+    });
+
+    /** Misma puerta que en `SLA_AT_RISK`: un técnico de baja no recibe correo. */
+    it('al buzón del equipo cuando el responsable está dado de baja', async () => {
+      const { dispatcher, email } = montar({
+        assignee: {
+          id: ASSIGNEE_ID,
+          email: RESPONSABLE_EMAIL,
+          fullName: RESPONSABLE_NOMBRE,
+          isActive: 0,
+        },
+      });
+
+      await dispatcher.dispatchForEvent(unMensajeDeCliente());
+      expect(enviados(email).map((c) => c.to)).toEqual([BUZON_EQUIPO]);
+    });
+
+    /**
+     * LA DECISIÓN QUE NO SE NEGOCIA: sale en cualquier estado, RESUELTO
+     * incluido. Es el caso del cliente que responde «sigue fallando» a un
+     * ticket que el equipo dio por terminado. Sin este aviso, ese mensaje cae
+     * donde nadie lo lee -- que es exactamente el argumento con el que
+     * `TicketMessagesService` rechaza los mensajes en tickets cerrados.
+     *
+     * `RESUELTO` es el estado del ticket base de este archivo, así que las
+     * pruebas de arriba ya salen de ahí; esta lo recorre entero para que nadie
+     * pueda apagarlo condicionando el aviso a un estado concreto.
+     */
+    it.each(['NUEVO', 'TRIAJE', 'ASIGNADO', 'EN_ATENCION', 'ESPERA_CLIENTE', 'DERIVADO', 'RESUELTO'])(
+      'con el ticket en %s',
+      async (status) => {
+        const { dispatcher, email } = montar({ ticket: unTicket({ status }) });
+        const resultado = await dispatcher.dispatchForEvent(unMensajeDeCliente());
+
+        expect(resultado.sent).toBe(1);
+        expect(enviados(email).map((c) => c.to)).toEqual([RESPONSABLE_EMAIL]);
+      },
+    );
+
+    it('el estado que cuenta es el del ticket: el evento del mensaje no cambia de estado', async () => {
+      const { dispatcher, email } = montar();
+      await dispatcher.dispatchForEvent(unMensajeDeCliente());
+
+      expect(enviados(email)[0].html).toContain('Resuelto');
+    });
+
+    it('y no le devuelve ningún correo al propio cliente', async () => {
+      const { dispatcher, email } = montar();
+      await dispatcher.dispatchForEvent(unMensajeDeCliente());
+
+      expect(enviados(email).map((c) => c.to)).not.toContain(AUTOR_EMAIL);
+    });
+  });
+
+  describe('un mensaje público del equipo avisa al autor del ticket', () => {
+    it('y solo a él', async () => {
+      const { dispatcher, email } = montar();
+      const resultado = await dispatcher.dispatchForEvent(unMensajeDelEquipo());
+
+      expect(resultado.sent).toBe(1);
+      expect(enviados(email).map((c) => c.to)).toEqual([AUTOR_EMAIL]);
+    });
+
+    it('no si el ticket no tiene autor de cliente', async () => {
+      const { dispatcher, email } = montar({
+        ticket: unTicket({ createdByClientUserId: null }),
+      });
+      const resultado = await dispatcher.dispatchForEvent(unMensajeDelEquipo());
+
+      expect(email.send).not.toHaveBeenCalled();
+      expect(resultado.sent).toBe(0);
+    });
+
+    it('sin filtrar nada de lo que el portal le oculta', async () => {
+      const { dispatcher, email } = montar();
+      await dispatcher.dispatchForEvent(unMensajeDelEquipo());
+
+      const [correo] = enviados(email);
+      const todo = `${correo.subject}\n${correo.html}\n${correo.text ?? ''}`;
+      expect(todo).not.toContain(PRIORIDAD);
+      expect(todo).not.toContain('2027');
+      expect(todo).not.toContain(RESPONSABLE_NOMBRE);
+      expect(todo).not.toContain(RESPONSABLE_EMAIL);
+    });
+  });
+
+  /**
+   * La regla que no puede fallar, ahora sobre el correo de verdad: una nota
+   * interna escribe **el mismo** `MESSAGE_POSTED` que una respuesta pública, y
+   * lo único que las separa es `ticket_messages.visibility`, que viaja en el
+   * `payload` de la fila.
+   */
+  describe('una nota interna no manda ningún correo', () => {
+    it('ni al cliente ni al equipo: no se llega ni a buscar plantilla', async () => {
+      const { dispatcher, email, templates } = montar();
+      const resultado = await dispatcher.dispatchForEvent(
+        unMensajeDelEquipo({ payload: { messageId: '57', visibility: 'INTERNA' } }),
+      );
+
+      expect(email.send).not.toHaveBeenCalled();
+      expect(templates.findActive).not.toHaveBeenCalled();
+      expect(resultado.sent).toBe(0);
+      expect(resultado.skipped).not.toBeNull();
+    });
+
+    /**
+     * Y se falla hacia el silencio cuando el dato no está o no se entiende. Al
+     * revés -- tratar lo desconocido como público -- es exactamente cómo una
+     * nota interna acabaría en la bandeja de un cliente el día en que una fila
+     * llegue con el `payload` incompleto, y un correo no se retira.
+     */
+    it.each([
+      ['sin payload', null],
+      ['con el payload vacío', {}],
+      ['sin la clave visibility', { messageId: '58' }],
+      ['con una visibilidad desconocida', { messageId: '58', visibility: 'PUBLICO' }],
+      ['con la visibilidad en otro tipo', { messageId: '58', visibility: 1 }],
+    ])('%s tampoco manda nada', async (_caso, payload) => {
+      const { dispatcher, email } = montar();
+      const resultado = await dispatcher.dispatchForEvent(unMensajeDeCliente({ payload }));
+
+      expect(email.send).not.toHaveBeenCalled();
+      expect(resultado.sent).toBe(0);
+    });
+
+    it('un mensaje sin autor en ninguna de las dos columnas tampoco manda nada', async () => {
+      const { dispatcher, email } = montar();
+      const resultado = await dispatcher.dispatchForEvent(
+        unMensajeDeCliente({ actorUserId: null, actorClientUserId: null }),
+      );
+
+      expect(email.send).not.toHaveBeenCalled();
+      expect(resultado.sent).toBe(0);
+    });
+  });
+
+  /**
+   * El cuerpo del mensaje no viaja en el correo: el aviso dice que hay
+   * respuesta y manda al portal o al panel. Las razones están escritas en
+   * `seeded-templates.consistency.spec.ts`; aquí se ata el otro extremo, que es
+   * por donde se rompería de verdad -- alguien copia el texto al `payload` del
+   * evento y el despachador lo arrastra sin querer al correo.
+   */
+  it('nada del payload del evento acaba dentro del correo', async () => {
+    const SECRETO = 'la clave del servidor de contabilidad es Andina2026';
+    const { dispatcher, email } = montar();
+
+    await dispatcher.dispatchForEvent(
+      unMensajeDeCliente({ payload: { messageId: '55', visibility: 'PUBLICA', bodyMd: SECRETO } }),
+    );
+
+    const [correo] = enviados(email);
+    expect(`${correo.subject}\n${correo.html}\n${correo.text ?? ''}`).not.toContain(SECRETO);
   });
 });
 

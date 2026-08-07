@@ -4,7 +4,11 @@ import { ConfigService } from '@nestjs/config';
 import { ClientsRepository } from '../clients/clients.repository';
 import { EmailService } from '../email/email.service';
 import { ClientUsersRepository } from '../portal/client-users.repository';
-import { TicketEvent } from '../tickets/entities/ticket-event.entity';
+import {
+  TICKET_MESSAGE_VISIBILITIES,
+  TicketMessageVisibility,
+} from '../ticket-messages/entities/ticket-message.entity';
+import { TicketEvent, TicketEventType } from '../tickets/entities/ticket-event.entity';
 import { Ticket } from '../tickets/entities/ticket.entity';
 import { TICKET_STATUS_LABELS, TicketStatus } from '../tickets/domain/ticket-state-machine';
 import { UsersService } from '../users/users.service';
@@ -12,7 +16,11 @@ import { TicketsRepository } from '../tickets/tickets.repository';
 import { WorkspaceService } from '../workspace/workspace.service';
 
 import { composeEmail } from './domain/email-compose';
-import { NotificationPlanEntry, plansForEvent } from './domain/notification-rules';
+import {
+  NotificationActorKind,
+  NotificationPlanEntry,
+  plansForEvent,
+} from './domain/notification-rules';
 import { ClientVariable, NotificationAudience, TeamVariable } from './domain/template-renderer';
 import { NotificationTemplate } from './entities/notification-template.entity';
 import { NotificationTemplatesService } from './notification-templates.service';
@@ -79,6 +87,23 @@ function errorText(error: unknown): string {
 const SIN_RESPONSABLE = 'Sin asignar';
 
 /**
+ * Los avisos de equipo que van al responsable cuando lo hay, y al buzón cuando
+ * no (ver `resolveTeamRecipient`).
+ *
+ * `SLA_AT_RISK` porque es suyo el plazo que vence. `MESSAGE_POSTED` -- que
+ * llega aquí solo cuando es un mensaje público del cliente, porque es lo único
+ * que `plansForEvent` deja pasar -- porque quien tiene el hilo en la cabeza es
+ * quien lo lleva; el buzón es el respaldo para el ticket que aún no tiene dueño.
+ *
+ * El alta desde el portal se queda fuera a propósito: un ticket recién entrado
+ * hay que triarlo, y eso lo mira el buzón aunque exista un responsable puesto.
+ */
+const TEAM_EVENTS_TO_ASSIGNEE: ReadonlySet<TicketEventType> = new Set<TicketEventType>([
+  'SLA_AT_RISK',
+  'MESSAGE_POSTED',
+]);
+
+/**
  * El estado en español. El `?? null` no es redundante aunque el `Record` sea
  * total: `status` llega de un `ENUM` de MySQL, y un valor añadido allí antes
  * que aquí imprimiría `undefined` dentro del correo. Con `null`, `render`
@@ -121,6 +146,40 @@ function toId(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
   return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * La visibilidad del mensaje que escribió un `MESSAGE_POSTED`, o `null`.
+ *
+ * Sale del `payload` de la fila (`{ messageId, visibility }`, lo que escribe
+ * `TicketMessagesService.post` en la misma transacción que el mensaje) y no de
+ * una segunda consulta a `ticket_messages`: es el dato del hecho registrado, no
+ * el estado actual de nada, y así el aviso no depende de que la fila del
+ * mensaje siga existiendo cuando el vigilante drene la cola.
+ *
+ * Se valida contra el enum en vez de devolver la cadena tal cual. Es lo que
+ * hace que un `payload` incompleto o con un valor que no reconocemos acabe en
+ * `null` --y por tanto en silencio, ver `plansForEvent`-- en vez de colarse
+ * como si fuera una visibilidad legítima.
+ */
+function messageVisibilityOf(event: TicketEvent): TicketMessageVisibility | null {
+  if (event.type !== 'MESSAGE_POSTED') return null;
+  const raw = (event.payload as { visibility?: unknown } | null)?.visibility;
+  return TICKET_MESSAGE_VISIBILITIES.find((v) => v === raw) ?? null;
+}
+
+/**
+ * De qué lado es quien firmó el evento, leído de las dos columnas de autor.
+ *
+ * El cliente gana cuando --por un dato corrupto-- estuvieran puestas las dos.
+ * No es indiferencia: de los dos avisos del hilo, el del cliente escribiendo va
+ * al equipo, correo interno; el otro sale hacia fuera. Ante una fila que no
+ * entendemos, la salida menos mala es la que se queda en casa.
+ */
+function actorKindOf(event: TicketEvent): NotificationActorKind | null {
+  if (toId(event.actorClientUserId) !== null) return 'CLIENT';
+  if (toId(event.actorUserId) !== null) return 'TEAM';
+  return null;
 }
 
 /**
@@ -193,6 +252,19 @@ interface NotificationContext {
  *    del cliente. Es la misma disciplina con la que el portal proyecta campo
  *    por campo.
  *
+ * ## El cuerpo de un mensaje del hilo no viaja en el correo
+ *
+ * El aviso de `MESSAGE_POSTED` dice **que hay un mensaje nuevo** y manda al
+ * portal o al panel; no reproduce el texto. Por eso este servicio no consulta
+ * `ticket_messages` ni saca del `payload` nada más que la visibilidad, y por
+ * eso no hay ninguna variable de mensaje en el catálogo del renderizador: la
+ * decisión se sostiene sola, sin depender de que nadie recuerde no usarla.
+ *
+ * El motivo, en una línea: un correo no se puede retirar y el cuerpo lo escribe
+ * una persona que puede equivocarse de destinatario. Un mensaje mal dirigido se
+ * borra del hilo; el correo que ya salió, no. El razonamiento completo está en
+ * `domain/seeded-templates.consistency.spec.ts`, junto al test que lo ata.
+ *
  * ## El envío parcial, y por qué se acepta que duplique
  *
  * Un evento puede producir dos avisos: el alta desde el portal escribe al
@@ -256,6 +328,11 @@ export class NotificationDispatcher {
       origin: ticket.origin,
       hasClientAuthor: clientAuthorId !== null,
       hasAssignee: assigneeId !== null,
+      // Los dos que distinguen una nota interna de una respuesta pública, y a
+      // la respuesta del equipo de la del cliente. Van por parámetro porque
+      // `plansForEvent` es dominio puro; quien tiene la fila delante es esto.
+      messageVisibility: messageVisibilityOf(event),
+      actorKind: actorKindOf(event),
     });
 
     if (plan.length === 0) {
@@ -507,8 +584,8 @@ export class NotificationDispatcher {
   }
 
   /**
-   * El responsable si el aviso es de SLA en riesgo y lo hay; si no, el buzón
-   * del equipo; y si está vacío, la dirección del remitente SMTP.
+   * El responsable si el aviso es de los suyos y lo hay; si no, el buzón del
+   * equipo; y si está vacío, la dirección del remitente SMTP.
    *
    * La condición se lee del tipo de evento y no de la clave del aviso: es el
    * enum `TicketEventType`, así que un cambio de nombre en las claves
@@ -517,13 +594,13 @@ export class NotificationDispatcher {
    * Un técnico dado de baja no recibe nada, igual que un usuario de cliente
    * desactivado: es correo interno, pero es la misma puerta. Su aviso cae al
    * buzón del equipo, que es justo lo que hay que hacer con un SLA en riesgo
-   * cuyo responsable ya no está.
+   * cuyo responsable ya no está -- o con un cliente que acaba de escribir.
    */
   private async resolveTeamRecipient(
     event: TicketEvent,
     assigneeId: number | null,
   ): Promise<string | null> {
-    if (event.type === 'SLA_AT_RISK' && assigneeId !== null) {
+    if (TEAM_EVENTS_TO_ASSIGNEE.has(event.type) && assigneeId !== null) {
       const assignee = await this.users.findById(assigneeId);
       const email = assignee?.isActive ? assignee.email?.trim() : null;
       if (email) return email;
