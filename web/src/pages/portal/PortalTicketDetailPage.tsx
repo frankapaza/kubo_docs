@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { portalApi } from '../../api/portal.api';
-import type { PortalTicketDetail, PortalTicketEventType } from '../../api/types';
+import type { PortalTicketDetail, PortalTicketEventType, TicketStatus } from '../../api/types';
 import { STATUS_LABELS } from '../tickets/ticket-ui';
 import { Card, CardBody, CardHeader } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { ArrowLeftIcon } from '../../components/ui/Icon';
 import { STATUS_TONES, fmtDateTime } from './PortalTicketsListPage';
+import PortalTicketThread from './thread/PortalTicketThread';
 
 /**
  * Etiquetas de los tipos de evento visibles en el portal. Son exactamente
@@ -67,6 +68,29 @@ export default function PortalTicketDetailPage() {
     };
   }, [id]);
 
+  /**
+   * El estado que devolvió el `POST` del hilo, aplicado a la ficha que ya está
+   * en pantalla.
+   *
+   * Es lo que hace **visible la reactivación**: un cliente que responde a un
+   * ticket en «Espera cliente» lo ve pasar a «En atención» en el mismo sitio de
+   * siempre, sin recargar. Sin esto, la cabecera seguiría diciendo que el ticket
+   * le espera a él justo después de haber contestado, y la lectura natural de
+   * eso es que el mensaje no llegó -- así que lo vuelve a mandar.
+   *
+   * Se toma el estado de la respuesta y no se deduce aquí: el backend condiciona
+   * la reactivación al estado que leyó dentro de su transacción y puede haber
+   * decidido no mover nada (el ticket ya no estaba donde creíamos). Adivinarlo
+   * desde este lado sería enseñar una transición que no ocurrió.
+   *
+   * `useCallback` con dependencias vacías: baja por props hasta el compositor y
+   * una referencia estable es lo que evita que acabe algún día dentro de un
+   * `useEffect` de allí provocando un ciclo de renderizados.
+   */
+  const applyTicketStatus = useCallback((status: TicketStatus) => {
+    setDetail((current) => (current && current.status !== status ? { ...current, status } : current));
+  }, []);
+
   return (
     <div className="space-y-6">
       <Link
@@ -112,6 +136,18 @@ export default function PortalTicketDetailPage() {
               )}
             </CardBody>
           </Card>
+
+          {/*
+            El hilo va **antes** del historial y no dentro: se lee de arriba
+            abajo y se responde desde el final, mientras que el historial es un
+            registro que se consulta hacia atrás. Ver el docblock de
+            `PortalTicketThread`.
+          */}
+          <PortalTicketThread
+            ticketId={detail.id}
+            ticketStatus={detail.status}
+            onTicketStatus={applyTicketStatus}
+          />
 
           <Card>
             <CardHeader title="Historial" />
