@@ -528,6 +528,19 @@ export interface Ticket {
   slaOverdue: boolean;
 }
 
+/**
+ * Lo que devuelve `POST /tickets`: el ticket **y** el identificador del primer
+ * mensaje de su hilo, que el alta escribe en la misma transacción.
+ *
+ * Es un tipo aparte y no un campo de `Ticket` porque solo viaja en la respuesta
+ * del alta: ni el listado ni el detalle lo traen. Los adjuntos que se aportan al
+ * crear el ticket se suben después contra ese mensaje, que es lo que les da una
+ * visibilidad de la que heredar.
+ */
+export interface CreatedTicket extends Ticket {
+  firstMessageId: number;
+}
+
 export interface TicketEvent {
   id: number;
   ticketId: number;
@@ -646,6 +659,15 @@ export interface PortalTicket {
 /** Detalle: lo mismo que `PortalTicket` más el timeline visible para el cliente. */
 export interface PortalTicketDetail extends PortalTicket {
   timeline: PortalTicketEvent[];
+}
+
+/**
+ * Lo que devuelve `POST /portal/tickets`. Mismo motivo que `CreatedTicket` en el
+ * panel: el identificador del primer mensaje del hilo, para colgarle los
+ * adjuntos que el cliente aportó al abrir el ticket. Solo viaja aquí.
+ */
+export interface PortalCreatedTicket extends PortalTicket {
+  firstMessageId: number;
 }
 
 /** Sistemas del cliente, solo lo imprescindible para poblar un selector. */

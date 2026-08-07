@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { ticketsApi, clientSystemsApi } from '../../api/tickets.api';
+import { ticketMessagesApi } from '../../api/ticket-messages.api';
 import { clientsApi } from '../../api/clients.api';
 import { projectsApi } from '../../api/projects.api';
 import type {
   Client,
   ClientSystem,
+  CreatedTicket,
   Project,
   ServiceCategory,
   Ticket,
@@ -14,7 +16,17 @@ import type {
   TicketUrgency,
 } from '../../api/types';
 import { SERVICE_CATEGORIES, SERVICE_CATEGORY_LABELS } from '../../api/types';
+import {
+  FileDropZone,
+  uploadPendingAttachments,
+  type PendingAttachment,
+  type RejectedAttachment,
+} from '../../components/upload';
+import { withTimeout } from '../../lib/with-timeout';
 import { ORIGIN_LABELS, PRIORITY_STYLES, TICKET_IMPACTS, TICKET_URGENCIES, previewPriority } from './ticket-ui';
+
+/** Los adjuntos pueden ser de 10 MB y van de uno en uno: se acota por archivo. */
+const UPLOAD_TIMEOUT_MS_PER_FILE = 60_000;
 
 type CaptureMode = 'text' | 'audio' | 'live';
 
@@ -51,9 +63,40 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
   const [clients, setClients] = useState<Client[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [systems, setSystems] = useState<ClientSystem[]>([]);
+  const [files, setFiles] = useState<PendingAttachment[]>([]);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  /**
+   * El ticket **ya creado** cuyo diálogo se retiene para contar qué pasó con sus
+   * archivos. Sin esto, un adjunto que no subió se perdía sin dejar rastro: el
+   * alta cierra el diálogo y con él el único sitio donde contarlo.
+   */
+  const [createdTicket, setCreatedTicket] = useState<CreatedTicket | null>(null);
+  const [attachmentIssues, setAttachmentIssues] = useState<RejectedAttachment[]>([]);
+
+  const rawTextRef = useRef<HTMLTextAreaElement>(null);
+
+  /** `key` del `FileDropZone`: la zona guarda sus propios rechazos, que este componente no ve. */
+  const [dropZoneEpoch, setDropZoneEpoch] = useState(0);
+
+  /** Corta el camino tardío tras desmontar: la subida puede durar minutos. */
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+
+  /**
+   * Guarda **síncrona** contra el doble envío. `disabled={busy}` no basta:
+   * `busy` es estado de React y no cambia hasta el siguiente render, así que un
+   * doble clic de verdad entra dos veces y crea **dos tickets**. Misma guarda
+   * que los dos compositores del hilo y que el diálogo de alta del portal.
+   */
+  const inFlight = useRef(false);
 
   // Resetea el formulario cada vez que el diálogo se abre; se mantiene
   // montado (igual que ResolveDialog) para no perder el `useEffect` de
@@ -71,6 +114,10 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
     setProjectId('');
     setSystemId('');
     setError(null);
+    setFiles([]);
+    setCreatedTicket(null);
+    setAttachmentIssues([]);
+    setDropZoneEpoch((epoch) => epoch + 1);
   }, [open]);
 
   useEffect(() => {
@@ -129,15 +176,31 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
     };
   }, [open, clientId]);
 
+  /**
+   * Cerrar por ESC o por el fondo. Con algo en vuelo no se cierra --se llevaría
+   * el informe de los archivos--, y con el ticket ya creado cerrar es *seguir*
+   * hasta él, no cancelar: el ticket existe y la bandeja tiene que enterarse.
+   */
+  const dismiss = () => {
+    if (busy) return;
+    if (createdTicket) {
+      onCreated(createdTicket);
+      return;
+    }
+    onCancel();
+  };
+
   // Cerrar con ESC — mismo idioma que ResolveDialog / ConfirmDialog.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCancel();
+      if (e.key === 'Escape') dismiss();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [open, onCancel]);
+    // Las que mira `dismiss`: sin `busy` ni `createdTicket` el oyente cerraría
+    // el diálogo en mitad de una subida.
+  }, [open, busy, createdTicket, onCancel, onCreated]);
 
   if (!open) return null;
 
@@ -145,14 +208,33 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
   const pr = PRIORITY_STYLES[priority];
 
   const submit = async () => {
+    // La guarda, antes que nada y sin ningún `await` por delante.
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      await create();
+    } finally {
+      inFlight.current = false;
+    }
+  };
+
+  const create = async () => {
     if (!rawText.trim()) {
       setError('El texto es obligatorio.');
       return;
     }
+
+    // Se capturan aquí: la lista se vacía en cuanto el ticket existe y la
+    // subida sigue necesitándolos.
+    const pending = files;
+
     setBusy(true);
     setError(null);
+    setAttachmentIssues([]);
+
+    let created: CreatedTicket;
     try {
-      const created = await ticketsApi.create({
+      created = await ticketsApi.create({
         rawText: rawText.trim(),
         subject: subject.trim() || undefined,
         origin,
@@ -163,12 +245,62 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
         projectId: projectId || undefined,
         systemId: systemId || undefined,
       });
-      onCreated(created);
     } catch (e: any) {
-      setError(e?.response?.data?.message ?? 'No se pudo crear el ticket');
-    } finally {
-      setBusy(false);
+      if (alive.current) {
+        setError(e?.response?.data?.message ?? 'No se pudo crear el ticket');
+        setBusy(false);
+      }
+      return;
     }
+
+    if (!alive.current) return;
+
+    // ------------------------------------------------------------------
+    // El ticket **existe** y eso no se deshace. Lo que pase con los adjuntos ya
+    // no es un fallo de alta, y no puede contarse como tal: «no se pudo crear
+    // el ticket» mandaría a crear un duplicado del que sí está creado.
+    // ------------------------------------------------------------------
+    setFiles([]);
+    setDropZoneEpoch((epoch) => epoch + 1);
+
+    if (pending.length === 0) {
+      setBusy(false);
+      onCreated(created);
+      return;
+    }
+
+    let issues: RejectedAttachment[];
+    try {
+      const outcome = await withTimeout(
+        // Contra el primer mensaje del hilo, que el alta acaba de escribir.
+        uploadPendingAttachments(ticketMessagesApi, created.id, created.firstMessageId, pending),
+        UPLOAD_TIMEOUT_MS_PER_FILE * pending.length,
+      );
+      issues = [...outcome.failed, ...outcome.skipped];
+    } catch {
+      // `uploadPendingAttachments` no rechaza por su cuenta, así que caer aquí
+      // solo puede ser el corte de tiempo. No se afirma que no subieran: no se
+      // sabe cuáles llegaron.
+      issues = pending.map((item) => ({
+        id: item.id,
+        filename: item.file.name,
+        code: 'TIMEOUT',
+        message:
+          `«${item.file.name}»: el servidor no respondió a tiempo. ` +
+          'Puede haberse adjuntado o no; abre el ticket para comprobarlo.',
+      }));
+    }
+
+    if (!alive.current) return;
+    setBusy(false);
+
+    if (issues.length === 0) {
+      onCreated(created);
+      return;
+    }
+
+    setAttachmentIssues(issues);
+    setCreatedTicket(created);
   };
 
   return (
@@ -176,7 +308,7 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
       role="dialog"
       aria-modal="true"
       aria-labelledby="new-ticket-dialog-title"
-      onClick={onCancel}
+      onClick={dismiss}
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '5vh 16px', zIndex: 50, overflowY: 'auto' }}
     >
       <div
@@ -247,13 +379,41 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
           <span style={labelStyle}>Texto de la solicitud *</span>
           <textarea
             id="new-ticket-rawtext"
+            ref={rawTextRef}
             value={rawText}
+            disabled={busy}
             onChange={(e) => setRawText(e.target.value)}
             rows={5}
             placeholder="Pega el WhatsApp o el correo, o escribe la solicitud tal cual te la contaron…"
             style={{ ...inputStyle, resize: 'vertical' }}
           />
         </label>
+
+        <div>
+          <span style={labelStyle}>Archivos adjuntos (opcional)</span>
+          <FileDropZone
+            key={dropZoneEpoch}
+            files={files}
+            onFilesChange={setFiles}
+            disabled={busy || createdTicket !== null}
+            pasteScope={rawTextRef}
+            hint={
+              /*
+                Decirlo aquí no es un adorno: el texto y los archivos del alta
+                quedan como **nota interna**, porque `raw_text` en un alta del
+                panel es la captura en crudo y el cliente no la ve (lo decide
+                `firstMessageVisibility` en el backend). Quien arrastra aquí un
+                volcado de logs tiene que saber dónde acaba -- y quien quiera
+                hacerle llegar algo al cliente tiene la conversación del ticket,
+                con sus dos botones y su confirmación.
+              */
+              <span style={{ display: 'block', marginTop: 2, fontSize: 11, color: '#6d7577' }}>
+                Quedan como nota interna: el cliente no los ve. Para hacerle llegar algo,
+                respóndele desde la conversación del ticket.
+              </span>
+            }
+          />
+        </div>
 
         <label htmlFor="new-ticket-subject">
           <span style={labelStyle}>Asunto (opcional)</span>
@@ -412,32 +572,70 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
           </span>
         )}
 
+        {/*
+          El ticket ya está creado: queda contar qué pasó con los archivos. El
+          titular va primero para que esto no se lea nunca como «no se creó»,
+          que llevaría a crear un duplicado del que ya existe.
+        */}
+        {attachmentIssues.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'oklch(0.45 0.11 75)' }}>
+              El ticket sí se creó. Con los archivos pasó esto:
+            </span>
+            {attachmentIssues.map((issue) => (
+              <span
+                key={issue.id}
+                role="alert"
+                data-error-code={issue.code}
+                style={{ fontSize: 12, color: 'oklch(0.4 0.09 75)', background: 'oklch(0.97 0.03 75)', border: '1px solid oklch(0.88 0.06 75)', borderRadius: 6, padding: '7px 10px' }}
+              >
+                {issue.message}
+              </span>
+            ))}
+            <span style={{ fontSize: 11, color: '#6d7577' }}>
+              Puedes adjuntarlos desde la conversación del ticket.
+            </span>
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', borderTop: '1px solid #eceeef', paddingTop: 14 }}>
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={busy}
-            style={{ fontSize: 13, padding: '9px 14px', borderRadius: 7, background: '#fff', border: '1px solid #d8dcdd', cursor: 'pointer' }}
-          >
-            Cancelar
-          </button>
-          <button
-            type="button"
-            disabled={busy || !rawText.trim()}
-            onClick={submit}
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              padding: '9px 14px',
-              borderRadius: 7,
-              background: busy || !rawText.trim() ? '#c9cdce' : '#15191a',
-              color: '#fff',
-              border: 'none',
-              cursor: busy || !rawText.trim() ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {busy ? 'Creando…' : 'Crear ticket'}
-          </button>
+          {createdTicket ? (
+            <button
+              type="button"
+              onClick={() => onCreated(createdTicket)}
+              style={{ fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: '#15191a', color: '#fff', border: 'none', cursor: 'pointer' }}
+            >
+              Ver el ticket
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={onCancel}
+                disabled={busy}
+                style={{ fontSize: 13, padding: '9px 14px', borderRadius: 7, background: '#fff', border: '1px solid #d8dcdd', cursor: 'pointer' }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={busy || !rawText.trim()}
+                onClick={submit}
+                style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  padding: '9px 14px',
+                  borderRadius: 7,
+                  background: busy || !rawText.trim() ? '#c9cdce' : '#15191a',
+                  color: '#fff',
+                  border: 'none',
+                  cursor: busy || !rawText.trim() ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {busy ? 'Creando…' : 'Crear ticket'}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

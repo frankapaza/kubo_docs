@@ -1,5 +1,6 @@
 import { api } from './client';
 import type {
+  CreatedTicket,
   Ticket, TicketDetail, TicketStatus, TicketPriority, TicketImpact, TicketUrgency,
   TicketOrigin, TicketRequestType, ServiceCategory, ClientSystem, SupportAgent, SupportAgentView, AgentLevel,
 } from './types';
@@ -42,7 +43,13 @@ export const ticketsApi = {
 
   findOne: (id: number) => api.get<TicketDetail>(`/tickets/${id}`).then((r) => r.data),
 
-  create: (body: CreateTicketBody) => api.post<Ticket>('/tickets', body).then((r) => r.data),
+  /**
+   * Devuelve `CreatedTicket` y no `Ticket`: el alta trae además el
+   * `firstMessageId` del primer mensaje del hilo, que es contra el que se suben
+   * los adjuntos aportados al crear el ticket.
+   */
+  create: (body: CreateTicketBody) =>
+    api.post<CreatedTicket>('/tickets', body).then((r) => r.data),
 
   update: (id: number, body: Partial<CreateTicketBody> & { descriptionMd?: string }) =>
     api.patch<Ticket>(`/tickets/${id}`, body).then((r) => r.data),

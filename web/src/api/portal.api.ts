@@ -1,6 +1,7 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import type {
   PortalClientSystem,
+  PortalCreatedTicket,
   PortalSession,
   PortalTicket,
   PortalTicketDetail,
@@ -137,8 +138,13 @@ export const portalApi = {
   getTicket: (id: number) =>
     portalApiClient.get<PortalTicketDetail>(`/portal/tickets/${id}`).then((r) => r.data),
 
+  /**
+   * Devuelve `PortalCreatedTicket`: el alta trae además el `firstMessageId`
+   * contra el que se suben los archivos que el cliente adjuntó al abrir el
+   * ticket.
+   */
   createTicket: (body: CreatePortalTicketBody) =>
-    portalApiClient.post<PortalTicket>('/portal/tickets', body).then((r) => r.data),
+    portalApiClient.post<PortalCreatedTicket>('/portal/tickets', body).then((r) => r.data),
 
   listSystems: () =>
     portalApiClient.get<PortalClientSystem[]>('/portal/systems').then((r) => r.data),
