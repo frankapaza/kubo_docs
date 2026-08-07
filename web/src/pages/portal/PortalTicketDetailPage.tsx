@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { portalApi } from '../../api/portal.api';
@@ -36,37 +36,80 @@ export default function PortalTicketDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // `cancelled` evita que una carga obsoleta (tras navegar rápido entre
-  // tickets) pise el estado de la vista actual.
+  /**
+   * Las dos guardas de siempre: `alive` corta el camino tardío tras desmontar y
+   * `detailSeq` decide quién manda cuando hay varias cargas en vuelo --navegar
+   * rápido entre tickets, o un refresco que adelanta a la carga inicial--. Solo
+   * la última pedida escribe el estado.
+   */
+  const alive = useRef(true);
+  const detailSeq = useRef(0);
+
   useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+
+  /**
+   * Trae la ficha entera, cabecera **e historial**.
+   *
+   * `mode` no es de dónde viene la llamada, es qué hay en pantalla mientras
+   * tanto. En `'initial'` no hay ficha y se enseña «Cargando…»; en `'refresh'`
+   * sí la hay, así que no se vacía nada y un fallo **no** se convierte en el
+   * cuadro rojo que sustituye a la página: se queda en el log y la ficha sigue
+   * donde estaba, que es exactamente lo que pasaba antes de refrescar. Tirar
+   * una ficha buena por un refresco fallido sería cambiar un desajuste por una
+   * pérdida.
+   */
+  const loadDetail = useCallback(async (mode: 'initial' | 'refresh') => {
     if (!Number.isFinite(id)) {
       // Id de ruta no numérico (URL manual, enlace obsoleto): sin este corte
-      // explícito `loading` se queda en `true` para siempre, porque nunca se
-      // dispara ni el `.then` ni el `.catch` de abajo.
+      // explícito `loading` se queda en `true` para siempre.
       setLoading(false);
       setError('Ticket no encontrado');
       return;
     }
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    portalApi
-      .getTicket(id)
-      .then((data) => {
-        if (!cancelled) setDetail(data);
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          setError(e?.response?.data?.message ?? 'No se pudo cargar el ticket.');
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    const seq = ++detailSeq.current;
+    if (mode === 'initial') {
+      setLoading(true);
+      setError(null);
+    }
+    try {
+      const data = await portalApi.getTicket(id);
+      if (!alive.current || seq !== detailSeq.current) return;
+      setDetail(data);
+      setError(null);
+    } catch (e: any) {
+      if (!alive.current || seq !== detailSeq.current) return;
+      if (mode === 'initial') {
+        setError(e?.response?.data?.message ?? 'No se pudo cargar el ticket.');
+      } else {
+        console.warn('[PortalTicketDetailPage] No se pudo refrescar la ficha del ticket.', e);
+      }
+    } finally {
+      if (alive.current && seq === detailSeq.current && mode === 'initial') setLoading(false);
+    }
   }, [id]);
+
+  useEffect(() => {
+    void loadDetail('initial');
+  }, [loadDetail]);
+
+  /**
+   * Espejo del estado que la ficha tiene ahora mismo en pantalla.
+   *
+   * Existe para poder compararlo **fuera** del actualizador de `setDetail`: un
+   * actualizador tiene que ser puro, y disparar una petición desde dentro lo
+   * haría correr dos veces bajo `StrictMode`. Leerlo de `detail` directamente
+   * obligaría a poner `detail` en las dependencias de `applyTicketStatus`, que
+   * es justo la referencia estable que hay que conservar (ver abajo).
+   */
+  const shownStatus = useRef<TicketStatus | null>(null);
+  useEffect(() => {
+    shownStatus.current = detail?.status ?? null;
+  }, [detail]);
 
   /**
    * El estado que devolvió el `POST` del hilo, aplicado a la ficha que ya está
@@ -83,13 +126,39 @@ export default function PortalTicketDetailPage() {
    * decidido no mover nada (el ticket ya no estaba donde creíamos). Adivinarlo
    * desde este lado sería enseñar una transición que no ocurrió.
    *
-   * `useCallback` con dependencias vacías: baja por props hasta el compositor y
+   * **Y el historial se vuelve a pedir.** Parchear solo `status` dejaba las dos
+   * mitades de la misma pantalla contando cosas distintas: la cabecera ya decía
+   * «En atención» y el historial de abajo, que es el registro de por qué está
+   * ahí, seguía sin el `STATUS_CHANGED` hasta la siguiente carga entera. Al
+   * cliente que acaba de escribir eso se le lee como que su mensaje movió el
+   * distintivo pero no quedó apuntado en ninguna parte --y el historial es
+   * justo el sitio donde mira para comprobar que las cosas pasaron.
+   *
+   * El parche local se mantiene además de la petición, y no se sustituye por
+   * ella: es instantáneo y no puede fallar, mientras que el refresco tarda y
+   * puede no llegar. Si no llega, la cabecera ya está bien y el historial se
+   * queda como estaba, que es donde estaba de todas formas.
+   *
+   * Solo en el portal. En el panel el historial y el hilo se refrescan por su
+   * cuenta y `TicketDetailPage` quita los `MESSAGE_POSTED`, así que allí no hay
+   * este desajuste.
+   *
+   * `useCallback` sin depender de `detail`: baja por props hasta el compositor y
    * una referencia estable es lo que evita que acabe algún día dentro de un
-   * `useEffect` de allí provocando un ciclo de renderizados.
+   * `useEffect` de allí provocando un ciclo de renderizados. Por eso la
+   * comparación va contra `shownStatus`, no contra `detail`.
    */
-  const applyTicketStatus = useCallback((status: TicketStatus) => {
-    setDetail((current) => (current && current.status !== status ? { ...current, status } : current));
-  }, []);
+  const applyTicketStatus = useCallback(
+    (status: TicketStatus) => {
+      // Se avisa siempre, cambie o no; aquí se decide. Si no cambió, no hay ni
+      // que parchear ni que volver a pedir nada.
+      if (shownStatus.current === null || shownStatus.current === status) return;
+      shownStatus.current = status;
+      setDetail((current) => (current ? { ...current, status } : current));
+      void loadDetail('refresh');
+    },
+    [loadDetail],
+  );
 
   return (
     <div className="space-y-6">
