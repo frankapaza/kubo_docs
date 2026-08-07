@@ -479,10 +479,16 @@ export type TicketOrigin =
 
 export type TicketRequestType = 'INCIDENCIA' | 'BUG' | 'MEJORA' | 'FEATURE' | 'AJUSTE';
 
+// Espejo del enum `ticket_events.type` del backend (ver
+// `modules/tickets/entities/ticket-event.entity.ts`). Tiene que estar
+// completo: `TicketTimeline` indexa su tabla de etiquetas con este tipo, así
+// que un valor que llega del servidor y no figura aquí no da error de
+// compilación --sale una fila con el título en blanco--. `MESSAGE_POSTED` lo
+// añadió la migración 018 con la conversación del ticket.
 export type TicketEventType =
   | 'CREATED' | 'TRIAGED' | 'ASSIGNED' | 'TAKEN' | 'STATUS_CHANGED'
   | 'ESCALATED' | 'COMMENT' | 'RESOLVED' | 'CLOSED' | 'REOPENED'
-  | 'SLA_AT_RISK' | 'PRIORITY_OVERRIDDEN';
+  | 'SLA_AT_RISK' | 'PRIORITY_OVERRIDDEN' | 'MESSAGE_POSTED';
 
 export interface Ticket {
   id: number;

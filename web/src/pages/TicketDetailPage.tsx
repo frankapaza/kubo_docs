@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { ticketsApi, supportAgentsApi } from '../api/tickets.api';
@@ -10,6 +10,7 @@ import TicketSlaClock from './tickets/TicketSlaClock';
 import ResolveDialog from './tickets/ResolveDialog';
 import AssignDialog from './tickets/AssignDialog';
 import OverridePriorityDialog from './tickets/OverridePriorityDialog';
+import TicketThread from './tickets/thread/TicketThread';
 
 // Mismos seis estados que OPEN_STATUSES en
 // backend/src/modules/tickets/domain/ticket-state-machine.ts (no importable
@@ -153,6 +154,17 @@ export default function TicketDetailPage() {
     act(() => ticketsApi.escalate(id, { toLevel: 'N3', reason }));
   };
 
+  // El «Historial» es el registro de lo que le pasó al ticket; la conversación
+  // tiene su propia tarjeta justo encima (ver el docblock de TicketThread, con
+  // el porqué de tenerlas separadas). Un `MESSAGE_POSTED` aquí sería la misma
+  // línea contada dos veces y, como las notas internas también escriben el
+  // suyo, dejaría en el historial una cuenta de cuántas hubo sin decir nada de
+  // ellas.
+  const lifecycleEvents = useMemo(
+    () => (detail?.timeline ?? []).filter((e) => e.type !== 'MESSAGE_POSTED'),
+    [detail],
+  );
+
   if (loading) {
     return <div style={{ padding: 26, fontSize: 13, color: '#6d7577' }}>Cargando…</div>;
   }
@@ -164,7 +176,9 @@ export default function TicketDetailPage() {
     );
   }
 
-  const { ticket, timeline } = detail;
+  // El `timeline` no se desestructura: al historial va `lifecycleEvents`, que
+  // es el mismo sin los `MESSAGE_POSTED`.
+  const { ticket } = detail;
   const st = STATUS_STYLES[ticket.status];
   const pr = PRIORITY_STYLES[ticket.priority];
 
@@ -288,9 +302,17 @@ export default function TicketDetailPage() {
             </section>
           )}
 
+          <TicketThread
+            ticketId={id}
+            ticketStatus={ticket.status}
+            clientId={clientId}
+            clientName={clientName}
+            staffNamesById={usersById}
+          />
+
           <section style={cardStyle}>
             <h2 style={{ margin: '0 0 12px', fontSize: 13, fontWeight: 600 }}>Historial</h2>
-            <TicketTimeline events={timeline} />
+            <TicketTimeline events={lifecycleEvents} />
           </section>
         </div>
 

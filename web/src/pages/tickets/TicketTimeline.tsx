@@ -14,6 +14,11 @@ const EVENT_LABELS: Record<TicketEventType, string> = {
   REOPENED: 'Reabierto',
   SLA_AT_RISK: 'SLA en riesgo',
   PRIORITY_OVERRIDDEN: 'Prioridad ajustada',
+  // La ficha no le pasa estos eventos: la conversación se enseña entera en su
+  // propia tarjeta (ver TicketThread). La etiqueta existe igualmente porque el
+  // tipo del evento es real y este mapa se indexa con él: sin entrada, un
+  // MESSAGE_POSTED que llegara por otra vía saldría con el título en blanco.
+  MESSAGE_POSTED: 'Mensaje en el hilo',
 };
 
 export default function TicketTimeline({ events }: { events: TicketEvent[] }) {
