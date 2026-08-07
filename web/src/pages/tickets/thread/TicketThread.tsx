@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { clientUsersApi } from '../../../api/client-users.api';
 import { ticketMessagesApi } from '../../../api/ticket-messages.api';
@@ -71,6 +71,8 @@ export default function TicketThread({
    * veces.
    */
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  /** Hay una recarga en curso: el botón de reintentar no admite una segunda. */
+  const [reloading, setReloading] = useState(false);
   const [clientUsersById, setClientUsersById] = useState<Map<number, string>>(new Map());
 
   const fetchThread = useCallback(
@@ -78,33 +80,67 @@ export default function TicketThread({
     [ticketId],
   );
 
-  // Carga inicial. `cancelled` evita que una respuesta de un ticket que ya no
-  // se está mirando pise el hilo del actual.
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setLoadError(null);
-    setRefreshError(null);
+  /**
+   * Guardas de la carga, que son dos cosas distintas:
+   *
+   * - `alive` corta el camino tardío tras desmontar.
+   * - `requestSeq` decide **quién manda** cuando hay varias en vuelo: solo la
+   *   última pedida escribe el estado. Sin esto, cambiar de ticket rápido o
+   *   publicar dos veces seguidas deja que una respuesta vieja pise a una
+   *   nueva, y en un hilo eso se ve como mensajes que desaparecen.
+   */
+  const alive = useRef(true);
+  const requestSeq = useRef(0);
 
-    fetchThread()
-      .then(([thread, files]) => {
-        if (cancelled) return;
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+
+  const load = useCallback(
+    async (mode: 'initial' | 'refresh') => {
+      const seq = ++requestSeq.current;
+      if (mode === 'initial') setLoading(true);
+      else setReloading(true);
+
+      try {
+        const [thread, files] = await fetchThread();
+        if (!alive.current || seq !== requestSeq.current) return;
         setMessages(thread);
         setAttachments(files);
-      })
-      .catch((failure: unknown) => {
-        if (cancelled) return;
-        console.warn('[TicketThread] No se pudo cargar el hilo del ticket.', failure);
-        setLoadError('No se pudo cargar la conversación de este ticket.');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+        // **Los dos**. El éxito borra también el error de carga: si no, la
+        // lista se queda escondida detrás de un cuadro rojo que ya no describe
+        // nada --un acierto tragado, que es la otra cara de tragarse un fallo--
+        // y quien acaba de publicar concluye que su mensaje no entró y lo
+        // vuelve a mandar.
+        setLoadError(null);
+        setRefreshError(null);
+      } catch (failure) {
+        if (!alive.current || seq !== requestSeq.current) return;
+        console.warn('[TicketThread] No se pudo traer la conversación del ticket.', failure);
+        if (mode === 'initial') {
+          setLoadError('No se pudo cargar la conversación de este ticket.');
+        } else {
+          setRefreshError(
+            'La conversación de abajo puede estar desactualizada: no se pudo volver a cargar.',
+          );
+        }
+      } finally {
+        if (alive.current && seq === requestSeq.current) {
+          setLoading(false);
+          setReloading(false);
+        }
+      }
+    },
+    [fetchThread],
+  );
 
-    return () => {
-      cancelled = true;
-    };
-  }, [fetchThread]);
+  // Carga inicial, y de nuevo cada vez que cambia el ticket.
+  useEffect(() => {
+    void load('initial');
+  }, [load]);
 
   // Los nombres del lado del cliente. Si la petición falla (un rol sin permiso
   // sobre el catálogo, por ejemplo), el hilo se sigue leyendo: los mensajes del
@@ -135,19 +171,8 @@ export default function TicketThread({
   }, [clientId]);
 
   const reload = useCallback(() => {
-    setRefreshError(null);
-    fetchThread()
-      .then(([thread, files]) => {
-        setMessages(thread);
-        setAttachments(files);
-      })
-      .catch((failure: unknown) => {
-        console.warn('[TicketThread] No se pudo refrescar el hilo.', failure);
-        setRefreshError(
-          'La conversación de abajo puede estar desactualizada: no se pudo volver a cargar.',
-        );
-      });
-  }, [fetchThread]);
+    void load('refresh');
+  }, [load]);
 
   /** Los adjuntos, colgados de su mensaje. Los huérfanos no se pierden: van al final. */
   const byMessage = useMemo(() => {
@@ -198,10 +223,11 @@ export default function TicketThread({
           <span className="flex-1">{refreshError}</span>
           <button
             type="button"
+            disabled={reloading}
             onClick={reload}
-            className="rounded border border-amber-400 px-2 py-1 font-medium hover:bg-amber-100"
+            className="rounded border border-amber-400 px-2 py-1 font-medium hover:bg-amber-100 disabled:opacity-50"
           >
-            Reintentar
+            {reloading ? 'Actualizando…' : 'Reintentar'}
           </button>
         </div>
       )}
@@ -216,10 +242,11 @@ export default function TicketThread({
           <span className="flex-1">{loadError}</span>
           <button
             type="button"
+            disabled={reloading}
             onClick={reload}
-            className="rounded border border-red-400 px-2 py-1 font-medium hover:bg-red-100"
+            className="rounded border border-red-400 px-2 py-1 font-medium hover:bg-red-100 disabled:opacity-50"
           >
-            Reintentar
+            {reloading ? 'Actualizando…' : 'Reintentar'}
           </button>
         </div>
       )}

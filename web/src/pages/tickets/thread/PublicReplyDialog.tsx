@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 import { audienceSentence, VISIBILITY_SKINS } from './message-visibility';
+import type { PostFailure } from './post-failure';
 
 /**
  * El último control antes de que un mensaje salga hacia el cliente.
@@ -16,24 +17,37 @@ import { audienceSentence, VISIBILITY_SKINS } from './message-visibility';
  * va con prisa.
  *
  * Lo que enseña no es un «¿Estás seguro?»: es **el mensaje tal y como va a
- * quedar**, con los colores y la etiqueta de una respuesta pública, y el nombre
- * de quien lo va a abrir. Un «esto lo rompió el becario» escrito creyendo que
- * era privado se lee distinto debajo de un cartel que dice quién lo leerá.
+ * quedar** --el cuerpo ya recortado, que es exactamente el que se publica--,
+ * con los colores y la etiqueta de una respuesta pública, y el nombre de quien
+ * lo va a abrir.
  *
- * El foco entra en **Cancelar**: así la tecla Intro, que es la que se pulsa sin
- * mirar, no manda nada.
+ * **El error del envío sale aquí dentro, no detrás.** Antes se escribía en el
+ * compositor, que en ese momento está tapado por este modal: el envío fallaba,
+ * el diálogo seguía abierto sin decir una palabra y con el botón rehabilitado.
+ * Eso enseña justo el reflejo de doble clic que la asimetría quiere evitar --y
+ * la asimetría solo vale mientras confirmar sea un acto que se lee.
+ *
+ * El foco entra en **Cancelar** (así la tecla Intro, que es la que se pulsa sin
+ * mirar, no manda nada), **no se sale del diálogo con el tabulador** y **vuelve
+ * al elemento de antes** al cerrarse.
  */
 interface PublicReplyDialogProps {
   open: boolean;
-  /** El texto tal cual, sin recortar: se enseña entero. */
+  /** El cuerpo **ya recortado**: el mismo que va a viajar en la petición. */
   bodyMd: string;
   attachmentCount: number;
   clientName: string | null;
   /** Verdadero mientras el envío está en vuelo. */
   submitting: boolean;
+  /** Lo que falló al enviar, si falló. Se enseña aquí dentro. */
+  error: PostFailure | null;
   onCancel: () => void;
   onConfirm: () => void;
 }
+
+/** Lo que puede recibir el foco dentro del diálogo. */
+const FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export default function PublicReplyDialog({
   open,
@@ -41,25 +55,72 @@ export default function PublicReplyDialog({
   attachmentCount,
   clientName,
   submitting,
+  error,
   onCancel,
   onConfirm,
 }: PublicReplyDialogProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  /** Quién tenía el foco antes de abrir, para devolvérselo al cerrar. */
+  const previouslyFocused = useRef<HTMLElement | null>(null);
 
-  // Escape cierra, como en el resto de los diálogos del panel. No mientras el
-  // envío está en vuelo: cerrar entonces daría a entender que se ha cancelado
-  // algo que ya va de camino.
+  // Escape cierra, como en el resto de los diálogos del panel; y el tabulador
+  // da la vuelta dentro del diálogo en vez de irse a los botones de detrás,
+  // que están tapados y no se pueden ver mientras hay un modal delante.
+  //
+  // Ninguna de las dos cosas ocurre mientras el envío está en vuelo: cerrar
+  // entonces daría a entender que se ha cancelado algo que ya va de camino. Esa
+  // ventana está acotada por el tiempo de espera del compositor, así que no
+  // puede quedarse abierta para siempre.
   useEffect(() => {
     if (!open) return;
+
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !submitting) onCancel();
+      if (event.key === 'Escape') {
+        if (!submitting) onCancel();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const panel = panelRef.current;
+      if (!panel) return;
+      const focusables = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE));
+      if (focusables.length === 0) {
+        // Todo deshabilitado (envío en vuelo): el foco se queda donde está en
+        // vez de escaparse detrás del modal.
+        event.preventDefault();
+        return;
+      }
+
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+
+      if (event.shiftKey && (active === first || !panel.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (active === last || !panel.contains(active))) {
+        event.preventDefault();
+        first.focus();
+      }
     };
+
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [open, submitting, onCancel]);
 
   useEffect(() => {
-    if (open) cancelRef.current?.focus();
+    if (!open) return;
+
+    previouslyFocused.current = document.activeElement as HTMLElement | null;
+    cancelRef.current?.focus();
+
+    return () => {
+      // Devolver el foco es lo que evita que, al cerrar, quien navega con
+      // teclado aparezca al principio del documento sin saber dónde está.
+      previouslyFocused.current?.focus?.();
+      previouslyFocused.current = null;
+    };
   }, [open]);
 
   if (!open) return null;
@@ -77,6 +138,7 @@ export default function PublicReplyDialog({
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
     >
       <div
+        ref={panelRef}
         onClick={(event) => event.stopPropagation()}
         className="flex max-h-[88vh] w-[620px] max-w-[94vw] flex-col gap-4 overflow-y-auto rounded-xl bg-white p-6 shadow-pop"
       >
@@ -113,6 +175,15 @@ export default function PublicReplyDialog({
           </div>
         </div>
 
+        {error && (
+          <p
+            role="alert"
+            className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-[13px] text-red-800"
+          >
+            <strong className="font-semibold">{error.headline}</strong> {error.detail}
+          </p>
+        )}
+
         <p className="text-xs text-slate-500">
           ¿Era una nota para el equipo? Cancela y usa el botón ámbar «
           {VISIBILITY_SKINS.INTERNA.action}».
@@ -134,7 +205,7 @@ export default function PublicReplyDialog({
             onClick={onConfirm}
             className={`h-10 rounded-lg px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${skin.buttonClass}`}
           >
-            {submitting ? 'Enviando…' : 'Sí, enviar al cliente'}
+            {submitting ? 'Enviando…' : error ? 'Reintentar el envío' : 'Sí, enviar al cliente'}
           </button>
         </div>
       </div>

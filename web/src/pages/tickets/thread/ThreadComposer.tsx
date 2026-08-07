@@ -15,6 +15,7 @@ import {
   NO_DESTINATION_NOTICE,
   VISIBILITY_SKINS,
 } from './message-visibility';
+import type { PostFailure } from './post-failure';
 import PublicReplyDialog from './PublicReplyDialog';
 
 /**
@@ -57,6 +58,31 @@ interface ThreadComposerProps {
   onPosted: () => void;
 }
 
+/**
+ * Cortes locales de tiempo, porque la instancia de axios del proyecto no
+ * declara ninguno.
+ *
+ * Sin ellos, una petición que no llega a responder nunca no deja «el botón
+ * muerto»: deja **el diálogo convertido en una trampa**. Con el envío colgado,
+ * Cancelar está deshabilitado, Escape se ignora y el clic en el fondo también,
+ * porque las tres cosas se bloquean a propósito mientras hay algo de camino.
+ * Sin salida, la única escapatoria es recargar la página, y recargando se
+ * pierde el texto escrito.
+ *
+ * Que la instancia sea compartida no impide acotar **aquí**: se acota la espera
+ * de esta pantalla, no la de nadie más.
+ */
+const POST_TIMEOUT_MS = 20_000;
+/** Los adjuntos pueden ser de 10 MB y van de uno en uno: se acota por archivo. */
+const UPLOAD_TIMEOUT_MS_PER_FILE = 60_000;
+
+const TIMEOUT_FAILURE: PostFailure = {
+  headline: 'El servidor no respondió a tiempo.',
+  detail:
+    'El mensaje puede haberse publicado o no: actualiza la conversación y comprueba si está ' +
+    'antes de volver a enviarlo.',
+};
+
 export default function ThreadComposer({ ticketId, clientName, onPosted }: ThreadComposerProps) {
   const [body, setBody] = useState('');
   const [files, setFiles] = useState<PendingAttachment[]>([]);
@@ -68,16 +94,32 @@ export default function ThreadComposer({ ticketId, clientName, onPosted }: Threa
 
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  /** Falló la **escritura**: no se publicó nada. Distinto de un fallo de refresco. */
-  const [writeError, setWriteError] = useState<string | null>(null);
+  /** Falló la **escritura**. Distinto, y con otras palabras, de un fallo de refresco. */
+  const [writeError, setWriteError] = useState<PostFailure | null>(null);
+  /** El mismo fallo, cuando ocurre con el diálogo delante: se cuenta ahí dentro. */
+  const [dialogError, setDialogError] = useState<PostFailure | null>(null);
   /** El mensaje sí se publicó; alguno de sus archivos, no. */
   const [attachmentIssues, setAttachmentIssues] = useState<RejectedAttachment[]>([]);
+
+  /**
+   * Cambia en cada mensaje publicado y sirve de `key` del `FileDropZone`.
+   *
+   * La zona de archivos guarda **sus propios** rechazos («no es de un tipo
+   * permitido…»), que este componente no ve y no puede limpiar. Sin esto, los
+   * rechazos del mensaje anterior se quedaban colgando debajo del compositor
+   * del siguiente, hablando de archivos que ya no están en ninguna parte.
+   * Cambiar la clave la remonta limpia; los archivos aceptados son estado de
+   * aquí y se vacían aparte.
+   */
+  const [dropZoneEpoch, setDropZoneEpoch] = useState(0);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const domId = useId();
 
   const busy = sending !== null;
-  const ready = body.trim().length > 0;
+  /** El cuerpo tal y como va a viajar: lo mismo que se envía y lo que se previsualiza. */
+  const trimmedBody = body.trim();
+  const ready = trimmedBody.length > 0;
   // Qué destino se está enseñando, por orden de mando: el envío en curso, la
   // confirmación abierta, y por último lo que se esté señalando con el cursor o
   // el foco. Los dos primeros hacen falta porque al pulsar el botón el cursor
@@ -88,52 +130,92 @@ export default function ThreadComposer({ ticketId, clientName, onPosted }: Threa
   const skin = shown ? VISIBILITY_SKINS[shown] : null;
 
   const send = async (visibility: TicketMessageVisibility) => {
+    // Los archivos se capturan aquí: más abajo se vacía la lista en cuanto el
+    // mensaje existe, y la subida sigue necesitándolos.
+    const pending = files;
+
     setSending(visibility);
     setWriteError(null);
+    setDialogError(null);
     setAttachmentIssues([]);
 
+    let posted;
     try {
-      const posted = await ticketMessagesApi.post(ticketId, {
-        bodyMd: body.trim(),
-        visibility,
-      });
-
-      // Los adjuntos van después: su URL lleva el id del mensaje, que no existe
-      // hasta aquí. `uploadPendingAttachments` los sube de uno en uno y cuenta
-      // cada rechazo con su nombre y su motivo.
-      let issues: RejectedAttachment[] = [];
-      if (files.length > 0) {
-        const outcome = await uploadPendingAttachments(
-          ticketMessagesApi,
-          ticketId,
-          posted.message.id,
-          files,
-        );
-        issues = [...outcome.failed, ...outcome.skipped];
-      }
-
-      // Se limpia aunque algún archivo haya fallado: el mensaje **ya está
-      // publicado**, así que dejar los archivos en la zona invitaría a pulsar
-      // otra vez y eso publicaría un segundo mensaje. Los fallos quedan escritos
-      // debajo, con el nombre de cada archivo, para poder volver a adjuntarlos
-      // en un mensaje nuevo a sabiendas.
-      setBody('');
-      setFiles([]);
-      setConfirmOpen(false);
-      setAttachmentIssues(issues);
-      onPosted();
+      posted = await withTimeout(
+        ticketMessagesApi.post(ticketId, { bodyMd: trimmedBody, visibility }),
+        POST_TIMEOUT_MS,
+      );
     } catch (failure) {
-      setWriteError(describePostError(failure));
-    } finally {
+      // El error va donde el usuario está mirando. La respuesta pública se
+      // manda siempre desde el diálogo, y el diálogo tapa el compositor:
+      // escribir ahí detrás es dejar el fallo fuera de la vista, con el botón
+      // de confirmar rehabilitado y sin una palabra --justo el reflejo de doble
+      // clic que la confirmación existe para evitar.
+      const described = describePostError(failure);
+      if (visibility === 'PUBLICA') setDialogError(described);
+      else setWriteError(described);
       setSending(null);
+      return;
     }
+
+    // ------------------------------------------------------------------
+    // A partir de aquí el mensaje **existe**. Nada de lo que pase con los
+    // adjuntos vuelve a ser un fallo de escritura, y los campos se vacían ya:
+    // dejarlos llenos durante la subida invita a pulsar otra vez, y eso
+    // publicaría un segundo mensaje.
+    // ------------------------------------------------------------------
+    setConfirmOpen(false);
+    setBody('');
+    setFiles([]);
+    setDropZoneEpoch((epoch) => epoch + 1);
+
+    // **Imprescindible, y por poco no estaba.** Al vaciarse el cuerpo, los dos
+    // botones pasan a deshabilitados, y un botón deshabilitado **no emite
+    // `mouseleave`**: si el puntero sigue encima, `aimed` se queda clavado en el
+    // destino del mensaje que se acaba de mandar. El resultado era que, tras
+    // guardar una nota interna, el recuadro seguía ámbar afirmando «solo lo lee
+    // el equipo… no se envía ningún correo» **mientras se escribía el mensaje
+    // siguiente**, que puede ir a otro sitio. No desvía el envío --eso lo decide
+    // el botón que se pulsa-- pero invierte la señal sobre la que se apoya todo
+    // lo demás, que es peor.
+    setAimed(null);
+
+    // El hilo se refresca ya, para que el mensaje aparezca aunque los adjuntos
+    // tarden. Se vuelve a refrescar al final, cuando ya cuelgan de él.
+    onPosted();
+
+    if (pending.length > 0) {
+      try {
+        const outcome = await withTimeout(
+          uploadPendingAttachments(ticketMessagesApi, ticketId, posted.message.id, pending),
+          UPLOAD_TIMEOUT_MS_PER_FILE * pending.length,
+        );
+        setAttachmentIssues([...outcome.failed, ...outcome.skipped]);
+      } catch {
+        // `uploadPendingAttachments` no rechaza por su cuenta --cuenta cada
+        // rechazo dentro de su resultado--, así que caer aquí solo puede ser el
+        // corte de tiempo. Se cuenta archivo por archivo y sin afirmar que no
+        // subieron: no se sabe cuáles llegaron.
+        setAttachmentIssues(
+          pending.map((item) => ({
+            id: item.id,
+            filename: item.file.name,
+            code: 'TIMEOUT',
+            message:
+              `«${item.file.name}»: el servidor no respondió a tiempo. ` +
+              'Puede haberse adjuntado o no; actualiza la conversación para comprobarlo.',
+          })),
+        );
+      }
+      onPosted();
+    }
+
+    setSending(null);
   };
 
   // Se anota siempre, también durante el envío: mientras dura, `shown` hace
   // caso a `sending` de todas formas, y al terminar `aimed` refleja dónde está
-  // de verdad el cursor. Ignorar el `mouseleave` mientras hay una petición en
-  // vuelo dejaba el recuadro teñido de un destino del que el usuario ya se
-  // había apartado.
+  // de verdad el cursor.
   const aim = (visibility: TicketMessageVisibility | null) => () => setAimed(visibility);
 
   const destinationButton = (visibility: TicketMessageVisibility, onClick: () => void) => {
@@ -196,6 +278,7 @@ export default function ThreadComposer({ ticketId, clientName, onPosted }: Threa
       />
 
       <FileDropZone
+        key={dropZoneEpoch}
         className="mt-3"
         files={files}
         onFilesChange={setFiles}
@@ -210,14 +293,14 @@ export default function ThreadComposer({ ticketId, clientName, onPosted }: Threa
           role="alert"
           className="mt-3 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-[13px] text-red-800"
         >
-          <strong className="font-semibold">No se publicó nada.</strong> {writeError}
+          <strong className="font-semibold">{writeError.headline}</strong> {writeError.detail}
         </p>
       )}
 
       {attachmentIssues.length > 0 && (
         <ul className="mt-3 space-y-1">
           <li className="text-xs font-semibold text-amber-800">
-            El mensaje sí se publicó, pero estos archivos no se pudieron adjuntar:
+            El mensaje sí se publicó. Con los archivos pasó esto:
           </li>
           {attachmentIssues.map((issue) => (
             <li
@@ -233,7 +316,10 @@ export default function ThreadComposer({ ticketId, clientName, onPosted }: Threa
       )}
 
       <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-start">
-        {destinationButton('PUBLICA', () => setConfirmOpen(true))}
+        {destinationButton('PUBLICA', () => {
+          setDialogError(null);
+          setConfirmOpen(true);
+        })}
         {destinationButton('INTERNA', () => void send('INTERNA'))}
       </div>
 
@@ -245,15 +331,49 @@ export default function ThreadComposer({ ticketId, clientName, onPosted }: Threa
 
       <PublicReplyDialog
         open={confirmOpen}
-        bodyMd={body}
+        // El cuerpo **recortado**: es el que se envía, así que es el que hay que
+        // enseñar. Previsualizar el sin recortar convertía «esto es lo que se
+        // publica» en una frase que no era exacta.
+        bodyMd={trimmedBody}
         attachmentCount={files.length}
         clientName={clientName}
         submitting={sending === 'PUBLICA'}
-        onCancel={() => setConfirmOpen(false)}
+        error={dialogError}
+        onCancel={() => {
+          setConfirmOpen(false);
+          setDialogError(null);
+        }}
         onConfirm={() => void send('PUBLICA')}
       />
     </div>
   );
+}
+
+/**
+ * La misma promesa, pero que se rinde al cabo de un rato.
+ *
+ * No cancela la petición --no hay forma de hacerlo sin tocar la instancia de
+ * axios compartida--, así que el mensaje que se enseña **no afirma que no se
+ * haya publicado**: con una respuesta que no llega, eso no se sabe. Decir «no
+ * se envió» sería la forma más directa de provocar el envío duplicado, que en
+ * una respuesta pública son dos correos idénticos al cliente.
+ */
+class TimeoutError extends Error {
+  constructor() {
+    super(`${TIMEOUT_FAILURE.headline} ${TIMEOUT_FAILURE.detail}`);
+    this.name = 'TimeoutError';
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const alarm = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new TimeoutError()), ms);
+  });
+  // `finally` y no `then`: el temporizador se apaga tanto si la petición sale
+  // bien como si falla, y sin él el proceso se queda con un `setTimeout` vivo
+  // por cada mensaje enviado.
+  return Promise.race([promise, alarm]).finally(() => clearTimeout(timer));
 }
 
 /**
@@ -265,15 +385,23 @@ export default function ThreadComposer({ ticketId, clientName, onPosted }: Threa
  * los adjuntos, y leer que falló «el archivo» mandaría a buscar el problema
  * donde no está.
  */
-function describePostError(error: unknown): string {
+function describePostError(error: unknown): PostFailure {
+  // El único caso en el que **no** se puede afirmar que no se publicó nada.
+  if (error instanceof TimeoutError) return TIMEOUT_FAILURE;
+
+  const headline = 'No se publicó nada.';
+
   if (axios.isAxiosError(error)) {
     if (!error.response) {
-      return 'No se pudo contactar con el servidor. Comprueba tu conexión e inténtalo de nuevo.';
+      return {
+        headline,
+        detail: 'No se pudo contactar con el servidor. Comprueba tu conexión e inténtalo de nuevo.',
+      };
     }
     const body: unknown = error.response.data;
     if (body && typeof body === 'object' && typeof (body as { message?: unknown }).message === 'string') {
-      return (body as { message: string }).message;
+      return { headline, detail: (body as { message: string }).message };
     }
   }
-  return 'No se pudo publicar el mensaje. Inténtalo de nuevo.';
+  return { headline, detail: 'No se pudo publicar el mensaje. Inténtalo de nuevo.' };
 }
