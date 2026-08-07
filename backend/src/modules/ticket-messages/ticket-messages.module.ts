@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { TicketAttachment } from './entities/ticket-attachment.entity';
 import { TicketMessage } from './entities/ticket-message.entity';
 import { TicketAttachmentsService } from './ticket-attachments.service';
+import { TicketMessagesController } from './ticket-messages.controller';
 import { TicketMessagesRepository } from './ticket-messages.repository';
 import { TicketMessagesService } from './ticket-messages.service';
 import { StorageModule } from '../../common/storage/storage.module';
@@ -23,7 +24,10 @@ import { TicketsModule } from '../tickets/tickets.module';
  * sobre por qué el proveedor se extrajo en vez de arrastrar aquí la cola de
  * transcripción entera.
  *
- * Faltan los controladores que exponen todo esto: llegan en tareas siguientes.
+ * `TicketMessagesController` expone el hilo y los adjuntos para el **panel
+ * interno**. La superficie del portal es la del `PortalModule`, con su propio
+ * guard y su propio actor: son dos puertas distintas al mismo servicio, que es
+ * quien tiene la política.
  */
 @Module({
   imports: [
@@ -31,6 +35,7 @@ import { TicketsModule } from '../tickets/tickets.module';
     TicketsModule,
     StorageModule,
   ],
+  controllers: [TicketMessagesController],
   // El repositorio **no** se exporta a propósito: es quien lee y escribe el
   // hilo sin comprobar de quién es el ticket. Si otro módulo pudiera
   // inyectarlo, se saltaría `loadVisibleOrFail` sin darse cuenta y la
