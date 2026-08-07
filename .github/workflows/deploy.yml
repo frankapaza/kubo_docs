@@ -1,8 +1,38 @@
 name: Deploy to Production
 
+# -----------------------------------------------------------------------------
+#  EL DISPARADOR: detras del CI, no en paralelo con el.
+#
+#  Antes era `on: push: branches: [main]`. El CI tenia el mismo disparador, asi
+#  que los dos workflows arrancaban a la vez y ninguno miraba al otro: un CI en
+#  rojo no impedia desplegar. Con la suite del backend y los dos builds ya
+#  dentro del CI, esa independencia pasaba de ser un descuido a ser el agujero.
+#
+#  `workflow_run` es la unica forma de que un workflow espere a otro cuando son
+#  ficheros distintos (`needs:` solo vale entre trabajos del mismo fichero).
+#  El `if` del trabajo es imprescindible: `types: [completed]` dispara tambien
+#  cuando el CI FALLA o se cancela, y sin el `conclusion == 'success'` esto
+#  desplegaria justo en el caso que viene a evitar.
+#
+#  DOS COSAS QUE CONVIENE SABER DE `workflow_run`
+#    · Solo se dispara con la version de este fichero que este en la rama por
+#      omision. Mientras este cambio viva en una rama, no se dispara nada; empieza
+#      a valer al entrar en `main`.
+#    · El contexto es el de la rama por omision, no el del commit que disparo el
+#      CI. Aqui da igual: el despliegue no usa `actions/checkout`, entra por SSH
+#      y hace `git pull` en el VPS, asi que despliega lo que haya en `main` en
+#      ese momento —exactamente igual que antes.
+#
+#  `workflow_dispatch` se queda como valvula: si el CI se rompe por algo ajeno
+#  al codigo desplegable, tiene que existir una forma de desplegar a mano sin
+#  quitar la puerta. Es un boton, no un atajo por omision.
+# -----------------------------------------------------------------------------
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
+  workflow_dispatch:
 
 # -----------------------------------------------------------------------------
 #  El despliegue prepara la base ANTES de reconstruir, y por eso es seguro.
@@ -36,6 +66,13 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # Un `workflow_run` de tipo `completed` llega tambien cuando el CI acaba en
+    # rojo o cancelado: sin esta linea, el gate no gatea nada. El
+    # `workflow_dispatch` no trae `workflow_run` en el evento, y por eso el
+    # primer termino lo deja pasar.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     steps:
       - name: Deploy to VPS
         uses: appleboy/ssh-action@v1.0.3

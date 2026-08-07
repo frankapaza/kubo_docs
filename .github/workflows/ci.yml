@@ -1,12 +1,38 @@
 name: CI
 
 # -----------------------------------------------------------------------------
-#  Las comprobaciones que necesitan **el repositorio entero**.
+#  Lo que tiene que estar en verde antes de desplegar.
 #
-#  Existe por un caso concreto: `web/package.json` tiene un `prebuild` que
-#  verifica que `web/src/api/attachment-rules.generated.ts` sigue coincidiendo
-#  con `backend/src/modules/ticket-messages/domain/attachment-rules.ts`, que es
-#  donde de verdad se deciden los tipos de adjunto aceptados y sus topes.
+#  Este fichero se estrenó con **un solo trabajo**: la comprobación de que el
+#  frontend sigue al dominio de adjuntos del backend. Eso dejaba un CI que no
+#  ejecutaba ni una prueba ni una compilación, es decir, que aprobaba una rama
+#  con la suite en rojo y con el TypeScript sin compilar. Y como
+#  `deploy.yml` no dependía de este fichero para nada --dos workflows sueltos
+#  disparados por el mismo `push`--, un CI en rojo tampoco impedía desplegar:
+#  los dos arrancaban a la vez y el despliegue no miraba al otro.
+#
+#  Ahora son tres trabajos, en paralelo porque no dependen entre sí, y
+#  `deploy.yml` **no arranca hasta que este workflow termina en verde**
+#  (`workflow_run`; ver la cabecera de aquel fichero).
+#
+#  POR QUÉ LAS PRUEBAS DEL BACKEND Y SU BUILD VAN EN EL MISMO TRABAJO
+#  Comparten el `npm ci`, que es lo que cuesta. Separarlos duplicaría la
+#  instalación entera para ganar un poco de paralelismo y una casilla más en la
+#  interfaz. Van en ese orden a propósito: si la suite está en rojo, el fallo
+#  que se lee primero es el de la prueba y no un error de compilación derivado.
+#
+#  POR QUÉ EL WEB SÍ VA APARTE
+#  No comparte nada con el backend: otro `package-lock.json`, otro `node_modules`
+#  y otro cacheado. Y su `build` es `tsc && vite build`, así que compilar es
+#  también toda la comprobación de tipos que tiene el frontend --no hay `test`
+#  en `web/package.json`. Es el único trabajo que puede pillar un error de tipos
+#  de una pantalla.
+#
+#  SOBRE `attachment-rules`, QUE ES DE DONDE VENÍA ESTE FICHERO
+#  `web/package.json` tiene un `prebuild` que verifica que
+#  `web/src/api/attachment-rules.generated.ts` sigue coincidiendo con
+#  `backend/src/modules/ticket-messages/domain/attachment-rules.ts`, que es donde
+#  de verdad se deciden los tipos de adjunto aceptados y sus topes.
 #
 #  Ese `prebuild` no puede ser la garantía, y conviene tenerlo escrito:
 #  `docker-compose.yml` le da al servicio `web` el contexto `./web`, donde
@@ -14,12 +40,13 @@ name: CI
 #  (`--skip-if-missing`, que existe justo para que la imagen no se caiga por no
 #  poder comprobar algo que ya viene comprobado del repositorio) y se queda en
 #  un aviso por consola. Es decir: en producción, donde de verdad se construye,
-#  el `prebuild` no aplica nada. Lo único que quedaba era un desarrollador
-#  compilando fuera de Docker, y nada obliga a eso.
+#  el `prebuild` no aplica nada.
 #
 #  Aquí sí están las dos carpetas, así que aquí se ejecuta **sin**
 #  `--skip-if-missing`: si por lo que sea la fuente no estuviera, el trabajo
-#  falla en vez de aprobar por ausencia.
+#  falla en vez de aprobar por ausencia. Sigue teniendo trabajo propio y no se
+#  fía del `prebuild` del trabajo `web`, que corre con `--skip-if-missing` y
+#  por tanto puede aprobar callando.
 #
 #  Lo que una divergencia provoca no es un agujero --el servidor sigue siendo la
 #  autoridad, `assertAcceptable` decide por la firma de bytes-- sino que la criba
@@ -47,3 +74,55 @@ jobs:
       - name: Comprobar que el fichero generado está al día
         working-directory: web
         run: node scripts/sync-attachment-rules.mjs --check
+
+  backend:
+    name: Backend — pruebas y compilación
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      # `npm ci` y no `npm install`: instala exactamente el lockfile y falla si
+      # se ha desincronizado del package.json, en vez de arreglarlo en silencio
+      # y probar algo distinto de lo que se despliega.
+      - name: Instalar dependencias
+        working-directory: backend
+        run: npm ci
+
+      # La suite no toca ninguna base de datos ni ningún servicio: todo son
+      # dobles. Por eso no hace falta levantar MySQL ni Redis aquí, y si algún
+      # día un test los necesitara, este trabajo es el sitio donde se notaría.
+      - name: Pruebas
+        working-directory: backend
+        run: npm test
+
+      - name: Compilar
+        working-directory: backend
+        run: npm run build
+
+  web:
+    name: Web — compilación y tipos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Instalar dependencias
+        working-directory: web
+        run: npm ci
+
+      # `tsc && vite build`: compilar es aquí toda la comprobación de tipos que
+      # tiene el frontend, porque `web` no tiene suite de pruebas.
+      - name: Compilar
+        working-directory: web
+        run: npm run build
