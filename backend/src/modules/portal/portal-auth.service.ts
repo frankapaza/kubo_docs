@@ -23,6 +23,14 @@ export interface PortalAuthResponse {
      * pero no se asume); el frontend cae al nombre del usuario en ese caso.
      */
     clientRazonSocial: string | null;
+    /**
+     * Si administra su empresa. El mismo hecho que viaja en el token como
+     * `isClientAdmin` y que gobierna `ClientAdminGuard`; aquí va para que la
+     * interfaz pueda esconder lo que el guard ya deniega.
+     *
+     * Esconder el botón **no** es la defensa: la defensa es el guard.
+     */
+    isAdmin: boolean;
   };
 }
 
@@ -137,6 +145,7 @@ export class PortalAuthService {
         fullName: user.fullName,
         clientId: Number(user.clientId),
         clientRazonSocial: await this.resolveClientRazonSocial(Number(user.clientId)),
+        isAdmin: !!user.isAdmin,
       },
     };
   }

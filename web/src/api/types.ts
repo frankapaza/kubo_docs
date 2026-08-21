@@ -687,6 +687,13 @@ export interface PortalClientUser {
    * la cabecera del portal cae al nombre del usuario.
    */
   clientRazonSocial: string | null;
+  /**
+   * Si administra su empresa, tal como lo calcula `portal-auth.service.ts`
+   * (`!!user.isAdmin`, nunca el tinyint crudo). Gobierna si la interfaz
+   * ofrece el alta de requerimientos; el guard del backend es la defensa
+   * real, esto solo evita mostrar un botón que se va a denegar.
+   */
+  isAdmin: boolean;
 }
 
 export interface PortalSession {

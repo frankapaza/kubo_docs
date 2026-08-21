@@ -109,8 +109,24 @@ describe('login', () => {
     );
     const res = await service.login('a@x.com', 'correcta');
     expect(Object.keys(res.clientUser).sort()).toEqual(
-      ['clientId', 'clientRazonSocial', 'email', 'fullName', 'id'].sort(),
+      ['clientId', 'clientRazonSocial', 'email', 'fullName', 'id', 'isAdmin'].sort(),
     );
+  });
+
+  it('la sesion dice si el usuario administra su empresa', async () => {
+    const hash = await bcrypt.hash('correcta', 10);
+    const { service } = makeService({ id: 1, clientId: 7, email: 'a@x.com', passwordHash: hash, isActive: 1, isAdmin: 1 });
+    const res = await service.login('a@x.com', 'correcta');
+    // Booleano, no el tinyint: el frontend hace `if (user.isAdmin)` y un 0
+    // llegado como cadena '0' seria verdadero.
+    expect(res.clientUser.isAdmin).toBe(true);
+  });
+
+  it('un usuario normal llega con isAdmin en false', async () => {
+    const hash = await bcrypt.hash('correcta', 10);
+    const { service } = makeService({ id: 1, clientId: 7, email: 'a@x.com', passwordHash: hash, isActive: 1, isAdmin: 0 });
+    const res = await service.login('a@x.com', 'correcta');
+    expect(res.clientUser.isAdmin).toBe(false);
   });
 
   it('degrada a null si el cliente no se puede resolver, sin tumbar el login', async () => {
