@@ -31,7 +31,10 @@ const COLUMNAS_015 = [
  */
 const COLUMNA_016 = { tableName: 'ticket_events', columnName: 'notify_next_attempt_at' };
 
-const COLUMNAS_ESPERADAS = [...COLUMNAS_013, COLUMNA_014, ...COLUMNAS_015, COLUMNA_016];
+/** La columna que añade la 020: si el requerimiento se puede ver desde el portal. */
+const COLUMNA_020 = { tableName: 'work_items', columnName: 'origin' };
+
+const COLUMNAS_ESPERADAS = [...COLUMNAS_013, COLUMNA_014, ...COLUMNAS_015, COLUMNA_016, COLUMNA_020];
 
 /**
  * Las tablas que tienen que estar: client_users (013), las plantillas (015) y

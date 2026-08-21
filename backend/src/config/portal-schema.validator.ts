@@ -81,6 +81,7 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
   private static readonly MIGRATION_015 = 'migrations/015_notificaciones.sql';
   private static readonly MIGRATION_016 = 'migrations/016_notify_next_attempt.sql';
   private static readonly MIGRATION_018 = 'migrations/018_conversacion_adjuntos.sql';
+  private static readonly MIGRATION_020 = 'migrations/020_requerimientos_portal.sql';
 
   /**
    * Lo que hace falta para que exista `workspace_settings.team_inbox_email`, en
@@ -151,6 +152,11 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
     { table: 'tickets', column: 'created_by_client_user_id', files: [PortalSchemaValidator.MIGRATION_013] },
     { table: 'ticket_events', column: 'actor_client_user_id', files: [PortalSchemaValidator.MIGRATION_013] },
     { table: 'work_items', column: 'created_by_client_user_id', files: [PortalSchemaValidator.MIGRATION_013] },
+    // 020: sin ella, `work-item.entity.ts` pide una columna que no existe y
+    // TypeORM la emite en TODO SELECT sobre work_items — el tablero interno
+    // entero deja de cargar, no solo el portal. Falla en el arranque, que es
+    // donde se ve, en vez de en la primera consulta de un usuario.
+    { table: 'work_items', column: 'origin', files: [PortalSchemaValidator.MIGRATION_020] },
     { table: 'work_item_events', column: 'actor_client_user_id', files: [PortalSchemaValidator.MIGRATION_013] },
     // 014: sin ella, la entidad AuditLog pide una columna que no existe y
     // TODA la auditoría se pierde en silencio (el interceptor degrada el
