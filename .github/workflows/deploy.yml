@@ -174,7 +174,8 @@ jobs:
             for m in 010_service_desk 012_work_items 013_portal_clientes \
                      014_audit_client_user 015_notificaciones \
                      016_notify_next_attempt 017_plantillas_respuesta \
-                     018_conversacion_adjuntos 019_adjunto_cuelga_de_mensaje; do
+                     018_conversacion_adjuntos 019_adjunto_cuelga_de_mensaje \
+                     020_requerimientos_portal; do
               echo "--- $m"
               sql_file "backend/sql/migrations/$m.sql"
             done
