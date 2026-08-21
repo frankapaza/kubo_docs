@@ -102,7 +102,17 @@ portalApiClient.interceptors.response.use(
             // indefinidamente pero nunca vuelve a escribir el perfil, así que
             // un administrador real dejaría de ver el botón de alta hasta
             // cerrar sesión a mano, sin ninguna señal de que tiene que hacerlo.
-            localStorage.setItem(PORTAL_USER_STORAGE_KEY, JSON.stringify(r.data.clientUser));
+            //
+            // Guardado solo si el campo viene: hoy el backend siempre lo manda,
+            // pero sin esta guarda, si alguna vez faltara, `JSON.stringify`
+            // devolvería `undefined` y `localStorage.setItem` lo coaccionaría a
+            // la cadena literal "undefined". El siguiente `JSON.parse` de
+            // PortalAuthContext lanzaría, y su catch borra las tres claves de
+            // sesión: cierre de sesión de todo el portal, tickets incluidos, no
+            // solo de requerimientos.
+            if (r.data.clientUser) {
+              localStorage.setItem(PORTAL_USER_STORAGE_KEY, JSON.stringify(r.data.clientUser));
+            }
             return r.data.accessToken;
           })
           .finally(() => {

@@ -21,7 +21,11 @@ export class ClientUser {
   @Column({ name: 'full_name', type: 'varchar', length: 180 })
   fullName!: string;
 
-  /** Reservado para P3. En P1 no gobierna ningún permiso. */
+  /**
+   * Gobierna `ClientAdminGuard`: solo el usuario de cliente con `isAdmin` en
+   * `true` puede pedir requerimientos desde el portal (ver
+   * `client-admin.guard.ts`).
+   */
   @Column({ name: 'is_admin', type: 'tinyint', default: 0 })
   isAdmin!: number;
 

@@ -33,7 +33,11 @@ export class CreateClientUserDto {
   @Length(1, 180)
   fullName!: string;
 
-  /** Reservado para P3. En P1 no gobierna ningún permiso. */
+  /**
+   * Gobierna `ClientAdminGuard`: solo el usuario de cliente con `isAdmin` en
+   * `true` puede pedir requerimientos desde el portal (ver
+   * `client-admin.guard.ts` y la etiqueta homónima del panel interno).
+   */
   @IsOptional()
   @IsBoolean()
   isAdmin?: boolean;

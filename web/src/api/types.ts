@@ -757,7 +757,15 @@ export interface PortalRequirement {
   committedDate: string | null;
   closedAt: string | null;
   createdAt: string;
-  /** Solo trae contenido cuando `status` es `'Rechazado'`. */
+  /**
+   * Solo trae contenido cuando `status` es `'Rechazado'`.
+   *
+   * Ojo con el listado (`GET /portal/requirements`): por rendimiento, ahí
+   * viaja siempre en `null`, incluso para un rechazado — ese `null` significa
+   * «no consultado», no «no hay motivo». Nunca pintar el detalle a partir de
+   * un objeto sacado del listado; pedirlo siempre a su propia ruta
+   * (`GET /portal/requirements/:id`), que sí trae el motivo real.
+   */
   rejectionReason: string | null;
 }
 

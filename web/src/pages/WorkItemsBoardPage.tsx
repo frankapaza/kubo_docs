@@ -20,8 +20,14 @@ const SEARCH_DEBOUNCE_MS = 280;
 
 const PRIORITIES: WorkItemPriority[] = ['ALTA', 'MEDIA', 'BAJA'];
 
-/** BLOQUEADO y CANCELADO no son columnas: van en la franja plegable de abajo. */
-const OUT_OF_FLOW_STATUSES: WorkItemStatus[] = ['BLOQUEADO', 'CANCELADO'];
+/**
+ * BLOQUEADO, CANCELADO y RECHAZADO no son columnas: van en la franja
+ * plegable de abajo. Mismo conjunto que OUT_OF_FLOW_STATUSES en
+ * backend/src/modules/work-items/domain/work-item-board.ts: sin RECHAZADO
+ * aquí, un requerimiento rechazado desaparecía del tablero (el cliente lo ve
+ * en el portal, pero la casa no lo volvía a encontrar en ninguna pantalla).
+ */
+const OUT_OF_FLOW_STATUSES: WorkItemStatus[] = ['BLOQUEADO', 'CANCELADO', 'RECHAZADO'];
 
 type DueFilterValue = 'vencidos' | 'semana' | '';
 

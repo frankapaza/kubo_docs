@@ -109,6 +109,12 @@ export class PortalRequirementsService {
    * rechazo no se busca aquí: es una consulta por ítem y en un listado de
    * veinte no tiene sentido hacerla veinte veces para descartarla diecinueve
    * (solo los rechazados la necesitan, y `findOne` sí la trae).
+   *
+   * Por eso el `rejectionReason` de cada fila viaja siempre en `null`, incluso
+   * para un `RECHAZADO`: aquí `null` significa «no consultado», no «no hay
+   * motivo». La pantalla de detalle no debe reutilizar un objeto de este
+   * listado para pintarse — tiene que pedir su propia ruta (`findOne`), que sí
+   * trae el motivo real.
    */
   async list(clientId: number): Promise<PortalRequirementView[]> {
     assertSessionScope(clientId, 'clientId', PortalRequirementsService.name);

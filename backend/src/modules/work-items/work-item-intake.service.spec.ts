@@ -67,12 +67,17 @@ describe('WorkItemIntakeService.accept', () => {
   });
 
   it('pasa a PENDIENTE fijando prioridad y fecha comprometida', async () => {
+    // Reloj fijo: '2026-09-30' es una fecha futura hoy, pero deja de serlo el
+    // 2026-10-01 y `assertFechaNoPasada` la rechazaría. Fijar el sistema, no
+    // cambiar la fecha, para no mover la misma bomba a otro día.
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-07T15:00:00Z'));
     const { service, patches } = makeService(fila({ status: 'SOLICITADO' }));
     await service.accept(1, 5, { priority: 'ALTA', committedDate: '2026-09-30' });
     expect(patches[0]).toMatchObject({ status: 'PENDIENTE', priority: 'ALTA', dueDate: '2026-09-30' });
   });
 
   it('escribe el evento ACCEPTED con el actor interno', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-07T15:00:00Z'));
     const { service, eventos } = makeService(fila({ status: 'SOLICITADO' }));
     await service.accept(1, 5, { priority: 'ALTA', committedDate: '2026-09-30' });
     expect(eventos[0]).toMatchObject({
@@ -84,6 +89,7 @@ describe('WorkItemIntakeService.accept', () => {
   });
 
   it('lo coloca en la columna PENDIENTE por su banda de prioridad', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-07T15:00:00Z'));
     const { service, orden } = makeService(fila({ id: 9, status: 'SOLICITADO' }), [
       fila({ id: 1, status: 'PENDIENTE', priority: 'ALTA' }),
       fila({ id: 2, status: 'PENDIENTE', priority: 'BAJA' }),
@@ -138,6 +144,7 @@ describe('WorkItemIntakeService.accept', () => {
    * ("el formateo fija la zona, no la hereda del proceso").
    */
   it('calcula "hoy" con la zona de Lima escrita, no con la del proceso', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-07T15:00:00Z'));
     const spy = jest.spyOn(Intl, 'DateTimeFormat');
     const { service } = makeService(fila({ status: 'SOLICITADO' }));
 
