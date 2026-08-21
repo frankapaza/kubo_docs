@@ -229,6 +229,14 @@ describe('PortalRequirementsService.list', () => {
 
     expect(vistas.map((v) => v.id)).toEqual([1]);
   });
+
+  // `create` ya prueba esto; `list` no lo probaba, y un `clientId` inservible
+  // colándose en el `where` de `listPortalRequirements` es exactamente la
+  // forma de fallo que documenta `assertSessionScope`.
+  it('rechaza una sesión sin empresa utilizable', async () => {
+    const { service } = makeService();
+    await expect(service.list(0)).rejects.toThrow(/no identifica a ninguna empresa/i);
+  });
 });
 
 describe('PortalRequirementsService.findOne', () => {
@@ -283,6 +291,22 @@ describe('PortalRequirementsService.findOne', () => {
   });
 
   /**
+   * Un RECHAZADO tampoco pasó nunca por la aceptación: su `priority` en la
+   * base es el `DEFAULT_PRIORITY` que le puso el alta (la columna no admite
+   * nulo), no algo que la casa haya decidido. Enseñarlo sería el mismo
+   * defecto que con SOLICITADO — decidir por el valor guardado en vez de por
+   * el hecho («¿se aceptó?») — solo que aquí el valor de más sí está
+   * presente, así que una condición que solo mirase SOLICITADO pasaría de
+   * largo.
+   */
+  it('esconde la prioridad de un rechazado: tampoco pasó por la aceptación', async () => {
+    const { service } = makeService([
+      fila({ id: 1, clientId: 7, origin: 'PORTAL', status: 'RECHAZADO', priority: 'MEDIA' }),
+    ]);
+    await expect(service.findOne(7, 1)).resolves.toMatchObject({ priority: null });
+  });
+
+  /**
    * La decisión es por el estado, no por si `dueDate` está vacía. Con un
    * requerimiento recién creado las dos condiciones coinciden (SOLICITADO y
    * sin fecha comprometida a la vez), así que esa combinación no distingue
@@ -306,6 +330,11 @@ describe('PortalRequirementsService.findOne', () => {
       status: 'Rechazado',
       rejectionReason: 'Fuera del alcance del contrato',
     });
+  });
+
+  it('rechaza una sesión sin empresa utilizable', async () => {
+    const { service } = makeService();
+    await expect(service.findOne(0, 1)).rejects.toThrow(/no identifica a ninguna empresa/i);
   });
 });
 

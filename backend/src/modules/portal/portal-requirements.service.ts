@@ -3,7 +3,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { WorkItemsRepository } from '../work-items/work-items.repository';
 import { WorkItem } from '../work-items/entities/work-item.entity';
 import { WorkItemEvent } from '../work-items/entities/work-item-event.entity';
-import { DEFAULT_PRIORITY, WorkItemStatus } from '../work-items/domain/work-item-board';
+import { DEFAULT_PRIORITY, PRE_BOARD_STATUSES, WorkItemStatus } from '../work-items/domain/work-item-board';
 
 import { assertSessionScope, toIso } from './session-scope';
 import { CreatePortalRequirementDto } from './dto/create-portal-requirement.dto';
@@ -157,10 +157,13 @@ export class PortalRequirementsService {
       title: w.title,
       descriptionMd: w.descriptionMd ?? null,
       status: STATUS_LABELS[w.status],
-      // Por el estado, no por si `dueDate` está vacío: la prioridad guardada es
-      // el valor por defecto de la columna, y enseñarlo antes de aceptar
-      // comunicaría un compromiso que nadie ha asumido.
-      priority: w.status === 'SOLICITADO' ? null : w.priority,
+      // Por el estado, no por si `dueDate` está vacío ni por si el valor es el
+      // por defecto: un RECHAZADO tampoco pasó nunca por la aceptación, y su
+      // columna `priority` conserva el DEFAULT_PRIORITY del alta porque no
+      // admite nulo — enseñarlo sería atribuirle a la casa un compromiso que
+      // nadie asumió, igual que con SOLICITADO. PRE_BOARD_STATUSES es
+      // justo ese conjunto: «pedido y todavía no aceptado» más «rechazado».
+      priority: PRE_BOARD_STATUSES.includes(w.status) ? null : w.priority,
       committedDate: w.dueDate ?? null,
       closedAt: toIso(w.closedAt),
       createdAt: toIso(w.createdAt)!,

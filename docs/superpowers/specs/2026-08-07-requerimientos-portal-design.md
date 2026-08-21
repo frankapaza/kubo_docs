@@ -154,7 +154,7 @@ Lista blanca explícita, campo a campo. Nunca por difusión ni por descarte:
 | `id`, `code` | |
 | `title`, `descriptionMd` | lo que él escribió |
 | `status` | traducido, ver abajo |
-| `priority` | **`null` mientras esté en `SOLICITADO`** — la prioridad por defecto es `MEDIA`, y enseñarla antes de aceptar comunicaría un compromiso que no existe |
+| `priority` | **`null` mientras no haya sido aceptado** — es decir, en `SOLICITADO` **y también en `RECHAZADO`** (el conjunto `PRE_BOARD_STATUSES`). La columna no admite nulo, así que un requerimiento que nunca pasó por la aceptación conserva el `MEDIA` por defecto que le puso el alta; enseñarlo comunicaría un compromiso que nadie asumió. La decisión se toma por el hecho «¿ya fue aceptado?», nunca por si la fecha comprometida está vacía |
 | `committedDate` | `due_date`; `null` hasta la aceptación |
 | `closedAt`, `createdAt` | |
 | `rejectionReason` | solo cuando `status` es `RECHAZADO`; se lee del `reason` del último evento `REJECTED` del ítem, que es donde vive — `work_items` no guarda motivos |
