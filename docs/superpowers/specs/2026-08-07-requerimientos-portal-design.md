@@ -120,6 +120,14 @@ El alta **no** acepta prioridad ni fecha: las fija la casa al aceptar. El client
 
 Toda lectura filtra por `client_id` del token **y** `origin = 'PORTAL'`. Un requerimiento de otra empresa, o interno, responde **`404` con el mismo cuerpo que uno inexistente** — nunca `403`, que confirmaría que existe.
 
+### La sesión debe decir si administra
+
+`isClientAdmin` viaja en el **token**, pero no en el objeto `clientUser` que devuelven el login y el refresh (`portal-auth.service.ts`), que es lo único que el navegador puede leer. Sin él, la interfaz no puede saber si enseñar el botón de alta.
+
+Se añade `isAdmin: boolean` a esa respuesta, calculado con `!!user.isAdmin` igual que ya se calcula para el token — booleano, nunca el `tinyint` crudo, que llegado como `'0'` sería verdadero en un `if`.
+
+Esconder el botón **no es la defensa**. La defensa es `ClientAdminGuard`. Lo uno evita ofrecer algo que se va a denegar; lo otro lo deniega.
+
 ## Superficie interna
 
 En `WorkItemsController`, que hoy corre bajo `@UseGuards(JwtAuthGuard, StaffOnlyGuard)` — sin `RolesGuard`. Las dos rutas nuevas heredan eso y **no** añaden restricción por rol, para no introducir un patrón que el resto del controlador no sigue. Ver el riesgo 5.
