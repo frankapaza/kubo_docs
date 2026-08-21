@@ -147,7 +147,7 @@ export function resolveScope(actor: TicketMessageActor, sujeto: string): ActorSc
 }
 
 /**
- * Mismo cuerpo que `assertSessionScope` en `portal-tickets.service.ts`: el
+ * Mismo cuerpo que `assertSessionScope` en `portal/session-scope.ts`: el
  * portal ya contesta esto cuando la sesión no trae empresa, y dos textos
  * distintos para la misma situación solo sirven para que quien depure crea que
  * son dos situaciones.
