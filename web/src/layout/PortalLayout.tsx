@@ -42,10 +42,31 @@ export default function PortalLayout() {
           </div>
           <div className="flex items-center gap-4 flex-shrink-0">
             {/*
-              La ayuda se busca en la cabecera, que es lo único que el portal
-              tiene siempre a la vista. `NavLink` y no `Link` para que se
-              distinga cuando ya estás dentro del manual.
+              Navegación entre las dos secciones del portal, más la ayuda:
+              todo lo que el cliente tiene siempre a la vista, aquí en la
+              cabecera y no en un menú lateral (ver el comentario de arriba).
+              `NavLink` y no `Link` para que se distinga en cuál sección estás.
             */}
+            <NavLink
+              to="/portal/tickets"
+              className={({ isActive }) =>
+                `text-sm font-medium transition ${
+                  isActive ? 'text-kubo-primary' : 'text-slate-600 hover:text-slate-900'
+                }`
+              }
+            >
+              Tickets
+            </NavLink>
+            <NavLink
+              to="/portal/requerimientos"
+              className={({ isActive }) =>
+                `text-sm font-medium transition ${
+                  isActive ? 'text-kubo-primary' : 'text-slate-600 hover:text-slate-900'
+                }`
+              }
+            >
+              Requerimientos
+            </NavLink>
             <NavLink
               to="/portal/help"
               className={({ isActive }) =>

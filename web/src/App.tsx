@@ -30,6 +30,8 @@ import HelpPage from './pages/HelpPage';
 import PortalLoginPage from './pages/portal/PortalLoginPage';
 import PortalTicketsListPage from './pages/portal/PortalTicketsListPage';
 import PortalTicketDetailPage from './pages/portal/PortalTicketDetailPage';
+import PortalRequirementsListPage from './pages/portal/PortalRequirementsListPage';
+import PortalRequirementDetailPage from './pages/portal/PortalRequirementDetailPage';
 import PortalHelpPage from './pages/portal/PortalHelpPage';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { PortalProtectedRoute } from './auth/PortalProtectedRoute';
@@ -69,6 +71,8 @@ export default function App() {
             <Route path="/portal" element={<Navigate to="/portal/tickets" replace />} />
             <Route path="/portal/tickets" element={<PortalTicketsListPage />} />
             <Route path="/portal/tickets/:ticketId" element={<PortalTicketDetailPage />} />
+            <Route path="/portal/requerimientos" element={<PortalRequirementsListPage />} />
+            <Route path="/portal/requerimientos/:requirementId" element={<PortalRequirementDetailPage />} />
             {/*
               Manual del cliente. Va aquí dentro, y no como ruta suelta, por
               dos motivos: comparte la cabecera del portal (que es desde donde

@@ -703,6 +703,44 @@ export interface PortalSession {
 }
 
 // ---------------------------------------------------------------------------
+// Requerimientos del portal: mismo criterio que los tipos de ticket de
+// arriba, reflejan exactamente la proyección que expone
+// `PortalRequirementsController` (tarea 8), no la entidad completa.
+// ---------------------------------------------------------------------------
+
+/**
+ * Estados de un requerimiento tal como los devuelve el backend: **ya
+ * traducidos** para el cliente. Se pintan tal cual, sin volver a mapearlos
+ * ni traducirlos aquí.
+ */
+export type PortalRequirementStatusLabel =
+  | 'Solicitado' | 'Aceptado, en cola' | 'En desarrollo' | 'En pruebas'
+  | 'Entregado' | 'Bloqueado' | 'Cancelado' | 'Rechazado';
+
+export interface PortalRequirement {
+  id: number;
+  code: string | null;
+  title: string;
+  descriptionMd: string | null;
+  status: PortalRequirementStatusLabel;
+  /**
+   * `null` mientras el requerimiento no ha sido aceptado: todavía no hay
+   * ningún compromiso de prioridad que mostrar. La pantalla lo trata como
+   * «no pintar el campo», no como un guion ni un «sin prioridad».
+   */
+  priority: 'ALTA' | 'MEDIA' | 'BAJA' | null;
+  /**
+   * `null` hasta la aceptación. Se pinta como «Pendiente de aceptación»: un
+   * guion se lee como «no hay», y aquí lo que hay es «todavía no».
+   */
+  committedDate: string | null;
+  closedAt: string | null;
+  createdAt: string;
+  /** Solo trae contenido cuando `status` es `'Rechazado'`. */
+  rejectionReason: string | null;
+}
+
+// ---------------------------------------------------------------------------
 // Conversación y adjuntos de un ticket.
 //
 // Son **dos juegos de tipos y no uno**, igual que en el backend, porque las dos

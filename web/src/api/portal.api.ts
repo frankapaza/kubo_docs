@@ -2,6 +2,7 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import type {
   PortalClientSystem,
   PortalCreatedTicket,
+  PortalRequirement,
   PortalSession,
   PortalTicket,
   PortalTicketDetail,
@@ -149,3 +150,16 @@ export const portalApi = {
   listSystems: () =>
     portalApiClient.get<PortalClientSystem[]>('/portal/systems').then((r) => r.data),
 };
+
+/** Límites de `CreatePortalRequirementDto` en el backend: deben coincidir siempre con él. */
+export const PORTAL_REQUIREMENT_TITLE_MAX_LENGTH = 240;
+export const PORTAL_REQUIREMENT_DESCRIPTION_MAX_LENGTH = 16383;
+
+export const listPortalRequirements = () =>
+  portalApiClient.get<PortalRequirement[]>('/portal/requerimientos').then((r) => r.data);
+
+export const getPortalRequirement = (id: number) =>
+  portalApiClient.get<PortalRequirement>(`/portal/requerimientos/${id}`).then((r) => r.data);
+
+export const createPortalRequirement = (body: { title: string; descriptionMd: string }) =>
+  portalApiClient.post<PortalRequirement>('/portal/requerimientos', body).then((r) => r.data);
