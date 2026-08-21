@@ -14,6 +14,11 @@ import {
   WORK_ITEM_PRIORITIES,
 } from '../domain/work-item-board';
 
+/** Cómo nació el requerimiento. Es el hecho que decide si el cliente lo ve. */
+export type WorkItemOrigin = 'INTERNO' | 'PORTAL';
+
+export const WORK_ITEM_ORIGINS: WorkItemOrigin[] = ['INTERNO', 'PORTAL'];
+
 @Entity('work_items')
 @Index('idx_wi_client', ['clientId'])
 @Index('idx_wi_status', ['status'])
@@ -27,6 +32,17 @@ export class WorkItem {
 
   @Column({ name: 'client_id', type: 'bigint', unsigned: true })
   clientId!: number;
+
+  /**
+   * `INTERNO` para todo lo que nace dentro de casa (actas, reuniones, Jira, el
+   * tablero); `PORTAL` para lo que pidió el cliente.
+   *
+   * **Es el único criterio de visibilidad del portal**, y está separado de
+   * `createdByClientUserId` a propósito: quién lo creó y si el cliente puede
+   * verlo son dos hechos distintos.
+   */
+  @Column({ type: 'enum', enum: WORK_ITEM_ORIGINS, default: 'INTERNO' })
+  origin!: WorkItemOrigin;
 
   @Column({ name: 'project_id', type: 'bigint', unsigned: true, nullable: true })
   projectId!: number | null;
@@ -61,8 +77,13 @@ export class WorkItem {
   @Column({ name: 'closed_at', type: 'datetime', nullable: true })
   closedAt!: Date | null;
 
-  @Column({ name: 'created_by', type: 'bigint', unsigned: true })
-  createdBy!: number;
+  /** Nulo cuando lo creó un usuario de cliente desde el portal. */
+  @Column({ name: 'created_by', type: 'bigint', unsigned: true, nullable: true })
+  createdBy!: number | null;
+
+  /** Nulo salvo que lo creara un usuario de cliente. Columna de la migración 013. */
+  @Column({ name: 'created_by_client_user_id', type: 'bigint', unsigned: true, nullable: true })
+  createdByClientUserId!: number | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

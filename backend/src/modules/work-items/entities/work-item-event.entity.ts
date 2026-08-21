@@ -11,7 +11,10 @@ export type WorkItemEventType =
   | 'CLOSED'
   | 'REOPENED'
   | 'CANCELLED'
-  | 'PRIORITY_CHANGED';
+  | 'PRIORITY_CHANGED'
+  | 'REQUESTED'
+  | 'ACCEPTED'
+  | 'REJECTED';
 
 export const WORK_ITEM_EVENT_TYPES: WorkItemEventType[] = [
   'CREATED',
@@ -24,6 +27,9 @@ export const WORK_ITEM_EVENT_TYPES: WorkItemEventType[] = [
   'REOPENED',
   'CANCELLED',
   'PRIORITY_CHANGED',
+  'REQUESTED',
+  'ACCEPTED',
+  'REJECTED',
 ];
 
 /** Append-only: nunca se actualiza ni se borra. */
@@ -47,6 +53,10 @@ export class WorkItemEvent {
 
   @Column({ name: 'actor_user_id', type: 'bigint', unsigned: true, nullable: true })
   actorUserId!: number | null;
+
+  /** Nulo salvo que el autor del evento fuese un usuario de cliente. Migración 013. */
+  @Column({ name: 'actor_client_user_id', type: 'bigint', unsigned: true, nullable: true })
+  actorClientUserId!: number | null;
 
   @Column({ type: 'text', nullable: true })
   reason!: string | null;
