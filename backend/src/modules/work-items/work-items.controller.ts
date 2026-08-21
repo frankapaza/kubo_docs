@@ -5,13 +5,17 @@ import {
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+import { WorkItem } from './entities/work-item.entity';
 import { WorkItemsService } from './work-items.service';
 import { WorkItemBoardService } from './work-item-board.service';
+import { WorkItemIntakeService } from './work-item-intake.service';
 import { CreateWorkItemDto } from './dto/create-work-item.dto';
 import { UpdateWorkItemDto } from './dto/update-work-item.dto';
 import { MoveWorkItemDto } from './dto/move-work-item.dto';
 import { AssignWorkItemDto } from './dto/assign-work-item.dto';
 import { ChangePriorityDto } from './dto/change-priority.dto';
+import { AcceptWorkItemDto } from './dto/accept-work-item.dto';
+import { RejectWorkItemDto } from './dto/reject-work-item.dto';
 import { DueFilter } from './work-items.repository';
 import { WorkItemStatus, WorkItemPriority } from './domain/work-item-board';
 
@@ -21,6 +25,7 @@ export class WorkItemsController {
   constructor(
     private readonly service: WorkItemsService,
     private readonly board: WorkItemBoardService,
+    private readonly intake: WorkItemIntakeService,
   ) {}
 
   @Get()
@@ -105,5 +110,28 @@ export class WorkItemsController {
       priority: dto.priority,
       reason: dto.reason,
     });
+  }
+
+  /**
+   * Aceptar compromete una fecha de entrega con un cliente. Va con los mismos
+   * guards que el resto del controlador —sin `RolesGuard`, que este módulo no
+   * usa— y está anotado como riesgo en la especificación.
+   */
+  @Post(':id/accept')
+  accept(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AcceptWorkItemDto,
+  ): Promise<WorkItem> {
+    return this.intake.accept(id, user.id, dto);
+  }
+
+  @Post(':id/reject')
+  reject(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RejectWorkItemDto,
+  ): Promise<WorkItem> {
+    return this.intake.reject(id, user.id, dto);
   }
 }
