@@ -18,6 +18,11 @@ const EVENT_LABELS: Record<WorkItemEventType, string> = {
   REOPENED: 'Reabierto',
   CANCELLED: 'Cancelado',
   PRIORITY_CHANGED: 'Prioridad cambiada',
+  // Los tres que escribe la bandeja de aceptación (tarea 12): el alta desde
+  // el portal, y la respuesta de la casa a esa alta.
+  REQUESTED: 'Solicitado',
+  ACCEPTED: 'Aceptado',
+  REJECTED: 'Rechazado',
 };
 
 export interface WorkItemTimelineProps {

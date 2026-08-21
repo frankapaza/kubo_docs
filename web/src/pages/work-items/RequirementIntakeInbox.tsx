@@ -98,7 +98,11 @@ interface AcceptDialogProps {
  * el doble envío que NewPortalRequirementDialog / los compositores del hilo.
  */
 function AcceptDialog({ item, onCancel, onAccepted }: AcceptDialogProps) {
-  const [priority, setPriority] = useState<WorkItemPriority>('MEDIA');
+  // Sin valor por defecto: si arrancara en 'MEDIA', la prioridad nunca
+  // podría faltar y "ambos obligatorios" se reduciría a mirar solo la
+  // fecha. Quien acepta tiene que elegir la prioridad a propósito, porque
+  // decide dónde cae el requerimiento en la columna PENDIENTE.
+  const [priority, setPriority] = useState<WorkItemPriority | ''>('');
   const [committedDate, setCommittedDate] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -126,7 +130,7 @@ function AcceptDialog({ item, onCancel, onAccepted }: AcceptDialogProps) {
   // Repone el formulario cada vez que se abre para un ítem nuevo.
   useEffect(() => {
     if (!item) return;
-    setPriority('MEDIA');
+    setPriority('');
     setCommittedDate('');
     setError(null);
     setBusy(false);
@@ -143,7 +147,9 @@ function AcceptDialog({ item, onCancel, onAccepted }: AcceptDialogProps) {
 
   if (!item) return null;
 
-  const canSubmit = committedDate.length > 0;
+  // Ambos obligatorios: ni la prioridad ni la fecha tienen un valor por
+  // defecto que los dé por puestos.
+  const canSubmit = priority !== '' && committedDate.length > 0;
 
   const submit = async () => {
     // La guarda, antes que nada y sin ningún `await` por delante.
@@ -157,7 +163,11 @@ function AcceptDialog({ item, onCancel, onAccepted }: AcceptDialogProps) {
   };
 
   const accept = async () => {
-    if (!canSubmit) return;
+    // Repetido en vez de reusar `canSubmit`: TS estrecha `priority` a
+    // `WorkItemPriority` (sin `''`) apoyándose en esa condición alias, y
+    // aquí hace falta la comprobación explícita para que el tipo del
+    // argumento de `workItemsApi.accept` cierre sin un `as`.
+    if (priority === '' || committedDate.length === 0) return;
     setBusy(true);
     // Limpia el error de un intento anterior antes de empezar este: dejar
     // uno sin limpiar mientras se reintenta es justo lo que una vez dejó un
@@ -205,9 +215,12 @@ function AcceptDialog({ item, onCancel, onAccepted }: AcceptDialogProps) {
             id="accept-wi-priority"
             value={priority}
             disabled={busy}
-            onChange={(e) => setPriority(e.target.value as WorkItemPriority)}
+            onChange={(e) => setPriority(e.target.value as WorkItemPriority | '')}
             style={inputStyle}
           >
+            <option value="" disabled>
+              Elige una prioridad…
+            </option>
             {PRIORITIES.map((p) => (
               <option key={p} value={p}>{p}</option>
             ))}
@@ -478,9 +491,14 @@ export default function RequirementIntakeInbox({ clients, onChanged }: Requireme
     onChanged();
   };
 
-  // Nada que mostrar y nada que reportar: la franja no se pinta. Mientras
-  // carga (o si falló) sí se pinta, para no ocultar un error de carga.
-  if (!loading && !error && items.length === 0) return null;
+  // Nada que mostrar y nada que reportar: la franja no se pinta -- ni
+  // siquiera durante la primera carga, que es cuando `items` todavía está
+  // vacío porque la respuesta no ha llegado. Sin el `!loading` de más
+  // arriba, la franja parpadeaba «Solicitados / 0 / Cargando…» en cada
+  // visita al tablero y desaparecía al llegar la respuesta. Un error sí
+  // se pinta siempre, tenga o no elementos: ocultarlo sería el mismo fallo
+  // al revés, un problema real que no se ve.
+  if (!error && items.length === 0) return null;
 
   return (
     <section

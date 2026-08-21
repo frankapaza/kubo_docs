@@ -591,9 +591,17 @@ export type WorkItemStatus =
 
 export type WorkItemPriority = 'ALTA' | 'MEDIA' | 'BAJA';
 
+// Espejo de WorkItemEventType en
+// backend/src/modules/work-items/entities/work-item-event.entity.ts: son los
+// 13 tipos reales, no solo los 10 que ya existían aquí antes de la tarea 12.
+// Faltaban REQUESTED/ACCEPTED/REJECTED -- justo los tres que escribe esta
+// misma tarea (alta desde el portal, aceptar, rechazar) -- y sin ellos
+// EVENT_LABELS en WorkItemTimeline.tsx los pintaba con título `undefined`,
+// mismo desfase que WorkItemStatus un campo más allá.
 export type WorkItemEventType =
   | 'CREATED' | 'MOVED' | 'ASSIGNED' | 'COMMENT' | 'BLOCKED' | 'UNBLOCKED'
-  | 'CLOSED' | 'REOPENED' | 'CANCELLED' | 'PRIORITY_CHANGED';
+  | 'CLOSED' | 'REOPENED' | 'CANCELLED' | 'PRIORITY_CHANGED'
+  | 'REQUESTED' | 'ACCEPTED' | 'REJECTED';
 
 export interface WorkItem {
   id: number;
