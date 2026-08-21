@@ -40,6 +40,30 @@ export function fmtDateTime(v: string): string {
   return new Date(v).toLocaleString('es-PE');
 }
 
+/**
+ * Formatea una fecha **sin hora** -- `YYYY-MM-DD`, como sale una columna
+ * `DATE` del backend (p.ej. `due_date`, ver `committedDate` de
+ * `PortalRequirement`) -- y no una marca de tiempo completa como las que
+ * esperan `fmtDate`/`fmtDateTime` de arriba.
+ *
+ * `fmtDate` **no sirve para esto**: hace `new Date(v)`, y ECMAScript parsea
+ * una cadena de solo fecha como medianoche **UTC**. Al formatearla en la
+ * zona local del navegador (Perú, UTC-5), retrocede un día -- el mismo
+ * `due_date` que el panel interno muestra bien (ver `formatDueDate` en
+ * `WorkItemCard.tsx` / `WorkItemPanel.tsx`, que esquivan la misma trampa
+ * fijando la hora a medianoche local) se leería un día antes en el portal.
+ * Los dos ayudantes conviven porque cada uno sirve a un tipo de columna
+ * distinto: usar el que no toca es silencioso -- compila y hasta parece
+ * funcionar -- y solo se nota comparando contra el dato real.
+ */
+export function fmtDateOnly(v: string): string {
+  return new Date(`${v}T00:00:00`).toLocaleDateString('es-PE', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
 export default function PortalTicketsListPage() {
   const navigate = useNavigate();
   const [tickets, setTickets] = useState<PortalTicket[]>([]);

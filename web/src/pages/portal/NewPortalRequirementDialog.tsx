@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import {
-  createPortalRequirement,
+  portalApi,
   PORTAL_REQUIREMENT_TITLE_MAX_LENGTH,
   PORTAL_REQUIREMENT_DESCRIPTION_MAX_LENGTH,
 } from '../../api/portal.api';
@@ -128,7 +128,7 @@ export default function NewPortalRequirementDialog({ open, onCancel, onCreated }
     setErrors([]);
 
     try {
-      const created = await createPortalRequirement({
+      const created = await portalApi.createRequirement({
         title: title.trim(),
         descriptionMd: description.trim(),
       });

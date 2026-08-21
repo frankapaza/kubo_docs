@@ -95,6 +95,14 @@ portalApiClient.interceptors.response.use(
           .then((r) => {
             localStorage.setItem(PORTAL_TOKEN_STORAGE_KEY, r.data.accessToken);
             localStorage.setItem(PORTAL_REFRESH_TOKEN_KEY, r.data.refreshToken);
+            // El refresh también trae `clientUser` (con `isAdmin` al día), y hay
+            // que guardarlo igual que el login: sin esto, una sesión abierta
+            // antes de que `isAdmin` existiera se queda para siempre con el
+            // perfil viejo en `localStorage` — el refresh renueva el token
+            // indefinidamente pero nunca vuelve a escribir el perfil, así que
+            // un administrador real dejaría de ver el botón de alta hasta
+            // cerrar sesión a mano, sin ninguna señal de que tiene que hacerlo.
+            localStorage.setItem(PORTAL_USER_STORAGE_KEY, JSON.stringify(r.data.clientUser));
             return r.data.accessToken;
           })
           .finally(() => {
@@ -149,17 +157,17 @@ export const portalApi = {
 
   listSystems: () =>
     portalApiClient.get<PortalClientSystem[]>('/portal/systems').then((r) => r.data),
+
+  listRequirements: () =>
+    portalApiClient.get<PortalRequirement[]>('/portal/requerimientos').then((r) => r.data),
+
+  getRequirement: (id: number) =>
+    portalApiClient.get<PortalRequirement>(`/portal/requerimientos/${id}`).then((r) => r.data),
+
+  createRequirement: (body: { title: string; descriptionMd: string }) =>
+    portalApiClient.post<PortalRequirement>('/portal/requerimientos', body).then((r) => r.data),
 };
 
 /** Límites de `CreatePortalRequirementDto` en el backend: deben coincidir siempre con él. */
 export const PORTAL_REQUIREMENT_TITLE_MAX_LENGTH = 240;
 export const PORTAL_REQUIREMENT_DESCRIPTION_MAX_LENGTH = 16383;
-
-export const listPortalRequirements = () =>
-  portalApiClient.get<PortalRequirement[]>('/portal/requerimientos').then((r) => r.data);
-
-export const getPortalRequirement = (id: number) =>
-  portalApiClient.get<PortalRequirement>(`/portal/requerimientos/${id}`).then((r) => r.data);
-
-export const createPortalRequirement = (body: { title: string; descriptionMd: string }) =>
-  portalApiClient.post<PortalRequirement>('/portal/requerimientos', body).then((r) => r.data);

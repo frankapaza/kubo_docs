@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
-import { getPortalRequirement } from '../../api/portal.api';
+import { portalApi } from '../../api/portal.api';
 import type { PortalRequirement } from '../../api/types';
 import { Card, CardBody } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
@@ -51,7 +51,8 @@ export default function PortalRequirementDetailPage() {
     const current = ++seq.current;
     setLoading(true);
     setError(null);
-    getPortalRequirement(id)
+    portalApi
+      .getRequirement(id)
       .then((data) => {
         if (!alive.current || current !== seq.current) return;
         setRequirement(data);

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import { listPortalRequirements } from '../../api/portal.api';
+import { portalApi } from '../../api/portal.api';
 import type { PortalRequirement, PortalRequirementStatusLabel } from '../../api/types';
 import { usePortalAuth } from '../../auth/PortalAuthContext';
 import { Button } from '../../components/ui/Button';
@@ -9,7 +9,7 @@ import { Card } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { FileTextIcon, PlusIcon } from '../../components/ui/Icon';
-import { fmtDate } from './PortalTicketsListPage';
+import { fmtDate, fmtDateOnly } from './PortalTicketsListPage';
 import NewPortalRequirementDialog from './NewPortalRequirementDialog';
 
 type BadgeTone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger' | 'info' | 'purple';
@@ -38,10 +38,16 @@ export const REQUIREMENT_STATUS_TONES: Record<PortalRequirementStatusLabel, Badg
  * Fecha comprometida para el listado y el detalle: mientras el requerimiento
  * no ha sido aceptado, el backend manda `null` y aquí se lee como «todavía
  * no», no como «no hay». Un guion se confunde con «no aplica»; este texto no.
+ *
+ * Usa `fmtDateOnly` y no `fmtDate`: `committedDate` es la columna `due_date`
+ * (`DATE`, `YYYY-MM-DD`, ver `PortalRequirement` en `types.ts`), no una marca
+ * de tiempo completa -- `fmtDate` la interpretaría como medianoche UTC y la
+ * mostraría un día antes de la real en un navegador en Perú (UTC-5).
+ *
  * Exportada por el mismo motivo que `REQUIREMENT_STATUS_TONES`.
  */
 export function fmtCommittedDate(v: string | null): string {
-  return v ? fmtDate(v) : 'Pendiente de aceptación';
+  return v ? fmtDateOnly(v) : 'Pendiente de aceptación';
 }
 
 export default function PortalRequirementsListPage() {
@@ -59,7 +65,8 @@ export default function PortalRequirementsListPage() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    listPortalRequirements()
+    portalApi
+      .listRequirements()
       .then((data) => {
         if (!cancelled) setRequirements(data);
       })
