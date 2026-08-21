@@ -47,8 +47,15 @@ describe('Portal — errores de validación (integración HTTP)', () => {
   let app: TestHttpApp;
   let token: string;
   let adminToken: string;
+  // Con nombre, y no un `jest.fn()` anónimo dentro del `useValue`: las dos
+  // pruebas de `ClientAdminGuard` de más abajo necesitan comprobar que jamás
+  // se llama, que es la única forma de distinguir «cortado por el guard» de
+  // «cortado por casualidad en otro sitio».
+  let requirementsCreate: jest.Mock;
 
   beforeAll(async () => {
+    requirementsCreate = jest.fn().mockResolvedValue({ id: 1 });
+
     const config = {
       get: (key: string, fallback?: string) =>
         ({ JWT_CLIENT_ACCESS_SECRET: CLIENT_ACCESS_SECRET })[key] ?? fallback,
@@ -77,7 +84,7 @@ describe('Portal — errores de validación (integración HTTP)', () => {
           useValue: {
             list: jest.fn().mockResolvedValue([]),
             findOne: jest.fn().mockResolvedValue({ id: 1 }),
-            create: jest.fn().mockResolvedValue({ id: 1 }),
+            create: requirementsCreate,
           },
         },
       ],
@@ -101,6 +108,10 @@ describe('Portal — errores de validación (integración HTTP)', () => {
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  beforeEach(() => {
+    requirementsCreate.mockClear();
   });
 
   /** El contrato que el frontend consume: `{ code, message }` con message string. */
@@ -296,6 +307,34 @@ describe('Portal — errores de validación (integración HTTP)', () => {
         expect(res.body.message).toContain(detail);
       }
       expect(res.body.message).not.toMatch(/[.!?][A-ZÁÉÍÓÚÑ]/);
+    });
+
+    /**
+     * Ronda de correcciones 1: hasta aquí, las cuatro pruebas de arriba usan
+     * siempre `adminToken`, así que quitar `@UseGuards(ClientAdminGuard)` del
+     * `@Post()` del controlador dejaría la suite entera en verde — la
+     * mutación que abre el alta a cualquier usuario de la empresa no la
+     * vería nadie. El cuerpo es **válido** a propósito: con uno inválido, un
+     * fallo de orden entre el guard y el `ValidationPipe` daría 400 en vez
+     * de 403 y la prueba no distinguiría «denegado por rol» de «rechazado
+     * por forma».
+     */
+    it('un token que no es de administrador no puede crear un requerimiento', async () => {
+      const res = await app.post('/portal/requerimientos', { token, body: validBody });
+
+      expect(res.status).toBe(403);
+      expect(res.body).toMatchObject({
+        code: 'FORBIDDEN',
+        message: 'Solo el administrador de la empresa puede crear requerimientos.',
+      });
+      expect(requirementsCreate).not.toHaveBeenCalled();
+    });
+
+    it('sin token no se puede crear un requerimiento', async () => {
+      const res = await app.post('/portal/requerimientos', { body: validBody });
+
+      expect(res.status).toBe(401);
+      expect(requirementsCreate).not.toHaveBeenCalled();
     });
   });
 
