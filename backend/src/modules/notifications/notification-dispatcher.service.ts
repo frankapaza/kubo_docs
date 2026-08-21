@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { PERU_TIME_ZONE } from '../../common/time-zone';
 import { ClientsRepository } from '../clients/clients.repository';
 import { EmailService } from '../email/email.service';
 import { ClientUsersRepository } from '../portal/client-users.repository';
@@ -210,23 +211,6 @@ function actorKindOf(event: TicketEvent): NotificationActorKind | null {
   }
   return null;
 }
-
-/**
- * La zona en la que se imprimen las fechas de los correos.
- *
- * Escrita aquí y no heredada del proceso. El sistema es UTC de punta a punta y
- * el `Date` que llega es correcto; lo que fallaba era la impresión:
- * `toLocaleString` sin `timeZone` usa la del proceso, y el contenedor de
- * producción corre en UTC —ni el Dockerfile, ni el compose, ni el
- * `.env.production.example` fijan `TZ`—. Un ticket abierto a las 18:14 de Lima
- * le llegaba al cliente como las 11:14 p. m.
- *
- * Se fija aquí, en el formateo, y no con un `TZ` en el contenedor: así es
- * determinista y no depende de que alguien acierte con una variable de entorno
- * que hoy no pone nadie. Y no se cazó antes porque el backend de desarrollo
- * corre en el host, que ya está en hora de Lima.
- */
-const PERU_TIME_ZONE = 'America/Lima';
 
 /**
  * Cómo se marca la zona dentro del correo.

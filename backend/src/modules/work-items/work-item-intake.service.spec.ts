@@ -102,6 +102,51 @@ describe('WorkItemIntakeService.accept', () => {
       .rejects.toThrow(/anterior a hoy/i);
   });
 
+  /**
+   * `2020-01-01` (la prueba de arriba) la rechaza cualquier implementación
+   * plausible, incluida una que compare instantes o que tenga el huso mal:
+   * solo demuestra que "hay alguna validación de fecha", no que sea la
+   * correcta. Estas dos acotan la frontera real: el propio día de hoy tiene
+   * que aceptarse siempre, sea cual sea la hora a la que se acepte.
+   *
+   * El instante de sistema se fija con `Z` (absoluto) y no con la forma local
+   * de la prueba de arriba, para que "hoy" en hora de Lima quede definido sin
+   * depender de en qué zona corra el host que ejecuta la suite: 2026-08-07
+   * 15:00 UTC son las 10:00 de Lima del mismo día 7.
+   */
+  it('acepta la fecha de hoy', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-07T15:00:00Z'));
+    const { service, patches } = makeService(fila({ status: 'SOLICITADO' }));
+    await service.accept(1, 5, { priority: 'ALTA', committedDate: '2026-08-07' });
+    expect(patches[0]).toMatchObject({ dueDate: '2026-08-07' });
+  });
+
+  it('acepta mañana', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-07T15:00:00Z'));
+    const { service, patches } = makeService(fila({ status: 'SOLICITADO' }));
+    await service.accept(1, 5, { priority: 'ALTA', committedDate: '2026-08-08' });
+    expect(patches[0]).toMatchObject({ dueDate: '2026-08-08' });
+  });
+
+  /**
+   * Con el host de desarrollo ya en hora de Lima, ningún instante delata en
+   * el resultado que `assertFechaNoPasada` calculara "hoy" con la zona del
+   * proceso en vez de con `PERU_TIME_ZONE` escrita: las dos darían el mismo
+   * día. La única forma de cazar esa regresión es estructural — comprobar
+   * que el formateo que decide "hoy" lleva la zona puesta —, igual que hace
+   * `notification-dispatcher.service.spec.ts` con el formateo de los correos
+   * ("el formateo fija la zona, no la hereda del proceso").
+   */
+  it('calcula "hoy" con la zona de Lima escrita, no con la del proceso', async () => {
+    const spy = jest.spyOn(Intl, 'DateTimeFormat');
+    const { service } = makeService(fila({ status: 'SOLICITADO' }));
+
+    await service.accept(1, 5, { priority: 'ALTA', committedDate: '2026-09-30' });
+
+    expect(spy).toHaveBeenCalledWith('en-CA', expect.objectContaining({ timeZone: 'America/Lima' }));
+    spy.mockRestore();
+  });
+
   it('no acepta lo que no está en SOLICITADO', async () => {
     const { service } = makeService(fila({ status: 'EN_PROCESO' }));
     await expect(service.accept(1, 5, { priority: 'ALTA', committedDate: '2026-09-30' }))

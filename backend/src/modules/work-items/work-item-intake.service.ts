@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 
+import { PERU_TIME_ZONE } from '../../common/time-zone';
 import { WorkItemsRepository } from './work-items.repository';
 import { WorkItem } from './entities/work-item.entity';
 import { WorkItemEvent } from './entities/work-item-event.entity';
@@ -138,13 +139,19 @@ export class WorkItemIntakeService {
   /**
    * Comparación por fecha civil, no por instante: `committedDate` es un `date`
    * sin hora, y comparar contra `new Date()` rechazaría el propio día de hoy
-   * a partir de las 00:00 según la zona horaria del servidor. Este servicio
-   * corre en producción en UTC y en desarrollo en hora de Lima; la diferencia
-   * es de cinco horas y ya mordió una vez en las fechas de los correos.
+   * a partir de las 00:00 según la zona horaria del servidor.
+   *
+   * "Hoy" se calcula en `PERU_TIME_ZONE`, escrita, no heredada del proceso:
+   * `getFullYear/getMonth/getDate` leen la zona del proceso, y ese proceso
+   * corre en producción en UTC y en desarrollo en hora de Lima, cinco horas
+   * de diferencia. Con esos métodos, a partir de las 19:00 de Lima "hoy" en
+   * UTC ya es mañana, y la fecha comprometida de hoy mismo se rechazaría con
+   * un 400 falso — invisible en desarrollo porque el host ya está en hora de
+   * Lima, igual que mordió una vez en las fechas de los correos (ver
+   * `PERU_TIME_ZONE` en `common/time-zone.ts`).
    */
   private assertFechaNoPasada(committedDate: string): void {
-    const hoy = new Date();
-    const hoyCivil = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`;
+    const hoyCivil = new Intl.DateTimeFormat('en-CA', { timeZone: PERU_TIME_ZONE }).format(new Date());
     if (committedDate >= hoyCivil) return;
     throw new BadRequestException({
       code: 'BAD_INPUT',
