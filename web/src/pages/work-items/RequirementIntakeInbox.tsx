@@ -410,6 +410,25 @@ export default function RequirementIntakeInbox({ clients, onChanged }: Requireme
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * Se pone en `true` cuando la primera carga termina, con éxito o con
+   * error, y nunca vuelve a `false`. Hace falta para distinguir dos
+   * momentos que (loading, items, error) por sí solos no distinguen:
+   * "todavía no hay respuesta de la primera carga" (se oculta, sin
+   * parpadeo) y "estoy recargando tras un error, con `items` igual de
+   * vacío que antes" (no se oculta -- ahí vive el botón "Reintentar" que el
+   * usuario acaba de pulsar). `load()` limpia `error` y pone `loading` en
+   * `true` en el mismo manejador, así que en el primer render tras pulsar
+   * "Reintentar" `error` ya es `null` e `items` sigue en `[]`: sin esta
+   * marca, la condición de más abajo no puede diferenciar ese instante del
+   * primer montaje, y el panel entero -- aviso, "Cargando…" y el propio
+   * botón -- desaparece justo cuando se pulsa. No es un `useState`: cambia
+   * dentro del mismo callback que ya dispara
+   * `setLoading`/`setError`/`setItems`, así que no hace falta un render
+   * propio para que quede al día a tiempo.
+   */
+  const settled = useRef(false);
+
   // Nombre de quien pidió cada requerimiento, resuelto por lote: el listado
   // de work items no lo trae (solo el id), así que se pide a
   // GET /client-users?clientId=… una vez por cada empresa distinta presente
@@ -438,7 +457,10 @@ export default function RequirementIntakeInbox({ clients, onChanged }: Requireme
         console.warn('[RequirementIntakeInbox] Fallo al cargar los solicitados.', e);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          settled.current = true;
+          setLoading(false);
+        }
       });
     return () => {
       cancelled = true;
@@ -491,14 +513,25 @@ export default function RequirementIntakeInbox({ clients, onChanged }: Requireme
     onChanged();
   };
 
-  // Nada que mostrar y nada que reportar: la franja no se pinta -- ni
-  // siquiera durante la primera carga, que es cuando `items` todavía está
-  // vacío porque la respuesta no ha llegado. Sin el `!loading` de más
-  // arriba, la franja parpadeaba «Solicitados / 0 / Cargando…» en cada
-  // visita al tablero y desaparecía al llegar la respuesta. Un error sí
-  // se pinta siempre, tenga o no elementos: ocultarlo sería el mismo fallo
-  // al revés, un problema real que no se ve.
-  if (!error && items.length === 0) return null;
+  /**
+   * Cuándo se oculta la franja entera. No es solo `!error && items.length
+   * === 0` -- esa fue la versión que rompió "Reintentar" (ver `settled`
+   * más arriba): tras pulsar el botón, `error` vuelve a `null` e `items`
+   * sigue en `[]`, así que esa condición ocultaba el panel entero,
+   * incluido el botón que se acababa de pulsar. Tampoco es `!loading &&
+   * !error && items.length === 0` -- esa fue la versión anterior a esa, y
+   * parpadeaba "Solicitados / 0 / Cargando…" en cada visita porque no
+   * distinguía "primera carga en curso" de "recarga en curso".
+   *
+   * Se oculta solo sin error, sin nada que mostrar, y cuando además no
+   * estamos en mitad de una recarga que ya tuvo una carga previa resuelta
+   * -- es decir, cuando es la primera carga (`!settled.current`) o cuando
+   * ya terminó de cargar (`!loading`). El caso que se deja fuera a
+   * propósito es "ya hubo una carga resuelta, y `loading` volvió a `true`":
+   * eso es pulsar "Reintentar" tras un error, y ahí el panel tiene que
+   * seguir de pie con su "Cargando…", no desaparecer.
+   */
+  if (!error && items.length === 0 && (!settled.current || !loading)) return null;
 
   return (
     <section
