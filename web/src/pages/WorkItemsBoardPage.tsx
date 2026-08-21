@@ -341,6 +341,16 @@ export default function WorkItemsBoardPage() {
   };
 
   const handleColumnDragOver = (e: DragEvent<HTMLElement>, status: WorkItemStatus) => {
+    // RECHAZADO no admite soltar nada encima: a ese estado solo se llega
+    // rechazando desde la bandeja de aceptación (RequirementIntakeInbox),
+    // porque ese es el único camino que escribe el evento REJECTED del que
+    // depende `lastRejectionReason` (el motivo que ve el cliente en el
+    // portal). Un arrastre hasta aquí escribiría un MOVED en su lugar —el
+    // portal mostraría "Rechazado" con "Sin motivo registrado"— y encima el
+    // ítem quedaría atrapado, porque assertMovable ya bloquea salir de
+    // RECHAZADO y no hay pantalla que lo deshaga. Sin preventDefault() el
+    // navegador rechaza la suelta antes de que llegue a handleColumnDrop.
+    if (status === 'RECHAZADO') return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     const index = computeDropIndex(e.currentTarget, e.clientY, draggingId);
@@ -517,14 +527,14 @@ export default function WorkItemsBoardPage() {
           type="button"
           onClick={() => setOutOfFlowOpen((v) => !v)}
           aria-expanded={outOfFlowOpen}
-          aria-label="Mostrar u ocultar los ítems bloqueados y cancelados"
+          aria-label="Mostrar u ocultar los ítems bloqueados, cancelados y rechazados"
           style={{
             width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
             padding: '12px 16px', background: 'none', border: 'none', cursor: 'pointer',
             fontSize: 13, fontWeight: 600, color: '#15191a',
           }}
         >
-          <span>Fuera de flujo — bloqueados y cancelados</span>
+          <span>Fuera de flujo — bloqueados, cancelados y rechazados</span>
           <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: '#6d7577' }}>
             {outOfFlowItems.length} {outOfFlowOpen ? '▲' : '▼'}
           </span>
