@@ -167,6 +167,15 @@ describe('refresh', () => {
     expect(res.clientUser.clientRazonSocial).toBe('Cliente de Prueba SAC');
   });
 
+  it('devuelve tambien si administra su empresa al refrescar', async () => {
+    const hash = await hash$;
+    const user = { id: 1, clientId: 7, email: 'a@x.com', passwordHash: hash, isActive: 1, isAdmin: 1 };
+    const { service, jwt } = makeService(user, { id: 7, razonSocial: 'Cliente de Prueba SAC' });
+    jwt.verifyAsync = jest.fn().mockResolvedValue({ sub: 1, email: 'a@x.com', clientId: 7, isClientAdmin: true });
+    const res = await service.refresh('un-refresh-token-valido');
+    expect(res.clientUser.isAdmin).toBe(true);
+  });
+
   it('rechaza un token de refresco invalido', async () => {
     const { service, jwt } = makeService(null);
     jwt.verifyAsync = jest.fn().mockRejectedValue(new Error('invalido'));
