@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 
 import { WorkItem } from './entities/work-item.entity';
+import { WorkItemEvent } from './entities/work-item-event.entity';
 import { WorkItemStatus, WorkItemPriority } from './domain/work-item-board';
 
 export type DueFilter = 'vencidos' | 'semana';
@@ -21,6 +22,7 @@ export interface WorkItemListFilters {
 export class WorkItemsRepository {
   constructor(
     @InjectRepository(WorkItem) private readonly repo: Repository<WorkItem>,
+    @InjectRepository(WorkItemEvent) private readonly eventsRepo: Repository<WorkItemEvent>,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -96,5 +98,30 @@ export class WorkItemsRepository {
   /** Mismo idioma que TicketsRepository.runInTransaction. */
   runInTransaction<T>(work: (manager: EntityManager) => Promise<T>): Promise<T> {
     return this.dataSource.transaction(work);
+  }
+
+  /**
+   * Solo lo que esa empresa pidió desde el portal. Los dos filtros van
+   * siempre juntos en el `where`, sin un `if` que pueda dejar caer alguno.
+   */
+  listPortalRequirements(clientId: number): Promise<WorkItem[]> {
+    return this.repo.find({
+      where: { clientId, origin: 'PORTAL' },
+      order: { createdAt: 'DESC', id: 'DESC' },
+    });
+  }
+
+  /** Misma frontera que `listPortalRequirements`, para un único ítem. */
+  findPortalRequirement(clientId: number, id: number): Promise<WorkItem | null> {
+    return this.repo.findOne({ where: { id, clientId, origin: 'PORTAL' } });
+  }
+
+  /** El motivo del rechazo más reciente de ese ítem, si lo hubo. */
+  async lastRejectionReason(workItemId: number): Promise<string | null> {
+    const ev = await this.eventsRepo.findOne({
+      where: { workItemId, type: 'REJECTED' },
+      order: { createdAt: 'DESC', id: 'DESC' },
+    });
+    return ev?.reason ?? null;
   }
 }

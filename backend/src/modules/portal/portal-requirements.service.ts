@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 
 import { WorkItemsRepository } from '../work-items/work-items.repository';
 import { WorkItem } from '../work-items/entities/work-item.entity';
@@ -101,6 +101,48 @@ export class PortalRequirementsService {
       );
 
       return this.toPortalView({ ...saved, code }, null);
+    });
+  }
+
+  /**
+   * Todo lo que ese cliente pidió desde el portal, y nada más. El motivo del
+   * rechazo no se busca aquí: es una consulta por ítem y en un listado de
+   * veinte no tiene sentido hacerla veinte veces para descartarla diecinueve
+   * (solo los rechazados la necesitan, y `findOne` sí la trae).
+   */
+  async list(clientId: number): Promise<PortalRequirementView[]> {
+    assertSessionScope(clientId, 'clientId', PortalRequirementsService.name);
+
+    const filas = await this.repo.listPortalRequirements(clientId);
+    return filas.map((w) => this.toPortalView(w, null));
+  }
+
+  /**
+   * Los dos filtros —`clientId` del token y `origin = 'PORTAL'`— van en el
+   * `WHERE` de `findPortalRequirement`, no en un `if` posterior aquí: la
+   * consulta no debe poder devolver nunca una fila de otra empresa ni un
+   * requerimiento interno, ni siquiera un instante antes de descartarla.
+   */
+  async findOne(clientId: number, requirementId: number): Promise<PortalRequirementView> {
+    assertSessionScope(clientId, 'clientId', PortalRequirementsService.name);
+
+    const w = await this.repo.findPortalRequirement(clientId, requirementId);
+    if (!w) throw this.noExiste();
+
+    const reason = w.status === 'RECHAZADO' ? await this.repo.lastRejectionReason(requirementId) : null;
+
+    return this.toPortalView(w, reason);
+  }
+
+  /**
+   * Un requerimiento de otra empresa, uno interno y uno que no existe dan
+   * exactamente esta misma respuesta. Distinguirlos confirmaría cuáles
+   * existen de verdad — de ahí 404 y nunca 403.
+   */
+  private noExiste(): NotFoundException {
+    return new NotFoundException({
+      code: 'NOT_FOUND',
+      message: 'Requerimiento no encontrado',
     });
   }
 
