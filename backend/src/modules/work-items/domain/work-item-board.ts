@@ -6,7 +6,9 @@ export type WorkItemStatus =
   | 'PRUEBAS'
   | 'CERRADO'
   | 'BLOQUEADO'
-  | 'CANCELADO';
+  | 'CANCELADO'
+  | 'SOLICITADO'
+  | 'RECHAZADO';
 
 export const WORK_ITEM_STATUSES: WorkItemStatus[] = [
   'PENDIENTE',
@@ -15,6 +17,8 @@ export const WORK_ITEM_STATUSES: WorkItemStatus[] = [
   'CERRADO',
   'BLOQUEADO',
   'CANCELADO',
+  'SOLICITADO',
+  'RECHAZADO',
 ];
 
 /** Las cuatro columnas de flujo del tablero, en orden de izquierda a derecha. */
@@ -26,7 +30,7 @@ export const BOARD_COLUMNS: WorkItemStatus[] = [
 ];
 
 /** Estados fuera del flujo: no son columnas, exigen motivo. */
-export const OUT_OF_FLOW_STATUSES: WorkItemStatus[] = ['BLOQUEADO', 'CANCELADO'];
+export const OUT_OF_FLOW_STATUSES: WorkItemStatus[] = ['BLOQUEADO', 'CANCELADO', 'RECHAZADO'];
 
 export type WorkItemPriority = 'ALTA' | 'MEDIA' | 'BAJA';
 
@@ -53,6 +57,40 @@ export function assertReason(toStatus: WorkItemStatus, reason: string | null | u
     code: 'BAD_INPUT',
     message: `Pasar a «${toStatus}» exige indicar un motivo.`,
   });
+}
+
+/**
+ * Estados anteriores al tablero: un requerimiento que el cliente pidió y que
+ * nadie ha aceptado todavía, y uno que se rechazó.
+ *
+ * No son columnas y **no se llega a ellos ni se sale de ellos arrastrando**.
+ * Se sale por `WorkItemIntakeService.accept` o `.reject`, que son los únicos
+ * sitios donde se fija la fecha comprometida o se exige el motivo.
+ */
+export const PRE_BOARD_STATUSES: WorkItemStatus[] = ['SOLICITADO', 'RECHAZADO'];
+
+/**
+ * Exige que el ítem ya esté en el tablero antes de dejar que alguien lo mueva.
+ *
+ * Hace falta porque aquí no hay máquina de estados: `move` acepta cualquier
+ * columna de destino desde cualquier origen. Sin esta guarda, arrastrar una
+ * tarjeta llevaría un SOLICITADO directo a EN_PROCESO y se saltaría la
+ * aceptación entera — que es lo único que garantiza que exista una fecha
+ * comprometida, de la que depende el informe mensual del cliente.
+ *
+ * Se comprueba el estado de ORIGEN, no el de destino: lo que está prohibido es
+ * sacar de aquí arrastrando, no llegar aquí (a `SOLICITADO` no llega nada, y a
+ * `RECHAZADO` solo llega `reject`).
+ */
+export function assertMovable(fromStatus: WorkItemStatus): void {
+  if (!PRE_BOARD_STATUSES.includes(fromStatus)) return;
+
+  const message =
+    fromStatus === 'SOLICITADO'
+      ? 'El requerimiento aún no ha sido aceptado: acéptalo antes de moverlo en el tablero.'
+      : 'El requerimiento fue rechazado y no vuelve al tablero.';
+
+  throw new BadRequestException({ code: 'BAD_INPUT', message });
 }
 
 /**

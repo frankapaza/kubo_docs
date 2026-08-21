@@ -5,6 +5,9 @@ import {
   assertReason,
   BOARD_COLUMNS,
   DEFAULT_PRIORITY,
+  WORK_ITEM_STATUSES,
+  PRE_BOARD_STATUSES,
+  assertMovable,
 } from './work-item-board';
 
 describe('BOARD_COLUMNS', () => {
@@ -160,5 +163,37 @@ describe('insertionIndex', () => {
 
   it('coloca al final si todas las existentes son de igual o mayor prioridad', () => {
     expect(insertionIndex(['ALTA', 'ALTA'], 'ALTA')).toBe(2);
+  });
+});
+
+describe('estados previos al tablero', () => {
+  it('SOLICITADO y RECHAZADO son estados válidos', () => {
+    expect(WORK_ITEM_STATUSES).toContain('SOLICITADO');
+    expect(WORK_ITEM_STATUSES).toContain('RECHAZADO');
+  });
+
+  it('no son columnas del tablero', () => {
+    expect(BOARD_COLUMNS).toEqual(['PENDIENTE', 'EN_PROCESO', 'PRUEBAS', 'CERRADO']);
+    expect(PRE_BOARD_STATUSES).toEqual(['SOLICITADO', 'RECHAZADO']);
+  });
+
+  it('RECHAZADO exige motivo; SOLICITADO no', () => {
+    expect(requiresReason('RECHAZADO')).toBe(true);
+    // Nace del portal sin que nadie lo motive: pedirle motivo lo haría
+    // imposible de crear.
+    expect(requiresReason('SOLICITADO')).toBe(false);
+  });
+
+  it('assertMovable rechaza mover lo que aún no entró al tablero', () => {
+    expect(() => assertMovable('SOLICITADO')).toThrow(/aceptado/i);
+    expect(() => assertMovable('RECHAZADO')).toThrow(/rechazado/i);
+  });
+
+  it('assertMovable deja pasar cualquier estado del tablero', () => {
+    for (const s of BOARD_COLUMNS) {
+      expect(() => assertMovable(s)).not.toThrow();
+    }
+    expect(() => assertMovable('BLOQUEADO')).not.toThrow();
+    expect(() => assertMovable('CANCELADO')).not.toThrow();
   });
 });
