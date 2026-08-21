@@ -89,6 +89,29 @@ const makeService = (
 };
 
 describe('move', () => {
+  it('no deja arrastrar un requerimiento que aún no fue aceptado', async () => {
+    const { service } = makeService(item({ status: 'SOLICITADO' }));
+    await expect(
+      service.move({ workItemId: 1, actorUserId: 5, toStatus: 'EN_PROCESO', toIndex: 0 }),
+    ).rejects.toThrow(/aceptado/i);
+  });
+
+  it('no deja devolver al tablero un requerimiento rechazado', async () => {
+    const { service } = makeService(item({ status: 'RECHAZADO' }));
+    await expect(
+      service.move({ workItemId: 1, actorUserId: 5, toStatus: 'PENDIENTE', toIndex: 0 }),
+    ).rejects.toThrow(/rechazado/i);
+  });
+
+  it('no escribe nada cuando rechaza el movimiento', async () => {
+    const { service, patches, savedEvents } = makeService(item({ status: 'SOLICITADO' }));
+    await expect(
+      service.move({ workItemId: 1, actorUserId: 5, toStatus: 'PRUEBAS', toIndex: 0 }),
+    ).rejects.toThrow();
+    expect(patches).toHaveLength(0);
+    expect(savedEvents).toHaveLength(0);
+  });
+
   it('rechaza pasar a BLOQUEADO sin motivo y no escribe nada', async () => {
     const { service, patches, savedEvents } = makeService(item());
     await expect(

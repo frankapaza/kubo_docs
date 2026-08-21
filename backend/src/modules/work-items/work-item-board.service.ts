@@ -4,7 +4,13 @@ import { WorkItemsRepository } from './work-items.repository';
 import { WorkItemEventsService } from './work-item-events.service';
 import { WorkItem } from './entities/work-item.entity';
 import { WorkItemEvent } from './entities/work-item-event.entity';
-import { assertReason, reorder, WorkItemStatus, WorkItemPriority } from './domain/work-item-board';
+import {
+  assertMovable,
+  assertReason,
+  reorder,
+  WorkItemStatus,
+  WorkItemPriority,
+} from './domain/work-item-board';
 
 export interface MoveInput {
   workItemId: number;
@@ -71,6 +77,11 @@ export class WorkItemBoardService {
         throw new NotFoundException({ code: 'NOT_FOUND', message: 'Requerimiento no encontrado' });
       }
       const from = current.status;
+
+      // Antes de tocar nada: un requerimiento que el cliente pidió y que nadie
+      // aceptó todavía no está en ninguna columna, y arrastrarlo se saltaría la
+      // aceptación — el único sitio donde se fija la fecha comprometida.
+      assertMovable(from);
 
       // Cuando `toStatus` coincide con el estado actual es una simple
       // reordenación dentro de la columna (spec, "el orden dentro de la
