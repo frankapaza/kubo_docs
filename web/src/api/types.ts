@@ -579,8 +579,15 @@ export interface SupportAgentView extends SupportAgent {
   openTickets: number;
 }
 
+// Espejo de WorkItemStatus en
+// backend/src/modules/work-items/domain/work-item-board.ts: son los ocho
+// estados reales, no solo los seis del tablero. Faltaban SOLICITADO y
+// RECHAZADO -- la bandeja de aceptación (tarea 12) pide
+// `GET /work-items?status=SOLICITADO`, y sin ellos aquí ese filtro ni
+// siquiera tipaba.
 export type WorkItemStatus =
-  | 'PENDIENTE' | 'EN_PROCESO' | 'PRUEBAS' | 'CERRADO' | 'BLOQUEADO' | 'CANCELADO';
+  | 'PENDIENTE' | 'EN_PROCESO' | 'PRUEBAS' | 'CERRADO' | 'BLOQUEADO' | 'CANCELADO'
+  | 'SOLICITADO' | 'RECHAZADO';
 
 export type WorkItemPriority = 'ALTA' | 'MEDIA' | 'BAJA';
 
@@ -604,6 +611,12 @@ export interface WorkItem {
   dueDate: string | null;
   closedAt: string | null;
   createdAt: string;
+  /**
+   * Quién lo pidió desde el portal; `null` para todo lo que nace en casa
+   * (origin INTERNO). La bandeja de aceptación (tarea 12) lo usa para
+   * resolver el nombre de quien pidió cada requerimiento SOLICITADO.
+   */
+  createdByClientUserId: number | null;
 }
 
 export interface WorkItemEvent {

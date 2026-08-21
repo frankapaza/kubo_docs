@@ -14,6 +14,7 @@ import BoardColumn from './work-items/BoardColumn';
 import type { DropTarget } from './work-items/BoardColumn';
 import WorkItemPanel from './work-items/WorkItemPanel';
 import NewWorkItemDialog from './work-items/NewWorkItemDialog';
+import RequirementIntakeInbox from './work-items/RequirementIntakeInbox';
 
 const SEARCH_DEBOUNCE_MS = 280;
 
@@ -473,6 +474,15 @@ export default function WorkItemsBoardPage() {
 
       {error && <div style={{ fontSize: 13, color: 'oklch(0.5 0.16 25)' }}>{error}</div>}
       {loading && <div style={{ fontSize: 13, color: '#6d7577' }}>Cargando…</div>}
+
+      {/*
+        Encima del tablero, no dentro: son requerimientos SOLICITADOS, que no
+        tienen columna propia — todavía no hay compromiso de prioridad ni
+        fecha que los ubique en ninguna. Se pide con su propio filtro de
+        estado y se refresca sola; `onChanged` solo avisa a este tablero
+        para que la columna PENDIENTE se entere del que se acaba de aceptar.
+      */}
+      <RequirementIntakeInbox clients={clients} onChanged={() => void refetchList()} />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
         {BOARD_COLUMNS.map((status) => (

@@ -153,7 +153,7 @@ export default function EditClientUserDialog({ open, user, onCancel, onUpdated }
                 onChange={(e) => setIsAdmin(e.target.checked)}
               />
               <span className="text-xs text-slate-600">
-                Administrador de la empresa (reservado, sin efecto todavía)
+                Administrador de la empresa — puede pedir requerimientos desde el portal
               </span>
             </label>
           </div>

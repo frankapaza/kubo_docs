@@ -20,6 +20,12 @@ export const STATUS_LABELS: Record<WorkItemStatus, string> = {
   CERRADO: 'Cerrado',
   BLOQUEADO: 'Bloqueado',
   CANCELADO: 'Cancelado',
+  // Ninguno de los dos tiene columna propia ni entra en ALL_STATUSES (no se
+  // llega a ellos arrastrando: SOLICITADO se resuelve desde la bandeja de
+  // aceptación, ver RequirementIntakeInbox.tsx). El Record los exige igual,
+  // porque son dos de los ocho valores reales de WorkItemStatus.
+  SOLICITADO: 'Solicitado',
+  RECHAZADO: 'Rechazado',
 };
 
 export const PRIORITY_STYLES: Record<WorkItemPriority, Swatch> = {

@@ -47,4 +47,12 @@ export const workItemsApi = {
 
   changePriority: (id: number, body: { priority: WorkItemPriority; reason?: string }) =>
     api.post<WorkItem>(`/work-items/${id}/priority`, body).then((r) => r.data),
+
+  /** Aceptar fija prioridad y fecha comprometida y lo mete en PENDIENTE (tarea 9). */
+  accept: (id: number, body: { priority: WorkItemPriority; committedDate: string }) =>
+    api.post<WorkItem>(`/work-items/${id}/accept`, body).then((r) => r.data),
+
+  /** Rechazar exige motivo, igual que el resto de estados fuera de flujo. */
+  reject: (id: number, body: { reason: string }) =>
+    api.post<WorkItem>(`/work-items/${id}/reject`, body).then((r) => r.data),
 };
