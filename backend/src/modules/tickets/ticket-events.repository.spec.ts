@@ -153,7 +153,7 @@ describe('TicketEventsRepository', () => {
     it('markNotified sella y limpia el siguiente intento', async () => {
       const { repo, update } = montar();
 
-      await repo.markNotified('901', AHORA, 2, 'sin plantilla activa');
+      await repo.markNotified('901', AHORA, 2, 'sin plantilla activa', null);
 
       expect(update).toHaveBeenCalledWith('901', {
         notifiedAt: AHORA,
@@ -162,6 +162,27 @@ describe('TicketEventsRepository', () => {
         // Una fila sellada no tiene siguiente intento: dejar ahí un instante
         // futuro sería un dato que miente a quien mire la tabla.
         notifyNextAttemptAt: null,
+        sentMessageId: null,
+      });
+    });
+
+    /**
+     * El Message-ID con el que salió el aviso al cliente sí se guarda: es lo
+     * único contra lo que `InboundEmailsRepository.findTicketsByEmailMessageIds`
+     * puede correlacionar la respuesta a un aviso posterior (no al acuse
+     * inicial, que cubre `tickets.email_message_id`).
+     */
+    it('markNotified guarda el Message-ID del aviso cuando lo hay', async () => {
+      const { repo, update } = montar();
+
+      await repo.markNotified('901', AHORA, 1, null, '<aviso-2@kuboti.com>');
+
+      expect(update).toHaveBeenCalledWith('901', {
+        notifiedAt: AHORA,
+        notifyAttempts: 1,
+        notifyLastError: null,
+        notifyNextAttemptAt: null,
+        sentMessageId: '<aviso-2@kuboti.com>',
       });
     });
 
@@ -189,7 +210,7 @@ describe('TicketEventsRepository', () => {
     it('acepta el id como cadena, que es como llega de la base', async () => {
       const { repo, update } = montar();
 
-      await repo.markNotified('9007199254740993', AHORA, 1, null);
+      await repo.markNotified('9007199254740993', AHORA, 1, null, null);
 
       expect(update.mock.calls[0][0]).toBe('9007199254740993');
     });

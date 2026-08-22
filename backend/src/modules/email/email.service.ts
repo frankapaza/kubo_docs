@@ -18,6 +18,14 @@ export interface SendEmailInput {
   text?: string;
   attachments?: EmailAttachment[];
   replyTo?: string;
+  /**
+   * Cabeceras adicionales, tal cual, sin transformar. Las usa
+   * `NotificationDispatcher` para marcar sus envíos como automáticos
+   * (`Auto-Submitted`, RFC 3834) y para enlazar el hilo de un ticket nacido de
+   * un correo (`In-Reply-To` / `References`), pero este servicio no sabe nada
+   * de esas dos cosas: solo las traslada a nodemailer.
+   */
+  headers?: Record<string, string>;
 }
 
 @Injectable()
@@ -103,6 +111,7 @@ export class EmailService {
         text: input.text,
         attachments: input.attachments,
         replyTo: input.replyTo ?? userEmail,
+        headers: input.headers,
       });
       this.logger.log(
         `Email OK: messageId=${info.messageId} accepted=${JSON.stringify(info.accepted)} rejected=${JSON.stringify(info.rejected)}`,

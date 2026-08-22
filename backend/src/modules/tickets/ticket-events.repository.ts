@@ -113,18 +113,30 @@ export class TicketEventsRepository {
    * Limpia `notify_next_attempt_at` porque una fila sellada no tiene siguiente
    * intento, y dejar ahí un instante futuro sería un dato que miente a quien
    * mire la tabla.
+   *
+   * `sentMessageId` **se exige siempre**, aunque casi siempre sea `null`, y no
+   * es un parámetro opcional que alguien pueda olvidar: es el `Message-ID` con
+   * el que salió el aviso al **cliente** (`NotificationDispatcher` solo lo
+   * rellena para la entrada de público `CLIENT` de un plan; un aviso solo al
+   * equipo, o un evento que no avisó a nadie, sella con `null` de verdad, no
+   * por omisión). Antes de este cambio el despachador pedía el `messageId` a
+   * `EmailService.send` y lo tiraba, así que esta columna nunca se llenaba y
+   * la mitad de la correlación de respuestas —la que cubre un aviso posterior
+   * al acuse inicial— estaba muerta desde que existe la tabla.
    */
   async markNotified(
     id: TicketEventId,
     notifiedAt: Date,
     attempts: number,
     lastError: string | null,
+    sentMessageId: string | null,
   ): Promise<void> {
     await this.repo.update(id, {
       notifiedAt,
       notifyAttempts: attempts,
       notifyLastError: lastError,
       notifyNextAttemptAt: null,
+      sentMessageId,
     });
   }
 

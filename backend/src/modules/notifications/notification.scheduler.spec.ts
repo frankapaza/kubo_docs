@@ -33,6 +33,7 @@ interface FilaFake {
   notifyAttempts: number;
   notifyNextAttemptAt: Date | null;
   notifyLastError: string | null;
+  sentMessageId: string | null;
 }
 
 function unaFila(overrides: Partial<FilaFake> = {}): FilaFake {
@@ -45,6 +46,7 @@ function unaFila(overrides: Partial<FilaFake> = {}): FilaFake {
     notifyAttempts: 0,
     notifyNextAttemptAt: null,
     notifyLastError: null,
+    sentMessageId: null,
     ...overrides,
   };
 }
@@ -95,13 +97,20 @@ function tablaFake(filas: FilaFake[]) {
         .slice(0, limit),
     ),
     markNotified: jest.fn(
-      async (id: unknown, notifiedAt: Date, attempts: number, lastError: string | null) => {
+      async (
+        id: unknown,
+        notifiedAt: Date,
+        attempts: number,
+        lastError: string | null,
+        sentMessageId: string | null,
+      ) => {
         validarError(lastError);
         const fila = buscar(id);
         fila.notifiedAt = notifiedAt;
         fila.notifyAttempts = attempts;
         fila.notifyLastError = lastError;
         fila.notifyNextAttemptAt = null;
+        fila.sentMessageId = sentMessageId;
       },
     ),
     recordNotifyFailure: jest.fn(
@@ -116,11 +125,17 @@ function tablaFake(filas: FilaFake[]) {
   };
 }
 
+interface RespuestaDespacho {
+  sent?: number;
+  skipped?: string | null;
+  sentMessageId?: string | null;
+}
+
 interface OpcionesDespachador {
   /** Por id de evento: qué devuelve o qué lanza el despachador. */
-  porEvento?: Record<string, { sent?: number; skipped?: string | null } | Error>;
+  porEvento?: Record<string, RespuestaDespacho | Error>;
   /** Comportamiento por defecto de los eventos no listados arriba. */
-  pordefecto?: { sent?: number; skipped?: string | null } | Error;
+  pordefecto?: RespuestaDespacho | Error;
 }
 
 function despachadorFake(opciones: OpcionesDespachador = {}) {
@@ -130,7 +145,11 @@ function despachadorFake(opciones: OpcionesDespachador = {}) {
     dispatchForEvent: jest.fn(async (event: any) => {
       const respuesta = porEvento[String(event.id)] ?? pordefecto;
       if (respuesta instanceof Error) throw respuesta;
-      return { sent: respuesta.sent ?? 0, skipped: respuesta.skipped ?? null };
+      return {
+        sent: respuesta.sent ?? 0,
+        skipped: respuesta.skipped ?? null,
+        sentMessageId: respuesta.sentMessageId ?? null,
+      };
     }),
   };
 }
@@ -173,6 +192,35 @@ describe('NotificationScheduler', () => {
 
       expect(segunda).toEqual({ processed: 0, sent: 0, failed: 0, abandoned: 0 });
       expect(dispatcher.dispatchForEvent).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * El trabajo que el vigilante tenía olvidado: `EmailService.send` ya le
+     * daba el `Message-ID` al despachador, y el despachador se lo devuelve en
+     * `DispatchResult.sentMessageId`, pero nadie lo llevaba hasta
+     * `ticket_events.sent_message_id`. Sin esto, la correlación de una
+     * respuesta a un aviso posterior -- no al acuse inicial -- está muerta.
+     */
+    it('sella con el Message-ID del aviso al cliente que le dio el despachador', async () => {
+      const fila = unaFila();
+      const { scheduler } = montar([fila], {
+        pordefecto: { sent: 1, skipped: null, sentMessageId: '<aviso-2@kuboti.com>' },
+      });
+
+      await scheduler.drain(T0);
+
+      expect(fila.sentMessageId).toBe('<aviso-2@kuboti.com>');
+    });
+
+    it('un aviso que solo fue al equipo sella sin Message-ID de cliente', async () => {
+      const fila = unaFila();
+      const { scheduler } = montar([fila], {
+        pordefecto: { sent: 1, skipped: null, sentMessageId: null },
+      });
+
+      await scheduler.drain(T0);
+
+      expect(fila.sentMessageId).toBeNull();
     });
 
     it('un evento ya notificado no se vuelve a procesar', async () => {
@@ -312,7 +360,7 @@ describe('NotificationScheduler', () => {
 
       await scheduler.drain(T0);
       // Ya no falla: el segundo intento sale.
-      dispatcher.dispatchForEvent.mockImplementation(async () => ({ sent: 1, skipped: null }));
+      dispatcher.dispatchForEvent.mockImplementation(async () => ({ sent: 1, skipped: null, sentMessageId: null }));
 
       await scheduler.drain(enT0Mas(retryDelayMs(1) + 1_000));
 
@@ -389,6 +437,30 @@ describe('NotificationScheduler', () => {
       expect(fila.notifyLastError).toContain('SMTP caído');
       // Un aviso perdido no puede quedarse en un `log` entre el ruido.
       expect(textoDe(logs.error)).toMatch(/abandona/i);
+    });
+
+    /**
+     * El caso que se perdía antes de esta ronda: el último intento entregó de
+     * verdad el aviso al cliente (el del equipo fue el que rebotó), y aun así
+     * se abandona por agotar el tope. Sellar sin su `Message-ID` habría
+     * dejado sin correlacionar una respuesta a un correo que sí llegó.
+     */
+    it('un abandono con envío parcial guarda igual el Message-ID que sí salió al cliente', async () => {
+      const fila = unaFila({ notifyAttempts: NOTIFY_MAX_ATTEMPTS - 1 });
+      const { scheduler } = montar([fila], {
+        pordefecto: new NotificationDispatchError(
+          'No se pudieron enviar 1 de 2 avisos del evento 901 (ticket 13).',
+          ['TICKET_CREATED/CLIENT'],
+          ['TICKET_CREATED_PORTAL/TEAM'],
+          [new Error('ECONNREFUSED')],
+          '<parcial-cliente@kuboti.com>',
+        ),
+      });
+
+      const resumen = await scheduler.drain(enT0Mas(UN_DIA));
+
+      expect(resumen.abandoned).toBe(1);
+      expect(fila.sentMessageId).toBe('<parcial-cliente@kuboti.com>');
     });
 
     /**
@@ -640,7 +712,7 @@ describe('NotificationScheduler', () => {
       });
       dispatcher.dispatchForEvent.mockImplementation(async () => {
         await colgado;
-        return { sent: 1, skipped: null };
+        return { sent: 1, skipped: null, sentMessageId: null };
       });
       return liberar;
     }
@@ -680,7 +752,7 @@ describe('NotificationScheduler', () => {
       // Llega una fila nueva y el cron siguiente la coge: el freno solo dura
       // lo que dura la pasada.
       repo.filas.push(unaFila({ id: '902' }));
-      dispatcher.dispatchForEvent.mockImplementation(async () => ({ sent: 1, skipped: null }));
+      dispatcher.dispatchForEvent.mockImplementation(async () => ({ sent: 1, skipped: null, sentMessageId: null }));
       await scheduler.handleCron();
 
       expect(dispatcher.dispatchForEvent).toHaveBeenCalledTimes(2);

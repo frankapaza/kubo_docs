@@ -1179,3 +1179,149 @@ describe('los juegos de valores', () => {
     expect(Object.keys(values).sort()).toEqual([...TEAM_VARIABLES].sort());
   });
 });
+
+// ---------------------------------------------------------------------------
+// El Message-ID del aviso al cliente, y las cabeceras que no dependen de la
+// plantilla (el trabajo que el despachador tenía olvidado: sin esto,
+// `ticket_events.sent_message_id` nunca se llenaba y la correlación de una
+// respuesta a un aviso posterior -- no al acuse inicial -- estaba muerta).
+// ---------------------------------------------------------------------------
+
+describe('el Message-ID del aviso al cliente', () => {
+  it('dispatchForEvent lo devuelve tal cual lo dio EmailService.send', async () => {
+    const { dispatcher, email } = montar();
+    email.send.mockResolvedValueOnce({
+      messageId: '<aviso-cliente-1@kuboti.com>',
+      accepted: [AUTOR_EMAIL] as string[],
+      rejected: [] as string[],
+    } as never);
+
+    const resultado = await dispatcher.dispatchForEvent(unEvento());
+
+    expect(resultado.sentMessageId).toBe('<aviso-cliente-1@kuboti.com>');
+  });
+
+  it('un aviso que solo va al equipo (SLA en riesgo) no tiene Message-ID de cliente', async () => {
+    const { dispatcher } = montar();
+
+    const resultado = await dispatcher.dispatchForEvent(
+      unEvento({ type: 'SLA_AT_RISK', toStatus: null }),
+    );
+
+    expect(resultado.sentMessageId).toBeNull();
+  });
+
+  it('un evento sin ningún aviso tampoco tiene Message-ID', async () => {
+    const { dispatcher } = montar();
+
+    const resultado = await dispatcher.dispatchForEvent(unEvento({ type: 'COMMENT', toStatus: null }));
+
+    expect(resultado.sentMessageId).toBeNull();
+  });
+
+  it('un alta desde el portal (dos avisos) solo recuerda el del cliente, no el del equipo', async () => {
+    const { dispatcher, email } = montar();
+    email.send.mockImplementation(((input: any) =>
+      Promise.resolve({
+        messageId: input.to === AUTOR_EMAIL ? '<al-cliente@kuboti.com>' : '<al-equipo@kuboti.com>',
+        accepted: [input.to] as string[],
+        rejected: [] as string[],
+      })) as never);
+
+    const resultado = await dispatcher.dispatchForEvent(
+      unEvento({ type: 'CREATED', fromStatus: null, toStatus: 'NUEVO' }),
+    );
+
+    expect(resultado.sentMessageId).toBe('<al-cliente@kuboti.com>');
+  });
+
+  it('si el envío al cliente falla, no hay Message-ID que recordar', async () => {
+    const { dispatcher, email } = montar();
+    email.send.mockResolvedValueOnce({
+      messageId: '<no-cuenta@kuboti.com>',
+      accepted: [] as string[],
+      rejected: [AUTOR_EMAIL] as string[],
+    } as never);
+
+    await expect(dispatcher.dispatchForEvent(unEvento())).rejects.toThrow();
+  });
+
+  /**
+   * El caso que sostiene `NotificationScheduler.recordFailure`: un envío
+   * parcial que sí entregó el aviso al cliente antes de que fallara el del
+   * equipo tiene que llevar ese Message-ID en el error, para que un abandono
+   * posterior no lo pierda.
+   */
+  it('un envío parcial deja el Message-ID del cliente en el error, aunque falle el del equipo', async () => {
+    const { dispatcher, email } = montar();
+    email.send.mockImplementation(((input: any) =>
+      input.to === BUZON_EQUIPO
+        ? Promise.reject(new Error('SMTP no responde'))
+        : Promise.resolve({
+            messageId: '<parcial-cliente@kuboti.com>',
+            accepted: [input.to] as string[],
+            rejected: [] as string[],
+          })) as never);
+
+    const error = await dispatcher
+      .dispatchForEvent(unEvento({ type: 'CREATED', fromStatus: null, toStatus: 'NUEVO' }))
+      .catch((e) => e);
+
+    expect(error).toBeInstanceOf(NotificationDispatchError);
+    expect(error.sentMessageId).toBe('<parcial-cliente@kuboti.com>');
+  });
+});
+
+describe('cabeceras que no dependen de la plantilla', () => {
+  it('todo aviso va marcado como automático (RFC 3834), para no disparar un bucle', async () => {
+    const { dispatcher, email } = montar();
+
+    await dispatcher.dispatchForEvent(unEvento());
+
+    const [correo] = enviados(email);
+    expect(correo.headers).toMatchObject({ 'Auto-Submitted': 'auto-generated' });
+  });
+
+  it('un ticket nacido de un correo lleva In-Reply-To y References al mensaje que lo abrió', async () => {
+    const { dispatcher, email } = montar({
+      ticket: unTicket({ emailMessageId: '<abrio-el-ticket@cliente.com>' }),
+    });
+
+    await dispatcher.dispatchForEvent(unEvento());
+
+    const [correo] = enviados(email);
+    expect(correo.headers['In-Reply-To']).toBe('<abrio-el-ticket@cliente.com>');
+    expect(correo.headers['References']).toBe('<abrio-el-ticket@cliente.com>');
+  });
+
+  it('un ticket que no nació de un correo no lleva esas dos cabeceras', async () => {
+    const { dispatcher, email } = montar({ ticket: unTicket({ emailMessageId: null }) });
+
+    await dispatcher.dispatchForEvent(unEvento());
+
+    const [correo] = enviados(email);
+    expect(correo.headers).not.toHaveProperty('In-Reply-To');
+    expect(correo.headers).not.toHaveProperty('References');
+  });
+
+  it('tampoco cuando el doble de ticket ni siquiera declara la columna', async () => {
+    // `unTicket()` no trae `emailMessageId`: en la base real la columna
+    // siempre existe (aunque sea `null`), pero un `undefined` que se colara
+    // sin convertir dejaría un `In-Reply-To: undefined` literal en la cabecera.
+    const { dispatcher, email } = montar();
+
+    await dispatcher.dispatchForEvent(unEvento());
+
+    const [correo] = enviados(email);
+    expect(correo.headers).not.toHaveProperty('In-Reply-To');
+  });
+
+  it('las cabeceras van también en el aviso de equipo', async () => {
+    const { dispatcher, email } = montar();
+
+    await dispatcher.dispatchForEvent(unEvento({ type: 'SLA_AT_RISK', toStatus: null }));
+
+    const [correo] = enviados(email);
+    expect(correo.headers).toMatchObject({ 'Auto-Submitted': 'auto-generated' });
+  });
+});

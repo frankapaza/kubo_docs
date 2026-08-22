@@ -355,7 +355,9 @@ export class NotificationScheduler {
         // Antes del sellado: si el `UPDATE` falla, esos correos ya salieron y
         // el contador tiene que decirlo.
         summary.sent += result.sent;
-        if (await this.seal(event, now, attempts, result.skipped)) summary.processed += 1;
+        if (await this.seal(event, now, attempts, result.skipped, result.sentMessageId)) {
+          summary.processed += 1;
+        }
       } catch (error) {
         summary.failed += 1;
         // Un despacho que falla puede haber entregado parte del plan: el alta
@@ -381,15 +383,21 @@ export class NotificationScheduler {
   /**
    * Sella la fila. Devuelve si el `UPDATE` salió: un fallo al escribir se
    * registra y se sigue con el lote.
+   *
+   * `sentMessageId` **por defecto `null`**: la mayoría de las llamadas
+   * (evento que no avisa a nadie, evento agotado) no tienen ningún correo al
+   * cliente que correlacionar. Solo el camino feliz de `drain` lo pasa,
+   * leyéndolo de `DispatchResult.sentMessageId`.
    */
   private async seal(
     event: TicketEvent,
     now: Date,
     attempts: number,
     reason: string | null,
+    sentMessageId: string | null = null,
   ): Promise<boolean> {
     try {
-      await this.events.markNotified(event.id, now, attempts, truncateNotifyError(reason));
+      await this.events.markNotified(event.id, now, attempts, truncateNotifyError(reason), sentMessageId);
       this.noteWriteOk(event);
       return true;
     } catch (error) {
@@ -414,8 +422,16 @@ export class NotificationScheduler {
 
     if (spent >= NOTIFY_MAX_ATTEMPTS) {
       this.logAbandoned(event, spent, message);
+      // Un envío parcial puede haber entregado el aviso al cliente antes de
+      // que fallara el del equipo: `NotificationDispatchError` lo lleva en
+      // `sentMessageId` justo para este momento. Sin leerlo aquí, ese correo
+      // -- que de verdad llegó -- se sellaría sin nada que correlacionar su
+      // respuesta, y la última entrega real del evento se perdería para
+      // siempre en cuanto se abandona.
+      const sentMessageId =
+        error instanceof NotificationDispatchError ? error.sentMessageId : null;
       return {
-        written: await this.seal(event, now, spent, this.exhaustedText(message)),
+        written: await this.seal(event, now, spent, this.exhaustedText(message), sentMessageId),
         abandoned: true,
       };
     }

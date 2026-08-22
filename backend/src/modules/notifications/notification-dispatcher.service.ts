@@ -35,6 +35,17 @@ import { NotificationTemplatesService } from './notification-templates.service';
 export interface DispatchResult {
   sent: number;
   skipped: string | null;
+  /**
+   * El `Message-ID` con el que salió el aviso al **cliente**, o `null` cuando
+   * este evento no le mandó nada (solo avisó al equipo, no generó ningún
+   * aviso, o el envío al cliente no llegó a salir). Es lo único que
+   * `NotificationScheduler` puede grabar en `ticket_events.sent_message_id`
+   * para que una respuesta a este aviso -- en vez de al acuse inicial del
+   * ticket -- siga correlacionando. Nunca el del aviso de equipo: ese
+   * destinatario no es el cliente y no es contra quien hay que correlacionar
+   * nada.
+   */
+  sentMessageId: string | null;
 }
 
 /**
@@ -54,6 +65,15 @@ export class NotificationDispatchError extends Error {
     readonly failedEntries: string[],
     /** Los errores originales del transporte, sin recortar. */
     readonly causes: unknown[],
+    /**
+     * El `Message-ID` del aviso al cliente, si llegó a salir antes de que
+     * fallara el resto del plan. El vigilante lo necesita para sellar la fila
+     * con él cuando el evento se abandona tras agotar los reintentos: sin
+     * esto, un aviso que sí llegó al cliente en el último intento perdería su
+     * `Message-ID` para siempre, justo el dato que sostiene la correlación de
+     * su respuesta.
+     */
+    readonly sentMessageId: string | null = null,
   ) {
     super(message);
     this.name = 'NotificationDispatchError';
@@ -329,7 +349,7 @@ export class NotificationDispatcher {
     const ticketId = toId(event.ticketId);
     const ticket = ticketId === null ? null : await this.tickets.findById(ticketId);
     if (!ticket) {
-      return { sent: 0, skipped: `El ticket ${String(event.ticketId)} ya no existe.` };
+      return { sent: 0, skipped: `El ticket ${String(event.ticketId)} ya no existe.`, sentMessageId: null };
     }
 
     const clientAuthorId = toId(ticket.createdByClientUserId);
@@ -353,7 +373,7 @@ export class NotificationDispatcher {
     });
 
     if (plan.length === 0) {
-      return { sent: 0, skipped: 'El evento no genera ningún aviso.' };
+      return { sent: 0, skipped: 'El evento no genera ningún aviso.', sentMessageId: null };
     }
 
     const context = await this.buildContext(ticket, event, assigneeId);
@@ -362,13 +382,21 @@ export class NotificationDispatcher {
     const enviados: string[] = [];
     const fallidos: string[] = [];
     const causas: unknown[] = [];
+    // El Message-ID con el que salió el aviso al CLIENTE, y solo ese: es el
+    // único de los dos públicos contra el que tiene sentido correlacionar una
+    // respuesta (ver el comentario de `DispatchResult.sentMessageId`).
+    let sentMessageId: string | null = null;
 
     for (const entry of plan) {
       const etiqueta = `${entry.triggerKey}/${entry.audience}`;
       try {
-        const razon = await this.dispatchOne(entry, context, clientAuthorId, assigneeId);
-        if (razon === null) enviados.push(etiqueta);
-        else razones.push(razon);
+        const resultado = await this.dispatchOne(entry, context, clientAuthorId, assigneeId);
+        if (resultado.skipped === null) {
+          enviados.push(etiqueta);
+          if (entry.audience === 'CLIENT') sentMessageId = resultado.messageId;
+        } else {
+          razones.push(resultado.skipped);
+        }
       } catch (error) {
         // Este `catch` **no traga nada**: lo único que hace es dejar que el
         // resto del plan se intente. Todo lo recogido aquí vuelve a lanzarse
@@ -379,10 +407,14 @@ export class NotificationDispatcher {
     }
 
     if (fallidos.length > 0) {
-      throw this.buildDispatchError(context, plan.length, enviados, fallidos, causas);
+      throw this.buildDispatchError(context, plan.length, enviados, fallidos, causas, sentMessageId);
     }
 
-    return { sent: enviados.length, skipped: razones.length > 0 ? razones.join(' ') : null };
+    return {
+      sent: enviados.length,
+      skipped: razones.length > 0 ? razones.join(' ') : null,
+      sentMessageId,
+    };
   }
 
   /**
@@ -438,6 +470,7 @@ export class NotificationDispatcher {
     enviados: string[],
     fallidos: string[],
     causas: unknown[],
+    sentMessageId: string | null,
   ): NotificationDispatchError {
     const referencia = `evento ${String(context.event.id)} (ticket ${String(context.ticket.id)})`;
     const detalle = fallidos
@@ -470,25 +503,32 @@ export class NotificationDispatcher {
       enviados,
       fallidos,
       causas,
+      sentMessageId,
     );
   }
 
   /**
-   * Un aviso concreto. Devuelve `null` si se envió, o la razón por la que no.
+   * Un aviso concreto.
    *
-   * Lo que no devuelve nunca es una razón por un fallo de envío: eso sube tal
-   * cual (ver la regla 2 de la cabecera de la clase).
+   * `skipped` es `null` si se envió, o la razón por la que no. Lo que no
+   * devuelve nunca es una razón por un fallo de envío: eso sube tal cual (ver
+   * la regla 2 de la cabecera de la clase). `messageId` solo viaja relleno
+   * cuando el envío salió bien; quien llama decide si le importa (hoy, solo
+   * para el público `CLIENT`).
    */
   private async dispatchOne(
     entry: NotificationPlanEntry,
     context: NotificationContext,
     clientAuthorId: number | null,
     assigneeId: number | null,
-  ): Promise<string | null> {
+  ): Promise<{ skipped: string | null; messageId: string | null }> {
     const template = await this.templates.findActive(entry.triggerKey, entry.audience);
     if (!template) {
       // No es un error: es exactamente cómo se apaga un aviso desde el panel.
-      return `El aviso ${entry.triggerKey}/${entry.audience} no tiene plantilla activa.`;
+      return {
+        skipped: `El aviso ${entry.triggerKey}/${entry.audience} no tiene plantilla activa.`,
+        messageId: null,
+      };
     }
 
     const to =
@@ -497,13 +537,23 @@ export class NotificationDispatcher {
         : await this.resolveTeamRecipient(context.event, assigneeId);
 
     if (!to) {
-      return `El aviso ${entry.triggerKey}/${entry.audience} no tiene destinatario.`;
+      return {
+        skipped: `El aviso ${entry.triggerKey}/${entry.audience} no tiene destinatario.`,
+        messageId: null,
+      };
     }
 
     const values =
       entry.audience === 'CLIENT' ? this.clientValues(context) : this.teamValues(context);
 
-    const resultado = await this.email.send(this.compose(template, entry.audience, values, to));
+    // `?? null` y no un acceso directo: los `Ticket` de verdad siempre traen
+    // la columna (aunque sea `null`), pero un doble de prueba que no la
+    // declare daría `undefined`, y `undefined !== null` colaría un
+    // `In-Reply-To: undefined` literal en la cabecera.
+    const threadMessageId = context.ticket.emailMessageId ?? null;
+    const resultado = await this.email.send(
+      this.compose(template, entry.audience, values, to, threadMessageId),
+    );
 
     // `EmailService.send` no lanza cuando el servidor acepta el mensaje pero
     // rechaza a un destinatario: eso viaja en `rejected`. Hoy siempre hay uno
@@ -521,7 +571,7 @@ export class NotificationDispatcher {
     this.logger.log(
       `Aviso ${entry.triggerKey}/${entry.audience} enviado para el ticket ${String(context.ticket.id)}.`,
     );
-    return null;
+    return { skipped: null, messageId: resultado.messageId };
   }
 
   /**
@@ -531,16 +581,50 @@ export class NotificationDispatcher {
    * (`./domain/email-compose.ts`), pura y sin depender de este servicio: es
    * el mismo camino que usa `NotificationTemplatesService.preview` /
    * `.sendTest` para que lo que ve el ADMIN al previsualizar sea, letra por
-   * letra, lo que este método manda de verdad. Aquí solo se añade el `to`
-   * que ya resolvió `dispatchOne`.
+   * letra, lo que este método manda de verdad. Aquí solo se añade el `to` que
+   * ya resolvió `dispatchOne`, y las cabeceras que no dependen de la
+   * plantilla (ver `automatedHeaders`).
    */
   private compose(
     template: NotificationTemplate,
     audience: NotificationAudience,
     values: Record<string, string | null>,
     to: string,
+    threadMessageId: string | null,
   ) {
-    return { to, ...composeEmail(template, audience, values) };
+    return {
+      to,
+      headers: this.automatedHeaders(threadMessageId),
+      ...composeEmail(template, audience, values),
+    };
+  }
+
+  /**
+   * Cabeceras de correo que no dependen de la plantilla.
+   *
+   * `Auto-Submitted: auto-generated` (RFC 3834) va en **todo** aviso, de los
+   * dos públicos: es lo que impide que un autorespondedor del otro lado
+   * (aviso de vacaciones, buzón compartido con una regla) nos conteste
+   * automáticamente y dispare, a su vez, otro aviso nuestro -- el bucle que
+   * `domain/message-headers.ts#isAutomaticMessage` corta del lado de entrada,
+   * y que aquí se corta del lado de salida marcando lo que nosotros mismos
+   * mandamos.
+   *
+   * `In-Reply-To`/`References` solo aparecen cuando el ticket nació de un
+   * correo (`ticket.emailMessageId` no nulo): son las cabeceras con las que
+   * un cliente de correo agrupa la respuesta en el mismo hilo visual del
+   * mensaje con el que abrió el ticket. Un ticket que nunca vino de un correo
+   * no tiene con qué enlazar -- forzar aquí un valor inventado sería peor que
+   * no llevar la cabecera, porque un `In-Reply-To` que no señala a nada real
+   * es indistinguible de una cabecera corrupta para quien lo reciba.
+   */
+  private automatedHeaders(threadMessageId: string | null): Record<string, string> {
+    const headers: Record<string, string> = { 'Auto-Submitted': 'auto-generated' };
+    if (threadMessageId !== null) {
+      headers['In-Reply-To'] = threadMessageId;
+      headers['References'] = threadMessageId;
+    }
+    return headers;
   }
 
   // -------------------------------------------------------------------------
