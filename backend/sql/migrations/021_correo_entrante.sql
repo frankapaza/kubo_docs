@@ -6,7 +6,9 @@
 --  que una respuesta por correo se correlacione con el ticket y lo alimente.
 --
 --    · `inbound_emails`               un registro por cada correo recibido,
---      se procese como se procese; también los que se descartan.
+--      se procese como se procese; también los que se descartan. Lleva DOS
+--      columnas de identificador (`message_id` y `message_id_raw`): ver la
+--      sección 1 para por qué no sobra ninguna.
 --    · `tickets.email_message_id`     el Message-ID del correo que abrió el
 --      ticket (si nació de uno), para casar las respuestas que le lleguen.
 --    · `ticket_messages.inbound_email_id`  de qué correo salió este mensaje,
@@ -32,15 +34,42 @@ SET NAMES utf8mb4;
 -- -------------------------------------------------------------------------
 --  `message_id` a 998 caracteres porque ese es el máximo de una línea de
 --  cabecera de correo (RFC 5322 §2.1.1). Va en `CHARACTER SET ascii` porque
---  un Message-ID es siempre US-ASCII por la propia RFC (5322 §3.6.4): con
+--  en la práctica abrumadora un Message-ID es US-ASCII (RFC 5322 §3.6.4); con
 --  utf8mb4 cada carácter pesa hasta 4 bytes y 998 de ellos superan los 3072
---  bytes que InnoDB admite en el prefijo de un índice —`ascii` pesa 1 byte
---  por carácter y dejan sitio de sobra, sin recortar la longitud útil.
+--  bytes que InnoDB admite en el prefijo de un índice, mientras que `ascii`
+--  pesa 1 byte por carácter y deja sitio de sobra sin recortar la longitud
+--  útil.
 --
---  LA CLAVE ÚNICA ES LO QUE HACE LA INGESTA IDEMPOTENTE: si el proceso cae a
---  medio procesar un correo y al reiniciar el buzón se lee de nuevo desde el
---  principio, el INSERT del mismo Message-ID falla y ese correo se salta en
---  vez de crear un ticket o un mensaje duplicado.
+--  PERO NO ES SIEMPRE ASCII, y la excepción no es un caso corrupto. El correo
+--  internacionalizado (RFC 6532, la extensión que acompaña a SMTPUTF8) amplía
+--  la gramática `atext` para admitir UTF-8 no-ASCII, y esa es la misma
+--  gramática sobre la que se construye el identificador: un Message-ID con
+--  caracteres no-ASCII es válido por norma, y encima hay remitentes mal
+--  implementados que los emiten igual sin serlo. Bajo el modo estricto de
+--  MySQL 8 (el de por defecto), insertar ese valor en una columna `ascii` no
+--  lo trunca en silencio: rechaza el INSERT entero, y como la columna es
+--  NOT NULL no hay otro valor que poner. Justo el correo raro que esta tabla
+--  existe para poder diagnosticar sería el único que no se podría registrar.
+--
+--  Por eso hay DOS columnas de identificador, y no conviene fusionarlas:
+--    · `message_id`      ascii, indexada, la que sostiene la correlación
+--                        (una comparación de igualdad). Cuando el valor
+--                        crudo trae algo no-ASCII, la ingesta guardará aquí
+--                        un sustituto determinista -un hash del valor crudo-
+--                        para que la deduplicación siga funcionando y la
+--                        fila se pueda registrar igual. Esa sustitución es
+--                        lógica de una tarea posterior; aquí solo se le deja
+--                        sitio a la columna.
+--    · `message_id_raw`  utf8mb4, sin indexar, el valor tal cual llegó, sin
+--                        ninguna transformación. Es lo que permite entender
+--                        qué pasó cuando `message_id` lleva un hash en vez
+--                        del original.
+--
+--  LA CLAVE ÚNICA SOBRE `message_id` ES LO QUE HACE LA INGESTA IDEMPOTENTE:
+--  si el proceso cae a medio procesar un correo y al reiniciar el buzón se
+--  lee de nuevo desde el principio, el INSERT del mismo Message-ID (o de su
+--  mismo hash, para los no-ASCII) falla y ese correo se salta en vez de crear
+--  un ticket o un mensaje duplicado.
 --
 --  `outcome` no es solo para los que sí generan ticket o mensaje: registra
 --  también por qué se descartó cada correo (no autenticado, automático,
@@ -49,7 +78,10 @@ SET NAMES utf8mb4;
 -- -------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS inbound_emails (
   id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  message_id        VARCHAR(998) CHARACTER SET ascii NOT NULL,
+  message_id        VARCHAR(998) CHARACTER SET ascii NOT NULL
+                    COMMENT 'identificador para correlacionar; hash del valor crudo si este no era ascii',
+  message_id_raw    VARCHAR(998) NOT NULL DEFAULT ''
+                    COMMENT 'Message-ID tal cual llego, sin transformar; ver cabecera de la migracion',
   from_address      VARCHAR(320)    NOT NULL,
   subject           VARCHAR(998)    NULL,
   sent_at           DATETIME        NULL,
@@ -88,6 +120,19 @@ BEGIN
   END IF;
 END //
 DELIMITER ;
+
+-- 2.0) `message_id_raw` también va detrás de este ayudante, y no solo dentro
+-- del CREATE TABLE de arriba: esta migración se revisó y se corrigió después
+-- de aplicarse una primera vez sin esta columna, así que en cualquier base
+-- donde ya se hubiera pasado esa primera versión la tabla existe sin ella, y
+-- CREATE TABLE IF NOT EXISTS no la habría añadido. Queda en los dos sitios
+-- -en el CREATE TABLE para una instalación nueva, aquí para una que ya tenía
+-- la tabla-; este CALL es un no-op en el primer caso porque la columna ya
+-- existe.
+CALL kubo_add_column_021('inbound_emails', 'message_id_raw',
+  "message_id_raw VARCHAR(998) NOT NULL DEFAULT '' "
+  "COMMENT 'Message-ID tal cual llego, sin transformar; ver cabecera de la migracion' "
+  "AFTER message_id");
 
 -- 2.1) El Message-ID del correo que abrió el ticket, cuando nació de uno.
 -- Un ticket creado desde el panel o el portal se queda con esta columna en
