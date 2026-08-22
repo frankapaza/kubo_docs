@@ -86,12 +86,27 @@ export interface MonthlyReportRequirementsBlock {
  * aquí.
  */
 export interface MonthlyReportView {
-  /** Razón social del cliente, o `null` si no pudo resolverse (ver `PortalAuthService.resolveClientRazonSocial`). */
+  /** Razón social del cliente, o `null` si no pudo resolverse (ver `./client-name`). */
   clientName: string | null;
   period: { year: number; month: number };
   scope: ReportScope;
-  /** ISO del instante en que se generó el documento. */
+  /**
+   * ISO del instante en que se generó el documento, para uso de máquina
+   * (ordenar, comparar, cachear). Nunca lo que lee la persona: un `Date`
+   * formateado sin zona en el navegador del cliente puede salir con otra
+   * hora, y hasta otro día — ver `generatedAtLabel`.
+   */
   generatedAt: string;
+  /**
+   * El mismo instante que `generatedAt`, ya en texto legible, en español y
+   * con la zona escrita («21 de agosto de 2026 a las 7:42 p. m. (hora de
+   * Perú)»). Se formatea aquí, en el backend, y no en quien dibuja el
+   * documento: el backend corre con `TZ=UTC` fijo a propósito, y de los
+   * formateadores de fecha del frontend casi ninguno pasa `timeZone` — el
+   * mismo documento leído en dos máquinas con hora local distinta no debe
+   * decir dos fechas de generación distintas.
+   */
+  generatedAtLabel: string;
   /**
    * Qué se contó y desde cuándo, en texto llano: sin esto, dos descargas del
    * mismo mes con números distintos —porque un veredicto de cumplimiento

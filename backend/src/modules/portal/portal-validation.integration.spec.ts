@@ -54,9 +54,16 @@ describe('Portal — errores de validación (integración HTTP)', () => {
   // se llama, que es la única forma de distinguir «cortado por el guard» de
   // «cortado por casualidad en otro sitio».
   let requirementsCreate: jest.Mock;
+  // Con nombre, igual que `requirementsCreate`: la ronda de correcciones 1
+  // necesita comprobar *con qué argumento* se llamó, no solo que se llamó —
+  // es la única forma de distinguir «el controlador pasa clientId» de «el
+  // controlador pasa clientUserId», dos campos contiguos de `AuthClientUser`
+  // que otros controladores del portal sí usan juntos.
+  let reportsMonthly: jest.Mock;
 
   beforeAll(async () => {
     requirementsCreate = jest.fn().mockResolvedValue({ id: 1 });
+    reportsMonthly = jest.fn().mockResolvedValue({ period: { year: 2026, month: 7 } });
 
     const config = {
       get: (key: string, fallback?: string) =>
@@ -96,7 +103,7 @@ describe('Portal — errores de validación (integración HTTP)', () => {
         },
         {
           provide: PortalReportsService,
-          useValue: { monthly: jest.fn().mockResolvedValue({ period: { year: 2026, month: 7 } }) },
+          useValue: { monthly: reportsMonthly },
         },
       ],
     }).compile();
@@ -123,6 +130,7 @@ describe('Portal — errores de validación (integración HTTP)', () => {
 
   beforeEach(() => {
     requirementsCreate.mockClear();
+    reportsMonthly.mockClear();
   });
 
   /** El contrato que el frontend consume: `{ code, message }` con message string. */
@@ -414,6 +422,25 @@ describe('Portal — errores de validación (integración HTTP)', () => {
     it('una consulta válida sigue llegando al servicio', async () => {
       const res = await app.get(`/portal/informes/mensual?${validQuery}`, { token });
       expect(res.status).toBe(200);
+    });
+
+    /**
+     * Ronda de correcciones 1: la prueba de arriba solo comprobaba el status,
+     * y eso deja pasar un cambio de `user.clientId` por `user.clientUserId`
+     * en el controlador — son campos contiguos de `AuthClientUser`, y otros
+     * controladores del portal los usan **los dos juntos y en ese orden**
+     * (`PortalRequirementsController.create`), así que el descuido es
+     * completamente plausible. El token de este fichero tiene `sub: 42` y
+     * `clientId: 7` justamente para que ambos valores sean distinguibles: si
+     * el controlador llegara a pasar `clientUserId` (42) en vez de `clientId`
+     * (7), esta aserción falla y delata que una empresa podría descargar el
+     * informe de otra.
+     */
+    it('pasa el clientId de la sesión al servicio, no el clientUserId', async () => {
+      const res = await app.get(`/portal/informes/mensual?${validQuery}`, { token });
+
+      expect(res.status).toBe(200);
+      expect(reportsMonthly).toHaveBeenCalledWith(7, expect.objectContaining({ year: 2026, month: 7 }));
     });
 
     it('sin token no se puede descargar el informe', async () => {

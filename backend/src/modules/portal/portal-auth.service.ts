@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
@@ -6,6 +6,7 @@ import { ClientUsersRepository } from './client-users.repository';
 import { ClientUser } from './entities/client-user.entity';
 import { ClientJwtPayload } from './strategies/client-jwt.strategy';
 import { ClientsService } from '../clients/clients.service';
+import { resolveClientRazonSocial } from './client-name';
 
 export interface PortalAuthResponse {
   accessToken: string;
@@ -144,30 +145,13 @@ export class PortalAuthService {
         email: user.email,
         fullName: user.fullName,
         clientId: Number(user.clientId),
-        clientRazonSocial: await this.resolveClientRazonSocial(Number(user.clientId)),
+        // Proyección campo por campo, en `./client-name`: la comparte con
+        // `PortalReportsService`, para que las dos vistas que muestran el
+        // nombre del cliente no puedan aplicar la regla de seguridad de
+        // forma distinta.
+        clientRazonSocial: await resolveClientRazonSocial(this.clients, Number(user.clientId)),
         isAdmin: !!user.isAdmin,
       },
     };
-  }
-
-  /**
-   * Proyección campo por campo, igual disciplina que `toView` en
-   * `client-users.service.ts`: se pide el cliente completo a `ClientsService`
-   * (única vía de acceso que expone `ClientsModule` al portal) y se extrae
-   * solo `razonSocial`, nunca el resto (RUC, dirección, representante legal,
-   * datos de facturación...).
-   */
-  private async resolveClientRazonSocial(clientId: number): Promise<string | null> {
-    try {
-      const client = await this.clients.findByIdOrFail(clientId);
-      return client.razonSocial;
-    } catch (err) {
-      // Un cliente que ya no existe degrada a null y la cabecera cae al nombre
-      // del usuario. Cualquier otro fallo —la base caída, por ejemplo— tiene
-      // que seguir subiendo: silenciarlo lo disfrazaría de "cliente sin
-      // resolver" y perderíamos el 500 que de verdad es.
-      if (err instanceof NotFoundException) return null;
-      throw err;
-    }
   }
 }

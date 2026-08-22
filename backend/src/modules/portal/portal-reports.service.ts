@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { peruMonthBounds, isPeruMonthClosed } from '../../common/peru-month';
 import { PERU_TIME_ZONE } from '../../common/time-zone';
@@ -18,6 +18,7 @@ import {
 } from './domain/monthly-report';
 import { REQUIREMENT_STATUS_LABELS } from './domain/requirement-status-labels';
 import { assertSessionScope, toIso } from './session-scope';
+import { resolveClientRazonSocial } from './client-name';
 import {
   MonthlyReportQueryDto,
   MonthlyReportRequirementRow,
@@ -37,6 +38,23 @@ function formatPeruDate(instant: Date): string {
 }
 
 /**
+ * Fecha y hora en texto largo, en español y en hora de Perú, con la zona
+ * escrita — para `generatedAtLabel`. La zona se escribe como texto y no con
+ * `timeZoneName` (que no se puede combinar con `dateStyle`/`timeStyle`) ni se
+ * deja para que la formatee el navegador del cliente: el backend corre en
+ * `TZ=UTC` a propósito, y es la única capa que puede garantizar que el mismo
+ * instante se lea igual sin importar en qué máquina abran el documento.
+ */
+function formatPeruDateTime(instant: Date): string {
+  const texto = new Intl.DateTimeFormat('es-PE', {
+    dateStyle: 'long',
+    timeStyle: 'short',
+    timeZone: PERU_TIME_ZONE,
+  }).format(instant);
+  return `${texto} (hora de Perú)`;
+}
+
+/**
  * Lista blanca campo a campo hacia el módulo de cálculo. Nunca `{...t}`: por
  * ahí saldrían `rootCause`, `correctiveAction`, `resolutionMd` o
  * `assigneeUserId` hacia un módulo cuyo resultado, tarde o temprano, ve el
@@ -46,7 +64,7 @@ function formatPeruDate(instant: Date): string {
  * `buildMonthlyReport` necesita para decidir "resuelto" (`TICKET_RESUELTO`).
  * La traducción a lo que lee el cliente pasa después, en `toReportTicketView`.
  */
-function toReportTicketRow(t: Ticket): ReportTicketRow {
+export function toReportTicketRow(t: Ticket): ReportTicketRow {
   return {
     id: Number(t.id),
     code: t.code,
@@ -63,7 +81,7 @@ function toReportTicketRow(t: Ticket): ReportTicketRow {
 }
 
 /** Misma disciplina que `toReportTicketRow`: lista blanca, estado crudo hasta después de calcular. */
-function toReportRequirementRow(w: WorkItem): ReportRequirementRow {
+export function toReportRequirementRow(w: WorkItem): ReportRequirementRow {
   return {
     id: Number(w.id),
     code: w.code,
@@ -81,7 +99,7 @@ function toReportRequirementRow(w: WorkItem): ReportRequirementRow {
  * alguien ajeno a la casa, y un `EN_ATENCION` en mayúsculas con guion bajo no
  * es algo que se le enseñe a un cliente.
  */
-function toTicketView(r: ReportTicketRowWithCompliance): MonthlyReportTicketRow {
+export function toTicketView(r: ReportTicketRowWithCompliance): MonthlyReportTicketRow {
   return {
     id: r.id,
     code: r.code,
@@ -100,7 +118,7 @@ function toTicketView(r: ReportTicketRowWithCompliance): MonthlyReportTicketRow 
 }
 
 /** Misma disciplina que `toTicketView`, con `REQUIREMENT_STATUS_LABELS`. */
-function toRequirementView(r: ReportRequirementRowWithCompliance): MonthlyReportRequirementRow {
+export function toRequirementView(r: ReportRequirementRowWithCompliance): MonthlyReportRequirementRow {
   return {
     id: r.id,
     code: r.code,
@@ -114,36 +132,58 @@ function toRequirementView(r: ReportRequirementRowWithCompliance): MonthlyReport
 }
 
 /**
- * El texto que hace explicable el documento: qué se contó y desde cuándo, y
- * —el punto que pidió expresamente la revisión del cálculo (`monthly-report.ts`,
- * JSDoc de `buildMonthlyReport`)— que los veredictos de cumplimiento reflejan
- * el estado *actual* de cada fila, no una foto fija del cierre del periodo.
- * Sin esta frase, dos descargas del mismo mes con números distintos —porque
- * un ticket se resolvió después de cerrado el periodo— no se pueden explicar,
- * y el informe genera llamadas en vez de evitarlas.
+ * El texto que hace explicable el documento: qué se contó, desde cuándo, y
+ * dos advertencias que la ronda de correcciones 1 pidió explícitamente:
+ *
+ * 1. No solo los veredictos de cumplimiento se mueven entre dos descargas del
+ *    mismo mes: `resolved`, `pending` y el estado de cada fila también,
+ *    porque todos cuentan la situación de **hoy**. Un cliente que compara dos
+ *    PDF no ve primero un veredicto: ve «Resueltos: 3» contra «Resueltos: 5».
+ * 2. El bloque de requerimientos solo trae los que la empresa registró desde
+ *    este portal (`origin: 'PORTAL'`, en `WorkItemsRepository.
+ *    listPortalRequirementsInPeriod`). Un cliente cuyos requerimientos
+ *    gestiona la casa por otra vía ve un bloque vacío, y sin esta frase nada
+ *    se lo explica.
+ *
+ * Sin todo esto, dos descargas del mismo mes con números distintos no se
+ * pueden explicar, y el informe genera llamadas en vez de evitarlas.
  */
 function buildCriteria(scope: ReportScope, from: Date, to: Date): string {
   // `to` es exclusivo: el último día del periodo es el instante anterior.
   const desde = formatPeruDate(from);
   const hasta = formatPeruDate(new Date(to.getTime() - 1));
 
-  const queCuenta =
-    scope === 'TICKETS'
-      ? 'Tickets creados'
-      : scope === 'REQUERIMIENTOS'
-        ? 'Requerimientos creados'
-        : 'Tickets y requerimientos creados';
+  const incluyeTickets = scope === 'TICKETS' || scope === 'AMBOS';
+  const incluyeReqs = scope === 'REQUERIMIENTOS' || scope === 'AMBOS';
 
-  const notaResueltos =
-    scope === 'REQUERIMIENTOS'
-      ? ''
-      : ' «Resueltos dentro del periodo» cuenta los resueltos en esas fechas, se hayan creado cuando fuera.';
+  const queCuenta =
+    incluyeTickets && incluyeReqs
+      ? 'Tickets y requerimientos creados'
+      : incluyeTickets
+        ? 'Tickets creados'
+        : 'Requerimientos creados';
+
+  const notaResueltos = incluyeTickets
+    ? ' «Resueltos dentro del periodo» cuenta los resueltos en esas fechas, se hayan creado cuando fuera.'
+    : '';
+
+  const notaOrigenPortal = incluyeReqs
+    ? ' Solo se listan los requerimientos que la empresa registró desde este portal; los que gestiona el equipo internamente no aparecen aquí.'
+    : '';
+
+  const sujeto =
+    incluyeTickets && incluyeReqs
+      ? 'de cada ticket o requerimiento'
+      : incluyeTickets
+        ? 'de cada ticket'
+        : 'de cada requerimiento';
 
   return (
-    `${queCuenta} entre el ${desde} y el ${hasta}, hora de Perú.${notaResueltos} ` +
-    'Los veredictos de cumplimiento de plazos reflejan el estado actual de cada fila, no una foto ' +
-    'fija del cierre del periodo: algo resuelto o entregado después de que el mes cerró puede figurar ' +
-    'como cumplido si el informe se vuelve a descargar más tarde.'
+    `${queCuenta} entre el ${desde} y el ${hasta}, hora de Perú.${notaResueltos}${notaOrigenPortal} ` +
+    'Los totales y el estado de cada fila reflejan la situación actual, no una foto fija del cierre del ' +
+    'periodo: dos descargas de este mismo mes pueden mostrar cifras distintas si algo cambió después. ' +
+    `Por el mismo motivo, los veredictos de cumplimiento de plazos reflejan el estado actual ${sujeto}, ` +
+    'no el que tenía al cerrar el periodo.'
   );
 }
 
@@ -198,10 +238,14 @@ export class PortalReportsService {
     });
 
     return {
-      clientName: await this.resolveClientName(clientId),
+      // Compartida con `PortalAuthService` en `./client-name`: dos copias de
+      // una proyección con función de seguridad (nunca RUC, dirección ni
+      // datos de facturación) son dos reglas que alguien puede desalinear.
+      clientName: await resolveClientRazonSocial(this.clients, clientId),
       period: { year: dto.year, month: dto.month },
       scope: dto.scope,
       generatedAt: toIso(ahora)!,
+      generatedAtLabel: formatPeruDateTime(ahora),
       criteria: buildCriteria(dto.scope, from, to),
       tickets:
         body.tickets === null
@@ -212,22 +256,5 @@ export class PortalReportsService {
           ? null
           : { rows: body.requirements.rows.map(toRequirementView), totals: body.requirements.totals },
     };
-  }
-
-  /**
-   * Proyección campo por campo, mismo criterio que
-   * `PortalAuthService.resolveClientRazonSocial`: se pide el cliente completo
-   * y se extrae solo la razón social, nunca RUC, dirección ni datos de
-   * facturación. Un cliente que ya no existe degrada a `null`; cualquier otro
-   * fallo sigue subiendo tal cual.
-   */
-  private async resolveClientName(clientId: number): Promise<string | null> {
-    try {
-      const client = await this.clients.findByIdOrFail(clientId);
-      return client.razonSocial;
-    } catch (err) {
-      if (err instanceof NotFoundException) return null;
-      throw err;
-    }
   }
 }
