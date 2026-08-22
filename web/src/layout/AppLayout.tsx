@@ -7,6 +7,7 @@ import { canManageUsers } from '../auth/permissions';
 import { workspaceApi } from '../api/workspace.api';
 import { roleLabels } from '../components/ui/Badge';
 import { ArchiveIcon, BellIcon, BookOpenIcon, BotIcon, FileTextIcon, FolderIcon, InboxIcon, KuboLogo, LogOutIcon, SettingsIcon, SparklesIcon, UsersIcon, ZapIcon } from '../components/ui/Icon';
+// Nota: "InboxIcon" también se usa en la sección Tickets (nav principal); es intencional.
 import { toast } from '../ui/Toast';
 // Nota: "UsersIcon" también se usa en la sección Clientes; es intencional.
 
@@ -236,6 +237,13 @@ export default function AppLayout() {
                 >
                   <FileTextIcon size={15} className="text-slate-500" />
                   Datos del emisor
+                </button>
+                <button
+                  onClick={() => go('/admin/correo-entrante')}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition text-left"
+                >
+                  <InboxIcon size={15} className="text-slate-500" />
+                  Correo entrante
                 </button>
               </div>
             )}

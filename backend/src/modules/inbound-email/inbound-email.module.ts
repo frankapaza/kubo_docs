@@ -7,6 +7,7 @@ import { TicketEvent } from '../tickets/entities/ticket-event.entity';
 
 import { InboundEmailsRepository } from './inbound-emails.repository';
 import { INBOUND_MAILBOX_ADDRESS, InboundEmailService } from './inbound-email.service';
+import { InboundEmailController } from './inbound-email.controller';
 import { InboundEmailScheduler } from './inbound-email.scheduler';
 import { ImapMailboxService } from './imap-mailbox.service';
 import { MAILBOX } from './mailbox.interface';
@@ -105,6 +106,7 @@ export async function resolveMailboxAddress(workspace: WorkspaceService): Promis
     TicketsModule,
     TicketMessagesModule,
   ],
+  controllers: [InboundEmailController],
   providers: [
     InboundEmailsRepository,
     InboundEmailService,

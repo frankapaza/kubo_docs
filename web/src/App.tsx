@@ -16,6 +16,7 @@ import TemplatesPage from './pages/TemplatesPage';
 import NotificationTemplatesPage from './pages/NotificationTemplatesPage';
 import DocumentEditorPage from './pages/DocumentEditorPage';
 import WorkspaceSettingsPage from './pages/WorkspaceSettingsPage';
+import InboundEmailPage from './pages/InboundEmailPage';
 import JiraReportPage from './pages/JiraReportPage';
 import DevReportBuilderPage from './pages/DevReportBuilderPage';
 import BrowserRecorderPage from './pages/BrowserRecorderPage';
@@ -128,6 +129,14 @@ export default function App() {
           */}
           <Route path="/admin/notifications" element={<NotificationTemplatesPage />} />
           <Route path="/admin/workspace" element={<WorkspaceSettingsPage />} />
+          {/*
+            Caja negra de la ingesta por correo (Task 9). Bajo el mismo
+            `ProtectedRoute` que el resto del panel -- no hay superficie de
+            cliente aquí, y esta pantalla en concreto muestra direcciones y
+            asuntos de todas las empresas a la vez, así que ni siquiera
+            correspondería exponerla en el portal.
+          */}
+          <Route path="/admin/correo-entrante" element={<InboundEmailPage />} />
           <Route path="/documents/:documentId" element={<DocumentEditorPage />} />
           {/* Manual del equipo interno; se enlaza desde el menú lateral. */}
           <Route path="/help" element={<HelpPage />} />
