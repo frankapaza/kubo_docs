@@ -50,11 +50,22 @@ function peruCivilDate(instant: Date): string {
  * para comparar. Con un `periodEnd` inclusivo el incumplimiento del último
  * día del mes desaparecería del informe. `judgeDeadline` no sufre esto:
  * compara instantes, no fechas civiles.
+ *
+ * `status` existe por una sola razón: un `CANCELADO` nunca tiene
+ * `deliveredAt` (`WorkItemBoardService` solo pone `closedAt` al pasar a
+ * `CERRADO`), así que sin esta comprobación caería en la última rama y una
+ * fecha comprometida ya pasada lo condenaría a `INCUMPLIDO`. `WorkItemsRepository.list`
+ * ya documenta y hace cumplir la misma regla para el filtro «vencidos»: *«Un
+ * ítem CERRADO o CANCELADO nunca está vencido […] su fecha límite dejó de
+ * significar nada»*. Sin este caso, el informe publicaba como incumplimiento
+ * del proveedor la misma fila que el tablero pinta en gris, sin marca de
+ * vencido.
  */
 export function judgeCommitment(
   committedDate: string | null,
   deliveredAt: Date | null,
   periodEnd: Date,
+  status: string,
 ): Compliance {
   // Comprobación de presencia, no de veracidad: una cadena vacía es un valor
   // inválido, no una ausencia. Con `!committedDate` colapsaría al mismo bug
@@ -63,6 +74,7 @@ export function judgeCommitment(
   if (deliveredAt) {
     return peruCivilDate(deliveredAt) <= committedDate ? 'CUMPLIDO' : 'INCUMPLIDO';
   }
+  if (status === 'CANCELADO') return 'SIN_COMPROMISO';
   return committedDate < peruCivilDate(periodEnd) ? 'INCUMPLIDO' : 'SIN_COMPROMISO';
 }
 
@@ -167,6 +179,16 @@ export interface TicketsTotals {
    * cumplió o no todavía no correspondía emitirlo.
    */
   notYetDue: number;
+  /**
+   * Igual que `withoutCommitment`, para el SLA de **respuesta**: tickets sin
+   * ningún `slaResponseDueAt` pactado. `responseCompliancePercent` ya excluye
+   * estos casos del denominador (ver `compliancePercent`), pero sin esta
+   * cifra el documento no dice sobre cuántos se calculó ese porcentaje — y
+   * ese número es justo lo que el informe existe para justificar.
+   */
+  responseWithoutCommitment: number;
+  /** Igual que `notYetDue`, para el SLA de respuesta. */
+  responseNotYetDue: number;
 }
 
 export interface TicketsBlock {
@@ -182,10 +204,35 @@ export interface ReportRequirementRowWithCompliance extends ReportRequirementRow
 /** Totales del bloque de requerimientos. */
 export interface RequirementsTotals {
   requested: number;
+  /**
+   * Salieron de `SOLICITADO` sin ser rechazados — **incluye** a los ya
+   * `delivered` y a los `CANCELADO` tras haberse aceptado: no es una
+   * categoría exclusiva de «entregados» ni desaparece al cancelarse, sino
+   * que los contiene a todos. Ver `REQ_ACEPTADO`.
+   */
   accepted: number;
   delivered: number;
   rejected: number;
+  /**
+   * `null` cuando no hubo ningún compromiso medible (todo `SIN_COMPROMISO`).
+   * Mismo criterio que `TicketsTotals.resolutionCompliancePercent`: los
+   * `withoutCommitment`/`notYetDue` de abajo son las cifras equivalentes que
+   * dicen sobre cuántos se calculó.
+   */
   commitmentCompliancePercent: number | null;
+  /**
+   * Requerimientos **sin ninguna fecha comprometida**: no hubo promesa que
+   * incumplir. Mismo criterio que `TicketsTotals.withoutCommitment`.
+   */
+  withoutCommitment: number;
+  /**
+   * Requerimientos **con** fecha comprometida, sin entregar, cuyo veredicto
+   * es `SIN_COMPROMISO` porque el plazo aún no vencía al cerrar el periodo o
+   * porque el ítem se canceló (ver `judgeCommitment`, caso `CANCELADO`): en
+   * los dos casos no corresponde emitir un juicio de cumplimiento todavía o
+   * ya nunca. Mismo criterio que `TicketsTotals.notYetDue`.
+   */
+  notYetDue: number;
 }
 
 export interface RequirementsBlock {
@@ -234,10 +281,11 @@ function buildTicketsBlock(
 
   const resolved = rows.filter((r) => TICKET_RESUELTO.has(r.status)).length;
 
-  // El veredicto SIN_COMPROMISO de `resolutionCompliance` mezcla dos causas
-  // (ver JSDoc de `withoutCommitment`/`notYetDue` en `TicketsTotals`): aquí
-  // se separan mirando si hubo o no un `slaResolutionDueAt` pactado.
+  // El veredicto SIN_COMPROMISO de cada columna de cumplimiento mezcla dos
+  // causas (ver JSDoc de `withoutCommitment`/`notYetDue` en `TicketsTotals`):
+  // aquí se separan mirando si hubo o no un SLA pactado para esa columna.
   const sinResolucionMedible = rows.filter((r) => r.resolutionCompliance === 'SIN_COMPROMISO');
+  const sinRespuestaMedible = rows.filter((r) => r.responseCompliance === 'SIN_COMPROMISO');
 
   return {
     rows,
@@ -250,6 +298,8 @@ function buildTicketsBlock(
       resolutionCompliancePercent: compliancePercent(rows.map((r) => r.resolutionCompliance)),
       withoutCommitment: sinResolucionMedible.filter((r) => r.slaResolutionDueAt === null).length,
       notYetDue: sinResolucionMedible.filter((r) => r.slaResolutionDueAt !== null).length,
+      responseWithoutCommitment: sinRespuestaMedible.filter((r) => r.slaResponseDueAt === null).length,
+      responseNotYetDue: sinRespuestaMedible.filter((r) => r.slaResponseDueAt !== null).length,
     },
   };
 }
@@ -260,8 +310,12 @@ function buildRequirementsBlock(
 ): RequirementsBlock {
   const rows: ReportRequirementRowWithCompliance[] = requirementRows.map((r) => ({
     ...r,
-    commitment: judgeCommitment(r.dueDate, r.closedAt, periodEnd),
+    commitment: judgeCommitment(r.dueDate, r.closedAt, periodEnd, r.status),
   }));
+
+  // Mismo tratamiento que `buildTicketsBlock`: el SIN_COMPROMISO se separa
+  // mirando si hubo o no una fecha comprometida pactada.
+  const sinCompromisoMedible = rows.filter((r) => r.commitment === 'SIN_COMPROMISO');
 
   return {
     rows,
@@ -271,6 +325,8 @@ function buildRequirementsBlock(
       delivered: rows.filter((r) => r.status === 'CERRADO').length,
       rejected: rows.filter((r) => r.status === 'RECHAZADO').length,
       commitmentCompliancePercent: compliancePercent(rows.map((r) => r.commitment)),
+      withoutCommitment: sinCompromisoMedible.filter((r) => r.dueDate === null).length,
+      notYetDue: sinCompromisoMedible.filter((r) => r.dueDate !== null).length,
     },
   };
 }

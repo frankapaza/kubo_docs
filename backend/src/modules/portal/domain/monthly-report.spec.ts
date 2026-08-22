@@ -54,26 +54,26 @@ describe('judgeDeadline', () => {
 
 describe('judgeCommitment', () => {
   it('entregado antes de la fecha comprometida es CUMPLIDO', () => {
-    expect(judgeCommitment('2026-08-20', new Date('2026-08-18T15:00:00Z'), FIN)).toBe('CUMPLIDO');
+    expect(judgeCommitment('2026-08-20', new Date('2026-08-18T15:00:00Z'), FIN, 'CERRADO')).toBe('CUMPLIDO');
   });
 
   // Se compara por fecha civil, no por instante: la fecha comprometida es un
   // dia entero, no un momento. Entregar a las 22:00 de ese dia cumple.
   it('entregado el mismo dia comprometido es CUMPLIDO, a cualquier hora', () => {
-    expect(judgeCommitment('2026-08-20', new Date('2026-08-21T02:00:00Z'), FIN)).toBe('CUMPLIDO');
+    expect(judgeCommitment('2026-08-20', new Date('2026-08-21T02:00:00Z'), FIN, 'CERRADO')).toBe('CUMPLIDO');
   });
 
   it('entregado al dia siguiente es INCUMPLIDO', () => {
-    expect(judgeCommitment('2026-08-20', new Date('2026-08-22T02:00:00Z'), FIN)).toBe('INCUMPLIDO');
+    expect(judgeCommitment('2026-08-20', new Date('2026-08-22T02:00:00Z'), FIN, 'CERRADO')).toBe('INCUMPLIDO');
   });
 
   it('sin entregar y con la fecha ya pasada es INCUMPLIDO', () => {
-    expect(judgeCommitment('2026-08-20', null, FIN)).toBe('INCUMPLIDO');
+    expect(judgeCommitment('2026-08-20', null, FIN, 'PENDIENTE')).toBe('INCUMPLIDO');
   });
 
   it('sin fecha comprometida es SIN_COMPROMISO', () => {
-    expect(judgeCommitment(null, null, FIN)).toBe('SIN_COMPROMISO');
-    expect(judgeCommitment(null, new Date('2026-08-18T15:00:00Z'), FIN)).toBe('SIN_COMPROMISO');
+    expect(judgeCommitment(null, null, FIN, 'PENDIENTE')).toBe('SIN_COMPROMISO');
+    expect(judgeCommitment(null, new Date('2026-08-18T15:00:00Z'), FIN, 'CERRADO')).toBe('SIN_COMPROMISO');
   });
 
   // `periodEnd` es exclusivo (ver JSDoc de `judgeCommitment`): el dia civil
@@ -81,14 +81,33 @@ describe('judgeCommitment', () => {
   // un periodEnd inclusivo, el incumplimiento del ultimo dia del mes
   // desapareceria del informe -- justo lo que esta prueba fija.
   it('la fecha comprometida igual al dia civil de periodEnd (exclusivo) es SIN_COMPROMISO', () => {
-    expect(judgeCommitment('2026-09-01', null, FIN)).toBe('SIN_COMPROMISO');
+    expect(judgeCommitment('2026-09-01', null, FIN, 'PENDIENTE')).toBe('SIN_COMPROMISO');
   });
 
   // Cadena vacia no es ausencia: es un valor invalido, pero tratarlo como
   // "no hubo promesa" por una comprobacion de veracidad (`!committedDate`)
   // repetiria el bug de los textos en blanco que ya mordio este proyecto.
   it('una fecha comprometida vacia no se trata como ausencia de compromiso', () => {
-    expect(judgeCommitment('', null, FIN)).toBe('INCUMPLIDO');
+    expect(judgeCommitment('', null, FIN, 'PENDIENTE')).toBe('INCUMPLIDO');
+  });
+
+  // El corazon de la correccion de la revision final: `WorkItemsRepository.list`
+  // ya documenta y hace cumplir que "un item CERRADO o CANCELADO nunca esta
+  // vencido [...] su fecha limite dejo de significar nada". Antes de esta
+  // prueba, un CANCELADO con fecha comprometida pasada y sin `closedAt`
+  // (CANCELADO nunca lo tiene -- solo `to === 'CERRADO'` lo fija, ver
+  // `WorkItemBoardService.move`) caia en la ultima rama y salia INCUMPLIDO:
+  // la misma fila que el tablero pinta en gris, sin marca de vencido, el
+  // informe la publicaba como incumplimiento del proveedor.
+  it('un CANCELADO con fecha comprometida ya pasada y sin entregar es SIN_COMPROMISO, no INCUMPLIDO', () => {
+    expect(judgeCommitment('2026-08-01', null, FIN, 'CANCELADO')).toBe('SIN_COMPROMISO');
+  });
+
+  // Un CANCELADO cuya fecha comprometida ni siquiera habia llegado tambien
+  // es SIN_COMPROMISO -- mismo resultado que sin el caso especial, pero por
+  // las dos vias a la vez, para que quede claro que no se solapan mal.
+  it('un CANCELADO con fecha comprometida futura tambien es SIN_COMPROMISO', () => {
+    expect(judgeCommitment('2026-09-15', null, FIN, 'CANCELADO')).toBe('SIN_COMPROMISO');
   });
 });
 
@@ -201,6 +220,28 @@ describe('buildMonthlyReport', () => {
     expect(r.tickets!.totals.notYetDue).toBe(1);
   });
 
+  // Mismo defecto, mismo remedio, pero del lado del SLA de respuesta: antes
+  // de esta correccion el documento decia "Cumplimiento de respuesta: 100 %"
+  // sin decir sobre cuantos se calculo -- exactamente lo que la revision
+  // final senalo como faltante.
+  it('separa "nunca hubo SLA de respuesta" de "el SLA de respuesta aun no vencia"', () => {
+    const r = buildMonthlyReport({
+      periodStart: INICIO, periodEnd: FIN,
+      tickets: [
+        ticket({ id: 1, slaResponseDueAt: null }),                        // nunca hubo SLA de respuesta
+        ticket({
+          id: 2, status: 'NUEVO', firstResponseAt: null, resolvedAt: null,
+          slaResponseDueAt: new Date('2026-09-05T12:00:00Z'),             // SLA vigente, aun no vence
+          slaResolutionDueAt: null,
+        }),
+        ticket({ id: 3 }),                                                // SLA de respuesta ya juzgado (CUMPLIDO)
+      ],
+      ticketsResolvedInPeriod: 1, requirements: null,
+    });
+    expect(r.tickets!.totals.responseWithoutCommitment).toBe(1);
+    expect(r.tickets!.totals.responseNotYetDue).toBe(1);
+  });
+
   it('un periodo vacio da ceros y porcentajes nulos', () => {
     const r = buildMonthlyReport({
       periodStart: INICIO, periodEnd: FIN,
@@ -249,5 +290,42 @@ describe('buildMonthlyReport', () => {
     expect(r.requirements!.totals.delivered).toBe(1);
     expect(r.requirements!.totals.rejected).toBe(1);
     expect(r.requirements!.totals.commitmentCompliancePercent).toBe(100); // solo el entregado mide
+    // Los tres sin `dueDate` (1 SOLICITADO, 4 RECHAZADO, 5 ANULADO) son
+    // "nunca hubo compromiso"; el 2 (PENDIENTE, comprometido para el 30 de
+    // setiembre, fuera del periodo de agosto) es "aun no vencia": la misma
+    // distincion que ya tenian los tickets, ahora con su propio contador
+    // para requerimientos. El 3 (CERRADO) ya tiene veredicto CUMPLIDO y no
+    // entra en ninguno de los dos.
+    expect(r.requirements!.totals.withoutCommitment).toBe(3);
+    expect(r.requirements!.totals.notYetDue).toBe(1);
+  });
+
+  // Integracion de la correccion de la revision final: un CANCELADO con
+  // fecha comprometida ya pasada no debe bajar el porcentaje de
+  // cumplimiento ni contar como "vencido" -- ver `judgeCommitment` y su
+  // JSDoc. Sigue contando en "Aceptados" porque paso por la aceptacion
+  // antes de cancelarse (ver JSDoc de `RequirementsTotals.accepted`).
+  it('un CANCELADO con fecha pasada no baja el porcentaje y sigue contando en Aceptados', () => {
+    const r = buildMonthlyReport({
+      periodStart: INICIO, periodEnd: FIN, tickets: null, ticketsResolvedInPeriod: null,
+      requirements: [
+        {
+          id: 1, code: 'RQ-0001', title: 'Cancelado con fecha vencida', status: 'CANCELADO',
+          createdAt: new Date('2026-08-03T12:00:00Z'), dueDate: '2026-08-10', closedAt: null,
+        },
+        {
+          id: 2, code: 'RQ-0002', title: 'Entregado a tiempo', status: 'CERRADO',
+          createdAt: new Date('2026-08-01T12:00:00Z'), dueDate: '2026-08-20',
+          closedAt: new Date('2026-08-19T12:00:00Z'),
+        },
+      ],
+    });
+    expect(r.requirements!.rows[0].commitment).toBe('SIN_COMPROMISO');
+    expect(r.requirements!.totals.accepted).toBe(2);
+    // Si el CANCELADO contara como INCUMPLIDO, este porcentaje seria 50, no
+    // 100: la correccion existe para que el unico veredicto medible sea el
+    // del entregado.
+    expect(r.requirements!.totals.commitmentCompliancePercent).toBe(100);
+    expect(r.requirements!.totals.notYetDue).toBe(1);
   });
 });

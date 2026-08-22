@@ -78,15 +78,25 @@ export interface MonthlyReportTicketsBlock {
   totals: TicketsTotals;
 }
 
-/** Fila de requerimiento tal como la ve el cliente, mismo criterio que `MonthlyReportTicketRow`. */
+/**
+ * Fila de requerimiento tal como la ve el cliente, mismo criterio que
+ * `MonthlyReportTicketRow`: `createdAt`/`closedAt` viajan en ISO solo para uso
+ * de máquina, y su `...Label` gemelo ya en texto legible, en hora de Perú y
+ * con la zona escrita. `closedAt` **es** la fecha contra la que
+ * `judgeCommitment` decide `CUMPLIDO`/`INCUMPLIDO` (ver `domain/monthly-report.ts`):
+ * un veredicto que no se puede verificar contra la hora impresa al lado no
+ * prueba nada, y `fmtDate` en el navegador del cliente no pasa zona horaria.
+ */
 export interface MonthlyReportRequirementRow {
   id: number;
   code: string | null;
   title: string;
   status: PortalRequirementStatusLabel;
   createdAt: string;
+  createdAtLabel: string;
   dueDate: string | null;
   closedAt: string | null;
+  closedAtLabel: string | null;
   commitment: Compliance;
 }
 

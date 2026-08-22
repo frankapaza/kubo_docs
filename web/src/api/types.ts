@@ -927,6 +927,14 @@ export interface TicketsTotals {
   withoutCommitment: number;
   /** Tickets con SLA de resolución pactado, sin resolver, cuyo plazo aún no había vencido al cerrar el periodo. */
   notYetDue: number;
+  /**
+   * Igual que `withoutCommitment`, para el SLA de **respuesta**: sin esta
+   * cifra, «Cumplimiento de respuesta: 100 %» no dice sobre cuántos se
+   * calculó.
+   */
+  responseWithoutCommitment: number;
+  /** Igual que `notYetDue`, para el SLA de respuesta. */
+  responseNotYetDue: number;
 }
 
 export interface MonthlyReportTicketsBlock {
@@ -934,24 +942,46 @@ export interface MonthlyReportTicketsBlock {
   totals: TicketsTotals;
 }
 
-/** Fila de requerimiento del informe, mismo criterio que `MonthlyReportTicketRow`. */
+/**
+ * Fila de requerimiento del informe, mismo criterio que
+ * `MonthlyReportTicketRow`: `createdAt`/`closedAt` en ISO, solo para uso de
+ * máquina; su `...Label` gemelo, ya en texto legible, en hora de Perú y con
+ * la zona escrita, es el que se pinta siempre -- `closedAt` es la fecha
+ * contra la que el backend decide `commitment`, y un veredicto que no se
+ * puede verificar contra la hora impresa al lado no prueba nada.
+ */
 export interface MonthlyReportRequirementRow {
   id: number;
   code: string | null;
   title: string;
   status: PortalRequirementStatusLabel;
   createdAt: string;
+  createdAtLabel: string;
   dueDate: string | null;
   closedAt: string | null;
+  closedAtLabel: string | null;
   commitment: Compliance;
 }
 
 export interface RequirementsTotals {
   requested: number;
+  /**
+   * Incluye a los ya `delivered` y a los cancelados tras aceptarse: no es
+   * una cifra aparte de «Entregados», sino que la contiene.
+   */
   accepted: number;
   delivered: number;
   rejected: number;
   commitmentCompliancePercent: number | null;
+  /** Requerimientos sin ninguna fecha comprometida: no hubo promesa que incumplir. */
+  withoutCommitment: number;
+  /**
+   * Requerimientos con fecha comprometida, sin entregar, cuyo veredicto es
+   * `SIN_COMPROMISO` porque el plazo aún no vencía al cerrar el periodo o
+   * porque el ítem se canceló (una fecha comprometida cancelada dejó de
+   * significar nada, igual que en el tablero de requerimientos).
+   */
+  notYetDue: number;
 }
 
 export interface MonthlyReportRequirementsBlock {

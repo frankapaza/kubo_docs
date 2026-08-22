@@ -12,7 +12,6 @@ import { Button } from '../../components/ui/Button';
 import { Card, CardBody, CardHeader } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { DownloadIcon, FileTextIcon, RefreshIcon } from '../../components/ui/Icon';
-import { fmtDate } from './PortalTicketsListPage';
 import {
   COMPLIANCE_LABELS,
   exportMonthlyReportCsv,
@@ -20,6 +19,8 @@ import {
   fmtDueDate,
   fmtPercent,
   monthLabel,
+  REQUIREMENTS_EMPTY_MESSAGE,
+  TICKETS_EMPTY_MESSAGE,
 } from './monthly-report-download';
 
 type BadgeTone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger' | 'info' | 'purple';
@@ -308,13 +309,21 @@ function TicketsBlockCard({ tickets }: { tickets: MonthlyReportTicketsBlock }) {
             value={fmtPercent(t.responseCompliancePercent)}
             note={percentNote(t.responseCompliancePercent)}
           />
+          {/*
+            Sobre cuántos se calculó el % de respuesta: sin estas dos cifras,
+            «Cumplimiento de respuesta: 100 %» no dice si el denominador fue
+            10 o 2 -- ver `TicketsTotals.responseWithoutCommitment` en el
+            backend.
+          */}
+          <Kpi label="Sin compromiso de respuesta" value={t.responseWithoutCommitment} />
+          <Kpi label="Aún no vence (respuesta)" value={t.responseNotYetDue} />
           <Kpi
             label="% cumplimiento resolución"
             value={fmtPercent(t.resolutionCompliancePercent)}
             note={percentNote(t.resolutionCompliancePercent)}
           />
           <Kpi label="Sin compromiso de resolución" value={t.withoutCommitment} />
-          <Kpi label="Aún no vence" value={t.notYetDue} />
+          <Kpi label="Aún no vence (resolución)" value={t.notYetDue} />
         </div>
 
         <div className="overflow-x-auto">
@@ -336,7 +345,7 @@ function TicketsBlockCard({ tickets }: { tickets: MonthlyReportTicketsBlock }) {
               {tickets.rows.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="px-3 py-6 text-center text-slate-400">
-                    Ningún ticket en este periodo.
+                    {TICKETS_EMPTY_MESSAGE}
                   </td>
                 </tr>
               ) : (
@@ -384,7 +393,12 @@ function RequirementsBlockCard({ requirements }: { requirements: MonthlyReportRe
       <CardBody className="space-y-4">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Kpi label="Solicitados" value={rq.requested} />
-          <Kpi label="Aceptados" value={rq.accepted} />
+          {/*
+            «Aceptados» incluye a los ya entregados y a los cancelados tras
+            aceptarse: no es una cifra aparte de «Entregados», sino que la
+            contiene -- la misma aclaración va impresa en `criteria`.
+          */}
+          <Kpi label="Aceptados (incluye entregados)" value={rq.accepted} />
           <Kpi label="Entregados" value={rq.delivered} />
           <Kpi label="Rechazados" value={rq.rejected} />
           <Kpi
@@ -392,6 +406,12 @@ function RequirementsBlockCard({ requirements }: { requirements: MonthlyReportRe
             value={fmtPercent(rq.commitmentCompliancePercent)}
             note={percentNote(rq.commitmentCompliancePercent)}
           />
+          {/*
+            Sobre cuántos se calculó ese porcentaje: sin esto, el lector no
+            puede saber si el denominador excluyó algo, y por qué.
+          */}
+          <Kpi label="Sin compromiso" value={rq.withoutCommitment} />
+          <Kpi label="Aún no vence" value={rq.notYetDue} />
         </div>
 
         {/*
@@ -416,7 +436,7 @@ function RequirementsBlockCard({ requirements }: { requirements: MonthlyReportRe
               {requirements.rows.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-3 py-6 text-center text-slate-400">
-                    Ningún requerimiento pedido desde el portal en este periodo.
+                    {REQUIREMENTS_EMPTY_MESSAGE}
                   </td>
                 </tr>
               ) : (
@@ -426,7 +446,12 @@ function RequirementsBlockCard({ requirements }: { requirements: MonthlyReportRe
                     <td className="px-3 py-2 font-mono text-xs text-slate-500">{r.code ?? `#${r.id}`}</td>
                     <td className="px-3 py-2 text-slate-800">{r.title}</td>
                     <td className="px-3 py-2 text-slate-700">{r.status}</td>
-                    <td className="px-3 py-2 text-xs text-slate-500">{fmtDate(r.createdAt)}</td>
+                    {/*
+                      `createdAtLabel`, nunca `fmtDate` sobre el ISO: ya
+                      viene en hora de Perú -- ver el JSDoc de
+                      `MonthlyReportRequirementRow`.
+                    */}
+                    <td className="px-3 py-2 text-xs text-slate-500">{r.createdAtLabel}</td>
                     <td className="px-3 py-2 text-xs text-slate-500">{fmtDueDate(r.dueDate)}</td>
                     <td className="px-3 py-2">
                       <ComplianceBadge value={r.commitment} />

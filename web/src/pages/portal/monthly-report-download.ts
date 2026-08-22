@@ -2,7 +2,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 import type { Compliance, PortalMonthlyReport } from '../../api/types';
-import { fmtDate, fmtDateOnly } from './PortalTicketsListPage';
+import { fmtDateOnly } from './PortalTicketsListPage';
 
 /**
  * Igual en las tres superficies (pantalla, PDF, CSV): `SIN_COMPROMISO` se
@@ -38,11 +38,6 @@ export function fmtPercentForDocument(p: number | null): string {
   return p === null ? '— (sin compromisos que medir)' : `${p}%`;
 }
 
-/** Marca de tiempo opcional (ISO, con hora) -- `fmtDate`, nunca `fmtDateOnly`, o desplaza el día. */
-function fmtOptDate(v: string | null): string {
-  return v ? fmtDate(v) : '—';
-}
-
 /**
  * Fecha comprometida de un requerimiento, o «—» si no hay ninguna (el
  * veredicto de la columna de cumplimiento, `SIN_COMPROMISO`, ya dice por
@@ -67,6 +62,18 @@ export function monthLabel(year: number, month: number): string {
     timeZone: 'UTC',
   }).format(new Date(Date.UTC(year, month - 1, 1)));
 }
+
+/**
+ * Mismo texto que pinta la pantalla (`PortalMonthlyReportPage.tsx`) cuando un
+ * bloque viene con la lista vacía -- una sola fuente para las tres
+ * superficies, para que no diverjan. Sin esto, un bloque vacío salía en el
+ * PDF y el CSV como una tabla solo con encabezados, sin nada que explique
+ * por qué: con los doce requerimientos que hay hoy en producción, todos
+ * internos, el bloque de requerimientos sale vacío en todos los primeros
+ * informes que un cliente descargue.
+ */
+export const TICKETS_EMPTY_MESSAGE = 'Ningún ticket en este periodo.';
+export const REQUIREMENTS_EMPTY_MESSAGE = 'Ningún requerimiento pedido desde el portal en este periodo.';
 
 function fileBaseName(report: PortalMonthlyReport): string {
   const cliente = (report.clientName ?? 'Cliente').replace(/\s+/g, '_');
@@ -110,15 +117,22 @@ const REQUIREMENTS_TABLE_HEAD = [
   '#', 'Código', 'Título', 'Estado', 'Creado', 'Fecha comprometida', 'Cerrado', 'Cumplimiento',
 ];
 
+/**
+ * `createdAtLabel`/`closedAtLabel`, nunca `fmtDate` sobre el ISO: mismo
+ * motivo que `ticketRows` -- `closedAt` es la fecha contra la que el backend
+ * decide `commitment`, y `fmtDate` no pasa zona horaria (toma la del
+ * navegador). Ver el JSDoc de `MonthlyReportRequirementRow` en
+ * `../../api/types`.
+ */
 function requirementRows(report: PortalMonthlyReport): string[][] {
   return report.requirements!.rows.map((r, i) => [
     String(i + 1),
     r.code ?? `#${r.id}`,
     r.title,
     r.status,
-    fmtDate(r.createdAt),
+    r.createdAtLabel,
     fmtDueDate(r.dueDate),
-    fmtOptDate(r.closedAt),
+    r.closedAtLabel ?? '—',
     COMPLIANCE_LABELS[r.commitment],
   ]);
 }
@@ -159,13 +173,24 @@ export function exportMonthlyReportCsv(report: PortalMonthlyReport): void {
     lines.push(csvLine(['Resueltos', String(t.resolved)]));
     lines.push(csvLine(['Pendientes', String(t.pending)]));
     lines.push(csvLine(['Resueltos en el periodo', String(t.resolvedInPeriod)]));
+    // Cada porcentaje va con sus dos contadores: sin ellos, «Cumplimiento de
+    // respuesta: 100 %» no dice sobre cuántos se calculó -- justo lo que
+    // este documento existe para justificar.
     lines.push(csvLine(['% cumplimiento de respuesta', fmtPercentForDocument(t.responseCompliancePercent)]));
+    lines.push(csvLine(['Sin compromiso de respuesta', String(t.responseWithoutCommitment)]));
+    lines.push(csvLine(['Aún no vence (respuesta)', String(t.responseNotYetDue)]));
     lines.push(csvLine(['% cumplimiento de resolución', fmtPercentForDocument(t.resolutionCompliancePercent)]));
     lines.push(csvLine(['Sin compromiso de resolución', String(t.withoutCommitment)]));
-    lines.push(csvLine(['Aún no vence', String(t.notYetDue)]));
+    lines.push(csvLine(['Aún no vence (resolución)', String(t.notYetDue)]));
     lines.push('');
     lines.push(csvLine(TICKETS_TABLE_HEAD));
-    ticketRows(report).forEach((row) => lines.push(csvLine(row)));
+    // Bloque con lista vacía: la misma frase que explica en pantalla por qué
+    // no hay nada, no una tabla con solo encabezados.
+    if (report.tickets.rows.length === 0) {
+      lines.push(csvLine([TICKETS_EMPTY_MESSAGE]));
+    } else {
+      ticketRows(report).forEach((row) => lines.push(csvLine(row)));
+    }
     lines.push('');
   }
 
@@ -173,13 +198,21 @@ export function exportMonthlyReportCsv(report: PortalMonthlyReport): void {
     const rq = report.requirements.totals;
     lines.push(csvLine(['Requerimientos']));
     lines.push(csvLine(['Solicitados', String(rq.requested)]));
+    // «Aceptados» no es una cifra aparte de «Entregados»: los contiene (ver
+    // `criteria`, que trae la misma aclaración impresa).
     lines.push(csvLine(['Aceptados', String(rq.accepted)]));
     lines.push(csvLine(['Entregados', String(rq.delivered)]));
     lines.push(csvLine(['Rechazados', String(rq.rejected)]));
     lines.push(csvLine(['% cumplimiento de compromiso', fmtPercentForDocument(rq.commitmentCompliancePercent)]));
+    lines.push(csvLine(['Sin compromiso', String(rq.withoutCommitment)]));
+    lines.push(csvLine(['Aún no vence', String(rq.notYetDue)]));
     lines.push('');
     lines.push(csvLine(REQUIREMENTS_TABLE_HEAD));
-    requirementRows(report).forEach((row) => lines.push(csvLine(row)));
+    if (report.requirements.rows.length === 0) {
+      lines.push(csvLine([REQUIREMENTS_EMPTY_MESSAGE]));
+    } else {
+      requirementRows(report).forEach((row) => lines.push(csvLine(row)));
+    }
   }
 
   const bom = '﻿';
@@ -234,18 +267,35 @@ export function exportMonthlyReportPdf(report: PortalMonthlyReport): void {
       y,
     );
     y += 5;
+    // Cada porcentaje con sus dos contadores al lado: sin ellos, «Cumplimiento
+    // de respuesta: 100 %» no dice sobre cuántos se calculó -- ese número es
+    // justo lo que este informe existe para justificar (ver `compliancePercent`
+    // en el backend).
     doc.text(
       `% cumplimiento respuesta: ${fmtPercentForDocument(t.responseCompliancePercent)}   ` +
-        `% cumplimiento resolución: ${fmtPercentForDocument(t.resolutionCompliancePercent)}   ` +
-        `Sin compromiso: ${t.withoutCommitment}   Aún no vence: ${t.notYetDue}`,
+        `Sin compromiso de respuesta: ${t.responseWithoutCommitment}   ` +
+        `Aún no vence (respuesta): ${t.responseNotYetDue}`,
+      marginX,
+      y,
+    );
+    y += 5;
+    doc.text(
+      `% cumplimiento resolución: ${fmtPercentForDocument(t.resolutionCompliancePercent)}   ` +
+        `Sin compromiso de resolución: ${t.withoutCommitment}   ` +
+        `Aún no vence (resolución): ${t.notYetDue}`,
       marginX,
       y,
     );
     y += 3;
 
+    const sinTickets = report.tickets.rows.length === 0;
     autoTable(doc, {
       head: [TICKETS_TABLE_HEAD],
-      body: ticketRows(report),
+      // Bloque con lista vacía: la misma frase que explica en pantalla por
+      // qué no hay nada, no una tabla huérfana con solo encabezados.
+      body: sinTickets
+        ? [[{ content: TICKETS_EMPTY_MESSAGE, colSpan: TICKETS_TABLE_HEAD.length, styles: { halign: 'center' as const, textColor: 130 } }]]
+        : ticketRows(report),
       startY: y,
       styles: { fontSize: 7, cellPadding: 1.5 },
       headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold' },
@@ -253,8 +303,12 @@ export function exportMonthlyReportPdf(report: PortalMonthlyReport): void {
     });
     // `lastAutoTable` lo añade `jspdf-autotable` al objeto en tiempo de
     // ejecución; sus tipos no lo declaran (ver `jspdf-autotable/dist/index.d.ts`),
-    // de ahí el `as any` puntual.
-    y = (doc as any).lastAutoTable.finalY + 10;
+    // de ahí el `as any` puntual. `?.finalY` **y** `?? y`: el campo es
+    // opcional en esos tipos, y sin la guarda una coordenada `NaN` borra el
+    // bloque de requerimientos del PDF entero sin error, sin hueco y sin
+    // aviso -- justo lo que se disparaba con el alcance AMBOS, el que viene
+    // por defecto.
+    y = ((doc as any).lastAutoTable?.finalY ?? y) + 10;
   }
 
   if (report.requirements) {
@@ -272,22 +326,56 @@ export function exportMonthlyReportPdf(report: PortalMonthlyReport): void {
     y += 6;
 
     doc.setFontSize(9);
+    // «Aceptados» no es una cifra aparte de «Entregados»: los contiene (ver
+    // `criteria`, que trae la misma aclaración impresa en el documento).
     doc.text(
       `Solicitados: ${rq.requested}   Aceptados: ${rq.accepted}   Entregados: ${rq.delivered}   ` +
-        `Rechazados: ${rq.rejected}   % cumplimiento de compromiso: ${fmtPercentForDocument(rq.commitmentCompliancePercent)}`,
+        `Rechazados: ${rq.rejected}`,
+      marginX,
+      y,
+    );
+    y += 5;
+    doc.text(
+      `% cumplimiento de compromiso: ${fmtPercentForDocument(rq.commitmentCompliancePercent)}   ` +
+        `Sin compromiso: ${rq.withoutCommitment}   Aún no vence: ${rq.notYetDue}`,
       marginX,
       y,
     );
     y += 3;
 
+    const sinRequerimientos = report.requirements.rows.length === 0;
     autoTable(doc, {
       head: [REQUIREMENTS_TABLE_HEAD],
-      body: requirementRows(report),
+      body: sinRequerimientos
+        ? [[{ content: REQUIREMENTS_EMPTY_MESSAGE, colSpan: REQUIREMENTS_TABLE_HEAD.length, styles: { halign: 'center' as const, textColor: 130 } }]]
+        : requirementRows(report),
       startY: y,
       styles: { fontSize: 7, cellPadding: 1.5 },
       headStyles: { fillColor: [79, 70, 229], textColor: 255, fontStyle: 'bold' },
       alternateRowStyles: { fillColor: [245, 247, 250] },
     });
+  }
+
+  // Cabecera e identificación en cada página, y numeración -- con trece
+  // columnas en A4 apaisado, cualquier cliente con actividad real hace que
+  // la tabla salte de página, y sin esto las siguientes salían sin razón
+  // social, sin periodo y sin numeración, en un documento cuyo propósito es
+  // archivarse y reenviarse. La primera página ya lleva la cabecera completa
+  // (razón social, periodo, generación y criterio); de la segunda en
+  // adelante se repite una versión compacta.
+  const totalPages = doc.getNumberOfPages();
+  const compactHeader = `${report.clientName ?? 'Cliente'} · ${monthLabel(report.period.year, report.period.month)}`;
+  for (let page = 1; page <= totalPages; page++) {
+    doc.setPage(page);
+    if (page > 1) {
+      doc.setFontSize(9);
+      doc.setTextColor(100);
+      doc.text(compactHeader, marginX, 10);
+    }
+    doc.setFontSize(8);
+    doc.setTextColor(120);
+    doc.text(`Página ${page} de ${totalPages}`, pageWidth - marginX, pageHeight - 6, { align: 'right' });
+    doc.setTextColor(0);
   }
 
   doc.save(`${fileBaseName(report)}.pdf`);

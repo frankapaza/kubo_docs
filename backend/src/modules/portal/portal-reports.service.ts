@@ -141,8 +141,10 @@ export function toRequirementView(r: ReportRequirementRowWithCompliance): Monthl
     title: r.title,
     status: REQUIREMENT_STATUS_LABELS[r.status as keyof typeof REQUIREMENT_STATUS_LABELS],
     createdAt: toIso(r.createdAt)!,
+    createdAtLabel: formatPeruDateTime(r.createdAt),
     dueDate: r.dueDate,
     closedAt: toIso(r.closedAt),
+    closedAtLabel: formatPeruDateTimeOrNull(r.closedAt),
     commitment: r.commitment,
   };
 }
@@ -160,6 +162,12 @@ export function toRequirementView(r: ReportRequirementRowWithCompliance): Monthl
  *    listPortalRequirementsInPeriod`). Un cliente cuyos requerimientos
  *    gestiona la casa por otra vía ve un bloque vacío, y sin esta frase nada
  *    se lo explica.
+ *
+ * Una tercera, que la revisión final pidió explícitamente: «Solicitados,
+ * Aceptados, Entregados, Rechazados» se leen como cuatro conjuntos que se
+ * excluyen entre sí, y no lo son — «Aceptados» contiene a «Entregados»
+ * (y a los cancelados tras aceptarse), no es una cifra aparte. Sin esta
+ * frase, «Aceptados: 8 · Entregados: 5» se lee como una resta que no cuadra.
  *
  * Sin todo esto, dos descargas del mismo mes con números distintos no se
  * pueden explicar, y el informe genera llamadas en vez de evitarlas.
@@ -184,7 +192,9 @@ function buildCriteria(scope: ReportScope, from: Date, to: Date): string {
     : '';
 
   const notaOrigenPortal = incluyeReqs
-    ? ' Solo se listan los requerimientos que la empresa registró desde este portal; los que gestiona el equipo internamente no aparecen aquí.'
+    ? ' Solo se listan los requerimientos que la empresa registró desde este portal; los que gestiona el ' +
+      'equipo internamente no aparecen aquí. «Aceptados» incluye a los ya entregados y a los cancelados ' +
+      'tras aceptarse: no es una cifra aparte de «Entregados», sino que la contiene.'
     : '';
 
   const sujeto =

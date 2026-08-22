@@ -298,6 +298,71 @@ describe('PortalReportsService.monthly', () => {
   });
 
   /**
+   * Correccion de la revision final (grupo B, "el quinto fallo de zona
+   * horaria"): `createdAt`/`closedAt` del requerimiento se pintaban en el
+   * frontend con `fmtDate`, que no pasa `timeZone` y usa la del navegador.
+   * `closedAt` **es** la fecha contra la que `judgeCommitment` decide
+   * CUMPLIDO/INCUMPLIDO -- un documento abierto en Europa podia leer
+   * "Comprometida: 31 ago . Cerrado: 1 sep . Cumplido" para el mismo
+   * instante que en Lima cae el 31.
+   *
+   * `closedAt` cae de madrugada en UTC (01 set, 01:00Z) pero la noche
+   * anterior en Lima (31 ago, 8:00 p.m.): si la etiqueta saliera sin
+   * `timeZone: PERU_TIME_ZONE`, esta prueba la cazaria con la fecha corrida
+   * un dia -- el mismo desplazamiento que ya mordio varias veces a este
+   * proyecto. Verificado el valor exacto ejecutando la prueba antes de
+   * fijarlo, no de memoria.
+   */
+  it('las dos fechas del requerimiento llevan su etiqueta en hora de Peru, cruzando el dia entre UTC y Lima', async () => {
+    const { service } = make({
+      requirementRows: [
+        {
+          id: 1, code: 'RQ-0001', title: 'Exportar a Excel', status: 'CERRADO',
+          createdAt: new Date('2026-08-05T14:00:00Z'), dueDate: '2026-08-31',
+          closedAt: new Date('2026-09-01T01:00:00Z'), // 31 ago, 8:00 p.m. en Lima
+        } as Partial<WorkItem>,
+      ],
+    });
+    const v = await service.monthly(7, { year: 2026, month: 8, scope: 'REQUERIMIENTOS' });
+    const fila = v.requirements!.rows[0];
+    expect(fila.createdAtLabel).toBe('5 de agosto de 2026 a las 9:00 a. m. (hora de Perú)');
+    expect(fila.closedAtLabel).toBe('31 de agosto de 2026 a las 8:00 p. m. (hora de Perú)');
+  });
+
+  // `closedAtLabel` es `null` cuando no hay `closedAt`, igual que
+  // `firstResponseAtLabel`/`resolvedAtLabel` en el ticket: `null` entra,
+  // `null` sale, sin inventar una etiqueta para una ausencia.
+  it('closedAtLabel es null cuando el requerimiento no esta cerrado', async () => {
+    const { service } = make({
+      requirementRows: [
+        {
+          id: 1, code: 'RQ-0001', title: 'Exportar a Excel', status: 'PENDIENTE',
+          createdAt: new Date('2026-08-05T14:00:00Z'), dueDate: '2026-08-31', closedAt: null,
+        } as Partial<WorkItem>,
+      ],
+    });
+    const v = await service.monthly(7, { year: 2026, month: 8, scope: 'REQUERIMIENTOS' });
+    expect(v.requirements!.rows[0].closedAtLabel).toBeNull();
+  });
+
+  // Correccion de la revision final (grupo A3): un CANCELADO con fecha
+  // comprometida ya pasada y sin `closedAt` no debe publicarse como
+  // INCUMPLIDO -- ver el JSDoc de `judgeCommitment`. Prueba de extremo a
+  // extremo, a traves del servicio completo, no solo de la funcion pura.
+  it('un requerimiento CANCELADO con fecha comprometida pasada sale como SIN_COMPROMISO, no INCUMPLIDO', async () => {
+    const { service } = make({
+      requirementRows: [
+        {
+          id: 1, code: 'RQ-0001', title: 'Cancelado', status: 'CANCELADO',
+          createdAt: new Date('2026-07-01T12:00:00Z'), dueDate: '2026-07-10', closedAt: null,
+        } as Partial<WorkItem>,
+      ],
+    });
+    const v = await service.monthly(7, { year: 2026, month: 7, scope: 'REQUERIMIENTOS' });
+    expect(v.requirements!.rows[0].commitment).toBe('SIN_COMPROMISO');
+  });
+
+  /**
    * Ronda de correcciones 1: dos expresiones regulares sueltas sobreviven a
    * mutaciones reales del texto — formatear `hasta` con `to` en vez de
    * `to - 1ms` (el documento diría cubrir «hasta el 1 de agosto», un día que
@@ -312,10 +377,12 @@ describe('PortalReportsService.monthly', () => {
       'Tickets y requerimientos creados entre el 1 de julio de 2026 y el 31 de julio de 2026, hora de Perú. ' +
         '«Resueltos dentro del periodo» cuenta los resueltos en esas fechas, se hayan creado cuando fuera. ' +
         'Solo se listan los requerimientos que la empresa registró desde este portal; los que gestiona el ' +
-        'equipo internamente no aparecen aquí. Los totales y el estado de cada fila reflejan la situación ' +
-        'actual, no una foto fija del cierre del periodo: dos descargas de este mismo mes pueden mostrar ' +
-        'cifras distintas si algo cambió después. Por el mismo motivo, los veredictos de cumplimiento de ' +
-        'plazos reflejan el estado actual de cada ticket o requerimiento, no el que tenía al cerrar el periodo.',
+        'equipo internamente no aparecen aquí. «Aceptados» incluye a los ya entregados y a los cancelados ' +
+        'tras aceptarse: no es una cifra aparte de «Entregados», sino que la contiene. Los totales y el ' +
+        'estado de cada fila reflejan la situación actual, no una foto fija del cierre del periodo: dos ' +
+        'descargas de este mismo mes pueden mostrar cifras distintas si algo cambió después. Por el mismo ' +
+        'motivo, los veredictos de cumplimiento de plazos reflejan el estado actual de cada ticket o ' +
+        'requerimiento, no el que tenía al cerrar el periodo.',
     );
   });
 
