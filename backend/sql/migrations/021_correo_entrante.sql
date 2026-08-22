@@ -63,7 +63,14 @@ SET NAMES utf8mb4;
 --    · `message_id_raw`  utf8mb4, sin indexar, el valor tal cual llegó, sin
 --                        ninguna transformación. Es lo que permite entender
 --                        qué pasó cuando `message_id` lleva un hash en vez
---                        del original.
+--                        del original. NULABLE Y SIN DEFAULT a propósito:
+--                        NULL significa "no se capturó el valor crudo"; una
+--                        cadena vacía queda libre para el día -si llega- en
+--                        que un correo real traiga un Message-ID vacío. Un
+--                        DEFAULT '' habría confundido las dos cosas, que es
+--                        justo el defecto que más se ha repetido en este
+--                        proyecto: una cadena vacía haciendo de sustituto
+--                        silencioso de "no se sabe".
 --
 --  LA CLAVE ÚNICA SOBRE `message_id` ES LO QUE HACE LA INGESTA IDEMPOTENTE:
 --  si el proceso cae a medio procesar un correo y al reiniciar el buzón se
@@ -80,8 +87,8 @@ CREATE TABLE IF NOT EXISTS inbound_emails (
   id                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   message_id        VARCHAR(998) CHARACTER SET ascii NOT NULL
                     COMMENT 'identificador para correlacionar; hash del valor crudo si este no era ascii',
-  message_id_raw    VARCHAR(998) NOT NULL DEFAULT ''
-                    COMMENT 'Message-ID tal cual llego, sin transformar; ver cabecera de la migracion',
+  message_id_raw    VARCHAR(998) NULL
+                    COMMENT 'Message-ID tal cual llego, sin transformar; NULL = no capturado (ver cabecera)',
   from_address      VARCHAR(320)    NOT NULL,
   subject           VARCHAR(998)    NULL,
   sent_at           DATETIME        NULL,
@@ -130,9 +137,36 @@ DELIMITER ;
 -- la tabla-; este CALL es un no-op en el primer caso porque la columna ya
 -- existe.
 CALL kubo_add_column_021('inbound_emails', 'message_id_raw',
-  "message_id_raw VARCHAR(998) NOT NULL DEFAULT '' "
-  "COMMENT 'Message-ID tal cual llego, sin transformar; ver cabecera de la migracion' "
-  "AFTER message_id");
+  'message_id_raw VARCHAR(998) NULL '
+  "COMMENT 'Message-ID tal cual llego, sin transformar; NULL = no capturado (ver cabecera)' "
+  'AFTER message_id');
+
+-- 2.0b) Corrige una revisión anterior de ESTA MISMA migración, que llegó a
+-- aplicarse en desarrollo con `NOT NULL DEFAULT ''`. Esa cadena vacía por
+-- defecto habría dejado indistinguibles, en las filas que el reajuste de
+-- arriba rellena, "no se capturó el valor crudo" de "el identificador crudo
+-- llegó vacío de verdad" -justo el defecto que se corrige aquí-. Guardado por
+-- IS_NULLABLE: en una instalación nueva la columna ya nace NULL (arriba, en
+-- el CREATE TABLE y en el CALL de justo encima) y este bloque no toca nada.
+DROP PROCEDURE IF EXISTS kubo_fix_raw_nullable_021;
+DELIMITER //
+CREATE PROCEDURE kubo_fix_raw_nullable_021()
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = 'kubo_devdocs'
+      AND TABLE_NAME = 'inbound_emails' AND COLUMN_NAME = 'message_id_raw'
+      AND IS_NULLABLE = 'NO'
+  ) THEN
+    ALTER TABLE inbound_emails MODIFY COLUMN message_id_raw VARCHAR(998) NULL
+      COMMENT 'Message-ID tal cual llego, sin transformar; NULL = no capturado (ver cabecera)';
+  END IF;
+END //
+DELIMITER ;
+
+CALL kubo_fix_raw_nullable_021();
+
+DROP PROCEDURE IF EXISTS kubo_fix_raw_nullable_021;
 
 -- 2.1) El Message-ID del correo que abrió el ticket, cuando nació de uno.
 -- Un ticket creado desde el panel o el portal se queda con esta columna en
