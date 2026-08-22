@@ -6,69 +6,96 @@
  */
 
 /**
- * El veredicto de autenticacion de un correo, con **tres** valores y no dos.
+ * El veredicto de autenticacion de un correo, con **cuatro** valores.
  *
- * `SIN_CABECERA` es la razon de ser de este modulo: si el servidor de correo
- * no anade `Authentication-Results`, la ausencia no significa "probablemente
- * bien" -- significa que no hay ninguna garantia de que el remitente sea
- * quien dice ser, y sin esa garantia no debe entrar ningun correo. Separarlo
- * de `FALLA` importa para quien opera el sistema: "el remitente fallo la
- * autenticacion" (un ataque, o un servidor de origen mal configurado) y
- * "nuestro servidor no esta anadiendo la cabecera" (un fallo de
- * configuracion nuestro) son dos problemas de naturaleza distinta, y el
- * registro tiene que poder decir cual de los dos esta ocurriendo.
+ * `SIN_CABECERA` es la razon de ser original de este modulo: si el servidor
+ * de correo no anade `Authentication-Results` en absoluto, la ausencia no
+ * significa "probablemente bien" -- significa que no hay ninguna garantia de
+ * que el remitente sea quien dice ser, y sin esa garantia no debe entrar
+ * ningun correo.
  *
- * Puesta en marcha: comprobar solo que llega la cabecera no basta desde la
- * ronda de correcciones 2 (ver `judgeAuthentication`) -- hay que comprobar
- * ademas que llega con un segmento `dmarc=`. Si el proveedor de correo anade
- * `Authentication-Results` pero nunca corre DMARC, este modulo nunca vera
- * `SIN_CABECERA` (la cabecera SI llega) y todo correo dara `FALLA` en
- * silencio. Esa combinacion debe salir en cualquier comprobacion de salud de
- * la ingesta.
+ * `SIN_DMARC` (ronda de correcciones 3) separa una causa operativa mas: la
+ * cabecera SI llega, pero sin ningun segmento `dmarc=` -- el proveedor de
+ * correo no corre o no informa DMARC. Tiene el mismo efecto que `FALLA`
+ * (no entra el correo) pero **un dueno y un alcance distintos**: se
+ * arregla en la consola del proveedor, no aqui, y afecta al 100% del
+ * trafico entrante a la vez, no a un remitente concreto. Es ademas el
+ * fallo mas probable en la puesta en marcha, y el de sintoma mas confuso:
+ * sin esta distincion, la bandeja se queda vacia sin una sola senal de por
+ * que.
+ *
+ * `FALLA` es "el remitente (o su cabecera) no autentica" -- el remitente
+ * fallo `dmarc`, o la cabecera muestra senales de haber sido manipulada
+ * (ver `evaluateDmarc`). `SIN_CABECERA` y `SIN_DMARC` son, en cambio,
+ * problemas de **nuestro** lado de la tuberia. Distinguir los tres separa
+ * "el remitente fallo la autenticacion" de "nuestro servidor no anade la
+ * cabecera" de "nuestro servidor no evalua DMARC" -- tres problemas de
+ * naturaleza y de dueno distintos, y el registro tiene que poder decir cual
+ * de los tres esta ocurriendo.
  */
-export type AuthVerdict = 'PASA' | 'FALLA' | 'SIN_CABECERA';
+export type AuthVerdict = 'PASA' | 'FALLA' | 'SIN_CABECERA' | 'SIN_DMARC';
+
+/**
+ * Un segmento de nivel superior, con su rango de caracteres `[start, end)`
+ * en la cadena ORIGINAL (antes de quitar comentarios). Ese rango es lo que
+ * permite, mas abajo, comprobar que ninguna aparicion cruda de `dmarc=`
+ * cae fuera de el.
+ */
+interface TopLevelSegment {
+  text: string;
+  start: number;
+  end: number;
+}
 
 /**
  * Tokeniza `header` en los segmentos de nivel superior separados por `;`,
  * respetando la gramatica de RFC 5322/8601: una `quoted-string` (`"..."`,
- * con `\` como escape) y un comentario (`(...)`, que **anida** y tambien usa
+ * con `\` como escape) y un comentario (`(...)`, que anida y tambien usa
  * `\` como escape) pueden contener un `;` -- o un `(`, o un `"` -- que no
  * delimita nada; son parte del valor.
  *
- * Ronda de correcciones 2: la version anterior hacia
- * `header.replace(/\([^()]*\)/g, ' ').split(';')`, que falla en dos frentes
- * a la vez que el remitente controla:
+ * **Ronda de correcciones 3 -- por que esto YA NO BASTA por si solo.** Un
+ * comentario no reconoce comillas (RFC 5322: dentro de `ccontent` no hay
+ * `quoted-string`, solo `ctext`/`quoted-pair`/comentario anidado). Un
+ * remitente que controla su propia direccion de correo puede escribir un
+ * local-part valido y entrecomillado como `"a); dmarc=pass; x"` -- RFC 5322
+ * permite `)`, `;` y espacios dentro de un local-part entre comillas. Si
+ * **nuestro propio servidor** interpola esa direccion sin re-escapar dentro
+ * de un comentario boilerplate (el estilo habitual de Google, Microsoft y
+ * rspamd: `spf=fail (google.com: domain of <direccion> does not
+ * designate...) smtp.mailfrom=<direccion>`), el primer `)` del local-part
+ * -- que dentro del comentario es un `)` normal y corriente, no el cierre
+ * de ninguna comilla -- cierra el comentario **antes de tiempo**. Todo lo
+ * que el servidor pretendia que siguiera dentro del comentario (el resto
+ * del texto boilerplate, y el `)` genuino que lo cerraba) pasa a leerse
+ * como estructura de nivel superior: el `; dmarc=pass;` que el remitente
+ * inyecto en su propia direccion cae al principio de su propio segmento y
+ * satisface el ancla de `RESULT_AT_SEGMENT_START` sin mas.
  *
- * 1. **No conoce las `quoted-string`.** RFC 8601 define el valor de una
- *    propiedad como `token / quoted-string`, y un `;` dentro de una cadena
- *    entrecomillada (p. ej. `smtp.mailfrom="ana;dkim=pass"@atacante.net`,
- *    una direccion valida: RFC 5322 permite `;` en un local-part entre
- *    comillas) creaba un segmento nuevo que el ancla `^` de
- *    `RESULT_AT_SEGMENT_START` validaba sin más.
- * 2. **No anida comentarios.** RFC 5322 permite un comentario dentro de
- *    otro. `\([^()]*\)` solo reconoce el par mas interno; en
- *    `(razon: (detalle) ; dkim=pass )` solo borra `(detalle)`, deja el `(`
- *    externo huerfano sin reemplazar, y el resto de la cadena --incluido el
- *    `dkim=pass` falso-- queda como texto normal para el `split`.
+ * **No se puede analizar correctamente una cadena cuyos delimitadores ya
+ * falsifico el atacante aguas arriba.** El tokenizador de por si (comillas
+ * y anidamiento de comentarios) sigue siendo correcto -- resiste comillas
+ * escapadas, comentarios anidados a varios niveles, y todos los casos
+ * limite de la ronda 2 -- pero la premisa de que "un comentario delimita un
+ * comentario" deja de sostenerse cuando el contenido del comentario no es
+ * el que el servidor penso que era. Por eso esta ronda anade dos cosas mas
+ * (ver `evaluateDmarc`): cualquier malformacion invalida la cabecera
+ * **entera**, no solo la cola; y una comprobacion sobre el texto crudo que
+ * no depende de que el analisis estructural haya acertado.
  *
- * Un `split` sobre texto sin tokenizar no puede ser correcto aqui, sin
- * importar cuantos parches se le añadan: hace falta recorrer la cadena
- * carácter a carácter llevando la cuenta de si se está dentro de una
- * `quoted-string` o de la profundidad de comentarios, y partir solo por los
- * `;` que queden fuera de las dos cosas.
- *
- * **Malformación (comentario o cadena entrecomillada sin cerrar, o
- * paréntesis sin pareja): falla cerrado.** Todo lo que queda desde el punto
- * de la malformación hasta el final de la cabecera se descarta -- incluido
- * cualquier resultado genuino que hubiera venido despues. Es una perdida
- * aceptada a proposito: no hay forma de distinguir con certeza, a partir
- * solo del texto, "esto es un ataque" de "el servidor que compuso la
- * cabecera tiene un fallo de escape", y en los dos casos el texto que sigue
- * a la malformación no es de fiar.
+ * Reglas de malformacion (las tres devuelven `{ ok: false }`):
+ * 1. Una `quoted-string` sin cerrar.
+ * 2. Un comentario sin cerrar, o con mas `(` que `)` (anidamiento roto).
+ * 3. **Un `)` a nivel superior, sin ningun `(` que lo abra.** Es la prueba
+ *    directa de que el anidamiento se rompio en algun punto anterior --
+ *    exactamente lo que deja el cierre prematuro descrito arriba: el `)`
+ *    genuino del servidor, que ya no tiene con que emparejar, aparece
+ *    "suelto" en cuanto el analisis vuelve a nivel superior.
  */
-function splitTopLevelSegments(header: string): string[] {
-  const segments: string[] = [];
+function splitTopLevelSegments(header: string): { ok: true; segments: TopLevelSegment[] } | { ok: false } {
+  const segments: TopLevelSegment[] = [];
   let current = '';
+  let segmentStart = 0;
   let i = 0;
   const n = header.length;
 
@@ -77,11 +104,7 @@ function splitTopLevelSegments(header: string): string[] {
 
     if (ch === '"') {
       const quoted = consumeQuotedString(header, i);
-      if (quoted === null) {
-        // Sin cerrar: se descarta el resto de la cabecera (falla cerrado).
-        i = n;
-        break;
-      }
+      if (quoted === null) return { ok: false };
       current += quoted.text;
       i = quoted.next;
       continue;
@@ -89,23 +112,24 @@ function splitTopLevelSegments(header: string): string[] {
 
     if (ch === '(') {
       const next = skipComment(header, i);
-      if (next === null) {
-        // Sin cerrar (o sin pareja, por anidamiento): igual, falla cerrado.
-        i = n;
-        break;
-      }
+      if (next === null) return { ok: false };
       // El comentario entero es CFWS -- espacio en blanco semantico -- y se
-      // reemplaza por un unico espacio, igual que hacia la version anterior
-      // para el caso simple.
+      // reemplaza por un unico espacio.
       current += ' ';
       i = next;
       continue;
     }
 
+    if (ch === ')') {
+      // Sin un "(" que lo abra a este nivel: el anidamiento ya se rompio.
+      return { ok: false };
+    }
+
     if (ch === ';') {
-      segments.push(current);
+      segments.push({ text: current, start: segmentStart, end: i });
       current = '';
       i++;
+      segmentStart = i;
       continue;
     }
 
@@ -113,8 +137,8 @@ function splitTopLevelSegments(header: string): string[] {
     i++;
   }
 
-  segments.push(current);
-  return segments;
+  segments.push({ text: current, start: segmentStart, end: n });
+  return { ok: true, segments };
 }
 
 /**
@@ -146,6 +170,13 @@ function consumeQuotedString(s: string, start: number): { text: string; next: nu
  * incluidos los que anida dentro (`(a (b) c)` es un solo comentario, no dos
  * separados). `\X` escapa `X` literalmente, igual que en una
  * `quoted-string`.
+ *
+ * **No reconoce comillas** -- fiel a RFC 5322: dentro de un comentario no
+ * hay `quoted-string`, asi que un `"` aqui es un caracter normal y un `)`
+ * sin escapar siempre cierra (o cierra un nivel de) el comentario, este o
+ * no dentro de lo que, en otro contexto, se leeria como una cadena
+ * entrecomillada. Ese es exactamente el mecanismo que un local-part como
+ * `"a); dmarc=pass; x"` explota cuando aparece dentro de un comentario.
  *
  * Devuelve el indice justo despues del `)` que cierra el comentario **mas
  * externo**, o `null` si la profundidad nunca vuelve a cero antes del final
@@ -186,30 +217,87 @@ function skipComment(s: string, start: number): number | null {
  * prefijo `pass`, así que compararlo por igualdad exacta contra `"pass"`
  * rechaza correctamente un valor que solo empieza como un veredicto pero no
  * lo es.
+ *
+ * Deliberadamente **no** valida el resto del segmento contra ninguna
+ * gramatica mas estricta (p. ej. exigir que solo haya pares
+ * `clave=valor` reconocidos despues): Microsoft emite
+ * `dmarc=pass action=none`, donde `action` no es una clave de RFC 8601, y
+ * exigir una forma completa rompería un proveedor real y legitimo.
  */
 const RESULT_AT_SEGMENT_START = /^\s*([A-Za-z][A-Za-z0-9-]*)\s*=\s*([A-Za-z][A-Za-z0-9-]*)/;
 
 /**
- * Decide si `header` trae un veredicto `pass` autentico para `method`,
- * tokenizando la cabecera con `splitTopLevelSegments` en vez de partir por
- * `;` a ciegas.
- *
- * La cabecera tiene la forma "identificador-del-servidor; resultado;
- * resultado; ...", con cada resultado como `metodo=veredicto` seguido de
- * sus propios pares `clave=valor` (p. ej. `smtp.mailfrom=...`). **Un
- * veredicto solo cuenta si esta al principio de su propio segmento de nivel
- * superior** -- nunca si aparece dentro del valor de otra clave, ni dentro
- * de una `quoted-string`, ni dentro de un comentario.
+ * Busca **todas** las apariciones crudas de `dmarc\s*=` en `header` (sin
+ * tokenizar, sin distinguir mayusculas), con la posicion de cada una.
  */
-function hasPassingResult(header: string, method: string): boolean {
-  const segments = splitTopLevelSegments(header).slice(1);
+function findRawDmarcMentions(header: string): number[] {
+  const pattern = /dmarc\s*=/gi;
+  const positions: number[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(header)) !== null) {
+    positions.push(match.index);
+  }
+  return positions;
+}
 
-  return segments.some((segment) => {
-    const match = RESULT_AT_SEGMENT_START.exec(segment);
-    if (!match) return false;
-    const [, seenMethod, verdict] = match;
-    return seenMethod.toLowerCase() === method && verdict.toLowerCase() === 'pass';
-  });
+/** El resultado de evaluar el segmento `dmarc=` de la cabecera. */
+type DmarcOutcome = 'PASS' | 'NOT_PASS' | 'ABSENT' | 'COMPROMISED';
+
+/**
+ * Evalua el resultado `dmarc` de `header` con tres capas, **las tres a la
+ * vez** -- ronda de correcciones 3, ninguna basta sola:
+ *
+ * 1. **Tokenizar** con `splitTopLevelSegments`. Si la cabecera esta
+ *    malformada (comentario/cadena sin cerrar, o un `)` suelto), el
+ *    resultado es `COMPROMISED` **para la cabecera entera** -- no solo se
+ *    descarta la cola desde el punto de la malformacion. Si se descartara
+ *    solo la cola, un atacante podria colocar un `dmarc=pass` de mentira,
+ *    ya bien formado, ANTES de una malformacion posterior (en un segmento
+ *    sin relacion), y ese `dmarc=pass` ya se habria aceptado como valido
+ *    antes de llegar al punto roto. Una cadena malformada no es de fiar en
+ *    NINGUNA parte de si misma, precisamente porque no hay forma de saber,
+ *    solo con texto, si la corrupcion fue accidental o deliberada -- ni de
+ *    saber, si fue deliberada, donde mas actuo el remitente.
+ * 2. **Contar los resultados `dmarc=` de nivel superior.** Cero es
+ *    `ABSENT` (el proveedor no informa DMARC). Mas de uno es
+ *    `COMPROMISED`: dos resultados de nivel superior nunca son legitimos a
+ *    la vez -- ya sea porque uno es una inyeccion, ya sea porque son
+ *    contradictorios (`dmarc=fail` y `dmarc=pass` a la vez, algo que un
+ *    `.some()` habria dejado pasar como "alguno paso").
+ * 3. **La defensa que no depende de acertar el analisis**: sobre el texto
+ *    CRUDO de `header` (sin tokenizar), ninguna aparicion de `dmarc\s*=`
+ *    puede caer fuera del rango `[start, end)` del unico segmento
+ *    reconocido en el paso 2. Esto es deliberadamente independiente de si
+ *    el tokenizador identifico correctamente por que esa mencion estaba
+ *    ahi: si el remitente logro meter la palabra "dmarc=" en un
+ *    comentario, en una cadena entrecomillada, o en cualquier valor -- y
+ *    esta capa la encuentra fuera del segmento legitimo --, la cabecera ya
+ *    no merece confianza, sin importar donde acabara esa mencion ni si el
+ *    tokenizador la neutralizo bien. Es defensa en profundidad: detecta el
+ *    intento en si, no el resultado de analizarlo.
+ */
+function evaluateDmarc(header: string): DmarcOutcome {
+  const tokenized = splitTopLevelSegments(header);
+  if (!tokenized.ok) return 'COMPROMISED';
+
+  const rawMentions = findRawDmarcMentions(header);
+  if (rawMentions.length === 0) return 'ABSENT';
+
+  const resultSegments = tokenized.segments.slice(1); // descarta el identificador del servidor
+  const dmarcMatches = resultSegments
+    .map((segment) => ({ segment, match: RESULT_AT_SEGMENT_START.exec(segment.text) }))
+    .filter(
+      (entry): entry is { segment: TopLevelSegment; match: RegExpExecArray } =>
+        entry.match !== null && entry.match[1].toLowerCase() === 'dmarc',
+    );
+
+  if (dmarcMatches.length !== 1) return 'COMPROMISED';
+
+  const { segment, match } = dmarcMatches[0];
+  const allMentionsInsideSegment = rawMentions.every((index) => index >= segment.start && index < segment.end);
+  if (!allMentionsInsideSegment) return 'COMPROMISED';
+
+  return match[2].toLowerCase() === 'pass' ? 'PASS' : 'NOT_PASS';
 }
 
 /**
@@ -219,38 +307,37 @@ function hasPassingResult(header: string, method: string): boolean {
  * la pudo escribir el propio remitente). Quien llama es responsable de
  * pasar esa, y solo esa.
  *
- * **Ronda de correcciones 2, cambio de politica**: antes bastaba `spf=pass`
- * o `dkim=pass`. Eso deja un hueco que ningun analizador, por correcto que
- * sea, puede cerrar: un atacante que controla su propio dominio configura
- * DKIM (algo trivial), firma su propio correo, y pone `From:` de otra
- * empresa. `dkim=pass` es autentico -- el analizador no miente -- pero no
- * dice nada sobre si ese pase esta **alineado** con el dominio del `From:`.
- * El problema no es el analisis, es la politica: "autenticado" y
- * "autenticado como esta persona" no son lo mismo.
+ * **La politica (ronda 2)**: se exige `dmarc=pass`. DMARC exige por
+ * definicion un SPF o DKIM alineado con el dominio del `From:`, asi que
+ * comprobarlo directamente es mas simple y mas correcto que reimplementar
+ * la alineacion a mano -- y cierra el hueco de un `dkim=pass` autentico
+ * pero de un dominio ajeno al `From:`.
  *
- * Ahora se exige `dmarc=pass`. DMARC es exactamente el mecanismo disenado
- * para esto: por definicion, solo pasa si SPF o DKIM pasan **y ademas** el
- * dominio de esa comprobacion esta alineado con `From:`. Comprobar
- * `dmarc=pass` es mas simple y mas correcto que reimplementar la
- * comprobacion de alineación a mano a partir de `header.d=`/`header.i=`.
- *
- * Consecuencia aceptada a proposito: si el proveedor de correo no anade
- * `dmarc=` a la cabecera, no entra ningun correo (ver la nota sobre puesta
- * en marcha en `AuthVerdict`). Es coherente con el resto del diseño --
- * fallar cerrado, la ingesta nace apagada hasta que se demuestra que la
- * autenticacion esta configurada de verdad.
- *
- * Devuelve `SIN_CABECERA` si no hay cabecera que juzgar en absoluto --
- * `null`, `undefined`, o una cadena en blanco, que es como llega cuando el
- * correo no trae la cabecera. Si la cabecera SI llega pero no trae ningun
- * segmento `dmarc=` (o lo trae y no es `pass`), devuelve `FALLA`: la
- * cabecera existe, asi que no es "nuestro servidor no la anade" -- es "no
- * hay garantia de alineacion", que es la misma falta de garantia que un
- * `dmarc=fail` explicito, y merece la misma respuesta.
+ * Devuelve, en orden de prioridad:
+ * - `SIN_CABECERA` si no hay cabecera que juzgar en absoluto -- `null`,
+ *   `undefined`, o una cadena en blanco.
+ * - `SIN_DMARC` si la cabecera llega pero no trae ningun rastro de
+ *   `dmarc=` en ninguna parte del texto -- el proveedor no corre o no
+ *   informa DMARC. Ver `AuthVerdict` para por que esto no es lo mismo que
+ *   `FALLA`.
+ * - `PASA` solo si hay **exactamente un** resultado `dmarc=` de nivel
+ *   superior, ninguna otra mencion cruda de `dmarc=` fuera de el, y su
+ *   veredicto es `pass`.
+ * - `FALLA` en cualquier otro caso: el resultado no es `pass`, hay mas de
+ *   un resultado, la cabecera esta malformada, o aparece `dmarc=` fuera
+ *   del unico segmento legitimo. Todos estos casos comparten la misma
+ *   consecuencia -- no hay garantia -- y todos son responsabilidad del
+ *   remitente o de una cabecera que ya no se puede analizar con
+ *   confianza, a diferencia de `SIN_CABECERA`/`SIN_DMARC`, que son
+ *   responsabilidad de nuestro propio servidor.
  */
 export function judgeAuthentication(topmostHeader: string | null | undefined): AuthVerdict {
   if (topmostHeader == null || topmostHeader.trim().length === 0) return 'SIN_CABECERA';
-  return hasPassingResult(topmostHeader, 'dmarc') ? 'PASA' : 'FALLA';
+
+  const outcome = evaluateDmarc(topmostHeader);
+  if (outcome === 'PASS') return 'PASA';
+  if (outcome === 'ABSENT') return 'SIN_DMARC';
+  return 'FALLA'; // NOT_PASS o COMPROMISED
 }
 
 /**

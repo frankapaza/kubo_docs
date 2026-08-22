@@ -27,8 +27,13 @@ describe('judgeAuthentication', () => {
     ).toBe('FALLA');
   });
 
-  it('rechaza spf=softfail y dkim=none sin dmarc', () => {
-    expect(judgeAuthentication('mx.kuboti.com; spf=softfail; dkim=none')).toBe('FALLA');
+  // Ronda de correcciones 3, punto 5: esta cabecera no trae NINGUN segmento
+  // "dmarc=" -- no es que dmarc fallara, es que nunca se evaluo. Eso es
+  // SIN_DMARC, no FALLA: la causa es "el proveedor no corre/informa DMARC"
+  // (se arregla en su consola, afecta al 100% del trafico), distinta de "el
+  // remitente fallo la autenticacion".
+  it('sin ningun segmento dmarc es SIN_DMARC', () => {
+    expect(judgeAuthentication('mx.kuboti.com; spf=softfail; dkim=none')).toBe('SIN_DMARC');
   });
 
   // El punto entero de este modulo: la ausencia significa NO, nunca
@@ -40,19 +45,13 @@ describe('judgeAuthentication', () => {
     expect(judgeAuthentication('   ')).toBe('SIN_CABECERA');
   });
 
-  // Distinto del caso anterior: aqui la cabecera SI existe (nuestro servidor
-  // la anadio), pero no trae ningun segmento "dmarc=...". Eso no es "nuestro
-  // servidor no anade la cabecera" (eso es SIN_CABECERA, y tiene su propia
-  // causa operativa: un fallo de configuracion de ESTE servidor). Es "no
-  // corrio o no informo la comprobacion de DMARC", que es indistinguible en
-  // sus consecuencias de "DMARC no paso": en los dos casos no hay garantia
-  // de alineacion con el From, y el mismo "ante la duda, no entra" aplica.
-  // Usar SIN_CABECERA aqui mezclaria dos causas operativas distintas bajo
-  // la misma etiqueta, justo el problema que SIN_CABECERA existe para
-  // evitar en el caso contrario.
-  it('la cabecera presente pero sin segmento dmarc es FALLA, no SIN_CABECERA', () => {
+  // Distinto de los dos casos anteriores: aqui la cabecera SI existe Y SI
+  // trae un segmento "dmarc=...", pero no es "pass".
+  it('la cabecera presente con un segmento dmarc que no es pass es FALLA', () => {
     expect(
-      judgeAuthentication('mx.kuboti.com; spf=pass smtp.mailfrom=cliente.com; dkim=pass header.d=cliente.com'),
+      judgeAuthentication(
+        'mx.kuboti.com; spf=pass smtp.mailfrom=cliente.com; dkim=pass header.d=cliente.com; dmarc=none',
+      ),
     ).toBe('FALLA');
   });
 
@@ -68,16 +67,11 @@ describe('judgeAuthentication', () => {
     expect(judgeAuthentication('mx.kuboti.com; dmarc=pass-nada')).toBe('FALLA');
   });
 
-  // Los siete vectores de ataque de la ronda de correcciones 2. Todos deben
-  // dar FALLA. Se dirigen contra `dmarc`, no contra `spf`/`dkim`: con la
-  // politica nueva (punto 2) esos dos ya no deciden nada por si solos, asi
-  // que probar la robustez del analizador contra ellos seria una prueba
-  // decorativa -- pasaria igual con un analizador roto. El campo que de
-  // verdad hay que defender ahora es `dmarc`.
-  describe('vectores de ataque contra el analizador', () => {
-    // V1: cadena entrecomillada. `"ana;dmarc=pass"@atacante.net` es una
-    // direccion valida (RFC 5322 permite ";" dentro de un local-part entre
-    // comillas). El ";" de dentro no debe crear un segmento nuevo.
+  // Los vectores de ataque de la ronda de correcciones 2 (comillas y
+  // comentarios BIEN FORMADOS que esconden un dmarc=pass falso). Se dirigen
+  // contra `dmarc`, no contra `spf`/`dkim`: con la politica de la ronda 2
+  // esos dos ya no deciden nada por si solos.
+  describe('vectores de ataque de la ronda 2 (comillas y comentarios bien formados)', () => {
     it('V1: no se deja enganar por un dmarc=pass dentro de una cadena entrecomillada (smtp.mailfrom)', () => {
       expect(
         judgeAuthentication(
@@ -86,10 +80,6 @@ describe('judgeAuthentication', () => {
       ).toBe('FALLA');
     });
 
-    // V2: comentario anidado. RFC 5322 permite que un comentario contenga
-    // otro comentario dentro. Un analizador que solo quita `\([^()]*\)`
-    // (sin nesting) dejaba el parentesis externo huerfano y el resto de la
-    // cadena, incluido el "dmarc=pass" falso, se colaba como segmento real.
     it('V2: no se deja enganar por un dmarc=pass dentro de un comentario anidado', () => {
       expect(
         judgeAuthentication(
@@ -98,25 +88,13 @@ describe('judgeAuthentication', () => {
       ).toBe('FALLA');
     });
 
-    // V3: comentario sin cerrar. El texto crudo no debe entrar sin analizar
-    // solo porque el paréntesis de cierre falta -- eso incluye el propio
-    // "dmarc=pass" que aparece dentro del comentario roto.
     it('V3: un comentario sin cerrar no deja pasar el texto crudo', () => {
       expect(
         judgeAuthentication('mx.kuboti.com; spf=fail (comentario que dice dmarc=pass y nunca se cierra; dkim=fail'),
       ).toBe('FALLA');
     });
 
-    // V4: parentesis desbalanceado dentro del comentario que compone el
-    // propio servidor (al estilo Google), cuando el dato que interpola --la
-    // direccion del remitente-- trae un "(" sin su ")" -- ej. un local-part
-    // "user(evil" mal escapado. El comentario boilerplate solo aporta un
-    // ")" de cierre, asi que el parentesis del atacante deja el comentario
-    // abierto hasta el final de la cadena. Fallar cerrado aqui significa
-    // descartar TODO lo que sigue -- incluido un "dmarc=pass" genuino que
-    // hubiera venido despues -- y es el coste aceptado de un servidor que
-    // no escapa bien: preferible a arriesgar que ese hueco se explote.
-    it('V4: un parentesis sin pareja en el comentario descarta el resto de la cabecera (falla cerrado)', () => {
+    it('V4: un parentesis sin pareja en el comentario descarta la cabecera entera', () => {
       expect(
         judgeAuthentication(
           'mx.kuboti.com; spf=fail (google.com: domain of user(evil@atacante.net does not designate 1.2.3.4 as permitted sender) smtp.mailfrom=user(evil@atacante.net; dkim=fail; dmarc=pass',
@@ -124,29 +102,121 @@ describe('judgeAuthentication', () => {
       ).toBe('FALLA');
     });
 
-    // V5: la misma cadena entrecomillada de V1, pero colgada de smtp.helo.
     it('V5: no se deja enganar por un dmarc=pass dentro de una cadena entrecomillada (smtp.helo)', () => {
       expect(
         judgeAuthentication('mx.kuboti.com; spf=fail smtp.helo="ana;dmarc=pass"; dkim=fail; dmarc=fail'),
       ).toBe('FALLA');
     });
 
-    // V6: el mismo mecanismo, pero colgado de header.from -- el nombre para
-    // mostrar de un From: es texto libre que tambien elige el remitente.
     it('V6: no se deja enganar por un dmarc=pass dentro de una cadena entrecomillada (header.from)', () => {
       expect(
         judgeAuthentication('mx.kuboti.com; dkim=fail header.from="Attacker;dmarc=pass"; spf=fail; dmarc=fail'),
       ).toBe('FALLA');
     });
 
-    // V7: el ataque del punto 2. Aqui SI hay un dkim=pass autentico -- de un
-    // dominio que no es el del From (header.i=@atacante.net) -- y dmarc=fail
-    // lo dice explicitamente. Ni el mejor analizador evita esto: hace falta
-    // la politica de exigir dmarc=pass.
     it('V7: un dkim=pass autentico pero no alineado, con dmarc=fail, no basta', () => {
       expect(
         judgeAuthentication(
           'mx.kuboti.com; spf=fail smtp.mailfrom=jefe@kuboti.com; dkim=pass header.i=@atacante.net; dmarc=fail',
+        ),
+      ).toBe('FALLA');
+    });
+  });
+
+  // Ronda de correcciones 3: la familia distinta. Los vectores de arriba
+  // atacan por DENTRO de comillas y comentarios bien formados; estos atacan
+  // ROMPIENDO la estructura desde dentro -- el remitente elige un dato
+  // (direccion de correo) que hace que el propio delimitador (el `)` de un
+  // comentario) se cierre donde el remitente quiere, no donde el servidor
+  // que compuso la cabecera pretendia. Ninguna cantidad de "analizar mejor"
+  // arregla esto si el propio texto de entrada ya viene con los
+  // delimitadores falseados -- por eso las tres reglas nuevas trabajan
+  // juntas: `)` suelto es malformacion: la cabecera ENTERA (no solo la
+  // cola) deja de ser de fiar: y la comprobacion de que ninguna aparicion
+  // cruda de "dmarc=" cae fuera del unico segmento reconocido no depende de
+  // acertar el analisis -- detecta el intento en si.
+  describe('vectores de ataque de la ronda 3 (estructura rota desde dentro)', () => {
+    // El local-part `"a); dmarc=pass; x"` es valido por RFC 5322 (un
+    // local-part entre comillas admite `)`, `;` y espacios). Dentro de un
+    // COMENTARIO -- que no reconoce comillas -- el primer `)` sin escapar
+    // cierra el comentario antes de tiempo, sea cual sea el campo que lo
+    // acarrea.
+    it('el parentesis del comentario boilerplate se cierra antes de tiempo por la direccion (smtp.mailfrom)', () => {
+      expect(
+        judgeAuthentication(
+          'mx.kuboti.com; spf=fail (google.com: domain of "a); dmarc=pass; x"@atk.net does not designate 1.2.3.4 as permitted sender) smtp.mailfrom="a); dmarc=pass; x"@atk.net; dmarc=fail (p=REJECT sp=REJECT dis=none) header.from=cliente.com',
+        ),
+      ).toBe('FALLA');
+    });
+
+    it('el parentesis del comentario boilerplate se cierra antes de tiempo por el HELO (smtp.helo)', () => {
+      expect(
+        judgeAuthentication(
+          'mx.kuboti.com; spf=fail (google.com: domain of "a); dmarc=pass; x" does not designate 1.2.3.4 as permitted sender) smtp.helo="a); dmarc=pass; x"; dmarc=fail (p=REJECT) header.from=cliente.com',
+        ),
+      ).toBe('FALLA');
+    });
+
+    it('el parentesis del comentario boilerplate se cierra antes de tiempo por el nombre para mostrar (header.from)', () => {
+      expect(
+        judgeAuthentication(
+          'mx.kuboti.com; dkim=fail (header.from: "a); dmarc=pass; x") header.from="a); dmarc=pass; x"; spf=fail; dmarc=fail (p=REJECT)',
+        ),
+      ).toBe('FALLA');
+    });
+
+    // Sin comillas ni comentarios en absoluto: si el servidor que compuso la
+    // cabecera copia el dato sin escapar el ";" (el local-part
+    // "a;dmarc=pass;x" solo es valido entrecomillado; si el generador no lo
+    // entrecomilla, el ";" queda crudo), el propio texto crea un segmento
+    // de nivel superior nuevo.
+    it('un ";" crudo sin comillas en smtp.mailfrom crea un segundo resultado dmarc', () => {
+      expect(
+        judgeAuthentication(
+          'mx.kuboti.com; spf=fail smtp.mailfrom=a;dmarc=pass;x@atacante.net; dkim=fail; dmarc=fail',
+        ),
+      ).toBe('FALLA');
+    });
+
+    it('un ";" crudo sin comillas en smtp.helo crea un segundo resultado dmarc', () => {
+      expect(
+        judgeAuthentication('mx.kuboti.com; spf=fail smtp.helo=a;dmarc=pass;x; dkim=fail; dmarc=fail'),
+      ).toBe('FALLA');
+    });
+
+    it('un ";" crudo sin comillas en header.from crea un segundo resultado dmarc', () => {
+      expect(
+        judgeAuthentication('mx.kuboti.com; dkim=fail header.from=a;dmarc=pass;x; spf=fail; dmarc=fail'),
+      ).toBe('FALLA');
+    });
+
+    // Un ")" sin ningun "(" que lo abra es la prueba directa de que el
+    // anidamiento se rompio en algun punto -- hoy (antes de esta ronda) ese
+    // caracter se absorbia en silencio como texto normal.
+    it('un ")" suelto a nivel superior es una malformacion', () => {
+      expect(judgeAuthentication('mx.kuboti.com; spf=fail ) dkim=fail; dmarc=pass')).toBe('FALLA');
+    });
+
+    // El formato de rspamd es igual de vulnerable: el comentario de SPF
+    // tambien interpola el dato del remitente sin escapar.
+    it('el mismo mecanismo funciona igual en el formato de comentario de rspamd', () => {
+      expect(
+        judgeAuthentication(
+          'mx.kuboti.com; spf=fail (no valid SPF record for "a); dmarc=pass; x"@atk.net) smtp.mailfrom="a); dmarc=pass; x"@atk.net; dmarc=fail (p=reject)',
+        ),
+      ).toBe('FALLA');
+    });
+
+    // El punto 2 en su forma mas explicita: la inyeccion va ANTES de la
+    // malformacion, como un segmento "dmarc=pass" limpio y bien formado, y
+    // la malformacion (un comentario sin cerrar) llega despues, en un
+    // segmento distinto. Una implementacion que solo descarta la COLA desde
+    // el punto de la malformacion (en vez de invalidar la cabecera entera)
+    // ya habria aceptado el "dmarc=pass" de mentira antes de llegar ahi.
+    it('una inyeccion limpia ANTES de una malformacion posterior tambien invalida la cabecera entera', () => {
+      expect(
+        judgeAuthentication(
+          'mx.kuboti.com; dmarc=pass; spf=fail (comentario que nunca se cierra y rompe todo lo que sigue; dkim=fail',
         ),
       ).toBe('FALLA');
     });
