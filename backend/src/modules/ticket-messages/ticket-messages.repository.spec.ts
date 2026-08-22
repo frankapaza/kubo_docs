@@ -1,8 +1,8 @@
-import { FindManyOptions, FindOneOptions } from 'typeorm';
+import { FindManyOptions, FindOneOptions, getMetadataArgsStorage } from 'typeorm';
 
 import { TicketAttachment } from './entities/ticket-attachment.entity';
 import { TicketMessage } from './entities/ticket-message.entity';
-import { TicketMessagesRepository } from './ticket-messages.repository';
+import { THREAD_FIELDS, TicketMessagesRepository } from './ticket-messages.repository';
 
 /**
  * Como en `ticket-events.repository.spec.ts`: estos tests miran las opciones
@@ -167,6 +167,66 @@ describe('TicketMessagesRepository', () => {
 
       expect(findMessages).toHaveBeenCalledTimes(1);
       expect(findAttachments).not.toHaveBeenCalled();
+    });
+
+    /**
+     * `TicketMessagesService.listThread` devuelve estas entidades en crudo y
+     * el controlador las serializa tal cual: sin proyección, `GET
+     * /tickets/:ticketId/messages` publicaría `bodyFull` (el correo completo,
+     * sin recortar -- un `MEDIUMTEXT` duplicando lo que ya enseña `bodyMd`) y
+     * `inboundEmailId` (un detalle de correlación interno) en cada mensaje del
+     * hilo. Mismo motivo que `TIMELINE_FIELDS` en `ticket-events.repository.ts`.
+     */
+    it('no selecciona bodyFull ni inboundEmailId', async () => {
+      const { repo, findMessages } = montar();
+
+      await repo.listByTicket(13, { includeInternal: false });
+
+      const select = (findMessages.mock.calls[0][0] as FindManyOptions<TicketMessage>)
+        .select as Record<string, unknown>;
+      expect(select).toBeDefined();
+      expect(select.bodyFull).toBeUndefined();
+      expect(select.inboundEmailId).toBeUndefined();
+    });
+
+    /**
+     * La guarda que de verdad protege esto en el futuro: la lista de columnas
+     * se lee de los metadatos de la entidad, así que un `@Column` nuevo en
+     * `TicketMessage` rompe este test hasta que alguien decida, a mano, si va
+     * al hilo o a la lista de exclusiones. Mismo patrón que
+     * `ticket-events.repository.spec.ts`.
+     */
+    it('toda columna de la entidad está clasificada: o va al hilo o se excluye a mano', () => {
+      /** Lo que nunca sale del repositorio hacia `GET /tickets/:ticketId/messages`. */
+      const FUERA_DEL_HILO = ['bodyFull', 'inboundEmailId'];
+
+      const declaradas = getMetadataArgsStorage()
+        .columns.filter((c) => c.target === TicketMessage)
+        .map((c) => c.propertyName);
+
+      expect(declaradas.length).toBeGreaterThan(0);
+      const clasificadas = [...Object.keys(THREAD_FIELDS), ...FUERA_DEL_HILO].sort();
+      expect(declaradas.slice().sort()).toEqual(clasificadas);
+    });
+
+    it('sí selecciona lo que el hilo enseña', async () => {
+      const { repo, findMessages } = montar();
+
+      await repo.listByTicket(13, { includeInternal: false });
+
+      const select = (findMessages.mock.calls[0][0] as FindManyOptions<TicketMessage>)
+        .select as Record<string, unknown>;
+      for (const campo of [
+        'id',
+        'ticketId',
+        'bodyMd',
+        'visibility',
+        'authorUserId',
+        'authorClientUserId',
+        'createdAt',
+      ]) {
+        expect(select[campo]).toBe(true);
+      }
     });
   });
 

@@ -111,11 +111,23 @@ describe('InboundEmailsRepository', () => {
       expect(resultado).toEqual([{ ticketId: 22, clientId: 9 }]);
     });
 
+    /**
+     * `sameId` existe justo para esta asimetría: `Ticket.id` llega hidratado
+     * como cadena (`'5'`) mientras que `evento.ticketId`, leído de la misma
+     * columna `bigint` en otra fila, puede llegar como `number` si el driver
+     * lo consideró "seguro" (`supportBigNumbers`/`bigNumberStrings` en
+     * `app.module.ts`). Con los dos fixtures como cadena (`'5'` contra `'5'`),
+     * `===` habría dado el mismo resultado que `sameId` y el mutante
+     * `sameId` → `===` habría sobrevivido. Con esta asimetría, sustituir
+     * `sameId` por `===` hace que el ticket no se reconozca como "ya
+     * cubierto", dispare una segunda búsqueda de más y ponga esta prueba en
+     * rojo.
+     */
     it('un ticket encontrado por las dos vías a la vez no se duplica ni se vuelve a buscar', async () => {
       const { repository, ticketsRepo, eventsRepo } = montar();
       const ids = ['<mismo@x.com>'];
       ticketsRepo.find.mockResolvedValueOnce([{ id: '5', clientId: '3' }]);
-      eventsRepo.find.mockResolvedValueOnce([{ id: '901', ticketId: '5', sentMessageId: ids[0] }]);
+      eventsRepo.find.mockResolvedValueOnce([{ id: '901', ticketId: 5, sentMessageId: ids[0] }]);
 
       const resultado = await repository.findTicketsByEmailMessageIds(ids);
 
@@ -125,10 +137,23 @@ describe('InboundEmailsRepository', () => {
       expect(resultado).toEqual([{ ticketId: 5, clientId: 3 }]);
     });
 
-    it('un ticket sin cliente asignado queda fuera: no hay a quién atribuir la respuesta', async () => {
+    /**
+     * Las tres formas en que un `clientId` puede no ser un identificador de
+     * verdad, no solo `null`: `0` no es un id de cliente válido (los `bigint
+     * unsigned` de este esquema arrancan en 1) y `''` es lo que deja una
+     * columna vacía mal migrada. Cubrir solo `null` dejaría sobrevivir un
+     * mutante que cambiara `isUsableId` por un `!== null` a mano — que es
+     * justo el defecto que `isUsableId` existe para evitar (ver
+     * `common/ids.ts`).
+     */
+    it.each([
+      ['null', null],
+      ['0', 0],
+      ['cadena vacía', ''],
+    ])('un ticket sin cliente asignado (%s) queda fuera: no hay a quién atribuir la respuesta', async (_nombre, clientId) => {
       const { repository, ticketsRepo, eventsRepo } = montar();
       const ids = ['<interno@x.com>'];
-      ticketsRepo.find.mockResolvedValueOnce([{ id: '11', clientId: null }]);
+      ticketsRepo.find.mockResolvedValueOnce([{ id: '11', clientId }]);
       eventsRepo.find.mockResolvedValueOnce([]);
 
       const resultado = await repository.findTicketsByEmailMessageIds(ids);

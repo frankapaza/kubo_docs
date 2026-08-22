@@ -15,6 +15,18 @@ export class InboundEmailsRepository {
     @InjectRepository(TicketEvent) private readonly eventsRepo: Repository<TicketEvent>,
   ) {}
 
+  /**
+   * Busca por `message_id`, la columna `ascii` que sostiene la clave única de
+   * la idempotencia.
+   *
+   * **`messageId` tiene que llegar ya normalizado**, es decir, pasado por
+   * `normalizeMessageId` (`./message-id.ts`) -- el mismo valor que se guarda
+   * en la columna, nunca el `Message-ID` crudo tal cual trae la cabecera del
+   * correo (que puede no ser ASCII, RFC 6532). Llamar aquí con el valor crudo
+   * de un identificador no-ASCII no encuentra el duplicado y rompe la
+   * idempotencia de la ingesta -- que es lo único que impide crear un ticket
+   * repetido si el proceso cae a medio procesar un correo.
+   */
   findByMessageId(messageId: string): Promise<InboundEmail | null> {
     return this.repo.findOne({ where: { messageId } });
   }
@@ -46,6 +58,13 @@ export class InboundEmailsRepository {
    * **Solo entran los tickets con `clientId`.** Un ticket sin empresa no
    * tiene a quién atribuirle la respuesta del cliente — la firma de retorno
    * lo exige (`clientId: number`, no `number | null`) precisamente por eso.
+   *
+   * **`messageIds` tiene que llegar ya normalizado**, igual que en
+   * `findByMessageId`: son los dos valores extraídos de `In-Reply-To` /
+   * `References` de la respuesta entrante, y esas cabeceras pueden traer el
+   * mismo `Message-ID` no-ASCII con el que se abrió el ticket o se envió el
+   * aviso. Sin pasarlos por `normalizeMessageId` primero, la búsqueda contra
+   * estas dos columnas `ascii` no encuentra nunca el ticket.
    */
   async findTicketsByEmailMessageIds(
     messageIds: string[],

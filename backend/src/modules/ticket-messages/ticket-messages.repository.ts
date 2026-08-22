@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { FindOptionsSelect, Repository } from 'typeorm';
 
 import { TicketAttachment } from './entities/ticket-attachment.entity';
 import { TicketMessage } from './entities/ticket-message.entity';
@@ -26,6 +26,35 @@ export interface VisibilityFilter {
 
 const PUBLIC_VISIBILITY = 'PUBLICA';
 
+/**
+ * El mensaje tal y como sale de aquí hacia `GET /tickets/:ticketId/messages`:
+ * `TicketMessagesService.listThread` devuelve estas entidades en crudo y el
+ * controlador las serializa tal cual, igual que `TicketEventsRepository` con
+ * `TIMELINE_FIELDS` (ver su comentario, mismo motivo exacto).
+ *
+ * Sin esta lista blanca, añadir `bodyFull` e `inboundEmailId` a `TicketMessage`
+ * (migración 021) los mete en la respuesta sin que nadie lo haya pedido: cada
+ * mensaje venido de correo viajaría con su historial citado duplicado --el
+ * recortado en `bodyMd` y el completo en `bodyFull`-- en cada carga del hilo,
+ * y `bodyFull` es un `MEDIUMTEXT`. El portal se salva porque
+ * `PortalMessageView` proyecta campo a campo; el panel no, así que el corte
+ * va aquí, en el repositorio, para cubrir a cualquier consumidor futuro sin
+ * que tenga que acordarse.
+ *
+ * Se enumera en positivo y no como una lista de exclusiones, por lo mismo que
+ * `TIMELINE_FIELDS`: la columna que se añada dentro de seis meses no debe
+ * aparecer sola en la respuesta del panel.
+ */
+export const THREAD_FIELDS: FindOptionsSelect<TicketMessage> = {
+  id: true,
+  ticketId: true,
+  bodyMd: true,
+  visibility: true,
+  authorUserId: true,
+  authorClientUserId: true,
+  createdAt: true,
+};
+
 @Injectable()
 export class TicketMessagesRepository {
   constructor(
@@ -47,6 +76,7 @@ export class TicketMessagesRepository {
         ? { ticketId: ticketId as number }
         : { ticketId: ticketId as number, visibility: PUBLIC_VISIBILITY },
       order: { createdAt: 'ASC', id: 'ASC' },
+      select: THREAD_FIELDS,
     });
   }
 
