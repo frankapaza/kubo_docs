@@ -30,6 +30,16 @@ export class UsersService {
     return u;
   }
 
+  /**
+   * Igual que `findByEmailOrFail`, pero sin lanzar: la ingesta de correo
+   * necesita distinguir "es del personal" de "no es nadie conocido" antes de
+   * decidir qué hacer, y un 404 a mitad de esa comprobación sería un fallo
+   * del proceso entero, no la respuesta a la pregunta.
+   */
+  findByEmail(email: string): Promise<User | null> {
+    return this.repo.findByEmail(email);
+  }
+
   async findByIdOrFail(id: number): Promise<User> {
     const u = await this.repo.findById(id);
     if (!u) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Usuario no encontrado' });

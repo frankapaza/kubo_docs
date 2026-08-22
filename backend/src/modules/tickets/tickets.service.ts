@@ -53,6 +53,22 @@ export interface CreatedTicket extends Ticket {
   firstMessageId: number;
 }
 
+/**
+ * Lo que solo aporta un ticket nacido de un correo entrante (origen `EMAIL`).
+ * Parámetro aparte y no campos sueltos en `CreateTicketDto` a propósito: ese
+ * DTO es la forma de `POST /tickets`, y colar aquí un `emailMessageId`
+ * dejaría a cualquier miembro del equipo con permiso para inventarse, a mano,
+ * el identificador con el que un ticket "abierto por correo" correlaciona sus
+ * respuestas -- un dato que solo tiene sentido cuando de verdad viene de la
+ * cabecera de un mensaje que nadie en el panel llegó a ver.
+ */
+export interface EmailOrigin {
+  /** Ya normalizado (`normalizeMessageId`); va a `tickets.email_message_id`. */
+  emailMessageId: string;
+  /** El cuerpo del correo sin recortar; va a `ticket_messages.body_full` del primer mensaje. */
+  bodyFull: string;
+}
+
 /** Las dos columnas del actor, ya repartidas. Nunca van las dos a la vez. */
 interface ActorColumns {
   createdBy: number | null;
@@ -191,7 +207,11 @@ export class TicketsService {
    * (`TICKET_MESSAGE_FROM_CLIENT`) por el mismo hecho y en el mismo segundo, y
    * un correo no se retira. El mensaje viaja con el alta, no aparte.
    */
-  async create(actor: TicketActor, dto: CreateTicketDto): Promise<CreatedTicket> {
+  async create(
+    actor: TicketActor,
+    dto: CreateTicketDto,
+    emailOrigin?: EmailOrigin,
+  ): Promise<CreatedTicket> {
     // Lo primero: sin autor no se escribe nada, ni ticket, ni evento, ni mensaje.
     const actorColumns = resolveActorColumns(actor);
     const visibility = firstMessageVisibility(actor);
@@ -262,6 +282,7 @@ export class TicketsService {
           slaResolutionDueAt: slaInit.slaResolutionDueAt,
           createdBy: actorColumns.createdBy,
           createdByClientUserId: actorColumns.createdByClientUserId,
+          emailMessageId: emailOrigin?.emailMessageId ?? null,
         }),
       );
 
@@ -292,6 +313,7 @@ export class TicketsService {
         messageRepo.create({
           ticketId: ticket.id,
           bodyMd: ticket.rawText,
+          bodyFull: emailOrigin?.bodyFull ?? null,
           visibility,
           authorUserId: actorColumns.createdBy,
           authorClientUserId: actorColumns.createdByClientUserId,

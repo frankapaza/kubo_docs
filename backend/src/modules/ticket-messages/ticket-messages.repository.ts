@@ -81,6 +81,19 @@ export class TicketMessagesRepository {
   }
 
   /**
+   * Enlaza un mensaje ya guardado con el correo entrante del que salió
+   * (migración 021, `ticket_messages.inbound_email_id`). Se llama **después**
+   * de insertar la fila de `inbound_emails` -- que a su vez necesita el id del
+   * mensaje o del ticket ya creados --, así que este enlace no puede ir en el
+   * mismo `INSERT` que el mensaje: es, a propósito, la última escritura de la
+   * ingesta de un correo, puramente informativa (de qué correo salió este
+   * mensaje del hilo) y no algo de lo que dependa ningún invariante.
+   */
+  async attachInboundEmail(messageId: Id, inboundEmailId: number): Promise<void> {
+    await this.messages.update(messageId as number, { inboundEmailId });
+  }
+
+  /**
    * Un mensaje suelto por su id, **sin filtrar por visibilidad**.
    *
    * Es deliberado: quien pregunta necesita saber si el mensaje es interno para

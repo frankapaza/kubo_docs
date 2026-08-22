@@ -23,6 +23,13 @@ export interface PostMessageInput {
   bodyMd: string;
   /** Solo la respeta un autor del equipo. Ver `post`. */
   visibility?: TicketMessageVisibility;
+  /**
+   * El cuerpo sin recortar, cuando el mensaje viene de un correo entrante
+   * (`InboundEmailService`). `undefined`/ausente en cualquier mensaje escrito
+   * desde el panel o el portal -- ahí no hay cita que recortar, y forzar aquí
+   * un valor sería inventar un dato que nadie mandó.
+   */
+  bodyFull?: string;
 }
 
 export interface PostedMessage {
@@ -165,6 +172,7 @@ export class TicketMessagesService {
         messageRepo.create({
           ticketId: ticket.id,
           bodyMd,
+          bodyFull: input.bodyFull ?? null,
           visibility,
           authorUserId: author.userId,
           authorClientUserId: author.clientUserId,

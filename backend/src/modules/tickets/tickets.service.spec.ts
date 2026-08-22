@@ -302,6 +302,42 @@ describe('el primer mensaje del alta', () => {
     const created = await service.create({ kind: 'STAFF', userId: 5 }, { rawText: 'algo' } as any);
     expect(created.firstMessageId).toBe(repo.savedMessages[0].id);
   });
+
+  /**
+   * Sin `emailOrigin`, un ticket nace igual que siempre: sin `email_message_id`
+   * y sin `body_full` en el mensaje. Es la mayoría de los altas (panel, portal,
+   * WhatsApp) y el parámetro nuevo no puede cambiarles nada.
+   */
+  it('sin emailOrigin, el ticket y el mensaje no llevan nada de correo', async () => {
+    const { service, repo } = makeService();
+    await service.create({ kind: 'STAFF', userId: 5 }, { rawText: 'algo' } as any);
+
+    expect(repo.savedTickets[0].emailMessageId).toBeNull();
+    expect(repo.savedMessages[0].bodyFull).toBeNull();
+  });
+
+  /**
+   * El único camino que hoy pasa `emailOrigin`: `InboundEmailService`, cuando
+   * un correo de un cliente registrado crea un ticket. `emailMessageId` va al
+   * ticket (`tickets.email_message_id`, para correlacionar respuestas contra
+   * el acuse inicial) y `bodyFull` al primer mensaje (`ticket_messages.body_full`,
+   * el cuerpo sin recortar; `bodyMd` sigue siendo el texto ya recortado que
+   * llega en `rawText`).
+   */
+  it('con emailOrigin, el ticket guarda el Message-ID y el mensaje el cuerpo completo', async () => {
+    const { service, repo } = makeService();
+    await service.create(
+      { kind: 'CLIENT', clientUserId: 11 },
+      { rawText: 'se cayó el ERP', clientId: 1 } as any,
+      { emailMessageId: '<abc@cliente.com>', bodyFull: 'se cayó el ERP\n\n> cita anterior' },
+    );
+
+    expect(repo.savedTickets[0].emailMessageId).toBe('<abc@cliente.com>');
+    expect(repo.savedMessages[0].bodyFull).toBe('se cayó el ERP\n\n> cita anterior');
+    // bodyMd sigue siendo el texto recortado, no el completo: son dos columnas
+    // distintas y no pueden confundirse la una con la otra.
+    expect(repo.savedMessages[0].bodyMd).toBe('se cayó el ERP');
+  });
 });
 
 /**

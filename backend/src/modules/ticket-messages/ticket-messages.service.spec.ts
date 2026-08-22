@@ -681,6 +681,28 @@ describe('post: columnas de autor', () => {
     expect(ev.actorClientUserId).toBe(11);
   });
 
+  /**
+   * `bodyFull` es lo que usa `InboundEmailService` para guardar el cuerpo del
+   * correo sin recortar (`bodyMd` sigue siendo el texto ya recortado). Un
+   * mensaje del panel o del portal, que no lo manda, se guarda con `null` --
+   * nunca con el mismo texto de `bodyMd` repetido por omisión.
+   */
+  it('bodyFull se guarda cuando lo manda quien llama, y null cuando no', async () => {
+    const { service, confirmado } = makeHarness(ticketRow());
+
+    await service.post(CLIENTE, 7, { bodyMd: 'Ya funciona', bodyFull: 'Ya funciona\n\n> cita anterior' });
+
+    expect(confirmado.messages[0].bodyFull).toBe('Ya funciona\n\n> cita anterior');
+  });
+
+  it('sin bodyFull, el mensaje se guarda con null, no con bodyMd repetido', async () => {
+    const { service, confirmado } = makeHarness(ticketRow());
+
+    await service.post(CLIENTE, 7, { bodyMd: 'Gracias, ya quedó.' });
+
+    expect(confirmado.messages[0].bodyFull).toBeNull();
+  });
+
   it('nunca deja las dos columnas puestas ni las dos nulas', async () => {
     for (const actor of [EQUIPO, CLIENTE]) {
       const { service, confirmado } = makeHarness(ticketRow());

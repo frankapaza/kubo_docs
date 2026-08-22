@@ -81,6 +81,7 @@ function montarQueryBuilder(resultado: { getMany?: unknown[]; getRawOne?: unknow
 function montar(resultado: { getMany?: unknown[]; getRawOne?: unknown } = {}) {
   const findMessages = jest.fn().mockResolvedValue([]);
   const findOneMessage = jest.fn().mockResolvedValue(null);
+  const updateMessage = jest.fn().mockResolvedValue({ affected: 1 });
   const findAttachments = jest.fn().mockResolvedValue([]);
   const findOneAttachment = jest.fn().mockResolvedValue(null);
   const create = jest.fn((data: unknown) => data);
@@ -96,6 +97,7 @@ function montar(resultado: { getMany?: unknown[]; getRawOne?: unknown } = {}) {
   const messagesRepo = {
     find: findMessages,
     findOne: findOneMessage,
+    update: updateMessage,
     createQueryBuilder: createQueryBuilderMessages,
   } as any;
   const attachmentsRepo = {
@@ -111,6 +113,7 @@ function montar(resultado: { getMany?: unknown[]; getRawOne?: unknown } = {}) {
     repo,
     findMessages,
     findOneMessage,
+    updateMessage,
     findAttachments,
     findOneAttachment,
     create,
@@ -253,6 +256,16 @@ describe('TicketMessagesRepository', () => {
 
       expect(findOneAttachment).toHaveBeenCalledTimes(1);
       expect(findOneMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('attachInboundEmail', () => {
+    it('actualiza inbound_email_id del mensaje indicado', async () => {
+      const { repo, updateMessage } = montar();
+
+      await repo.attachInboundEmail(501, 9);
+
+      expect(updateMessage).toHaveBeenCalledWith(501, { inboundEmailId: 9 });
     });
   });
 

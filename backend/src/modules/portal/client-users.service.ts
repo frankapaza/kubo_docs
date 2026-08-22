@@ -69,6 +69,16 @@ export class ClientUsersService {
   }
 
   /**
+   * El usuario de cliente dueño de esa dirección, o `null`. Sin decorar a
+   * `ClientUserView`: quien llama (la ingesta de correo) necesita `clientId`
+   * y `isActive` tal cual vienen de la fila, no la vista que se publica al
+   * panel.
+   */
+  findByEmail(email: string): Promise<ClientUser | null> {
+    return this.repo.findByEmail(email);
+  }
+
+  /**
    * `staffUserId` viene de la sesión del panel (`created_by`), nunca del
    * cuerpo. El cliente se valida antes de tocar `client_users`: un
    * `clientId` inexistente no debe dejar una fila huérfana.
