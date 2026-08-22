@@ -68,6 +68,16 @@ export default function PortalLayout() {
               Requerimientos
             </NavLink>
             <NavLink
+              to="/portal/informes"
+              className={({ isActive }) =>
+                `text-sm font-medium transition ${
+                  isActive ? 'text-kubo-primary' : 'text-slate-600 hover:text-slate-900'
+                }`
+              }
+            >
+              Informes
+            </NavLink>
+            <NavLink
               to="/portal/help"
               className={({ isActive }) =>
                 `inline-flex items-center gap-2 text-sm font-medium transition ${

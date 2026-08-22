@@ -851,3 +851,123 @@ export interface PortalPostedTicketMessage {
   message: PortalTicketMessage;
   ticketStatus: TicketStatus;
 }
+
+// ---------------------------------------------------------------------------
+// Informe mensual del portal (`GET /portal/informes/mensual`): refleja
+// literalmente los tipos del backend (`MonthlyReportView` en
+// `backend/src/modules/portal/dto/monthly-report.dto.ts` y `Compliance` en
+// `domain/monthly-report.ts`). Los nombres de campo son deliberadamente
+// idénticos a los del backend, campo a campo, para no tener que recordar un
+// segundo mapeo.
+// ---------------------------------------------------------------------------
+
+/**
+ * Qué bloques trae el informe. Mismos tres valores que `REPORT_SCOPES` en el
+ * backend; `TICKETS`/`REQUERIMIENTOS` no traen el bloque contrario.
+ */
+export type ReportScope = 'TICKETS' | 'REQUERIMIENTOS' | 'AMBOS';
+
+/**
+ * Veredicto de cumplimiento de un plazo o compromiso. Tres valores, no dos:
+ * `SIN_COMPROMISO` es «no había nada que cumplir», distinto de `INCUMPLIDO`.
+ * Se pinta literalmente como «Sin compromiso» -- nunca como un hueco ni como
+ * un guion, que se leerían como «no cumplió» o como dato ausente.
+ */
+export type Compliance = 'CUMPLIDO' | 'INCUMPLIDO' | 'SIN_COMPROMISO';
+
+/** Fila de ticket del informe: fechas ya en ISO, estado ya traducido por el backend. */
+export interface MonthlyReportTicketRow {
+  id: number;
+  code: string | null;
+  subject: string | null;
+  category: string | null;
+  priority: string;
+  status: string;
+  capturedAt: string;
+  firstResponseAt: string | null;
+  resolvedAt: string | null;
+  slaResponseDueAt: string | null;
+  slaResolutionDueAt: string | null;
+  responseCompliance: Compliance;
+  resolutionCompliance: Compliance;
+}
+
+export interface TicketsTotals {
+  received: number;
+  resolved: number;
+  pending: number;
+  /** Distinto de `resolved`: cuenta resueltos en el periodo aunque se hayan recibido antes. */
+  resolvedInPeriod: number;
+  /**
+   * `null` cuando no hubo nada medible (todo `SIN_COMPROMISO`). Se pinta como
+   * «—» con la nota «sin compromisos que medir» -- nunca como 0 %, que se
+   * leería como «no cumplieron nada» en vez de «no había nada que cumplir».
+   */
+  responseCompliancePercent: number | null;
+  resolutionCompliancePercent: number | null;
+  /** Tickets sin ningún SLA de resolución pactado: no hubo promesa que incumplir. */
+  withoutCommitment: number;
+  /** Tickets con SLA de resolución pactado, sin resolver, cuyo plazo aún no había vencido al cerrar el periodo. */
+  notYetDue: number;
+}
+
+export interface MonthlyReportTicketsBlock {
+  rows: MonthlyReportTicketRow[];
+  totals: TicketsTotals;
+}
+
+/** Fila de requerimiento del informe, mismo criterio que `MonthlyReportTicketRow`. */
+export interface MonthlyReportRequirementRow {
+  id: number;
+  code: string | null;
+  title: string;
+  status: PortalRequirementStatusLabel;
+  createdAt: string;
+  dueDate: string | null;
+  closedAt: string | null;
+  commitment: Compliance;
+}
+
+export interface RequirementsTotals {
+  requested: number;
+  accepted: number;
+  delivered: number;
+  rejected: number;
+  commitmentCompliancePercent: number | null;
+}
+
+export interface MonthlyReportRequirementsBlock {
+  rows: MonthlyReportRequirementRow[];
+  totals: RequirementsTotals;
+}
+
+/**
+ * Lo que devuelve `GET /portal/informes/mensual`.
+ *
+ * `tickets`/`requirements` son `null` cuando ese bloque no se pidió, nunca un
+ * bloque con lista y totales vacíos -- esa diferencia («no lo pediste» vs.
+ * «no hubo nada») se conserva tal cual llega: un bloque `null` no se pinta,
+ * uno vacío sí, con su tabla vacía y sus ceros.
+ */
+export interface PortalMonthlyReport {
+  /** Razón social del cliente, o `null` si no pudo resolverse. */
+  clientName: string | null;
+  period: { year: number; month: number };
+  scope: ReportScope;
+  /** ISO del instante de generación, solo para uso de máquina. Nunca se pinta -- ver `generatedAtLabel`. */
+  generatedAt: string;
+  /**
+   * El mismo instante, ya en texto legible, en español, en hora de Perú y con
+   * la zona escrita. Se pinta literalmente, tal cual llega: no se reformatea
+   * ni se deriva del `generatedAt` ISO en el navegador del cliente.
+   */
+  generatedAtLabel: string;
+  /**
+   * Qué se contó y desde cuándo, en texto llano. Se pinta literalmente en la
+   * cabecera del informe y de las dos descargas: sin él, dos descargas del
+   * mismo mes con números distintos no se pueden explicar.
+   */
+  criteria: string;
+  tickets: MonthlyReportTicketsBlock | null;
+  requirements: MonthlyReportRequirementsBlock | null;
+}

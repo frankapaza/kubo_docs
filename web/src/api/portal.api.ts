@@ -2,10 +2,12 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import type {
   PortalClientSystem,
   PortalCreatedTicket,
+  PortalMonthlyReport,
   PortalRequirement,
   PortalSession,
   PortalTicket,
   PortalTicketDetail,
+  ReportScope,
 } from './types';
 
 /**
@@ -176,6 +178,17 @@ export const portalApi = {
 
   createRequirement: (body: { title: string; descriptionMd: string }) =>
     portalApiClient.post<PortalRequirement>('/portal/requerimientos', body).then((r) => r.data),
+
+  /**
+   * Informe mensual (tarea 6 del backend). El backend rechaza el mes en
+   * curso o uno futuro con un 400 en español -- la pantalla ya evita
+   * ofrecerlos en el selector, pero esta llamada no repite esa validación:
+   * es la misma que hace cumplir el límite de verdad.
+   */
+  getMonthlyReport: (year: number, month: number, scope: ReportScope) =>
+    portalApiClient
+      .get<PortalMonthlyReport>('/portal/informes/mensual', { params: { year, month, scope } })
+      .then((r) => r.data),
 };
 
 /** Límites de `CreatePortalRequirementDto` en el backend: deben coincidir siempre con él. */
