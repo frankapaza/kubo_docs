@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { QueryFailedError } from 'typeorm';
 
 import { InboundEmailsRepository } from './inbound-emails.repository';
 import { IncomingMessage, Mailbox, MAILBOX } from './mailbox.interface';
@@ -71,6 +72,46 @@ export interface DrainSummary {
 function errorText(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
+}
+
+/** Código con el que MySQL/mysql2 reporta un choque contra una clave única. */
+const MYSQL_DUPLICATE_ENTRY = 'ER_DUP_ENTRY';
+
+/**
+ * Si `error` es un choque contra la clave única de `message_id`. Mismo
+ * criterio que `ClientUsersService` (ronda de correcciones 2): se mira el
+ * código del error que reporta el driver, nunca el texto -- `sqlMessage`
+ * cambia de redacción entre versiones de MySQL/mysql2 y no es un contrato
+ * estable.
+ *
+ * Es el único caso en el que `claim` puede fallar sin que sea un fallo de
+ * verdad: significa que **otro intento ya reclamó este mismo Message-ID**
+ * antes que este -- el mismo desenlace que si `findByMessageId` lo hubiera
+ * encontrado al principio, solo que la carrera se decidió un instante más
+ * tarde.
+ */
+function isDuplicateKeyError(error: unknown): boolean {
+  if (!(error instanceof QueryFailedError)) return false;
+  const driverError = error.driverError as { code?: string } | undefined;
+  return driverError?.code === MYSQL_DUPLICATE_ENTRY;
+}
+
+/**
+ * Marca un fallo que **ya se registró** en la fila que este mismo intento
+ * había reclamado (`claim`). Existe para que `drain` no vuelva a registrar
+ * nada al atrapar la excepción: sin esta marca, `drain` no tiene forma de
+ * saber si quien le lanzó el error ya corrigió su propia fila o si el fallo
+ * ocurrió antes de reclamar ninguna -- y adivinarlo teniendo que localizar
+ * "la fila de este correo" por su `Message-ID` es exactamente el mecanismo
+ * que la ronda de correcciones 2 vino a quitar: esa fila podía no ser la de
+ * este intento (otro intento la reclamó primero, en una carrera) ni seguir
+ * significando lo mismo.
+ */
+class ClaimedRowFailure extends Error {
+  constructor(readonly cause: unknown) {
+    super(errorText(cause));
+    this.name = 'ClaimedRowFailure';
+  }
 }
 
 /**
@@ -234,11 +275,22 @@ export class InboundEmailService {
         await this.processOne(message, summary);
       } catch (error) {
         summary.errors += 1;
+        // Si el error viene envuelto en `ClaimedRowFailure`, quien lo lanzó
+        // ya corrigió su propia fila (por su id de fila, nunca por el
+        // Message-ID del correo -- ver el comentario de la clase): registrar
+        // aquí además, buscando por Message-ID, es precisamente el mecanismo
+        // que sobrescribía la fila de otro intento cuando dos coincidían en
+        // el mismo identificador. Se desenvuelve solo para el log, que sí
+        // quiere el motivo real y no el nombre de la envoltura.
+        const yaRegistrado = error instanceof ClaimedRowFailure;
+        const causa = yaRegistrado ? (error as ClaimedRowFailure).cause : error;
         this.logger.error(
           `Fallo al procesar el correo ${message.mailboxRef} (Message-ID crudo "${message.messageId}"): ` +
-            errorText(error),
+            errorText(causa),
         );
-        await this.recordError(message, error);
+        if (!yaRegistrado) {
+          await this.recordError(message, error);
+        }
       }
 
       // Se marca procesado pase lo que pase: un fallo (de negocio o de
@@ -445,6 +497,11 @@ export class InboundEmailService {
       // El ticket ya se conoce: se reclama la fila con él antes de escribir
       // el mensaje (ver `claim`).
       const row = await this.claim(message, messageId, 'MENSAJE_ANADIDO', correlation.ticketId, clientUserId);
+      if (row === null) {
+        // Perdimos la carrera: otro intento ya reclamó este Message-ID.
+        summary.duplicates += 1;
+        return;
+      }
 
       const input: PostMessageInput = {
         bodyMd,
@@ -457,14 +514,18 @@ export class InboundEmailService {
         // afirmación explícita y no esa coincidencia.
         visibility: 'PUBLICA',
       };
-      const posted = await this.ticketMessages.post(
-        { kind: 'CLIENT', clientUserId, clientId: senderClientId },
-        correlation.ticketId,
-        input,
-      );
-
-      await this.safeAttachInboundEmail(posted.message.id, row.id);
-      summary.messagesAdded += 1;
+      try {
+        const posted = await this.ticketMessages.post(
+          { kind: 'CLIENT', clientUserId, clientId: senderClientId },
+          correlation.ticketId,
+          input,
+        );
+        await this.safeAttachInboundEmail(posted.message.id, row.id);
+        summary.messagesAdded += 1;
+      } catch (error) {
+        await this.failClaimedRow(row.id, error);
+        throw new ClaimedRowFailure(error);
+      }
       return;
     }
 
@@ -478,6 +539,11 @@ export class InboundEmailService {
     // autoincremental que le va a tocar al ticket --, así que se reclama con
     // `null` y se corrige después de crearlo (ver `claim`).
     const row = await this.claim(message, messageId, 'TICKET_CREADO', null, clientUserId);
+    if (row === null) {
+      // Perdimos la carrera: otro intento ya reclamó este Message-ID.
+      summary.duplicates += 1;
+      return;
+    }
 
     const dto: CreateTicketDto = {
       rawText: bodyMd,
@@ -487,11 +553,20 @@ export class InboundEmailService {
     } as CreateTicketDto;
     const emailOrigin: EmailOrigin = { emailMessageId: messageId, bodyFull: message.textBody };
 
-    const created = await this.tickets.create({ kind: 'CLIENT', clientUserId }, dto, emailOrigin);
-
-    await this.repo.updateOutcome(row.id, { ticketId: Number(created.id) });
-    await this.safeAttachInboundEmail(created.firstMessageId, row.id);
-    summary.ticketsCreated += 1;
+    try {
+      const created = await this.tickets.create({ kind: 'CLIENT', clientUserId }, dto, emailOrigin);
+      await this.repo.updateOutcome(row.id, { ticketId: Number(created.id) });
+      await this.safeAttachInboundEmail(created.firstMessageId, row.id);
+      summary.ticketsCreated += 1;
+    } catch (error) {
+      // Se corrige **solo** la fila que este intento reclamó (`row.id`),
+      // nunca buscando por Message-ID: es justo lo que impide que un fallo
+      // en este intento le borre el éxito a otra fila -- la del intento que
+      // ganó la carrera de `claim`, o la de una fila que ya llevaba el
+      // ticket escrito y solo falló el propio `updateOutcome`.
+      await this.failClaimedRow(row.id, error);
+      throw new ClaimedRowFailure(error);
+    }
   }
 
   /**
@@ -547,6 +622,11 @@ export class InboundEmailService {
 
     const bodyMd = withAttachmentNote(strippedBody, message.attachmentNames);
     const row = await this.claim(message, messageId, 'MENSAJE_ANADIDO', ticketId, null);
+    if (row === null) {
+      // Perdimos la carrera: otro intento ya reclamó este Message-ID.
+      summary.duplicates += 1;
+      return;
+    }
 
     const input: PostMessageInput = {
       bodyMd,
@@ -558,14 +638,18 @@ export class InboundEmailService {
       // importa de verdad.
       visibility: 'PUBLICA',
     };
-    const posted = await this.ticketMessages.post(
-      { kind: 'STAFF', userId: Number(staffUser.id) },
-      ticketId,
-      input,
-    );
-
-    await this.safeAttachInboundEmail(posted.message.id, row.id);
-    summary.messagesAdded += 1;
+    try {
+      const posted = await this.ticketMessages.post(
+        { kind: 'STAFF', userId: Number(staffUser.id) },
+        ticketId,
+        input,
+      );
+      await this.safeAttachInboundEmail(posted.message.id, row.id);
+      summary.messagesAdded += 1;
+    } catch (error) {
+      await this.failClaimedRow(row.id, error);
+      throw new ClaimedRowFailure(error);
+    }
   }
 
   /** El ticket al que corresponde el correo de un miembro del personal, o `null` si no hay ninguno. */
@@ -742,42 +826,81 @@ export class InboundEmailService {
    * El `ticketId` puede no conocerse todavía (un ticket nuevo depende del
    * autoincremental que le toque): se reclama con `null` y `handleClientSender`
    * lo corrige con `InboundEmailsRepository.updateOutcome` en cuanto existe.
-   * Si la escritura que sigue revienta, `recordError` encuentra esta misma
-   * fila (por su `Message-ID`, ya único) y la corrige a `ERROR` -- nunca
-   * inserta una segunda, que la clave única rechazaría de todos modos.
+   *
+   * Devuelve `null`, y no lanza, cuando el propio `INSERT` choca contra la
+   * clave única de `message_id`: significa que **otro intento ya reclamó
+   * este mismo Message-ID** un instante antes (ronda de correcciones 2 --
+   * antes de esto, quien perdía esa carrera dejaba subir la excepción, y
+   * `recordError` la resolvía buscando "la fila de este Message-ID" y
+   * encontraba, precisamente, la del intento que sí ganó: la sobrescribía a
+   * `ERROR` aunque hubiera terminado bien). Quien llama tiene que tratar un
+   * `null` exactamente como el descarte por duplicado que ya hace
+   * `findByMessageId` al principio de `processOne` -- no reintenta nada más
+   * con este correo.
+   *
+   * Cualquier otro fallo del `INSERT` sí sube tal cual: no hay fila que
+   * reclamar, así que no hay nada que este método pueda corregir por su
+   * cuenta.
    */
-  private claim(
+  private async claim(
     message: IncomingMessage,
     messageId: string,
     outcome: 'TICKET_CREADO' | 'MENSAJE_ANADIDO',
     ticketId: number | null,
     clientUserId: number | null,
-  ): Promise<InboundEmail> {
-    return this.repo.record({
-      ...this.baseRow(message, messageId),
-      outcome,
-      reason: null,
-      ticketId,
-      clientUserId,
-    });
+  ): Promise<InboundEmail | null> {
+    try {
+      return await this.repo.record({
+        ...this.baseRow(message, messageId),
+        outcome,
+        reason: null,
+        ticketId,
+        clientUserId,
+      });
+    } catch (error) {
+      if (isDuplicateKeyError(error)) return null;
+      throw error;
+    }
   }
 
   /**
-   * Dado un fallo de verdad (no un desenlace previsto -- ver `discard`),
-   * deja constancia como `ERROR`. Si la fila ya estaba reclamada (`claim`
-   * la insertó antes de la escritura que reventó), la corrige; si no había
-   * ninguna -- el fallo ocurrió antes de reclamar nada --, inserta una
-   * nueva. Nunca las dos cosas: la clave única de `message_id` rechazaría un
-   * segundo `INSERT` sobre una fila ya reclamada.
+   * Corrige a `ERROR` la fila que **este mismo intento** reclamó con `claim`,
+   * identificada por su propio id de fila -- nunca por el `Message-ID` del
+   * correo. Es la mitad de la corrección de la ronda de correcciones 2: tocar
+   * cualquier fila que no sea exactamente esta es el error que esa ronda vino
+   * a cerrar, tanto si la fila ajena pertenece al intento que ganó una
+   * carrera de `claim` como si, sin ninguna carrera, el fallo llega después
+   * de que el ticket ya se creara y solo reventara el propio `updateOutcome`
+   * que le iba a poner el `ticketId`.
+   *
+   * Un fallo al corregir (la base tampoco acepta este `UPDATE`) solo se
+   * registra en el log: no hay ninguna otra fila sobre la que reintentarlo, y
+   * la fila original se queda con el resultado provisional que le puso
+   * `claim` -- correcto de leer, aunque incompleto.
+   */
+  private async failClaimedRow(rowId: number, error: unknown): Promise<void> {
+    try {
+      await this.repo.updateOutcome(rowId, { outcome: 'ERROR', reason: errorText(error) });
+    } catch (updateError) {
+      this.logger.error(
+        `No se pudo corregir a ERROR la fila ${rowId} tras un fallo: ${errorText(updateError)} ` +
+          `(motivo original: ${errorText(error)}).`,
+      );
+    }
+  }
+
+  /**
+   * Registra un fallo que ocurrió **antes** de que hubiera ninguna fila que
+   * reclamar (por ejemplo, al resolver a qué ticket corresponde un correo del
+   * personal). Un `INSERT` nuevo, siempre -- nunca busca "la fila de este
+   * Message-ID" para corregirla: si hubiera una, `claim`/`failClaimedRow` ya
+   * se habrían encargado de ella por su propio id, y buscar aquí por
+   * `Message-ID` es precisamente el mecanismo que la ronda de correcciones 2
+   * quitó (ver `ClaimedRowFailure`).
    */
   private async recordError(message: IncomingMessage, error: unknown): Promise<void> {
     const messageId = normalizeMessageId(message.messageId);
     try {
-      const existing = await this.repo.findByMessageId(messageId);
-      if (existing) {
-        await this.repo.updateOutcome(existing.id, { outcome: 'ERROR', reason: errorText(error) });
-        return;
-      }
       await this.repo.record({
         ...this.baseRow(message, messageId),
         outcome: 'ERROR',

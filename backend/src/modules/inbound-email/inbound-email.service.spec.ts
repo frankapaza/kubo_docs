@@ -1,5 +1,16 @@
+import { QueryFailedError } from 'typeorm';
+
 import { InboundEmailService } from './inbound-email.service';
 import { IncomingMessage } from './mailbox.interface';
+
+/** El error con el que MySQL/mysql2 reporta un choque contra una clave única, tal y como lo envuelve TypeORM. */
+function unErrorDeClaveDuplicada(): QueryFailedError {
+  return new QueryFailedError(
+    'INSERT INTO inbound_emails ...',
+    undefined,
+    { code: 'ER_DUP_ENTRY' } as never,
+  );
+}
 
 /**
  * El recorrido completo de un correo, de la bandeja al hilo -- probado sin
@@ -294,6 +305,98 @@ describe('InboundEmailService.drain', () => {
       // un segundo INSERT.
       expect(repo.filas.filter((f) => f.messageIdRaw === '<msg-1@empresa.com>')).toHaveLength(1);
     });
+
+    /**
+     * Ronda de correcciones 2, hallazgo 1 (la mitad con carrera). Dos
+     * intentos reclaman el mismo Message-ID; solo uno gana el `INSERT` (la
+     * clave única del real, simulada aquí con `ER_DUP_ENTRY`). El que pierde
+     * no puede "corregir" nada -- no tiene ninguna fila propia -- y, sobre
+     * todo, **no puede tocar la fila del que ganó**, que puede llevar ya un
+     * ticket de verdad escrito.
+     */
+    it('si pierde la carrera al reclamar la fila, no toca la del intento que ganó', async () => {
+      const { service, repo, tickets } = montar({ clientUser: CLIENT_USER });
+
+      // El ganador: su fila ya existe y terminó bien, con el ticket puesto.
+      // `findByMessageId` no la ve -- es la propia naturaleza de la carrera:
+      // la lectura de este intento fue anterior a que esa fila existiera.
+      const filaGanadora: Record<string, unknown> = {
+        id: 999,
+        messageId: '<msg-1@empresa.com>',
+        messageIdRaw: '<msg-1@empresa.com>',
+        outcome: 'TICKET_CREADO',
+        ticketId: 777,
+        clientUserId: 11,
+      };
+      repo.filas.push(filaGanadora as never);
+      repo.findByMessageId.mockResolvedValueOnce(null);
+      repo.record.mockImplementationOnce(() => {
+        throw unErrorDeClaveDuplicada();
+      });
+
+      const resumen = await service.drain();
+
+      expect(tickets.create).not.toHaveBeenCalled();
+      expect(resumen.errors).toBe(0);
+      expect(resumen.duplicates).toBe(1);
+      // La fila del ganador, intacta.
+      expect(filaGanadora.outcome).toBe('TICKET_CREADO');
+      expect(filaGanadora.ticketId).toBe(777);
+    });
+
+    /**
+     * Ronda de correcciones 2, hallazgo 1 (la mitad sin carrera). El ticket
+     * SÍ se crea -- id 501 -- y falla justo el `updateOutcome` que le iba a
+     * anotar ese id a la fila reclamada. La corrección tiene que tocar
+     * **esa** fila y ninguna otra: se siembra una fila de un correo distinto
+     * para demostrar que no se toca.
+     */
+    it('si falla después de crear el ticket (sin carrera), corrige solo su propia fila', async () => {
+      const { service, repo, tickets } = montar({ clientUser: CLIENT_USER });
+      const filaAjena: Record<string, unknown> = {
+        id: 555,
+        messageId: '<otro@empresa.com>',
+        messageIdRaw: '<otro@empresa.com>',
+        outcome: 'TICKET_CREADO',
+        ticketId: 321,
+      };
+      repo.filas.push(filaAjena as never);
+      repo.updateOutcome.mockImplementationOnce(() => {
+        throw new Error('ER_LOCK_WAIT_TIMEOUT');
+      });
+
+      const resumen = await service.drain();
+
+      expect(tickets.create).toHaveBeenCalledTimes(1);
+      expect(resumen.errors).toBe(1);
+      expect(resumen.ticketsCreated).toBe(0);
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('ERROR');
+      // El ticket 501 se creó de verdad, pero nunca se llegó a anotar aquí:
+      // es el residuo aceptado de este fallo concreto (ver el docblock de
+      // `claim`), y por eso sigue en null en vez de en 501.
+      expect(fila.ticketId).toBeNull();
+      // La fila de otro correo, intacta.
+      expect(filaAjena.outcome).toBe('TICKET_CREADO');
+      expect(filaAjena.ticketId).toBe(321);
+    });
+
+    /**
+     * Ronda de correcciones 2, hallazgo 2. Sin esta aserción de orden, mover
+     * `claim` a después de `tickets.create` deja las 39 pruebas anteriores
+     * en verde igual: al fallar, `recordError`/`failClaimedRow` insertan o
+     * corrigen una fila con el mismo resultado final, y sigue habiendo una
+     * sola. Solo mirando el orden de las llamadas se distingue.
+     */
+    it('la fila se reclama ANTES de crear el ticket, no después', async () => {
+      const { service, repo, tickets } = montar({ clientUser: CLIENT_USER });
+
+      await service.drain();
+
+      const ordenReclamo = repo.record.mock.invocationCallOrder[0];
+      const ordenCreacion = tickets.create.mock.invocationCallOrder[0];
+      expect(ordenReclamo).toBeLessThan(ordenCreacion);
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -343,6 +446,18 @@ describe('InboundEmailService.drain', () => {
       // nunca escriba una nota interna.
       expect(input.visibility).toBe('PUBLICA');
       expect(input.bodyMd).toContain('sigue igual');
+    });
+
+    /** Mismo motivo que la equivalente del alta: la aserción de orden es la única que distingue "antes" de "después". */
+    it('la fila se reclama ANTES de escribir el mensaje en el hilo, no después', async () => {
+      const { service, repo, ticketMessages } = montarRespuesta();
+      repo.asociar('<abrio-el-ticket@empresa.com>', { ticketId: 501, clientId: 7 });
+
+      await service.drain();
+
+      const ordenReclamo = repo.record.mock.invocationCallOrder[0];
+      const ordenPost = ticketMessages.post.mock.invocationCallOrder[0];
+      expect(ordenReclamo).toBeLessThan(ordenPost);
     });
   });
 
@@ -469,7 +584,7 @@ describe('InboundEmailService.drain', () => {
       expect(fila.outcome).toBe('DESCARTADO_SIN_CONTENIDO');
     });
 
-    it('un correo del personal sobre un ticket conocido pero sin texto (ni adjuntos) tampoco es un error', async () => {
+    it('un correo del personal sobre un ticket conocido, cuerpo puro cita: stripQuotedText lo deja intacto y sí se publica', async () => {
       const { service, repo, ticketMessages } = montar({
         staffUser: STAFF_USER,
         mensajes: [
@@ -487,10 +602,41 @@ describe('InboundEmailService.drain', () => {
       // OJO: `stripQuotedText` devuelve el original si el recorte lo dejara
       // vacío (para no publicar una burbuja en blanco cuando SÍ se publica
       // algo) -- así que este cuerpo, siendo puro `>`, no se vacía sola. Este
-      // test usa ese mismo cuerpo para comprobar la vía de "hay contenido" y
-      // deja la vía de "vacío de verdad" al siguiente test.
+      // test cubre la vía de "hay contenido" (tras stripQuotedText); la vía
+      // de "vacío de verdad" está en el test siguiente.
       expect(ticketMessages.post).toHaveBeenCalledTimes(1);
       expect(resumen.errors).toBe(0);
+    });
+
+    /**
+     * Ronda de correcciones 2, hallazgo 3: el test de arriba, con un cuerpo
+     * puramente citado, nunca ejercita de verdad la rama de "cuerpo vacío"
+     * de `handleStaffSender` -- `stripQuotedText` no lo vacía. Anular esa
+     * rama no mataba ninguna prueba. Este cuerpo sí queda vacío tras
+     * recortar (no hay ninguna cita que "no vaciar": es blanco desde el
+     * principio), así que sí la ejercita.
+     */
+    it('un correo del personal sobre un ticket conocido, sin texto de verdad y sin adjuntos, se descarta', async () => {
+      const { service, repo, ticketMessages } = montar({
+        staffUser: STAFF_USER,
+        mensajes: [
+          unMensaje({
+            from: 'tecnico@kuboti.com',
+            subject: 'Re: [KB-0501] No carga el reporte',
+            textBody: '   ',
+          }),
+        ],
+      });
+      repo.findTicketByCode.mockResolvedValueOnce({ id: 501, clientId: 7 });
+
+      const resumen = await service.drain();
+
+      expect(ticketMessages.post).not.toHaveBeenCalled();
+      expect(resumen.errors).toBe(0);
+      expect(resumen.discarded).toBe(1);
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('DESCARTADO_SIN_CONTENIDO');
+      expect(fila.ticketId).toBe(501);
     });
   });
 
