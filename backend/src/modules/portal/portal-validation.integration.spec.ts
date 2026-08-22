@@ -12,6 +12,8 @@ import { PortalTicketsController } from './portal-tickets.controller';
 import { PortalTicketsService } from './portal-tickets.service';
 import { PortalRequirementsController } from './portal-requirements.controller';
 import { PortalRequirementsService } from './portal-requirements.service';
+import { PortalReportsController } from './portal-reports.controller';
+import { PortalReportsService } from './portal-reports.service';
 import { ClientJwtStrategy } from './strategies/client-jwt.strategy';
 
 /**
@@ -65,7 +67,12 @@ describe('Portal — errores de validación (integración HTTP)', () => {
       // El throttler de `PortalAuthController` no es el objeto de esta prueba,
       // pero sin él el controlador no se puede instanciar.
       imports: [PassportModule, ThrottlerModule.forRoot({ throttlers: PORTAL_AUTH_THROTTLERS })],
-      controllers: [PortalAuthController, PortalTicketsController, PortalRequirementsController],
+      controllers: [
+        PortalAuthController,
+        PortalTicketsController,
+        PortalRequirementsController,
+        PortalReportsController,
+      ],
       providers: [
         { provide: ConfigService, useValue: config },
         ClientJwtStrategy,
@@ -86,6 +93,10 @@ describe('Portal — errores de validación (integración HTTP)', () => {
             findOne: jest.fn().mockResolvedValue({ id: 1 }),
             create: requirementsCreate,
           },
+        },
+        {
+          provide: PortalReportsService,
+          useValue: { monthly: jest.fn().mockResolvedValue({ period: { year: 2026, month: 7 } }) },
         },
       ],
     }).compile();
@@ -357,6 +368,57 @@ describe('Portal — errores de validación (integración HTTP)', () => {
       // administrador: por eso este id válido usa el token normal.
       const res = await app.get('/portal/requerimientos/12', { token });
       expect(res.status).toBe(200);
+    });
+  });
+
+  describe('GET /portal/informes/mensual', () => {
+    const validQuery = 'year=2026&month=7&scope=AMBOS';
+
+    it('un alcance que no es tickets, requerimientos ni ambos devuelve un mensaje en español', async () => {
+      const res = await app.get('/portal/informes/mensual?year=2026&month=7&scope=TODO', { token });
+
+      expect(res.status).toBe(400);
+      expectSpanishValidationError(res.body);
+      expect(res.body.message.toLowerCase()).toContain('alcance');
+    });
+
+    it('un mes fuera de rango devuelve un mensaje en español', async () => {
+      const res = await app.get('/portal/informes/mensual?year=2026&month=13&scope=AMBOS', { token });
+
+      expect(res.status).toBe(400);
+      expectSpanishValidationError(res.body);
+      expect(res.body.message).toContain('1 y 12');
+    });
+
+    /**
+     * Mismo motivo que en `/portal/tickets` y `/portal/requerimientos`: el
+     * rechazo no puede confirmarle a quien lo intente que acertó con el
+     * nombre de la propiedad.
+     *
+     * La comprobación se queda en `message`/`details` (lo que hace
+     * `expectSpanishValidationError`) y no repite el `JSON.stringify(res.body)`
+     * que sí usan esas dos rutas: aquí el parámetro no declarado viaja en la
+     * *query*, y `HttpExceptionFilter` siempre copia `req.url` —query
+     * incluida— al campo `path` de cualquier error, en cualquier ruta. Eso no
+     * es un nombre interno confirmado por el servidor: es la propia URL que
+     * el cliente ya escribió, y pedir que desaparezca de `path` sería exigirle
+     * a esta ruta un comportamiento que ninguna otra tiene ni necesita.
+     */
+    it('un parámetro no declarado se rechaza sin decir cuál era', async () => {
+      const res = await app.get(`/portal/informes/mensual?${validQuery}&clientId=99`, { token });
+
+      expect(res.status).toBe(400);
+      expectSpanishValidationError(res.body);
+    });
+
+    it('una consulta válida sigue llegando al servicio', async () => {
+      const res = await app.get(`/portal/informes/mensual?${validQuery}`, { token });
+      expect(res.status).toBe(200);
+    });
+
+    it('sin token no se puede descargar el informe', async () => {
+      const res = await app.get(`/portal/informes/mensual?${validQuery}`, {});
+      expect(res.status).toBe(401);
     });
   });
 });

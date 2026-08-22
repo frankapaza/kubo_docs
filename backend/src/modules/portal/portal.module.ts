@@ -15,6 +15,8 @@ import { PortalTicketsService } from './portal-tickets.service';
 import { PortalTicketsController } from './portal-tickets.controller';
 import { PortalRequirementsService } from './portal-requirements.service';
 import { PortalRequirementsController } from './portal-requirements.controller';
+import { PortalReportsService } from './portal-reports.service';
+import { PortalReportsController } from './portal-reports.controller';
 import { ClientUsersService } from './client-users.service';
 import { ClientUsersController } from './client-users.controller';
 import { TicketsModule } from '../tickets/tickets.module';
@@ -50,6 +52,7 @@ import { WorkItemsModule } from '../work-items/work-items.module';
     PortalAuthController,
     PortalTicketsController,
     PortalRequirementsController,
+    PortalReportsController,
     ClientUsersController,
   ],
   // `JwtModule`/`PassportModule` ya no se exportan: PortalAuthService y
@@ -61,6 +64,7 @@ import { WorkItemsModule } from '../work-items/work-items.module';
     PortalAuthService,
     PortalTicketsService,
     PortalRequirementsService,
+    PortalReportsService,
     ClientUsersService,
   ],
   exports: [ClientUsersRepository],
