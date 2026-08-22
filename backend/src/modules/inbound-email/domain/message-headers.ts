@@ -36,8 +36,12 @@ const BRACKETED_MESSAGE_ID_PATTERN = /<[^>]+>/g;
  * identificador valido y no volveria a coincidir con nada.
  *
  * Solo si no aparece ningun identificador entre corchetes se cae al criterio
- * anterior (partir por espacios y normalizar cada trozo): es el caso de un
- * cliente que escribe un unico identificador sin corchetes en absoluto.
+ * anterior (partir por espacios o comas y normalizar cada trozo): es el caso
+ * de un cliente que escribe uno o mas identificadores sin corchetes en
+ * absoluto. Esta rama de respaldo tenia el mismo problema que la principal
+ * (ronda de correcciones 2): partia solo por espacios, asi que
+ * `'a@x,b@x'` se quedaba en un unico token `'a@x,b@x'` con la coma pegada.
+ * Partir tambien por comas la deja igual de correcta que la rama principal.
  *
  * `null`, `undefined` o una cadena en blanco no son un identificador
  * ausente-que-cuenta-como-otra-cosa: son la ausencia de la cabecera, y
@@ -52,7 +56,7 @@ export function parseMessageIds(raw: string | null | undefined): string[] {
   if (bracketed && bracketed.length > 0) return bracketed;
 
   return trimmed
-    .split(/\s+/)
+    .split(/[\s,]+/)
     .filter((token) => token.length > 0)
     .map(normalizeMessageId);
 }
@@ -142,8 +146,12 @@ const AUTOMATIC_PRESENCE_KEYS = ['x-auto-response-suppress', 'list-id'] as const
  *
  * - `Auto-Submitted: no` es, por RFC 3834, el valor que identifica un
  *   correo escrito por una persona -- es el valor por defecto que un
- *   servidor cumplidor antepone. Cualquier otro valor (`auto-replied`,
- *   `auto-generated`, ...) es automatico.
+ *   servidor cumplidor antepone. Cualquier otro valor no vacio
+ *   (`auto-replied`, `auto-generated`, ...) es automatico. Un valor en
+ *   blanco no es "no" ni ningun tipo de automatizacion reconocido: no es
+ *   evidencia de nada, igual que un `List-Id` en blanco tampoco lo es
+ *   (ronda de correcciones 2: antes esta cabecera era la unica excepcion a
+ *   la regla de "valor no vacio" que las otras tres ya cumplian).
  * - `Precedence` tiene la misma dualidad: `bulk`, `list` y `junk` son
  *   automaticos; `normal` y `first-class` (o cualquier otro valor) son
  *   correo de persona.
@@ -153,8 +161,9 @@ const AUTOMATIC_PRESENCE_KEYS = ['x-auto-response-suppress', 'list-id'] as const
  */
 export function isAutomaticMessage(headers: Record<string, string | undefined>): boolean {
   const autoSubmitted = headers['auto-submitted'];
-  if (autoSubmitted !== undefined && autoSubmitted.trim().toLowerCase() !== 'no') {
-    return true;
+  if (autoSubmitted !== undefined) {
+    const value = autoSubmitted.trim().toLowerCase();
+    if (value.length > 0 && value !== 'no') return true;
   }
 
   const precedence = headers['precedence'];

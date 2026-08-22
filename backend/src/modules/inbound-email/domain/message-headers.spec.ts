@@ -28,6 +28,13 @@ describe('parseMessageIds', () => {
   it('extrae varios identificadores con corchetes separados por comas', () => {
     expect(parseMessageIds('<a@x>,<b@x>')).toEqual(['<a@x>', '<b@x>']);
   });
+
+  // La rama de respaldo (sin corchetes) tenia el mismo problema: partia solo
+  // por espacios, asi que una coma sin espacio alrededor se quedaba pegada
+  // al identificador y ya no volvia a coincidir con nada al comparar.
+  it('separa tambien por comas cuando no hay corchetes', () => {
+    expect(parseMessageIds('a@x,b@x')).toEqual(['<a@x>', '<b@x>']);
+  });
 });
 
 describe('stripSubjectPrefixes', () => {
@@ -122,4 +129,13 @@ describe('isAutomaticMessage', () => {
       expect(isAutomaticMessage({ [clave]: '   ' })).toBe(false);
     },
   );
+
+  // La misma regla de "valor no vacio" tiene que aplicarse a las cuatro
+  // cabeceras por igual. `auto-submitted` quedaba fuera: un valor en blanco
+  // no es ninguno de los valores que la norma define (ni "no" ni un tipo de
+  // automatizacion), asi que no es evidencia de nada -- igual que un
+  // `list-id` en blanco no lo es.
+  it('auto-submitted con valor en blanco no es automatico', () => {
+    expect(isAutomaticMessage({ 'auto-submitted': '   ' })).toBe(false);
+  });
 });
