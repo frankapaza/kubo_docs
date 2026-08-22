@@ -13,6 +13,11 @@ import {
 } from './domain/message-headers';
 import { isOwnMailbox, judgeAuthentication } from './domain/intake-rules';
 import { stripQuotedText } from './domain/quoted-text';
+import {
+  UNKNOWN_REPLY_COOLDOWN_DAYS,
+  hasReachedNewTicketCap,
+  shouldReplyToUnknown,
+} from './domain/throttle';
 import { InboundEmail, InboundEmailOutcome } from './entities/inbound-email.entity';
 
 import { EmailService } from '../email/email.service';
@@ -43,6 +48,10 @@ export const INBOUND_MAILBOX_ADDRESS = Symbol('INBOUND_MAILBOX_ADDRESS');
 /** Cuántos correos se piden al buzón por pasada. */
 export const INBOUND_EMAIL_BATCH_SIZE = 50;
 
+/** Un día y una hora, en milisegundos: lo que hace falta para calcular las ventanas de los dos topes de `domain/throttle.ts`. */
+const UN_DIA_EN_MS = 24 * 60 * 60 * 1000;
+const UNA_HORA_EN_MS = 60 * 60 * 1000;
+
 /** Lo que hizo una pasada de la ingesta. */
 export interface DrainSummary {
   /** Correos que el buzón entregó en esta pasada, se procesaran como se procesaran. */
@@ -66,22 +75,36 @@ function errorText(error: unknown): string {
 }
 
 /**
- * El texto de la respuesta a un remitente autenticado pero no registrado.
+ * El texto de la respuesta a un remitente autenticado pero no registrado
+ * (Task 7). Cuatro exigencias, las cuatro deliberadas:
  *
- * **Provisional**: la Task 7 (los topes y la respuesta al desconocido) es la
- * dueña de esta redacción y del freno de cuántas veces se manda -- una por
- * dirección cada varios días, un tope global por hora. Sin ese freno, hoy
- * esto responde una vez **por correo que llega**, no una vez por dirección:
- * un mismo desconocido que insista recibiría una respuesta por cada intento.
- * Aquí solo se cierra el hueco que dejaría "autenticado pero desconocido"
- * sin ninguna respuesta, que es peor que un texto genérico: la decisión 2 del
- * diseño exige que no se ignore en silencio.
+ * - **En español y sin jerga**: quien lo recibe no tiene por qué saber qué es
+ *   un ticket, un buzón de ingesta o un `Message-ID`.
+ * - **Dice que su dirección no está registrada**, no que "hubo un error": es
+ *   accionable, no un genérico "algo salió mal".
+ * - **Manda a escribirle a una persona de Kubo, nunca a "su administrador"**:
+ *   si la empresa del remitente nunca se dio de alta, ese administrador no
+ *   existe del lado de Kubo, y del lado del remitente puede no tener ningún
+ *   poder sobre nuestro sistema. Cualquiera de los dos casos deja el mensaje
+ *   en un callejón sin salida; "una persona de Kubo" no depende de que la
+ *   empresa ya exista en el sistema.
+ * - **No cita nada del correo original** (ni el asunto ni el cuerpo): un
+ *   buzón que repite de vuelta lo que le mandan es un amplificador -- exacto
+ *   el patrón que un ataque de reflexión/spam explota, y exacto lo que
+ *   `withAttachmentNote`/`stripQuotedText` evitan en el resto del recorrido
+ *   con el contenido de un cliente real.
+ *
+ * Va marcada como automática (`Auto-Submitted`, ver `handleUnknownSender`)
+ * para que un autorespondedor del otro lado no conteste a esto y cierre el
+ * bucle -- ese marcado es una propiedad del envío, no del texto, así que no
+ * se repite aquí.
  */
 function unknownSenderReplyText(): string {
   return (
-    'Recibimos tu correo, pero tu dirección no está registrada como usuario en nuestro sistema, ' +
-    'así que no pudimos abrir un ticket a partir de él. Escríbenos desde la dirección con la que ' +
-    'trabajas con nosotros, o pide que un miembro de nuestro equipo la dé de alta.'
+    'Recibimos tu correo, pero esta dirección no está registrada en nuestro sistema, así que no ' +
+    'pudimos abrir un ticket a partir de él.\n\n' +
+    'Para poder atenderte por correo, pide a una persona de Kubo que registre tu dirección. ' +
+    'En cuanto quede registrada, tu próximo correo desde ella sí abrirá un ticket.'
   );
 }
 
@@ -370,6 +393,29 @@ export class InboundEmailService {
     });
     const correlatedTicketId = correlation.kind === 'HILO' ? correlation.ticketId : null;
 
+    // Task 7: el tope de tickets nuevos por dirección y hora
+    // (`NEW_TICKETS_MAX_PER_ADDRESS_PER_HOUR`) protege contra el correo mal
+    // configurado que abre tickets en bucle -- pero **solo** cuando este
+    // correo abriría uno nuevo. Comprobarlo también para `correlation.kind
+    // === 'HILO'` dejaría mudo, por ese mismo tope, a un cliente con una
+    // conversación viva: es justo el caso legítimo que el freno contra el
+    // abuso no debe romper.
+    if (correlation.kind !== 'HILO') {
+      const topeDeTicketsAlcanzado = await this.newTicketCapReached(message.from);
+      if (topeDeTicketsAlcanzado) {
+        await this.discard(
+          message,
+          messageId,
+          'DESCARTADO_POR_TOPE',
+          'Tope de tickets nuevos por dirección y hora.',
+          null,
+          clientUserId,
+        );
+        summary.discarded += 1;
+        return;
+      }
+    }
+
     // El cuerpo recortado (sin la cita del hilo anterior) es lo que se
     // publica; el cuerpo completo se guarda aparte y sin tocar (decisión 7
     // del diseño).
@@ -541,20 +587,39 @@ export class InboundEmailService {
 
   /**
    * Paso 6 del recorrido cuando la dirección no es de nadie conocido:
-   * decisión 2 del diseño, se le responde una vez en vez de ignorarlo en
-   * silencio. El registro se escribe primero -- es el descarte ya decidido,
-   * pasara lo que pasara con la respuesta -- y la respuesta se intenta
-   * después, sin dejar que su fallo se confunda con un fallo del propio
-   * procesamiento del correo (por eso su propio `try`, aquí y no en `drain`).
+   * decisión 2 del diseño, se le responde en vez de ignorarlo en silencio --
+   * pero como mucho una vez cada `UNKNOWN_REPLY_COOLDOWN_DAYS` días por
+   * dirección, y nunca por encima del tope global `UNKNOWN_REPLY_MAX_PER_HOUR`
+   * (Task 7, `domain/throttle.ts`). Sin esos dos topes, encender el buzón de
+   * verdad (Task 8) regalaría el dominio a cualquier autorespondedor mal
+   * configurado que insistiera, o a quien mandara desconocidos a mansalva
+   * solo para gastar la reputación del remitente.
+   *
+   * El registro se escribe primero -- es el descarte ya decidido, pasara lo
+   * que pasara con la respuesta -- y la respuesta se intenta después, sin
+   * dejar que su fallo se confunda con un fallo del propio procesamiento del
+   * correo (por eso su propio `try`, aquí y no en `drain`).
    */
   private async handleUnknownSender(message: IncomingMessage, messageId: string): Promise<void> {
+    const permitido = await this.allowedToReplyToUnknown(message.from);
+    if (!permitido) {
+      await this.discard(
+        message,
+        messageId,
+        'DESCARTADO_POR_TOPE',
+        'Tope de respuestas a remitente desconocido: enfriamiento por dirección, tope global por ' +
+          'hora, o fallo al comprobarlos.',
+      );
+      return;
+    }
+
     await this.discard(message, messageId, 'REMITENTE_DESCONOCIDO', null);
 
     try {
       await this.email.send({
         to: message.from,
         subject: 'No pudimos crear un ticket con tu correo',
-        html: `<p>${unknownSenderReplyText()}</p>`,
+        html: `<p>${unknownSenderReplyText().replace('\n\n', '</p><p>')}</p>`,
         text: unknownSenderReplyText(),
         // Marcado como automático (RFC 3834) para que un autorespondedor del
         // otro lado no nos conteste y forme, con esto, un bucle de acuses.
@@ -564,6 +629,63 @@ export class InboundEmailService {
       this.logger.warn(
         `No se pudo responder al remitente desconocido ${message.from}: ${errorText(error)}`,
       );
+    }
+  }
+
+  /**
+   * Las dos consultas que sostienen el tope de respuestas a un desconocido
+   * (`domain/throttle.ts` decide con lo que aquí se calcula, nunca al
+   * revés): cuántas veces ya se respondió a esta misma dirección dentro del
+   * enfriamiento, y cuántas se respondió a cualquiera en la última hora.
+   *
+   * **Fallo cerrado, explícito.** Si cualquiera de las dos consultas
+   * revienta, no hay forma de saber si el tope ya se agotó o no -- y "no se
+   * pudo saber" nunca es lo mismo que "no hay historial". Se trata como tope
+   * alcanzado y no se responde, en vez de decidir por la ausencia del dato
+   * en lugar de por el hecho que debía determinarlo (el mismo defecto que
+   * tenía el `as Date` sin guarda de
+   * `InboundEmailsRepository.countRepliesToUnknown`).
+   */
+  private async allowedToReplyToUnknown(address: string): Promise<boolean> {
+    try {
+      const ahora = Date.now();
+      const desdeElEnfriamiento = new Date(ahora - UNKNOWN_REPLY_COOLDOWN_DAYS * UN_DIA_EN_MS);
+      const desdeHaceUnaHora = new Date(ahora - UNA_HORA_EN_MS);
+      const [repliesToAddressInCooldown, repliesGlobalLastHour] = await Promise.all([
+        this.repo.countRepliesToUnknown(address, desdeElEnfriamiento),
+        this.repo.countRepliesToUnknown(desdeHaceUnaHora),
+      ]);
+      return shouldReplyToUnknown({ repliesToAddressInCooldown, repliesGlobalLastHour });
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo comprobar el tope de respuestas a desconocidos para ${address}: ${errorText(error)}`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * El tope de tickets nuevos por dirección y hora
+   * (`NEW_TICKETS_MAX_PER_ADDRESS_PER_HOUR`, `domain/throttle.ts`): protege
+   * contra un cliente con el correo mal configurado abriendo tickets en
+   * bucle. Mismo criterio de fallo cerrado que `allowedToReplyToUnknown`: si
+   * la consulta revienta, se trata como si el tope ya se hubiera alcanzado y
+   * no se crea el ticket.
+   *
+   * Quien llama es responsable de no invocar esto para una respuesta que ya
+   * correlacionó con un hilo existente -- ver el comentario en
+   * `handleClientSender` sobre por qué ese caso no debe pasar por aquí.
+   */
+  private async newTicketCapReached(address: string): Promise<boolean> {
+    try {
+      const desdeHaceUnaHora = new Date(Date.now() - UNA_HORA_EN_MS);
+      const nuevosEnLaUltimaHora = await this.repo.countNewTicketsByAddress(address, desdeHaceUnaHora);
+      return hasReachedNewTicketCap(nuevosEnLaUltimaHora);
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo comprobar el tope de tickets nuevos para ${address}: ${errorText(error)}`,
+      );
+      return true;
     }
   }
 

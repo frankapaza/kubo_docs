@@ -118,8 +118,40 @@ function repoDoble() {
       }
       return encontrados;
     }),
-    countRepliesToUnknown: jest.fn(),
+    /**
+     * Espejo del repositorio real (`inbound-emails.repository.ts`): filtra
+     * `filas` por `outcome` y, con dirección, por `fromAddress` también.
+     * Tiene que ser un filtro de verdad -- no un `jest.fn()` suelto -- porque
+     * el tope de respuestas a desconocidos (Task 7) se comprueba con lo que
+     * el propio `record` de este doble ya insertó dentro del mismo `drain`:
+     * un doble sin estado no vería la primera respuesta al decidir la
+     * segunda, y ningún test podría demostrar que el tope corta de verdad.
+     */
+    countRepliesToUnknown: jest.fn(async (addressOrSince: string | Date, maybeSince?: Date) => {
+      const since = typeof addressOrSince === 'string' ? (maybeSince as Date) : addressOrSince;
+      return filas.filter((f) => {
+        if (f.outcome !== 'REMITENTE_DESCONOCIDO') return false;
+        if (typeof addressOrSince === 'string' && f.fromAddress !== addressOrSince) return false;
+        return (f.receivedAt as Date) >= since;
+      }).length;
+    }),
+    /** Mismo criterio que `countRepliesToUnknown`, para el tope de tickets nuevos por dirección y hora. */
+    countNewTicketsByAddress: jest.fn(async (address: string, since: Date) => {
+      return filas.filter(
+        (f) => f.outcome === 'TICKET_CREADO' && f.fromAddress === address && (f.receivedAt as Date) >= since,
+      ).length;
+    }),
   };
+}
+
+/** `receivedAt` de hace `dias` días, para sembrar filas fuera del recorrido normal del servicio. */
+function haceDias(dias: number): Date {
+  return new Date(Date.now() - dias * 24 * 60 * 60 * 1000);
+}
+
+/** `receivedAt` de hace `minutos` minutos, para el tope global por hora y el de tickets nuevos. */
+function haceMinutos(minutos: number): Date {
+  return new Date(Date.now() - minutos * 60 * 1000);
 }
 
 interface Opciones {
@@ -312,6 +344,78 @@ describe('InboundEmailService.drain', () => {
       // nunca escriba una nota interna.
       expect(input.visibility).toBe('PUBLICA');
       expect(input.bodyMd).toContain('sigue igual');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Task 7: el tope de tickets nuevos por dirección y hora.
+  // -------------------------------------------------------------------------
+
+  describe('el tope de tickets nuevos por dirección y hora', () => {
+    /** 10 tickets ya abiertos por `direccion` en la última hora: el tope está en su límite. */
+    function sembrarDiezTicketsRecientes(repo: ReturnType<typeof repoDoble>, direccion: string) {
+      for (let i = 0; i < 10; i++) {
+        repo.filas.push({
+          id: 2000 + i,
+          outcome: 'TICKET_CREADO',
+          fromAddress: direccion,
+          receivedAt: haceMinutos(10),
+        });
+      }
+    }
+
+    it('una dirección que abrió 10 tickets en una hora deja de abrir más', async () => {
+      const { service, repo, tickets } = montar({ clientUser: CLIENT_USER });
+      sembrarDiezTicketsRecientes(repo, 'ana@empresa.com');
+
+      const resumen = await service.drain();
+
+      expect(tickets.create).not.toHaveBeenCalled();
+      expect(resumen.ticketsCreated).toBe(0);
+      expect(resumen.discarded).toBe(1);
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('DESCARTADO_POR_TOPE');
+    });
+
+    /**
+     * La distinción que evita que el freno contra el abuso rompa el caso
+     * legítimo: la misma dirección, con el mismo tope ya agotado, sigue
+     * pudiendo escribir en un hilo que ya tiene abierto -- el tope existe
+     * para el correo mal configurado que abre tickets en bucle, no para
+     * silenciar a un cliente con una conversación viva.
+     */
+    it('el tope de tickets nuevos NO afecta a las respuestas a hilos existentes', async () => {
+      const { service, repo, ticketMessages, tickets } = montar({
+        clientUser: CLIENT_USER,
+        mensajes: [
+          unMensaje({
+            headers: { 'in-reply-to': '<abrio-el-ticket@empresa.com>' },
+            textBody: 'Sigo con el mismo problema.',
+          }),
+        ],
+      });
+      sembrarDiezTicketsRecientes(repo, 'ana@empresa.com');
+      repo.asociar('<abrio-el-ticket@empresa.com>', { ticketId: 501, clientId: 7 });
+
+      const resumen = await service.drain();
+
+      expect(tickets.create).not.toHaveBeenCalled();
+      expect(ticketMessages.post).toHaveBeenCalledTimes(1);
+      expect(resumen.messagesAdded).toBe(1);
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('MENSAJE_ANADIDO');
+    });
+
+    it('si la consulta del tope de tickets nuevos revienta, no se crea el ticket (falla cerrado)', async () => {
+      const { service, repo, tickets } = montar({ clientUser: CLIENT_USER });
+      repo.countNewTicketsByAddress.mockRejectedValue(new Error('la base no contesta'));
+
+      const resumen = await service.drain();
+
+      expect(tickets.create).not.toHaveBeenCalled();
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('DESCARTADO_POR_TOPE');
+      expect(resumen.errors).toBe(0);
     });
   });
 
@@ -644,25 +748,32 @@ describe('InboundEmailService.drain', () => {
     });
 
     /**
-     * Deliberadamente **no** afirma "nunca más de una respuesta a la misma
-     * dirección": eso es el tope por dirección de la Task 7
-     * (`shouldReplyToUnknown`), que hoy no está cableado -- ver el docblock
-     * de la clase. Sin él, dos correos distintos del mismo desconocido
-     * producen, hoy, dos respuestas: este test deja esa frontera explícita en
-     * vez de dar a entender, con un nombre ambiguo, una garantía de tope que
-     * todavía no existe.
+     * El texto final (no el provisional que dejó la Task 6): dice que la
+     * dirección no está registrada, manda a escribirle a una persona de
+     * Kubo -- no a "su administrador", que puede no existir si la empresa
+     * nunca se dio de alta --, no reproduce nada del correo original (ni el
+     * asunto ni el cuerpo que mandó el desconocido), y va marcada como
+     * automática (RFC 3834) para que un autorespondedor del otro lado no
+     * conteste y cierre el bucle.
      */
-    it('dos correos distintos del mismo desconocido producen hoy dos respuestas (el tope llega con la Task 7)', async () => {
+    it('el texto de la respuesta manda a una persona de Kubo, no cita el correo original, y va marcada como automática', async () => {
+      const asunto = 'Necesito ayuda urgente con mi pedido #4521';
+      const cuerpo = 'Esto es confidencial: mi número de cuenta es 000-111-222.';
       const { service, email } = montar({
-        mensajes: [
-          unMensaje({ messageId: '<primero@fuera.com>', from: 'nadie@fuera.com' }),
-          unMensaje({ messageId: '<segundo@fuera.com>', from: 'nadie@fuera.com' }),
-        ],
+        mensajes: [unMensaje({ from: 'nadie@fuera.com', subject: asunto, textBody: cuerpo })],
       });
 
       await service.drain();
 
-      expect(email.send).toHaveBeenCalledTimes(2);
+      const envio = email.send.mock.calls[0][0];
+      expect(envio.text).toMatch(/no está registrada/i);
+      expect(envio.text).toMatch(/kubo/i);
+      expect(envio.text).not.toMatch(/administrador/i);
+      expect(envio.text).not.toContain(asunto);
+      expect(envio.text).not.toContain(cuerpo);
+      expect(envio.html).not.toContain(asunto);
+      expect(envio.html).not.toContain(cuerpo);
+      expect(envio.headers).toEqual({ 'Auto-Submitted': 'auto-generated' });
     });
 
     it('el registro se escribe antes de intentar la respuesta', async () => {
@@ -673,6 +784,99 @@ describe('InboundEmailService.drain', () => {
       const ordenRegistro = repo.record.mock.invocationCallOrder[0];
       const ordenRespuesta = email.send.mock.invocationCallOrder[0];
       expect(ordenRegistro).toBeLessThan(ordenRespuesta);
+    });
+
+    // -----------------------------------------------------------------------
+    // Task 7: el tope de respuestas a un remitente desconocido.
+    // -----------------------------------------------------------------------
+
+    it('dos correos del mismo desconocido en el mismo lote: solo se responde al primero, el segundo se descarta por tope', async () => {
+      const { service, repo, email } = montar({
+        mensajes: [
+          unMensaje({ messageId: '<primero@fuera.com>', from: 'nadie@fuera.com' }),
+          unMensaje({ messageId: '<segundo@fuera.com>', from: 'nadie@fuera.com' }),
+        ],
+      });
+
+      await service.drain();
+
+      expect(email.send).toHaveBeenCalledTimes(1);
+      expect(filaDe(repo, '<primero@fuera.com>')!.outcome).toBe('REMITENTE_DESCONOCIDO');
+      expect(filaDe(repo, '<segundo@fuera.com>')!.outcome).toBe('DESCARTADO_POR_TOPE');
+    });
+
+    it('a una dirección que ya recibió respuesta hace 2 días (dentro del enfriamiento), NO se le responde', async () => {
+      const { service, repo, email } = montar({ mensajes: [unMensaje({ from: 'nadie@fuera.com' })] });
+      repo.filas.push({
+        id: 900,
+        outcome: 'REMITENTE_DESCONOCIDO',
+        fromAddress: 'nadie@fuera.com',
+        receivedAt: haceDias(2),
+      });
+
+      await service.drain();
+
+      expect(email.send).not.toHaveBeenCalled();
+      expect(filaDe(repo, '<msg-1@empresa.com>')!.outcome).toBe('DESCARTADO_POR_TOPE');
+    });
+
+    it('a una dirección que la recibió hace 8 días (fuera del enfriamiento de 7), sí se le responde', async () => {
+      const { service, repo, email } = montar({ mensajes: [unMensaje({ from: 'nadie@fuera.com' })] });
+      repo.filas.push({
+        id: 900,
+        outcome: 'REMITENTE_DESCONOCIDO',
+        fromAddress: 'nadie@fuera.com',
+        receivedAt: haceDias(8),
+      });
+
+      await service.drain();
+
+      expect(email.send).toHaveBeenCalledTimes(1);
+      expect(filaDe(repo, '<msg-1@empresa.com>')!.outcome).toBe('REMITENTE_DESCONOCIDO');
+    });
+
+    it('superado el tope global por hora, no se responde a nadie más y se registra el descarte', async () => {
+      const { service, repo, email } = montar({
+        mensajes: [unMensaje({ from: 'el-numero-21@fuera.com' })],
+      });
+      // 20 respuestas ya mandadas en la última hora, a 20 direcciones
+      // distintas -- el tope global no distingue direcciones, así que
+      // ninguna de ellas puede coincidir con la del correo de este test.
+      for (let i = 0; i < 20; i++) {
+        repo.filas.push({
+          id: 1000 + i,
+          outcome: 'REMITENTE_DESCONOCIDO',
+          fromAddress: `ya-respondido-${i}@fuera.com`,
+          receivedAt: haceMinutos(10),
+        });
+      }
+
+      await service.drain();
+
+      expect(email.send).not.toHaveBeenCalled();
+      expect(filaDe(repo, '<msg-1@empresa.com>')!.outcome).toBe('DESCARTADO_POR_TOPE');
+    });
+
+    /**
+     * "Un tope que falla abierto no es un tope": si la consulta que sostiene
+     * la decisión revienta, no hay forma de saber si el enfriamiento o el
+     * tope global ya se agotaron, así que se trata como si sí -- se descarta
+     * y no se manda nada. La alternativa (asumir "sin historial" ante un
+     * error) decidiría por la AUSENCIA del dato, no por el hecho que debía
+     * determinarlo.
+     */
+    it('si la consulta del tope revienta, se descarta y no se responde (falla cerrado)', async () => {
+      const { service, repo, email } = montar({ mensajes: [unMensaje({ from: 'nadie@fuera.com' })] });
+      repo.countRepliesToUnknown.mockRejectedValue(new Error('la base no contesta'));
+
+      const resumen = await service.drain();
+
+      expect(email.send).not.toHaveBeenCalled();
+      expect(filaDe(repo, '<msg-1@empresa.com>')!.outcome).toBe('DESCARTADO_POR_TOPE');
+      // Una consulta que revienta al decidir el tope no es un correo roto de
+      // verdad (no hay nada mal en el correo en sí): no debe contarse como
+      // `ERROR`, ni impedir que el resto del lote se procese.
+      expect(resumen.errors).toBe(0);
     });
 
     it('un usuario de cliente desactivado también cuenta como desconocido', async () => {

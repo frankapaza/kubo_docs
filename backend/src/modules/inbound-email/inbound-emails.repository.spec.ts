@@ -204,5 +204,46 @@ describe('InboundEmailsRepository', () => {
         },
       });
     });
+
+    /**
+     * Antes de esta prueba, `maybeSince` se pasaba a `MoreThanOrEqual` con un
+     * `as Date` sin guarda: si alguien rompía el contrato de la sobrecarga en
+     * tiempo de ejecución (con `any`, o un doble mal construido) y llegaba
+     * aquí sin `since`, `MoreThanOrEqual(undefined)` no lanzaba nada -- TypeORM
+     * genera `receivedAt >= NULL`, una condición que SQL nunca da por
+     * verdadera, así que el `count` real devolvería 0 en vez de fallar. Un
+     * tope que decide "no hay respuestas previas" por la simple AUSENCIA de
+     * `since`, en vez de por el hecho de si de verdad no las hay, es un tope
+     * que falla ABIERTO. Por eso ahora esta rama lanza en cuanto falta
+     * `since`, en vez de dejar que el conteo mienta con un 0 silencioso.
+     */
+    it('con dirección pero sin "since", lanza en vez de consultar sin filtro de fecha', () => {
+      const { repository, repo } = montar();
+
+      expect(() =>
+        (repository.countRepliesToUnknown as (a: string, b?: Date) => Promise<number>)(
+          'desconocido@fuera.com',
+          undefined,
+        ),
+      ).toThrow();
+      expect(repo.count).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('countNewTicketsByAddress', () => {
+    it('cuenta los TICKET_CREADO de esa dirección desde esa fecha', async () => {
+      const { repository, repo } = montar();
+      const desde = new Date('2026-08-22T00:00:00Z');
+
+      await repository.countNewTicketsByAddress('cliente@empresa.com', desde);
+
+      expect(repo.count).toHaveBeenCalledWith({
+        where: {
+          outcome: 'TICKET_CREADO',
+          fromAddress: 'cliente@empresa.com',
+          receivedAt: MoreThanOrEqual(desde),
+        },
+      });
+    });
   });
 });

@@ -116,18 +116,47 @@ export class InboundEmailsRepository {
   countRepliesToUnknown(since: Date): Promise<number>;
   /** Tope por remitente: lo mismo, pero acotado a una única dirección. */
   countRepliesToUnknown(address: string, since: Date): Promise<number>;
+  /**
+   * `maybeSince` solo es opcional en esta firma de implementación porque
+   * TypeScript exige que cubra las dos sobrecargas de arriba -- las dos
+   * expuestas hacia fuera ya obligan a pasar `since`. Antes de esta guarda,
+   * un `as Date` sin comprobar dejaba que un `undefined` real (alguien
+   * rompiendo el contrato en tiempo de ejecución, p. ej. con `any`) llegara
+   * tal cual a `MoreThanOrEqual`: TypeORM genera `receivedAt >= NULL`, SQL
+   * nunca da eso por verdadero, y el `count` volvía 0 en silencio -- un tope
+   * que decide "no hay respuestas previas" por la AUSENCIA de `since`, no
+   * por el hecho de si de verdad no las hay, es un tope que falla ABIERTO.
+   * Se decide por el hecho (¿llegó `since`?) y, si no llegó, se lanza en vez
+   * de seguir con un conteo mentiroso.
+   */
   countRepliesToUnknown(addressOrSince: string | Date, maybeSince?: Date): Promise<number> {
     if (typeof addressOrSince === 'string') {
+      if (maybeSince === undefined) {
+        throw new Error('countRepliesToUnknown: falta "since" al consultar por dirección');
+      }
       return this.repo.count({
         where: {
           outcome: 'REMITENTE_DESCONOCIDO',
           fromAddress: addressOrSince,
-          receivedAt: MoreThanOrEqual(maybeSince as Date),
+          receivedAt: MoreThanOrEqual(maybeSince),
         },
       });
     }
     return this.repo.count({
       where: { outcome: 'REMITENTE_DESCONOCIDO', receivedAt: MoreThanOrEqual(addressOrSince) },
+    });
+  }
+
+  /**
+   * Tope de tickets nuevos: cuántos ha abierto esta dirección desde `since`.
+   * A diferencia de `countRepliesToUnknown`, no tiene variante global -- el
+   * riesgo que este tope corta es un remitente concreto en bucle, no la
+   * reputación del dominio en conjunto -- así que no hace falta la misma
+   * sobrecarga ni, por tanto, el mismo cast sin guarda que corrigió arriba.
+   */
+  countNewTicketsByAddress(address: string, since: Date): Promise<number> {
+    return this.repo.count({
+      where: { outcome: 'TICKET_CREADO', fromAddress: address, receivedAt: MoreThanOrEqual(since) },
     });
   }
 }

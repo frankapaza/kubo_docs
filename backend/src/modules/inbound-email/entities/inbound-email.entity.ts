@@ -2,10 +2,15 @@ import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 
 
 /**
  * Por qué terminó así el procesamiento de un correo, se haya generado ticket o
- * no. `DESCARTADO_POR_TOPE` y `REMITENTE_DESCONOCIDO` son los que sostienen los
- * topes de `countRepliesToUnknown` (ver `InboundEmailsRepository`); el resto es
- * lo que hace falta para poder responder después "por qué no entró éste" sin
- * tener que releer el correo original, que puede haber caducado en el buzón.
+ * no. `DESCARTADO_POR_TOPE` es el desenlace de **dos** topes distintos (Task
+ * 7, `domain/throttle.ts`): el de respuestas a un remitente desconocido
+ * (`InboundEmailsRepository.countRepliesToUnknown`, por dirección y global) y
+ * el de tickets nuevos por dirección y hora (`countNewTicketsByAddress`).
+ * `REMITENTE_DESCONOCIDO`, en cambio, es la respuesta que sí se mandó -- la
+ * que el primero de esos dos topes cuenta para decidir la siguiente. El
+ * resto de valores es lo que hace falta para poder responder después "por
+ * qué no entró éste" sin tener que releer el correo original, que puede
+ * haber caducado en el buzón.
  */
 export type InboundEmailOutcome =
   | 'TICKET_CREADO'
