@@ -64,4 +64,19 @@ describe('stripQuotedText', () => {
     const cuerpo = 'Confirmado, gracias.\n\n________________________________\nDe: Soporte\nAsunto: Ticket';
     expect(stripQuotedText(cuerpo)).toBe('Confirmado, gracias.');
   });
+
+  // Ronda de correcciones 2, punto 3: la regla de retroceso anterior
+  // ("mientras la linea previa no acabe en .!?:;") se comia una firma
+  // entera -- ninguna de sus lineas (nombre, departamento, telefono) acaba
+  // en puntuacion de cierre, que es lo normal en una firma. La atribucion
+  // de este caso NO esta envuelta (cabe entera en su propia linea), asi que
+  // no debe extenderse hacia atras en absoluto: el corte va justo en su
+  // propia linea, dejando intacta toda la firma que la precede.
+  it('no se come una firma solo porque ninguna de sus lineas termina en puntuacion', () => {
+    const cuerpo =
+      'Gracias.\nAna Perez\nDepartamento de Compras\nTel 600 123 456\nEl 20 ago 2026, Soporte <s@kuboti.com> escribio:\n> Le confirmamos el alta.';
+    expect(stripQuotedText(cuerpo)).toBe(
+      'Gracias.\nAna Perez\nDepartamento de Compras\nTel 600 123 456',
+    );
+  });
 });

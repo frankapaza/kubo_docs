@@ -70,24 +70,54 @@ function isQuotedTerritory(kind: LineKind): boolean {
 }
 
 /**
- * Un marcador de atribucion largo, cuando Gmail lo envuelve, deja el inicio
- * (fecha, remitente...) en una o mas lineas previas sin punto final, y solo
- * la palabra "escribio:"/"wrote:" en la ultima. Para no dejar ese principio
- * de la atribucion como si fuera contenido propio del cliente, se extiende
- * el punto de corte hacia atras mientras la linea anterior (a) no este en
- * blanco y (b) no termine en puntuacion de cierre de frase -- lo que
- * delataria que es una oracion completa e independiente, no la continuacion
- * envuelta de la misma atribucion.
+ * La linea marcadora, cuando **es en su totalidad** el verbo de atribucion
+ * ("escribio:"/"wrote:" y nada mas, sin nombre ni fecha delante). Esa forma
+ * solo ocurre cuando Gmail envuelve una atribucion larga en dos lineas
+ * fisicas: el resto (fecha, remitente, direccion) queda en la linea
+ * anterior, y el verbo solitario en la suya. Una atribucion que cabe entera
+ * en una linea (el caso normal) nunca tiene esta forma exacta.
+ */
+const BARE_ATTRIBUTION_VERB_PATTERN = /^(escribi[oó]|wrote)\s*:\s*$/i;
+
+/**
+ * Ronda de correcciones 2, punto 3: la heuristica anterior ("retrocede
+ * mientras la linea previa no acabe en puntuacion de cierre") se aplicaba a
+ * **toda** atribucion, envuelta o no, y ninguna linea de una firma (nombre,
+ * departamento, telefono) termina en esa puntuacion -- es as[i] como una
+ * firma entera de tres lineas desaparecia detras de una atribucion que ni
+ * siquiera estaba envuelta. Ademas, unir dos lineas cualesquiera con un
+ * espacio y comprobar si el resultado "termina en escribio:" es una prueba
+ * que no prueba nada: pegar CUALQUIER texto delante de una linea que ya
+ * termina asi sigue terminando asi.
+ *
+ * La condicion correcta no es sobre puntuacion ni sobre la union: es sobre
+ * la **forma de la propia linea marcadora**. Solo se extiende el corte hacia
+ * atras -- y solo un paso -- cuando se cumplen las dos señales especificas
+ * del envoltorio real de Gmail:
+ *
+ * 1. La linea marcadora es, ella sola, el verbo de atribucion
+ *    (`BARE_ATTRIBUTION_VERB_PATTERN`) -- nunca ocurre en una atribucion sin
+ *    envolver, que trae el nombre y la fecha en la misma linea.
+ * 2. La linea anterior termina en `>` -- el corchete de cierre de la
+ *    direccion de correo con la que termina el preambulo envuelto
+ *    ("... Soporte <ticket@kuboti.com>"). Ninguna linea de una firma (un
+ *    nombre, un cargo, un telefono) termina asi.
+ *
+ * Si cualquiera de las dos no se cumple, el corte se queda en la propia
+ * linea marcadora, sin tocar nada de lo que la precede -- ese es
+ * exactamente el caso de una atribucion completa en su propia linea,
+ * envuelta o no por una firma.
  */
 function expandAttributionStart(lines: string[], markerIndex: number): number {
-  let start = markerIndex;
-  while (start > 0) {
-    const previous = lines[start - 1].trim();
-    if (previous.length === 0) break;
-    if (/[.!?:;]$/.test(previous)) break;
-    start--;
-  }
-  return start;
+  if (markerIndex === 0) return markerIndex;
+
+  const markerLine = lines[markerIndex].trim();
+  if (!BARE_ATTRIBUTION_VERB_PATTERN.test(markerLine)) return markerIndex;
+
+  const previous = lines[markerIndex - 1].trim();
+  if (!previous.endsWith('>')) return markerIndex;
+
+  return markerIndex - 1;
 }
 
 /**
