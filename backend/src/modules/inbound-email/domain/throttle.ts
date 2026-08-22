@@ -24,6 +24,24 @@ export const UNKNOWN_REPLY_MAX_PER_HOUR = 20;
 /** Tope por dirección y hora: tickets nuevos que la misma dirección puede abrir antes de que se le deje de crear más. */
 export const NEW_TICKETS_MAX_PER_ADDRESS_PER_HOUR = 10;
 
+/**
+ * Un conteo usable: un número finito. `NaN`, `Infinity` y `-Infinity` no lo
+ * son -- y tampoco lo es un valor que en tiempo de ejecución resulte no ser
+ * un número en absoluto (`null`, `undefined`), aunque el tipo declarado diga
+ * `number`: TypeScript no vigila el límite entre este módulo y quien lo
+ * llama, solo el código que sí pasó por el compilador.
+ *
+ * Hoy nada produce un valor así -- `repo.count()` de TypeORM siempre da un
+ * número --, pero este módulo se declara a sí mismo el guardián de que
+ * ningún tope decida por la AUSENCIA de un conteo en vez de por el conteo
+ * en sí (ver el comentario de cabecera). Sin esta guarda, un conteo ausente
+ * habría colado el mismo defecto que corrigió `countRepliesToUnknown` --
+ * solo que aquí, en el punto de decisión, en vez de en el repositorio.
+ */
+function isUsableCount(value: number): boolean {
+  return Number.isFinite(value);
+}
+
 export interface ShouldReplyToUnknownInput {
   /**
    * Respuestas ya mandadas a esta dirección dentro de la ventana de
@@ -49,8 +67,20 @@ export interface ShouldReplyToUnknownInput {
  * `repliesToAddressInCooldown > 0` basta por sí solo -- no hace falta
  * compararlo con ningún máximo, la sola presencia de una respuesta previa
  * dentro del enfriamiento ya decide que toca esperar.
+ *
+ * Si cualquiera de los dos conteos no es un número usable (ver
+ * `isUsableCount`), se niega la respuesta -- fallo cerrado, igual que el
+ * criterio con el que `InboundEmailService` trata una consulta que revienta.
+ * Sin esta guarda, `repliesToAddressInCooldown` ausente habría hecho fallar
+ * `> 0` (silenciosamente "no hay historial") y `repliesGlobalLastHour`
+ * ausente habría hecho fallar `< UNKNOWN_REPLY_MAX_PER_HOUR` igual de
+ * silenciosamente ("tope no agotado") -- las dos comparaciones ceden ante
+ * un no-número exactamente en el sentido que abre la puerta.
  */
 export function shouldReplyToUnknown(input: ShouldReplyToUnknownInput): boolean {
+  if (!isUsableCount(input.repliesToAddressInCooldown) || !isUsableCount(input.repliesGlobalLastHour)) {
+    return false;
+  }
   if (input.repliesToAddressInCooldown > 0) return false;
   return input.repliesGlobalLastHour < UNKNOWN_REPLY_MAX_PER_HOUR;
 }
@@ -63,7 +93,15 @@ export function shouldReplyToUnknown(input: ShouldReplyToUnknownInput): boolean 
  * tope protege contra el correo mal configurado que abre tickets en bucle, y
  * no debe alcanzar nunca a una respuesta que ya correlacionó con un hilo
  * vivo -- ese cliente no tiene por qué quedarse mudo por el defecto de otro.
+ *
+ * Un conteo no usable (ver `isUsableCount`) se trata como tope YA alcanzado
+ * -- fallo cerrado, no se crea el ticket. Es la comparación contraria a la
+ * de `shouldReplyToUnknown` (`>=` en vez de `<`), así que un no-número la
+ * habría colado del lado opuesto: sin esta guarda, los dos topes fallarían
+ * en direcciones distintas ante el mismo tipo de defecto, por pura
+ * coincidencia del sentido de cada comparación.
  */
 export function hasReachedNewTicketCap(newTicketsFromAddressLastHour: number): boolean {
+  if (!isUsableCount(newTicketsFromAddressLastHour)) return true;
   return newTicketsFromAddressLastHour >= NEW_TICKETS_MAX_PER_ADDRESS_PER_HOUR;
 }

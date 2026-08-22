@@ -772,6 +772,11 @@ describe('InboundEmailService.drain', () => {
       expect(envio.text).not.toContain(cuerpo);
       expect(envio.html).not.toContain(asunto);
       expect(envio.html).not.toContain(cuerpo);
+      // El asunto es la otra superficie de "no amplificar": un `Re: <asunto
+      // original>` -- el cambio más natural del mundo para dar contexto --
+      // le devolvería al remitente su propio texto tal cual se lo mandó.
+      expect(envio.subject).not.toContain(asunto);
+      expect(envio.subject).not.toContain(cuerpo);
       expect(envio.headers).toEqual({ 'Auto-Submitted': 'auto-generated' });
     });
 
