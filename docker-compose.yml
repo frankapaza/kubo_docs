@@ -43,6 +43,9 @@ services:
       # columna.
       - ./backend/sql/migrations/019_adjunto_cuelga_de_mensaje.sql:/docker-entrypoint-initdb.d/019_adjunto_cuelga_de_mensaje.sql:ro
       - ./backend/sql/migrations/020_requerimientos_portal.sql:/docker-entrypoint-initdb.d/020_requerimientos_portal.sql:ro
+      # La 021 anade el correo entrante: la tabla inbound_emails y las
+      # columnas que correlacionan una respuesta con el ticket que la origino.
+      - ./backend/sql/migrations/021_correo_entrante.sql:/docker-entrypoint-initdb.d/021_correo_entrante.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s

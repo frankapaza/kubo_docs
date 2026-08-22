@@ -34,7 +34,25 @@ const COLUMNA_016 = { tableName: 'ticket_events', columnName: 'notify_next_attem
 /** La columna que añade la 020: si el requerimiento se puede ver desde el portal. */
 const COLUMNA_020 = { tableName: 'work_items', columnName: 'origin' };
 
-const COLUMNAS_ESPERADAS = [...COLUMNAS_013, COLUMNA_014, ...COLUMNAS_015, COLUMNA_016, COLUMNA_020];
+/**
+ * Lo que anade la 021: el correo entrante. Ninguna entidad las declara
+ * todavia, pero el esquema llega antes que ese codigo.
+ */
+const COLUMNAS_021 = [
+  { tableName: 'tickets', columnName: 'email_message_id' },
+  { tableName: 'ticket_messages', columnName: 'inbound_email_id' },
+  { tableName: 'ticket_messages', columnName: 'body_full' },
+  { tableName: 'ticket_events', columnName: 'sent_message_id' },
+];
+
+const COLUMNAS_ESPERADAS = [
+  ...COLUMNAS_013,
+  COLUMNA_014,
+  ...COLUMNAS_015,
+  COLUMNA_016,
+  COLUMNA_020,
+  ...COLUMNAS_021,
+];
 
 /**
  * Las tablas que tienen que estar: client_users (013), las plantillas (015) y

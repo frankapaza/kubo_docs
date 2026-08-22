@@ -175,7 +175,7 @@ jobs:
                      014_audit_client_user 015_notificaciones \
                      016_notify_next_attempt 017_plantillas_respuesta \
                      018_conversacion_adjuntos 019_adjunto_cuelga_de_mensaje \
-                     020_requerimientos_portal; do
+                     020_requerimientos_portal 021_correo_entrante; do
               echo "--- $m"
               sql_file "backend/sql/migrations/$m.sql"
             done

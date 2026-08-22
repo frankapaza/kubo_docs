@@ -82,6 +82,7 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
   private static readonly MIGRATION_016 = 'migrations/016_notify_next_attempt.sql';
   private static readonly MIGRATION_018 = 'migrations/018_conversacion_adjuntos.sql';
   private static readonly MIGRATION_020 = 'migrations/020_requerimientos_portal.sql';
+  private static readonly MIGRATION_021 = 'migrations/021_correo_entrante.sql';
 
   /**
    * Lo que hace falta para que exista `workspace_settings.team_inbox_email`, en
@@ -203,6 +204,25 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
       table: 'workspace_settings',
       column: 'team_inbox_email',
       files: PortalSchemaValidator.TEAM_INBOX_FILES,
+    },
+    // 021: las columnas del correo entrante. Ninguna entidad las declara
+    // todavía —eso llega en una tarea posterior—, pero el esquema se despliega
+    // antes que ese código, y sin él la correlación de respuestas no tiene
+    // contra qué buscar, que es el punto entero del proyecto.
+    { table: 'tickets', column: 'email_message_id', files: [PortalSchemaValidator.MIGRATION_021] },
+    {
+      table: 'ticket_messages',
+      column: 'inbound_email_id',
+      files: [PortalSchemaValidator.MIGRATION_021],
+    },
+    { table: 'ticket_messages', column: 'body_full', files: [PortalSchemaValidator.MIGRATION_021] },
+    // El Message-ID de cada aviso saliente, en la misma tabla que hace de
+    // bandeja de salida desde la 015. Sin él, `In-Reply-To` no tiene con qué
+    // casar la respuesta del cliente con el ticket que la originó.
+    {
+      table: 'ticket_events',
+      column: 'sent_message_id',
+      files: [PortalSchemaValidator.MIGRATION_021],
     },
   ];
 
