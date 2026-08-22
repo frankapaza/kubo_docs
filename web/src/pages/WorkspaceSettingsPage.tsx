@@ -6,7 +6,15 @@ import { useAuth } from '../auth/AuthContext';
 import { canManageUsers } from '../auth/permissions';
 import { Button } from '../components/ui/Button';
 import { Card, CardBody, CardHeader } from '../components/ui/Card';
-import { CheckIcon, ClockIcon, FileTextIcon, RefreshIcon, SaveIcon, SendIcon } from '../components/ui/Icon';
+import {
+  CheckIcon,
+  ClockIcon,
+  FileTextIcon,
+  InboxIcon,
+  RefreshIcon,
+  SaveIcon,
+  SendIcon,
+} from '../components/ui/Icon';
 import { toast } from '../ui/Toast';
 
 export default function WorkspaceSettingsPage() {
@@ -42,6 +50,14 @@ export default function WorkspaceSettingsPage() {
       smtpFrom: settings.smtpFrom ?? '',
       // smtpPass nunca se pre-llena; el usuario lo deja vacío si no quiere cambiarlo
       teamInboxEmail: settings.teamInboxEmail ?? '',
+      imapHost: settings.imapHost ?? '',
+      imapPort: settings.imapPort ?? 993,
+      imapSecure: settings.imapSecure === 1,
+      imapUser: settings.imapUser ?? '',
+      // imapPass nunca se pre-llena, mismo criterio que smtpPass
+      imapFolder: settings.imapFolder ?? '',
+      imapEnabled: settings.imapEnabled === 1,
+      imapAuthServerId: settings.imapAuthServerId ?? '',
       audioRetentionPolicy: settings.audioRetentionPolicy ?? 'DELETE_AFTER_DAYS',
       audioRetentionDays: settings.audioRetentionDays ?? 7,
     });
@@ -55,6 +71,7 @@ export default function WorkspaceSettingsPage() {
   });
 
   const smtpConfigured = !!settings?.smtpHost && !!settings?.smtpUser;
+  const imapConfigured = !!settings?.imapHost && !!settings?.imapUser;
 
   const save = useMutation({
     mutationFn: () => workspaceApi.update(form),
@@ -383,6 +400,137 @@ export default function WorkspaceSettingsPage() {
                 </div>
               </div>
             </details>
+          </CardBody>
+        </Card>
+
+        <Card className="mt-4">
+          <CardHeader
+            icon={<InboxIcon size={18} />}
+            title="IMAP — Correo entrante"
+            subtitle="Configura el buzón desde el que se leen los correos que abren y alimentan tickets."
+          />
+          <CardBody>
+            <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+              <div>
+                <p className="text-sm font-semibold text-slate-800">Ingesta de correo</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Apagada por omisión. Si el dominio empieza a caer en spam, este interruptor es lo
+                  primero que hay que revisar.
+                </p>
+              </div>
+              <label className="flex items-center gap-2 h-10 px-3 rounded-lg border border-slate-300 bg-white flex-shrink-0">
+                <input
+                  type="checkbox"
+                  checked={form.imapEnabled ?? false}
+                  onChange={(e) => setForm({ ...form, imapEnabled: e.target.checked })}
+                />
+                <span className="text-xs text-slate-600">
+                  {form.imapEnabled ? 'Encendida' : 'Apagada'}
+                </span>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_120px_140px] gap-3">
+              <div>
+                <label className="label">Host</label>
+                <input
+                  className="input font-mono"
+                  placeholder="imap.gmail.com"
+                  value={form.imapHost ?? ''}
+                  onChange={(e) => setForm({ ...form, imapHost: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="label">Puerto</label>
+                <input
+                  type="number"
+                  className="input"
+                  placeholder="993"
+                  value={form.imapPort ?? ''}
+                  onChange={(e) =>
+                    setForm({ ...form, imapPort: e.target.value === '' ? undefined : Number(e.target.value) })
+                  }
+                />
+              </div>
+              <div>
+                <label className="label">Conexión</label>
+                <label className="flex items-center gap-2 h-10 px-3 rounded-lg border border-slate-300 bg-white">
+                  <input
+                    type="checkbox"
+                    checked={form.imapSecure ?? false}
+                    onChange={(e) => setForm({ ...form, imapSecure: e.target.checked })}
+                  />
+                  <span className="text-xs text-slate-600">SSL/TLS</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+              <div>
+                <label className="label">Usuario</label>
+                <input
+                  type="email"
+                  className="input"
+                  placeholder="ticket@empresa.com"
+                  value={form.imapUser ?? ''}
+                  onChange={(e) => setForm({ ...form, imapUser: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="label">
+                  Contraseña
+                  {imapConfigured && (
+                    <span className="ml-2 text-xs text-emerald-600 font-normal">✓ configurada</span>
+                  )}
+                </label>
+                <input
+                  type="password"
+                  className="input"
+                  placeholder={imapConfigured ? '•••••••• (déjalo vacío si no cambia)' : 'App password o IMAP password'}
+                  value={form.imapPass ?? ''}
+                  onChange={(e) => setForm({ ...form, imapPass: e.target.value })}
+                  autoComplete="new-password"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+              <div>
+                <label className="label">Carpeta</label>
+                <input
+                  className="input font-mono"
+                  placeholder="INBOX"
+                  value={form.imapFolder ?? ''}
+                  onChange={(e) => setForm({ ...form, imapFolder: e.target.value })}
+                />
+                <p className="text-xs text-slate-400 mt-1">Vacío = INBOX.</p>
+              </div>
+              <div>
+                <label className="label">Identificador del servidor</label>
+                <input
+                  className="input font-mono"
+                  placeholder="mx.kuboti.com"
+                  value={form.imapAuthServerId ?? ''}
+                  onChange={(e) => setForm({ ...form, imapAuthServerId: e.target.value })}
+                />
+                <p className="text-xs text-slate-400 mt-1">
+                  El nombre con el que nuestro propio servidor de correo encabeza la cabecera{' '}
+                  <code className="bg-slate-100 px-1 rounded">Authentication-Results</code>. Sin
+                  esto, ningún correo autentica: es el ancla contra un remitente que fabrique esa
+                  cabecera dentro de su propio mensaje.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-start gap-2 text-xs text-slate-500 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+              <span className="text-amber-600 mt-0.5">⚠️</span>
+              <span>
+                <strong className="text-slate-700">Antes de encender la ingesta:</strong> verifica en
+                la consola del proveedor de correo que rechaza en el sobre SMTP cualquier mensaje que
+                no pase DMARC, y confirma que el identificador de arriba es exactamente el que ese
+                servidor escribe como primer segmento de <code className="bg-amber-100 px-1 rounded">Authentication-Results</code>.
+              </span>
+            </div>
           </CardBody>
         </Card>
 

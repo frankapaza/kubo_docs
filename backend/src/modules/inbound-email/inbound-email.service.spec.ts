@@ -189,6 +189,14 @@ interface Opciones {
   postMensajeImpl?: (...args: unknown[]) => Promise<unknown>;
   /** El interruptor de la ingesta (`WorkspaceService.isImapIngestionEnabled`) que ve `retry`. Encendido por omisión. */
   ingestionEnabled?: boolean;
+  /**
+   * El identificador de servidor esperado (`WorkspaceService.getImapAuthServerId`)
+   * que `processOne` cruza contra el primer segmento de cada cabecera. Por
+   * omisión, el mismo `mx.kuboti.com` que ya lleva `unMensaje()` -- así, un
+   * test que solo cambie `from`/`authenticationResults` no tiene que
+   * acordarse también de este ajuste.
+   */
+  authServerId?: string | null;
 }
 
 function montar(opciones: Opciones = {}) {
@@ -199,6 +207,7 @@ function montar(opciones: Opciones = {}) {
     crearTicketImpl,
     postMensajeImpl,
     ingestionEnabled = true,
+    authServerId = 'mx.kuboti.com',
   } = opciones;
 
   const mailbox = mailboxDoble(mensajes);
@@ -219,7 +228,10 @@ function montar(opciones: Opciones = {}) {
   const email = {
     send: jest.fn().mockResolvedValue({ messageId: '<respuesta@kuboti.com>', accepted: [], rejected: [] }),
   };
-  const workspace = { isImapIngestionEnabled: jest.fn().mockResolvedValue(ingestionEnabled) };
+  const workspace = {
+    isImapIngestionEnabled: jest.fn().mockResolvedValue(ingestionEnabled),
+    getImapAuthServerId: jest.fn().mockResolvedValue(authServerId),
+  };
 
   const service = new InboundEmailService(
     mailbox as any,
@@ -777,6 +789,58 @@ describe('InboundEmailService.drain', () => {
     });
 
     /**
+     * El crítico de la tanda de cierre. Antes de este ancla, `evaluateDmarc`
+     * descartaba el primer segmento de la cabecera sin comprobar nunca su
+     * valor -- exactamente lo que un remitente puede fabricar dentro de su
+     * propio mensaje. Este correo trae una cabecera impecable, con
+     * `dmarc=pass` y `header.from=` coincidiendo con el propio `From` (la
+     * suplantación completa del docblock de `judgeAuthentication`), pero un
+     * identificador de servidor que NO es el configurado: tiene que
+     * rechazarse igual que un `dmarc=fail`, nunca colarse como `PASA`.
+     */
+    it('con un identificador de servidor que no es el nuestro: DESCARTADO_NO_AUTENTICADO, aunque dmarc=pass y los dominios coincidan', async () => {
+      const { service, repo, email, tickets } = montar({
+        clientUser: CLIENT_USER,
+        authServerId: 'mx.kuboti.com',
+        mensajes: [
+          unMensaje({
+            from: 'jefe@kuboti.com',
+            authenticationResults:
+              'mx.kubo.com; spf=pass smtp.mailfrom=evil.com; dkim=pass header.d=evil.com; ' +
+              'dmarc=pass header.from=kuboti.com',
+          }),
+        ],
+      });
+
+      const resumen = await service.drain();
+
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('DESCARTADO_NO_AUTENTICADO');
+      expect(fila.reason).toContain('SIN_SERVIDOR_PROPIO');
+      expect(email.send).not.toHaveBeenCalled();
+      expect(tickets.create).not.toHaveBeenCalled();
+      expect(resumen.discarded).toBe(1);
+    });
+
+    // Fallo cerrado: sin el ajuste configurado todavía, ningún correo
+    // autentica, por limpia que venga su cabecera -- ver
+    // `WorkspaceService.getImapAuthServerId`.
+    it('sin identificador de servidor configurado (ajuste vacío): se descarta todo, incluso un correo legítimo', async () => {
+      const { service, repo, tickets } = montar({
+        clientUser: CLIENT_USER,
+        authServerId: null,
+      });
+
+      const resumen = await service.drain();
+
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('DESCARTADO_NO_AUTENTICADO');
+      expect(fila.reason).toContain('SIN_SERVIDOR_PROPIO');
+      expect(tickets.create).not.toHaveBeenCalled();
+      expect(resumen.discarded).toBe(1);
+    });
+
+    /**
      * Ronda de correcciones final de la Task 9: antes de normalizar los dos
      * lados del cruce de dominios a su forma codificada (`normalizeDomain`,
      * `domain/message-headers.ts`), un cliente con un dominio
@@ -787,9 +851,20 @@ describe('InboundEmailService.drain', () => {
      * (`xn--e1afmkfd.com`): dos representaciones del MISMO dominio que nunca
      * coincidían como cadena, y el cruce de dominios -- que existe para
      * proteger al cliente legítimo -- lo descartaba a él en su lugar.
+     *
+     * **Tanda de cierre: este test pasaba antes por el motivo equivocado.**
+     * El doble de `clientUsers.findByEmail` (`montar()`, arriba) devuelve
+     * `CLIENT_USER` sea cual sea el argumento con el que se le llame -- así
+     * que el ticket se creaba igual aunque la búsqueda real (la del
+     * repositorio, con su propia normalización) nunca hubiera encontrado a
+     * nadie. La aserción sobre `clientUsers.findByEmail` de más abajo es la
+     * que de verdad demuestra que el cliente entra por el motivo correcto: la
+     * búsqueda se invoca con el dominio ya en su forma codificada, la misma
+     * que espera `ClientUsersRepository.findByEmail` tras su propia
+     * normalización (ver su spec).
      */
     it('un cliente con dominio internacionalizado no se descarta aunque mailparser decodifique el From a caracteres nacionales', async () => {
-      const { service, repo, tickets } = montar({
+      const { service, repo, tickets, clientUsers } = montar({
         clientUser: CLIENT_USER,
         mensajes: [
           unMensaje({
@@ -806,6 +881,7 @@ describe('InboundEmailService.drain', () => {
       expect(tickets.create).toHaveBeenCalled();
       expect(resumen.discarded).toBe(0);
       expect(resumen.ticketsCreated).toBe(1);
+      expect(clientUsers.findByEmail).toHaveBeenCalledWith('ana@xn--e1afmkfd.com');
     });
 
     it('un correo automático: DESCARTADO_AUTOMATICO, no se responde y no crea nada', async () => {

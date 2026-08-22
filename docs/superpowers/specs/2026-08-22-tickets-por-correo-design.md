@@ -33,9 +33,11 @@ Estas las tomo yo, por ausencia del interlocutor, y quedan registradas para pode
 
    Por eso: **el servidor de correo debe rechazar, en el momento de la entrega, todo lo que no pase DMARC.** Así lo que llegue al buzón ya viene autenticado y no hay que interpretar nada escrito por el remitente.
 
-   `judgeAuthentication` se conserva como **defensa en profundidad**, no como la puerta. Exige `dmarc=pass`, distingue cuatro veredictos —pasa, falla, sin cabecera, sin DMARC—, y falla cerrado ante la ausencia. Su limitación residual está documentada en el código y fijada como prueba de caracterización, marcada como conocida.
+   `judgeAuthentication` se conserva como **defensa en profundidad**, no como la puerta. Exige `dmarc=pass`, distingue cinco veredictos —pasa, falla, sin cabecera, sin DMARC, sin servidor propio—, y falla cerrado ante la ausencia. Su limitación residual está documentada en el código y fijada como prueba de caracterización, marcada como conocida.
 
-   *Comprobación bloqueante de la puesta en marcha:* verificar esa política en el servidor **antes** de encender la ingesta. Por eso la ingesta nace apagada.
+   *Corrección de la revisión de cierre: un sexto vector, y el más grave.* Los cinco anteriores atacaban el contenido de la cabecera; este ataca una suposición que nadie había comprobado nunca: que "la cabecera `Authentication-Results` más externa" es de verdad la que puso **nuestro** servidor. `buildRawHeaders` (`imap-mailbox.service.ts`) toma la primera aparición confiando en que el MTA de entrada antepuso la suya — si esa entrega no está bien anclada (proveedor mal configurado, cambio de ruteo, entrega directa), "la primera" pasa a ser la que el propio remitente escribió dentro de su mensaje: bien formada, con su propio `dmarc=pass` honesto para su propio dominio, y un `header.from=` fabricado a mano para nombrar a quien quiera suplantar. Ninguna de las cinco capas anteriores lo detecta, porque no hay nada mal formado que detectar. El cierre es un sexto veredicto (`SIN_SERVIDOR_PROPIO`): la cabecera tiene que empezar exactamente por el identificador de servidor configurado en los ajustes, o se rechaza — sin excepción, y fallando cerrado si el ajuste no está configurado todavía.
+
+   *Comprobación bloqueante de la puesta en marcha:* no basta con verificar que la cabecera "llega" — un correo con la cabecera falsificada por el propio remitente la satisface exactamente igual. Hay que verificar dos cosas, las dos en el servidor real: que rechaza en el sobre SMTP todo lo que no pase DMARC, **y** que el identificador de servidor configurado en los ajustes IMAP coincide con el primer segmento que ese servidor escribe de verdad en `Authentication-Results`. Por eso la ingesta nace apagada.
 6. **Un técnico que responde desde su Outlook escribe un mensaje público del equipo**, no una nota interna. Un canal en el que uno puede equivocarse de destinatario no debe poder crear notas internas. Si quiere una nota interna, entra a la aplicación.
    *Consecuencia conocida:* si el técnico responde con «responder a todos», el cliente recibirá su correo directo **y** nuestra notificación. Dos mensajes con el mismo contenido. Se acepta; la alternativa —callar la notificación cuando el mensaje llegó por correo— es más lista de lo que conviene y rompe el hilo del portal.
 7. **Se guarda el cuerpo entero y se muestra recortado.** Recortar y tirar pierde información que a veces importa; guardar sin recortar repite la conversación completa en cada mensaje. Se almacenan los dos: el texto recortado, que es lo que se ve, y el original, detrás de un «ver mensaje completo».
@@ -98,7 +100,7 @@ Es la misma regla del portal y aquí entra por un canal nuevo:
 
 **Migración `021_correo_entrante.sql`:**
 
-- **`inbound_emails`** — el registro de todo lo que se lee. `message_id` con índice único, remitente, asunto, fecha, resultado del procesamiento (`TICKET_CREADO`, `MENSAJE_AÑADIDO`, `DESCARTADO_NO_AUTENTICADO`, `DESCARTADO_AUTOMATICO`, `DESCARTADO_DUPLICADO`, `REMITENTE_DESCONOCIDO`, `ERROR`), el ticket al que fue a parar, y el motivo cuando se descarta.
+- **`inbound_emails`** — el registro de todo lo que se lee. `message_id` con índice único, remitente, asunto, fecha, resultado del procesamiento (`TICKET_CREADO`, `MENSAJE_AÑADIDO`, `DESCARTADO_NO_AUTENTICADO`, `DESCARTADO_AUTOMATICO`, `DESCARTADO_PROPIO`, `DESCARTADO_DUPLICADO`, `REMITENTE_DESCONOCIDO`, `DESCARTADO_POR_TOPE`, `DESCARTADO_SIN_CONTENIDO`, `ERROR`), el ticket al que fue a parar, y el motivo cuando se descarta.
   Es la caja negra: sin ella, «a mi cliente no le llegó el ticket» no se puede investigar.
 - **`ticket_messages.inbound_email_id`** — de qué correo salió un mensaje del hilo.
 - **`ticket_messages.body_full`** — el cuerpo sin recortar (decisión 7). Nulo cuando el mensaje no vino por correo.
@@ -107,9 +109,9 @@ Es la misma regla del portal y aquí entra por un canal nuevo:
 
 ## Configuración
 
-En los ajustes del espacio de trabajo, junto a los de SMTP: servidor IMAP, puerto, usuario, contraseña, carpeta, y un interruptor para **apagar la ingesta sin desplegar**.
+En los ajustes del espacio de trabajo, junto a los de SMTP: servidor IMAP, puerto, usuario, contraseña, carpeta, **el identificador del propio servidor de correo** (el ancla contra una cabecera `Authentication-Results` fabricada por el remitente, corrección de la revisión de cierre), y un interruptor para **apagar la ingesta sin desplegar**.
 
-La ingesta **nace apagada**. Se enciende cuando la primera comprobación de la puesta en marcha confirma que la cabecera de autenticación llega.
+La ingesta **nace apagada**. Se enciende cuando la puesta en marcha confirma, contra el servidor real, dos cosas: que rechaza en el sobre lo que no pase DMARC, y que la cabecera de autenticación la pone de verdad nuestro propio servidor y es la más externa — no basta con comprobar que "llega".
 
 ## Errores y qué se ve
 
@@ -130,7 +132,7 @@ Casi todo el diseño es analizable sin red, y ahí es donde va el peso:
 
 ## Riesgos
 
-1. **Si el proveedor no añade `Authentication-Results`, no entra ningún correo.** Es la primera comprobación antes de encender la ingesta, y por eso la ingesta nace apagada.
+1. **Si el proveedor no ancla `Authentication-Results` como la cabecera más externa, la realidad es la contraria de "no entra ningún correo": entraría todo, cada uno autenticado por su propio remitente.** La primera versión de este riesgo decía que la ausencia de la cabecera cerraba la ingesta — cierto para el caso feliz de que el proveedor simplemente no la añada en absoluto (`SIN_CABECERA`, `judgeAuthentication` la bloquea), pero no para el caso real y más peligroso: un remitente que escribe su propia cabecera `Authentication-Results` dentro de su propio mensaje, con su propio `dmarc=pass` honesto para su propio dominio. Si nuestro servidor no la ancla en el primer lugar del bloque de cabeceras (un proveedor mal configurado, un cambio de ruteo, entrega directa sin pasar por el MX esperado), esa cabecera fabricada pasa las cinco capas de `judgeAuthentication` sin que nada la distinga de una legítima — y con un `header.from=` también fabricado, el correo se procesa como si lo hubiera escrito la persona suplantada. Por eso la puesta en marcha no puede limitarse a comprobar que la cabecera "llega": tiene que verificar que la puso nuestro servidor y que es la más externa (identificador de servidor, ver "Configuración"). Y por eso la ingesta nace apagada.
 2. **Un solo lector.** Si mañana hay dos instancias del backend, dos lectores procesarían el mismo correo. Es la misma limitación que ya tiene el despachador de notificaciones y el mismo momento en que habrá que resolver las dos.
 3. **El recorte de la cita nunca es perfecto.** Por eso se guarda el original.
 4. **Reputación del dominio.** Responder a desconocidos es una decisión tomada; los topes son lo que la hacen sostenible. Si el dominio empieza a caer en spam, el interruptor de la ingesta es lo primero que hay que mirar.

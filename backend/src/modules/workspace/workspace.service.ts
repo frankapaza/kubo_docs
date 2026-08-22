@@ -77,6 +77,7 @@ export class WorkspaceService {
       'imapHost',
       'imapUser',
       'imapFolder',
+      'imapAuthServerId',
     ];
     simpleKeys.forEach((key) => {
       const value = dto[key];
@@ -195,6 +196,25 @@ export class WorkspaceService {
   async isImapIngestionEnabled(): Promise<boolean> {
     const s = await this.get().catch(() => null);
     return s?.imapEnabled === 1;
+  }
+
+  /**
+   * El identificador del propio servidor de correo (`authserv-id`), o `null`
+   * si nadie lo configuró todavía -- también `null` si la fila de ajustes no
+   * se puede leer, mismo criterio de fallo cerrado que `isImapIngestionEnabled`.
+   * `InboundEmailService` lo pasa a `judgeAuthentication`/`extractAuthenticatedDomain`
+   * (`domain/intake-rules.ts`) en cada correo: `null` ahí significa
+   * `SIN_SERVIDOR_PROPIO` siempre, nunca "da igual cuál sea" -- ver el
+   * docblock de `judgeAuthentication`, sección "El ancla que faltaba".
+   *
+   * Recorta el valor, mismo criterio que `getTeamInboxEmail`: un espacio
+   * suelto guardado desde el panel dejaría un identificador que nunca
+   * coincidiría con el primer segmento real de la cabecera.
+   */
+  async getImapAuthServerId(): Promise<string | null> {
+    const s = await this.get().catch(() => null);
+    const serverId = s?.imapAuthServerId?.trim();
+    return serverId ? serverId : null;
   }
 
   /**

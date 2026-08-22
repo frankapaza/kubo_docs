@@ -11,7 +11,7 @@ import { InboundEmailController } from './inbound-email.controller';
 import { InboundEmailScheduler } from './inbound-email.scheduler';
 import { ImapMailboxService } from './imap-mailbox.service';
 import { MAILBOX } from './mailbox.interface';
-import { extractSenderAddress } from './domain/message-headers';
+import { extractSenderAddress, withEncodedDomain } from './domain/message-headers';
 
 import { WorkspaceService } from '../workspace/workspace.service';
 import { WorkspaceModule } from '../workspace/workspace.module';
@@ -57,6 +57,17 @@ import { TicketMessagesModule } from '../ticket-messages/ticket-messages.module'
  * (ninguna dirección real lo es), así que degrada a "nunca es el propio
  * buzón" -- el lado seguro, nunca a "todo correo es el propio buzón".
  *
+ * **Residuo de la tanda de cierre: el dominio se reescribe a su forma
+ * codificada (`withEncodedDomain`), igual que `message.from`.** Sin esto,
+ * `isOwnMailbox(message.from, mailboxAddress)` comparaba un lado siempre
+ * normalizado a punycode (`InboundEmailService.withNormalizedFrom`) contra
+ * este otro, que solo pasaba por `extractSenderAddress` (recorta y
+ * minuscula, nunca toca el dominio) -- si el propio buzón de ingesta viviera
+ * en un dominio internacionalizado, la comparación nunca coincidiría y un
+ * acuse propio que vuelve a entrar dejaría de descartarse en silencio para
+ * intentar abrir un ticket a partir de él. Los dos lados de una misma
+ * comparación tienen que normalizarse con la misma función, siempre.
+ *
  * **Limitación conocida, anotada para la lista de puesta en marcha**: esta
  * dirección sale del **usuario IMAP** de autenticación, no de un campo
  * aparte. Si ese usuario no es en sí mismo una dirección de correo (algunos
@@ -70,7 +81,7 @@ import { TicketMessagesModule } from '../ticket-messages/ticket-messages.module'
 export async function resolveMailboxAddress(workspace: WorkspaceService): Promise<string> {
   try {
     const config = await workspace.getImapConfig();
-    return config ? extractSenderAddress(config.user) : '';
+    return config ? withEncodedDomain(extractSenderAddress(config.user)) : '';
   } catch {
     return '';
   }

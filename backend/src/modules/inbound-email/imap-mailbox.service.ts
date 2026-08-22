@@ -35,6 +35,19 @@ import { ResolvedImapConfig, WorkspaceService } from '../workspace/workspace.ser
  *    que cualquier MTA añade encima de lo que ya traía el mensaje al
  *    recibirlo -- nunca las junta.
  *
+ *    **Este archivo confía en que "la primera" es de verdad la nuestra --
+ *    no lo comprueba.** Esa confianza depende enteramente de que el MTA de
+ *    entrada esté bien configurado; si no lo está (un proveedor mal
+ *    configurado, un cambio de ruteo, entrega directa sin pasar por el MX
+ *    esperado), "la primera" puede ser la que el propio remitente escribió
+ *    dentro de su mensaje. La comprobación que sí verifica esto -- que el
+ *    identificador del servidor que encabeza la cabecera es el que este
+ *    sistema espera del suyo -- vive en `judgeAuthentication`/`extractAuthenticatedDomain`
+ *    (`domain/intake-rules.ts`, sección "El ancla que faltaba" de su
+ *    docblock), no aquí: es lo que cierra, con una comprobación en cada
+ *    correo y no solo con una suposición sobre el orden de entrega, el vector
+ *    que este punto 1 describe.
+ *
  * 2. **`from`: la dirección que `mailparser` ya analizó, nunca su
  *    re-serialización, y nunca una alternativa insegura si esa lectura no
  *    da nada.** Siete intentos, documentados aquí porque cada uno enseña por

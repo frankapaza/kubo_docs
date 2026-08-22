@@ -1,4 +1,36 @@
-import { extractAuthenticatedDomain, isOwnMailbox, judgeAuthentication } from './intake-rules';
+import {
+  extractAuthenticatedDomain as extractAuthenticatedDomainReal,
+  isOwnMailbox,
+  judgeAuthentication as judgeAuthenticationReal,
+} from './intake-rules';
+
+/**
+ * Tanda de cierre: `judgeAuthentication`/`extractAuthenticatedDomain` ganaron
+ * un segundo parametro obligatorio (`expectedServerId`, el ancla contra la
+ * cabecera fabricada por el propio remitente -- ver "El ancla que faltaba" en
+ * el docblock de `judgeAuthentication`). Todas las cabeceras de ejemplo de
+ * este archivo, salvo las que se anotan explicitas mas abajo, ya empiezan por
+ * `mx.kuboti.com`: este envoltorio le pasa ese valor por omision para que las
+ * casi cuarenta pruebas existentes (que ejercitan la logica de `dmarc=`, no
+ * la del servidor) no tengan que tocarse una por una. El propio ancla tiene
+ * su describe dedicado, mas abajo, con casos explicitos de coincidencia,
+ * desajuste y ajuste sin configurar.
+ */
+const SERVER_ID_POR_OMISION = 'mx.kuboti.com';
+
+function judgeAuthentication(
+  topmostHeader: string | null | undefined,
+  expectedServerId: string | null = SERVER_ID_POR_OMISION,
+) {
+  return judgeAuthenticationReal(topmostHeader, expectedServerId);
+}
+
+function extractAuthenticatedDomain(
+  topmostHeader: string | null | undefined,
+  expectedServerId: string | null = SERVER_ID_POR_OMISION,
+) {
+  return extractAuthenticatedDomainReal(topmostHeader, expectedServerId);
+}
 
 describe('judgeAuthentication', () => {
   it('acepta cuando dmarc pasa', () => {
@@ -266,7 +298,7 @@ describe('judgeAuthentication', () => {
   // buena noticia: actualiza el test, no lo "arregles" para que vuelva a
   // pasar.
   it('LIMITACION CONOCIDA: un ";" sin comillas en smtp.helo es indistinguible de una cabecera legitima', () => {
-    expect(judgeAuthentication('mx.kubo.com; spf=fail smtp.helo=evil; dmarc=pass')).toBe('PASA');
+    expect(judgeAuthentication('mx.kubo.com; spf=fail smtp.helo=evil; dmarc=pass', 'mx.kubo.com')).toBe('PASA');
   });
 
   /**
@@ -278,8 +310,68 @@ describe('judgeAuthentication', () => {
    */
   it('LIMITACION CONOCIDA: el mismo ";" sin comillas tambien fabrica un header.from de mentira', () => {
     const cabecera = 'mx.kubo.com; spf=fail smtp.helo=evil; dmarc=pass header.from=victima.com';
-    expect(judgeAuthentication(cabecera)).toBe('PASA');
-    expect(extractAuthenticatedDomain(cabecera)).toBe('victima.com');
+    expect(judgeAuthentication(cabecera, 'mx.kubo.com')).toBe('PASA');
+    expect(extractAuthenticatedDomain(cabecera, 'mx.kubo.com')).toBe('victima.com');
+  });
+});
+
+/**
+ * Tanda de cierre, el critico: el ancla contra el identificador del propio
+ * servidor. Antes de esto, `evaluateDmarc` descartaba el primer segmento
+ * (`.slice(1)`) sin comprobar nunca su contenido -- exactamente lo que un
+ * remitente que escribe su propia cabecera `Authentication-Results` DENTRO
+ * de su propio mensaje puede fabricar sin ninguna dificultad. Ver "El ancla
+ * que faltaba" en el docblock de `judgeAuthentication` para el escenario
+ * completo de suplantacion que esto cierra.
+ */
+describe('judgeAuthentication / extractAuthenticatedDomain: el ancla del identificador de servidor', () => {
+  const CABECERA_LIMPIA =
+    'mx.kuboti.com; spf=pass smtp.mailfrom=cliente.com; dkim=pass header.d=cliente.com; ' +
+    'dmarc=pass header.from=cliente.com';
+
+  it('coincide exactamente: PASA, igual que antes de este ancla', () => {
+    expect(judgeAuthenticationReal(CABECERA_LIMPIA, 'mx.kuboti.com')).toBe('PASA');
+    expect(extractAuthenticatedDomainReal(CABECERA_LIMPIA, 'mx.kuboti.com')).toBe('cliente.com');
+  });
+
+  it('no distingue mayusculas al comparar el identificador', () => {
+    expect(judgeAuthenticationReal(CABECERA_LIMPIA, 'MX.KUBOTI.COM')).toBe('PASA');
+  });
+
+  it('tolera un numero de version de RFC 8601 tras el identificador (solo se compara el primer token)', () => {
+    expect(judgeAuthenticationReal('mx.kuboti.com 1; dmarc=pass header.from=cliente.com', 'mx.kuboti.com')).toBe(
+      'PASA',
+    );
+  });
+
+  /**
+   * El escenario del docblock, con el vector completo: un correo que un
+   * remitente compuso a mano, con su propia cabecera `Authentication-Results`
+   * -- impecable, dmarc=pass, un solo resultado -- pero cuyo primer segmento
+   * nombra a nuestro servidor sin serlo de verdad (o nombra cualquier otra
+   * cosa: el punto es que NO coincide con lo configurado). Sin el ancla,
+   * esto daria PASA; con el ancla, SIN_SERVIDOR_PROPIO -- un veredicto propio,
+   * no confundible con "el remitente no autentico".
+   */
+  it('un identificador que no es el nuestro: SIN_SERVIDOR_PROPIO, no PASA ni FALLA', () => {
+    const cabeceraFabricada =
+      'mx.kubo.com; spf=pass smtp.mailfrom=evil.com; dkim=pass header.d=evil.com; ' +
+      'dmarc=pass header.from=kuboti.com';
+    expect(judgeAuthenticationReal(cabeceraFabricada, 'mx.kuboti.com')).toBe('SIN_SERVIDOR_PROPIO');
+    expect(extractAuthenticatedDomainReal(cabeceraFabricada, 'mx.kuboti.com')).toBeNull();
+  });
+
+  // Fallo cerrado: sin el ajuste configurado, ningun correo autentica nunca
+  // -- no importa lo limpia que venga la cabecera.
+  it('sin identificador configurado (null): SIN_SERVIDOR_PROPIO siempre, nunca PASA', () => {
+    expect(judgeAuthenticationReal(CABECERA_LIMPIA, null)).toBe('SIN_SERVIDOR_PROPIO');
+    expect(extractAuthenticatedDomainReal(CABECERA_LIMPIA, null)).toBeNull();
+  });
+
+  it('se comprueba antes que SIN_DMARC: un servidor equivocado sin dmarc= sigue siendo SIN_SERVIDOR_PROPIO', () => {
+    expect(judgeAuthenticationReal('mx.kubo.com; spf=pass; dkim=pass', 'mx.kuboti.com')).toBe(
+      'SIN_SERVIDOR_PROPIO',
+    );
   });
 });
 

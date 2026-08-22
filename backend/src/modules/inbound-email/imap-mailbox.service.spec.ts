@@ -700,14 +700,17 @@ describe('los seis vectores de suplantación (ronda de correcciones 2)', () => {
   /** La dirección que un atacante intenta hacer pasar por su remitente. */
   const VICTIMA = 'jefe@kuboti.com';
 
+  /** El identificador de servidor que ya llevan todas las cabeceras de este describe. */
+  const SERVER_ID = 'mx.kuboti.com';
+
   /**
    * `true` solo si, con estos datos, `InboundEmailService.processOne`
    * terminaría tratando el correo como autenticado Y de la víctima --
    * exactamente lo que los seis vectores deben conseguir que sea `false`.
    */
   function suplantaALaVictima(authHeader: string | null | undefined, senderAddress: string): boolean {
-    if (judgeAuthentication(authHeader) !== 'PASA') return false;
-    const dominioAutenticado = extractAuthenticatedDomain(authHeader);
+    if (judgeAuthentication(authHeader, SERVER_ID) !== 'PASA') return false;
+    const dominioAutenticado = extractAuthenticatedDomain(authHeader, SERVER_ID);
     const dominioRemitente = domainOf(senderAddress);
     if (dominioAutenticado === null || dominioAutenticado !== dominioRemitente) return false;
     return senderAddress === VICTIMA;
@@ -807,8 +810,8 @@ describe('los seis vectores de suplantación (ronda de correcciones 2)', () => {
     const authHeader = 'mx.kuboti.com; spf=pass; dkim=pass; dmarc=pass header.from=empresa.com';
 
     expect(remitente).toBe('ana@empresa.com');
-    expect(judgeAuthentication(authHeader)).toBe('PASA');
-    expect(extractAuthenticatedDomain(authHeader)).toBe('empresa.com');
+    expect(judgeAuthentication(authHeader, SERVER_ID)).toBe('PASA');
+    expect(extractAuthenticatedDomain(authHeader, SERVER_ID)).toBe('empresa.com');
     expect(domainOf(remitente)).toBe('empresa.com');
   });
 });

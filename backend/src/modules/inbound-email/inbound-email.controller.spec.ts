@@ -3,6 +3,8 @@ import { GUARDS_METADATA } from '@nestjs/common/constants';
 
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { ROLES_KEY } from '../../common/decorators/roles.decorator';
 import { InboundEmailController, toInboundEmailListItem } from './inbound-email.controller';
 import { InboundEmail } from './entities/inbound-email.entity';
 
@@ -28,48 +30,51 @@ function unaFila(overrides: Partial<InboundEmail> = {}): InboundEmail {
   };
 }
 
-/** Dobles mínimos de las dos dependencias, cada método un `jest.fn` propio. */
+/** Dobles mínimos de las tres dependencias, cada método un `jest.fn` propio. */
 function makeController() {
   const repo = { list: jest.fn(), findById: jest.fn() };
   const service = { retry: jest.fn() };
-  const controller = new InboundEmailController(repo as any, service as any);
-  return { controller, repo, service };
+  const workspace = { isImapIngestionEnabled: jest.fn().mockResolvedValue(true) };
+  const controller = new InboundEmailController(repo as any, service as any, workspace as any);
+  return { controller, repo, service, workspace };
 }
 
 describe('toInboundEmailListItem — la proyección', () => {
   it('nunca expone messageId (el normalizado/interno), solo messageIdRaw', () => {
     const fila = unaFila({ messageId: '<hash-sintetico@buzon-imap.invalid>' });
 
-    const item = toInboundEmailListItem(fila);
+    const item = toInboundEmailListItem(fila, true);
 
     expect(item).not.toHaveProperty('messageId');
     expect(item.messageIdRaw).toBe('<falla@empresa.com>');
   });
 
   it('no expone clientUserId: fromAddress ya identifica a quién escribió', () => {
-    const item = toInboundEmailListItem(unaFila());
+    const item = toInboundEmailListItem(unaFila(), true);
 
     expect(item).not.toHaveProperty('clientUserId');
   });
 
   it('formatea receivedAt en hora de Perú, con la zona nombrada', () => {
     // 2026-08-20T15:05:00Z son las 10:05 a. m. en Lima (UTC-5).
-    const item = toInboundEmailListItem(unaFila());
+    const item = toInboundEmailListItem(unaFila(), true);
 
     expect(item.receivedAtLabel).toContain('hora de Perú');
     expect(item.receivedAtLabel).toMatch(/10:05/);
   });
 
   it('sentAt ausente (null) da sentAtLabel null, no una etiqueta inventada', () => {
-    const item = toInboundEmailListItem(unaFila({ sentAt: null }));
+    const item = toInboundEmailListItem(unaFila({ sentAt: null }), true);
 
     expect(item.sentAtLabel).toBeNull();
   });
 
-  it('retryable es true solo para ERROR', () => {
-    expect(toInboundEmailListItem(unaFila({ outcome: 'ERROR' })).retryable).toBe(true);
-    expect(toInboundEmailListItem(unaFila({ outcome: 'TICKET_CREADO' })).retryable).toBe(false);
-    expect(toInboundEmailListItem(unaFila({ outcome: 'DESCARTADO_SIN_CONTENIDO' })).retryable).toBe(false);
+  it('retryable es true solo para ERROR (con las otras tres guardas satisfechas)', () => {
+    expect(toInboundEmailListItem(unaFila({ outcome: 'ERROR' }), true).retryable).toBe(true);
+    expect(toInboundEmailListItem(unaFila({ outcome: 'TICKET_CREADO' }), true).retryable).toBe(false);
+    expect(toInboundEmailListItem(unaFila({ outcome: 'DESCARTADO_SIN_CONTENIDO' }), true).retryable).toBe(
+      false,
+    );
   });
 
   /**
@@ -84,11 +89,39 @@ describe('toInboundEmailListItem — la proyección', () => {
       messageId: '<falla@empresa.com>#reintento-55-1755882600000',
     });
 
-    expect(toInboundEmailListItem(fila).retryable).toBe(false);
+    expect(toInboundEmailListItem(fila, true).retryable).toBe(false);
+  });
+
+  /**
+   * Tanda de cierre: las tres guardas que faltaban. `InboundEmailService.retry`
+   * las comprueba las cuatro antes de reencolar de verdad; antes de esta
+   * corrección, `retryable` solo reflejaba la primera -- así que el botón se
+   * ofrecía para filas que el propio servicio iba a rechazar siempre.
+   */
+  it('retryable es false si la fila ya tiene un ticket asociado (podría duplicar un mensaje)', () => {
+    const fila = unaFila({ outcome: 'ERROR', ticketId: 501 });
+
+    expect(toInboundEmailListItem(fila, true).retryable).toBe(false);
+  });
+
+  it('retryable es false sin un Message-ID propio (null, o un sustituto sintético)', () => {
+    expect(toInboundEmailListItem(unaFila({ outcome: 'ERROR', messageIdRaw: null }), true).retryable).toBe(
+      false,
+    );
+    expect(
+      toInboundEmailListItem(
+        unaFila({ outcome: 'ERROR', messageIdRaw: '<sin-message-id.abc123@buzon-imap.invalid>' }),
+        true,
+      ).retryable,
+    ).toBe(false);
+  });
+
+  it('retryable es false con la ingesta apagada, aunque el resto de guardas pasen', () => {
+    expect(toInboundEmailListItem(unaFila({ outcome: 'ERROR' }), false).retryable).toBe(false);
   });
 
   it('conserva el motivo y el ticket, campo a campo', () => {
-    const item = toInboundEmailListItem(unaFila({ ticketId: 501 }));
+    const item = toInboundEmailListItem(unaFila({ ticketId: 501 }), true);
 
     expect(item.reason).toBe('Fallo de red al escribir el ticket.');
     expect(item.ticketId).toBe(501);
@@ -96,10 +129,28 @@ describe('toInboundEmailListItem — la proyección', () => {
 });
 
 describe('InboundEmailController — guards', () => {
-  it('lleva JwtAuthGuard y StaffOnlyGuard: esta pantalla ve direcciones y asuntos de todas las empresas', () => {
+  it('lleva JwtAuthGuard, StaffOnlyGuard y RolesGuard: esta pantalla ve direcciones y asuntos de todas las empresas', () => {
     const guards = Reflect.getMetadata(GUARDS_METADATA, InboundEmailController);
 
-    expect(guards).toEqual([JwtAuthGuard, StaffOnlyGuard]);
+    expect(guards).toEqual([JwtAuthGuard, StaffOnlyGuard, RolesGuard]);
+  });
+
+  /**
+   * El crítico de la tanda de cierre: la entrada de menú que lleva a esta
+   * pantalla ya era solo para ADMIN en el frontend, pero el endpoint de
+   * reintento aceptaba a cualquier miembro del personal -- el frontend
+   * afirmaba una restricción que el backend no imponía.
+   */
+  it('retry() exige el rol ADMIN', () => {
+    const roles = Reflect.getMetadata(ROLES_KEY, InboundEmailController.prototype.retry);
+
+    expect(roles).toEqual(['ADMIN']);
+  });
+
+  it('list() no exige ningún rol -- cualquier miembro del personal puede consultar el listado', () => {
+    const roles = Reflect.getMetadata(ROLES_KEY, InboundEmailController.prototype.list);
+
+    expect(roles).toBeUndefined();
   });
 });
 
@@ -134,6 +185,16 @@ describe('InboundEmailController.list', () => {
 
     await expect(controller.list('NO_EXISTE')).rejects.toThrow(BadRequestException);
     expect(repo.list).not.toHaveBeenCalled();
+  });
+
+  it('con la ingesta apagada, ninguna fila en error se ofrece como reintentable', async () => {
+    const { controller, repo, workspace } = makeController();
+    repo.list.mockResolvedValue([unaFila({ outcome: 'ERROR' })]);
+    workspace.isImapIngestionEnabled.mockResolvedValue(false);
+
+    const resultado = await controller.list(undefined);
+
+    expect(resultado[0].retryable).toBe(false);
   });
 });
 

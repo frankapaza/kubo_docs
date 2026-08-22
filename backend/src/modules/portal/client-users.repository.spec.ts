@@ -45,4 +45,29 @@ describe('ClientUsersRepository', () => {
     await repo.create(data as any);
     expect(data.email).toBe('Alguien@Empresa.com');
   });
+
+  /**
+   * Tanda de cierre: la normalización al escribir no solo baja a minúsculas,
+   * también reescribe el dominio a su forma codificada (punycode) -- la misma
+   * forma en la que llega el remitente de un correo entrante ya normalizado
+   * (`InboundEmailService.withNormalizedFrom`). Sin esto, un cliente dado de
+   * alta con el dominio en caracteres nacionales (tal como se copiaría de un
+   * correo real) nunca encontraría coincidencia cuando ese mismo cliente
+   * escribiera después por correo.
+   */
+  it('normaliza el dominio internacionalizado a su forma codificada al crear', async () => {
+    const { repo, typeormRepo } = makeRepo();
+    await repo.create({ email: 'ana@пример.com', clientId: 1 } as any);
+    expect(typeormRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({ email: 'ana@xn--e1afmkfd.com' }),
+    );
+  });
+
+  it('busca por el dominio ya normalizado a su forma codificada, aunque llegue en caracteres nacionales', async () => {
+    const { repo, typeormRepo } = makeRepo();
+    await repo.findByEmail('ana@пример.com');
+    expect(typeormRepo.findOne).toHaveBeenCalledWith({
+      where: { email: 'ana@xn--e1afmkfd.com' },
+    });
+  });
 });

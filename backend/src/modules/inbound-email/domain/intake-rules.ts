@@ -33,8 +33,18 @@ import { normalizeDomain } from './message-headers';
  * cabecera" de "nuestro servidor no evalua DMARC" -- tres problemas de
  * naturaleza y de dueno distintos, y el registro tiene que poder decir cual
  * de los tres esta ocurriendo.
+ *
+ * `SIN_SERVIDOR_PROPIO` (tanda de cierre) es un cuarto problema, y el mas
+ * grave de todos: la cabecera llega, y hasta puede traer un `dmarc=pass`
+ * perfectamente valido -- pero el identificador del propio servidor que la
+ * encabeza (`authserv-id`, RFC 8601 SS2.2 -- el primer segmento, antes del
+ * primer `;`) no es el que este sistema espera del suyo. Ver el docblock de
+ * `judgeAuthentication`, seccion "El ancla que faltaba", para el porque este
+ * veredicto tiene que existir separado de `FALLA`: significa algo
+ * completamente distinto ("no hay ninguna garantia de que esta cabecera la
+ * haya puesto nuestro servidor", no "el remitente no autentico").
  */
-export type AuthVerdict = 'PASA' | 'FALLA' | 'SIN_CABECERA' | 'SIN_DMARC';
+export type AuthVerdict = 'PASA' | 'FALLA' | 'SIN_CABECERA' | 'SIN_DMARC' | 'SIN_SERVIDOR_PROPIO';
 
 /**
  * Un segmento de nivel superior, con su rango de caracteres `[start, end)`
@@ -241,8 +251,27 @@ function findRawDmarcMentions(header: string): number[] {
   return positions;
 }
 
-/** El resultado de evaluar el segmento `dmarc=` de la cabecera. */
-type DmarcOutcome = 'PASS' | 'NOT_PASS' | 'ABSENT' | 'COMPROMISED';
+/**
+ * El resultado de evaluar el segmento `dmarc=` de la cabecera.
+ * `SERVER_MISMATCH` (tanda de cierre): el primer segmento -- el
+ * `authserv-id`, RFC 8601 SS2.2 -- no es el identificador que este sistema
+ * espera de su propio servidor. Antes de esta comprobacion, ese segmento se
+ * descartaba (`.slice(1)`, mas abajo) sin comprobar nunca su valor: es
+ * EXACTAMENTE lo que un remitente que escribe su propia cabecera dentro de su
+ * propio mensaje puede fabricar sin ninguna dificultad, y lo unico que
+ * distinguia esa cabecera fabricada de la nuestra.
+ */
+type DmarcOutcome = 'PASS' | 'NOT_PASS' | 'ABSENT' | 'COMPROMISED' | 'SERVER_MISMATCH';
+
+/**
+ * El primer token del primer segmento de nivel superior: el `authserv-id` de
+ * RFC 8601 SS2.2, opcionalmente seguido de un numero de version
+ * (`authres-version`) separado por un espacio -- por eso se toma solo el
+ * primer token, y no el segmento entero, al compararlo.
+ */
+function extractServerId(firstSegmentText: string): string {
+  return firstSegmentText.trim().split(/\s+/)[0] ?? '';
+}
 
 /**
  * Busca `header.from=<dominio>` DENTRO del texto de un segmento ya aislado
@@ -278,7 +307,15 @@ function extractHeaderFromDomain(segmentText: string): string | null {
 
 /**
  * Evalua el resultado `dmarc` de `header` con tres capas, **las tres a la
- * vez** -- ronda de correcciones 3, ninguna basta sola:
+ * vez** -- ronda de correcciones 3, ninguna basta sola. La tanda de cierre
+ * antepone una capa CERO, antes de las tres: **el identificador del propio
+ * servidor.** Si `expectedServerId` es `null` (nadie configuro el ajuste) o
+ * el primer segmento de `header` no coincide con el -- comparacion exacta del
+ * primer token, sin distinguir mayusculas -- el resultado es
+ * `SERVER_MISMATCH` de inmediato, sin llegar siquiera a mirar si hay un
+ * `dmarc=pass`. Ver el docblock de `judgeAuthentication`, seccion "El ancla
+ * que faltaba", para el porque esta capa tiene que ir PRIMERO y fallar
+ * CERRADO.
  *
  * 1. **Tokenizar** con `splitTopLevelSegments`. Si la cabecera esta
  *    malformada (comentario/cadena sin cerrar, o un `)` suelto), el
@@ -316,14 +353,26 @@ function extractHeaderFromDomain(segmentText: string): string | null {
  * cuando `outcome === 'PASS'`, así que `judgeAuthentication` (que solo lee
  * `outcome`) queda bit a bit igual que antes.
  */
-function evaluateDmarc(header: string): { outcome: DmarcOutcome; headerFromDomain: string | null } {
+function evaluateDmarc(
+  header: string,
+  expectedServerId: string | null,
+): { outcome: DmarcOutcome; headerFromDomain: string | null } {
   const tokenized = splitTopLevelSegments(header);
   if (!tokenized.ok) return { outcome: 'COMPROMISED', headerFromDomain: null };
+
+  // Capa cero, antes de cualquier otra cosa: el identificador del servidor.
+  // `tokenized.segments[0]` siempre existe (`splitTopLevelSegments` siempre
+  // devuelve al menos un segmento, vacio como mucho), pero su CONTENIDO nunca
+  // se habia comprobado -- ver el docblock de `DmarcOutcome`/`evaluateDmarc`.
+  const actualServerId = extractServerId(tokenized.segments[0].text);
+  if (expectedServerId === null || actualServerId.toLowerCase() !== expectedServerId.trim().toLowerCase()) {
+    return { outcome: 'SERVER_MISMATCH', headerFromDomain: null };
+  }
 
   const rawMentions = findRawDmarcMentions(header);
   if (rawMentions.length === 0) return { outcome: 'ABSENT', headerFromDomain: null };
 
-  const resultSegments = tokenized.segments.slice(1); // descarta el identificador del servidor
+  const resultSegments = tokenized.segments.slice(1); // el identificador del servidor ya se comprobo arriba
   const dmarcMatches = resultSegments
     .map((segment) => ({ segment, match: RESULT_AT_SEGMENT_START.exec(segment.text) }))
     .filter(
@@ -413,6 +462,60 @@ function evaluateDmarc(header: string): { outcome: DmarcOutcome; headerFromDomai
  * coincidencia -- el mismo punto y coma que regalaba el paso ahora regala
  * tambien la identidad.
  *
+ * # El ancla que faltaba, y por que sin ella el sistema queda abierto de par en par
+ *
+ * Tanda de cierre: todo el parrafo anterior -- las cinco elusiones, la
+ * politica SMTP como frontera real -- asumia algo que esta funcion **nunca
+ * comprobaba**: que la cabecera que recibe de verdad la puso nuestro propio
+ * servidor. `buildRawHeaders` (`imap-mailbox.service.ts`) toma la
+ * **primera** aparicion de `Authentication-Results` confiando en que un MTA
+ * bien configurado antepone la suya a lo que ya traia el mensaje. Si esa
+ * suposicion falla -- un proveedor de correo mal configurado, un cambio de
+ * ruteo, entrega directa sin pasar por el MX esperado -- "la primera" pasa a
+ * ser la que el propio remitente escribio DENTRO de su propio mensaje:
+ *
+ * ```
+ * Authentication-Results: mx.kubo.com; spf=pass smtp.mailfrom=evil.com;
+ *   dkim=pass header.d=evil.com; dmarc=pass header.from=kuboti.com
+ * From: jefe@kuboti.com
+ * ```
+ *
+ * Esa cabecera es **impecable**: bien formada, un solo resultado `dmarc=`,
+ * ninguna mencion cruda fuera de su segmento, `pass` de verdad -- porque el
+ * atacante la escribio para su propio dominio (`evil.com`), que autentica
+ * genuinamente. Las tres capas de `evaluateDmarc` la aprueban sin dudar, y el
+ * cruce de dominios de `InboundEmailService.processOne`
+ * (`extractAuthenticatedDomain` vs `domainOf(message.from)`) tampoco la para:
+ * el atacante controla LOS DOS LADOS de esa comparacion, y basta con que
+ * ponga el mismo `kuboti.com` en su `header.from=` fabricado y en su propio
+ * `From`. El resultado es **suplantacion completa de cualquier remitente,
+ * cliente o personal** -- no "un correo no autenticado que se cuela": un
+ * correo que el sistema procesa exactamente como si lo hubiera escrito la
+ * persona suplantada.
+ *
+ * `expectedServerId` (el segundo parametro, `WorkspaceService.getImapAuthServerId`
+ * -- ajunto de los demas ajustes IMAP) es el ancla que cierra esto:
+ * `evaluateDmarc` exige que el PRIMER segmento de la cabecera -- el
+ * `authserv-id` de RFC 8601 SS2.2 -- coincida con el valor configurado, antes
+ * de mirar nada mas. Si no coincide, o si nadie configuro el ajuste todavia,
+ * el resultado es `SIN_SERVIDOR_PROPIO`, sin excepcion: **falla cerrado**, no
+ * "probablemente sea nuestro servidor".
+ *
+ * **Por que la comprobacion de puesta en marcha "verificar que la cabecera
+ * llega" NO detecta este vector.** Esa comprobacion (ver el riesgo 1 del
+ * diseno, `docs/superpowers/specs/2026-08-22-tickets-por-correo-design.md`)
+ * confirma que `Authentication-Results` esta presente en el correo que
+ * llega -- y un correo con la cabecera FALSIFICADA por el propio remitente
+ * la satisface exactamente igual que uno legitimo: la cabecera "llega" en
+ * los dos casos, con el mismo aspecto de superficie. El sintoma de "la
+ * ingesta funciona" (llegan tickets, sin errores en el registro) y el
+ * sintoma de "la ingesta esta abierta de par en par" (cualquiera puede
+ * suplantar a cualquiera) son, vistos desde fuera, IDENTICOS. La unica
+ * comprobacion que de verdad distingue los dos casos es esta: que el primer
+ * segmento sea el identificador que solo nuestro servidor deberia escribir
+ * ahi -- y por eso tiene que vivir en codigo, evaluandose en cada correo, no
+ * en una lista de verificacion que se corre una vez al encender la ingesta.
+ *
  * # El contrato de la cabecera que se pasa
  *
  * Debe ser la cabecera `Authentication-Results` **mas externa** (la que
@@ -437,15 +540,26 @@ function evaluateDmarc(header: string): { outcome: DmarcOutcome; headerFromDomai
  * como ya demuestra el vector residual de arriba, esa distincion puede no
  * estar disponible en el texto en absoluto.
  *
+ * `expectedServerId` es el identificador de servidor esperado
+ * (`WorkspaceService.getImapAuthServerId`), o `null` si nadie lo configuro
+ * todavia -- ver la seccion "El ancla que faltaba" arriba. Se comprueba
+ * ANTES que cualquier otra cosa (incluso antes de `SIN_DMARC`): un
+ * desajuste de servidor es un problema mas grave y de causa distinta que "el
+ * proveedor no informa DMARC", y el registro tiene que poder distinguirlos.
+ *
  * Devuelve, en orden de prioridad:
  * - `SIN_CABECERA` si no hay cabecera que juzgar en absoluto -- `null`,
  *   `undefined`, o una cadena en blanco.
  * - `FALLA` si el valor contiene un salto de linea (`\n`/`\r`): senal de
  *   cabeceras concatenadas, ver arriba.
- * - `SIN_DMARC` si la cabecera llega pero no trae ningun rastro de
- *   `dmarc=` en ninguna parte del texto -- el proveedor no corre o no
- *   informa DMARC. Ver `AuthVerdict` para por que esto no es lo mismo que
- *   `FALLA`.
+ * - `SIN_SERVIDOR_PROPIO` si el primer segmento de la cabecera no coincide
+ *   con `expectedServerId`, o si `expectedServerId` es `null`. Fallo
+ *   cerrado: no saber cual es nuestro servidor nunca debe tratarse como "da
+ *   igual cual sea".
+ * - `SIN_DMARC` si la cabecera llega, el servidor SI es el nuestro, pero no
+ *   trae ningun rastro de `dmarc=` en ninguna parte del texto -- el
+ *   proveedor no corre o no informa DMARC. Ver `AuthVerdict` para por que
+ *   esto no es lo mismo que `FALLA`.
  * - `PASA` solo si hay **exactamente un** resultado `dmarc=` de nivel
  *   superior, ninguna otra mencion cruda de `dmarc=` fuera de el, y su
  *   veredicto es `pass`.
@@ -453,11 +567,15 @@ function evaluateDmarc(header: string): { outcome: DmarcOutcome; headerFromDomai
  *   un resultado, la cabecera esta malformada, o aparece `dmarc=` fuera
  *   del unico segmento legitimo.
  */
-export function judgeAuthentication(topmostHeader: string | null | undefined): AuthVerdict {
+export function judgeAuthentication(
+  topmostHeader: string | null | undefined,
+  expectedServerId: string | null,
+): AuthVerdict {
   if (topmostHeader == null || topmostHeader.trim().length === 0) return 'SIN_CABECERA';
   if (/[\r\n]/.test(topmostHeader)) return 'FALLA';
 
-  const { outcome } = evaluateDmarc(topmostHeader);
+  const { outcome } = evaluateDmarc(topmostHeader, expectedServerId);
+  if (outcome === 'SERVER_MISMATCH') return 'SIN_SERVIDOR_PROPIO';
   if (outcome === 'PASS') return 'PASA';
   if (outcome === 'ABSENT') return 'SIN_DMARC';
   return 'FALLA'; // NOT_PASS o COMPROMISED
@@ -506,12 +624,21 @@ export function judgeAuthentication(topmostHeader: string | null | undefined): A
  * son exactamente iguales, o si cualquiera de los dos es `null`. No hay
  * "casi iguales" ni subdominios: la comparacion es una igualdad de cadenas,
  * sobre dominios ya en minuscula.
+ *
+ * `expectedServerId` es el mismo ancla que exige `judgeAuthentication` (ver
+ * su docblock, seccion "El ancla que faltaba"): sin ella, un `header.from=`
+ * fabricado por el propio remitente dentro de su propia cabecera falsa
+ * pasaria por aqui exactamente igual que uno legitimo -- el "pass" es tan
+ * honesto como el de arriba, y certifica el mismo dominio de mentira.
  */
-export function extractAuthenticatedDomain(topmostHeader: string | null | undefined): string | null {
+export function extractAuthenticatedDomain(
+  topmostHeader: string | null | undefined,
+  expectedServerId: string | null,
+): string | null {
   if (topmostHeader == null || topmostHeader.trim().length === 0) return null;
   if (/[\r\n]/.test(topmostHeader)) return null;
 
-  const { outcome, headerFromDomain } = evaluateDmarc(topmostHeader);
+  const { outcome, headerFromDomain } = evaluateDmarc(topmostHeader, expectedServerId);
   if (outcome !== 'PASS') return null;
   return headerFromDomain;
 }

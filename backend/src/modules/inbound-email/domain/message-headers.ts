@@ -271,9 +271,24 @@ function splitAddress(address: string): { localPart: string; domain: string } | 
  * `null` si el dominio no es valido en absoluto (nunca una cadena vacia: es
  * la ausencia de dominio que comparar, el mismo criterio que ya usaba
  * `domainOf`).
+ *
+ * **Residuo de la ronda de cierre: el punto final de un FQDN no convergia.**
+ * RFC 1035 SS3.1 permite un "." final para marcar un nombre de dominio
+ * absoluto (`empresa.com.` y `empresa.com` son EL MISMO dominio) -- lo escribe
+ * asi, por ejemplo, cualquier cosa que arme el nombre a partir de una consulta
+ * DNS. `domainToASCII` no lo quita (`domainToASCII('empresa.com.')` da
+ * `'empresa.com.'`, con el punto): sin recortarlo antes, un cliente cuyo
+ * dominio llegara con el punto final por un lado del cruce (o de la busqueda
+ * de remitente) y sin el por el otro se trataria como dos dominios distintos,
+ * el mismo defecto de fondo que el resto de esta funcion existe para cerrar,
+ * solo que por un camino distinto al de mayusculas/IDN. Se recorta como mucho
+ * UN punto final -- un FQDN valido nunca lleva mas de uno -- antes de pedirle
+ * a `domainToASCII` la forma codificada.
  */
 export function normalizeDomain(domain: string): string | null {
-  const ascii = domainToASCII(domain.trim());
+  const trimmed = domain.trim();
+  const withoutTrailingDot = trimmed.endsWith('.') ? trimmed.slice(0, -1) : trimmed;
+  const ascii = domainToASCII(withoutTrailingDot);
   return ascii.length > 0 ? ascii : null;
 }
 

@@ -146,6 +146,16 @@ export class UpdateWorkspaceSettingsDto {
   @IsBoolean()
   imapEnabled?: boolean;
 
+  // El identificador del propio servidor de correo (`authserv-id`, RFC 8601
+  // §2.2), tanda de cierre: sin él, `judgeAuthentication` falla cerrado para
+  // todo correo (`SIN_SERVIDOR_PROPIO`). `IsString`, no un formato más
+  // estricto: es un nombre de host tal cual lo escribe el propio servidor de
+  // correo en la cabecera, no una dirección ni una URL.
+  @IsOptional()
+  @IsString()
+  @Length(0, 255)
+  imapAuthServerId?: string;
+
   // Retención de audio
   @IsOptional()
   @IsEnum(AUDIO_RETENTION_POLICIES)

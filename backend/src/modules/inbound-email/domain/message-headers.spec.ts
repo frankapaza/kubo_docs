@@ -207,6 +207,14 @@ describe('normalizeDomain / domainOf: dominio internacionalizado', () => {
   it('null sin ningun @, igual que antes de normalizar', () => {
     expect(domainOf('no-es-una-direccion')).toBeNull();
   });
+
+  // Residuo de la ronda de cierre: RFC 1035 admite un "." final para marcar
+  // un FQDN absoluto -- "empresa.com." y "empresa.com" son el mismo dominio,
+  // y `domainToASCII` no lo recorta por su cuenta.
+  it('un punto final de FQDN absoluto converge con la forma sin punto', () => {
+    expect(normalizeDomain('empresa.com.')).toBe('empresa.com');
+    expect(domainOf('cliente@empresa.com.')).toBe(domainOf('cliente@empresa.com'));
+  });
 });
 
 describe('withEncodedDomain', () => {

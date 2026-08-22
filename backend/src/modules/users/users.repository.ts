@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
+import { withEncodedDomain } from '../inbound-email/domain/message-headers';
 
 @Injectable()
 export class UsersRepository {
@@ -25,9 +26,16 @@ export class UsersRepository {
    * nadie revisa cuando cambia. La ingesta de correo (`InboundEmailService`)
    * es quien más se apoya en esto: el remitente de un correo llega tal cual lo
    * escribió su cliente de correo, no como el usuario lo tecleó al registrarse.
+   *
+   * **Tanda de cierre: el dominio también se reescribe a su forma codificada**
+   * (`withEncodedDomain`), mismo motivo y misma corrección que
+   * `ClientUsersRepository.findByEmail` -- ver el comentario de esa función
+   * para el escenario completo (un miembro del personal en un dominio
+   * internacionalizado que el cruce de dominios ya deja pasar, pero que esta
+   * búsqueda, sin normalizar, seguía sin reconocer).
    */
   findByEmail(email: string): Promise<User | null> {
-    return this.repo.findOne({ where: { email: email.trim().toLowerCase() } });
+    return this.repo.findOne({ where: { email: withEncodedDomain(email.trim().toLowerCase()) } });
   }
 
   create(data: Partial<User>): Promise<User> {

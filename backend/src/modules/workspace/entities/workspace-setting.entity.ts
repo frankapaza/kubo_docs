@@ -109,6 +109,20 @@ export class WorkspaceSetting {
   @Column({ name: 'imap_enabled', type: 'tinyint', default: 0 })
   imapEnabled!: number;
 
+  /**
+   * El identificador del propio servidor de correo (`authserv-id`, RFC 8601
+   * §2.2 -- el primer segmento de `Authentication-Results`, antes del primer
+   * `;`). Migración 024, tanda de cierre: sin este ancla, `evaluateDmarc`
+   * (`domain/intake-rules.ts`) descartaba ese segmento sin comprobar nunca su
+   * valor, y un remitente que escribe su propia cabecera dentro de su propio
+   * mensaje puede fabricarlo sin ninguna dificultad -- ver el docblock de
+   * `judgeAuthentication`, sección "El ancla que faltaba". `NULL` hasta que
+   * alguien lo configura a mano falla cerrado (`SIN_SERVIDOR_PROPIO` para
+   * todo correo), nunca se adivina.
+   */
+  @Column({ name: 'imap_auth_server_id', type: 'varchar', length: 255, nullable: true })
+  imapAuthServerId!: string | null;
+
   // ========== Retención de audio ==========
   @Column({
     name: 'audio_retention_policy',

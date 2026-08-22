@@ -33,6 +33,24 @@ export interface WorkspaceSettings {
   // remitente SMTP (`smtpFrom`).
   teamInboxEmail: string | null;
 
+  // IMAP (correo entrante). `imapEnabled` nace apagado (0): la ingesta no
+  // debe encenderse sin verificar antes, en el servidor real, que
+  // `Authentication-Results` la pone nuestro propio servidor y que rechaza en
+  // el sobre lo que no pase DMARC.
+  imapHost: string | null;
+  imapPort: number | null;
+  imapSecure: number;
+  imapUser: string | null;
+  imapFolder: string | null;
+  imapEnabled: number;
+  // `imapPassEncrypted` se devuelve pero nunca se usa en el frontend.
+  imapPassEncrypted?: string | null;
+  // El identificador del propio servidor de correo (`authserv-id`, RFC 8601
+  // §2.2): el ancla contra una cabecera `Authentication-Results` que el
+  // propio remitente fabricó dentro de su mensaje. `null` = sin configurar,
+  // y sin él ningún correo autentica nunca (falla cerrado).
+  imapAuthServerId: string | null;
+
   audioRetentionPolicy: AudioRetentionPolicy;
   audioRetentionDays: number;
 
@@ -63,6 +81,17 @@ export interface UpdateWorkspaceBody {
   // Cadena vacía = limpiarlo (el backend lo admite: ver `IsString`, no
   // `IsEmail`, en `UpdateWorkspaceSettingsDto.teamInboxEmail`).
   teamInboxEmail?: string;
+
+  imapHost?: string;
+  imapPort?: number;
+  imapSecure?: boolean;
+  imapUser?: string;
+  // Se envía solo si cambia; el backend lo encripta.
+  imapPass?: string;
+  imapFolder?: string;
+  // El interruptor de encendido de la ingesta. Nace apagado.
+  imapEnabled?: boolean;
+  imapAuthServerId?: string;
 
   audioRetentionPolicy?: AudioRetentionPolicy;
   audioRetentionDays?: number;

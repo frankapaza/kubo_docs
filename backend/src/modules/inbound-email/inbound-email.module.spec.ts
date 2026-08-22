@@ -64,6 +64,29 @@ describe('resolveMailboxAddress', () => {
 
     await expect(resolveMailboxAddress(workspace as any)).resolves.toBe('ticket@kuboti.com');
   });
+
+  /**
+   * Residuo de la tanda de cierre: `InboundEmailService.withNormalizedFrom`
+   * reescribe SIEMPRE el dominio de `message.from` a su forma codificada
+   * (`withEncodedDomain`) antes de que `isOwnMailbox` lo compare contra este
+   * valor -- si este lado se quedara sin la misma reescritura, un buzón de
+   * ingesta en un dominio internacionalizado nunca se reconocería a sí mismo,
+   * y un acuse propio que vuelve a entrar dejaría de descartarse en silencio.
+   */
+  it('el usuario IMAP en un dominio internacionalizado se normaliza a su forma codificada', async () => {
+    const workspace = {
+      getImapConfig: jest.fn().mockResolvedValue({
+        host: 'imap.kuboti.com',
+        port: 993,
+        secure: true,
+        user: 'Ticket@пример.com',
+        pass: 'secreto',
+        folder: 'INBOX',
+      }),
+    };
+
+    await expect(resolveMailboxAddress(workspace as any)).resolves.toBe('ticket@xn--e1afmkfd.com');
+  });
 });
 
 describe('el proveedor INBOUND_MAILBOX_ADDRESS se instancia sin abortar el arranque', () => {

@@ -302,6 +302,10 @@ export class InboundEmailService {
 
   async drain(limit: number = INBOUND_EMAIL_BATCH_SIZE): Promise<DrainSummary> {
     const incoming = await this.mailbox.fetchUnprocessed(limit);
+    // Se lee una sola vez por pasada, no por correo: es un ajuste de
+    // configuración, no algo que cambie a mitad de un lote. Fallo cerrado
+    // (`null`) si la propia consulta revienta -- ver `resolveExpectedServerId`.
+    const expectedServerId = await this.resolveExpectedServerId();
     const summary: DrainSummary = {
       fetched: incoming.length,
       ticketsCreated: 0,
@@ -317,7 +321,7 @@ export class InboundEmailService {
       const message = withNormalizedFrom(raw);
 
       try {
-        await this.processOne(message, summary);
+        await this.processOne(message, summary, expectedServerId);
       } catch (error) {
         summary.errors += 1;
         // Si el error viene envuelto en `ClaimedRowFailure`, quien lo lanzó
@@ -356,11 +360,33 @@ export class InboundEmailService {
   }
 
   /**
+   * El identificador de servidor esperado (`WorkspaceService.getImapAuthServerId`),
+   * o `null` si nadie lo configuró todavía o si la propia consulta revienta.
+   * Fallo cerrado, mismo criterio que `allowedToReplyToUnknown`/`newTicketCapReached`/
+   * `retry`: no saber cuál es nuestro servidor nunca debe tratarse como "da
+   * igual cuál sea" -- `null` hace que `judgeAuthentication` devuelva
+   * `SIN_SERVIDOR_PROPIO` para todo correo de esta pasada (ver el docblock de
+   * esa función, sección "El ancla que faltaba").
+   */
+  private async resolveExpectedServerId(): Promise<string | null> {
+    try {
+      return await this.workspace.getImapAuthServerId();
+    } catch (error) {
+      this.logger.warn(`No se pudo leer el identificador de servidor esperado: ${errorText(error)}`);
+      return null;
+    }
+  }
+
+  /**
    * Decide qué hacer con un correo y lo hace. No captura nada: un fallo aquí
    * sube tal cual hasta `drain`, que lo registra como `ERROR` y sigue con el
    * siguiente correo del lote.
    */
-  private async processOne(message: IncomingMessage, summary: DrainSummary): Promise<void> {
+  private async processOne(
+    message: IncomingMessage,
+    summary: DrainSummary,
+    expectedServerId: string | null,
+  ): Promise<void> {
     const messageId = normalizeMessageId(message.messageId);
 
     // Paso 2 del recorrido: si ya se procesó, no se repite nada -- ni el
@@ -417,7 +443,7 @@ export class InboundEmailService {
     // Paso 5: sin autenticación no hay garantía de quién lo mandó. Se
     // descarta en silencio -- contestar sería escribirle a la víctima de una
     // suplantación, no al remitente real.
-    const authVerdict = judgeAuthentication(message.authenticationResults);
+    const authVerdict = judgeAuthentication(message.authenticationResults, expectedServerId);
     if (authVerdict !== 'PASA') {
       await this.discard(
         message,
@@ -443,7 +469,7 @@ export class InboundEmailService {
     // `null` en cualquiera de los dos lados (sin `header.from=`, o un `from`
     // sin `@`) cuenta como no coincidencia -- nunca como "probablemente
     // igual".
-    const dominioAutenticado = extractAuthenticatedDomain(message.authenticationResults);
+    const dominioAutenticado = extractAuthenticatedDomain(message.authenticationResults, expectedServerId);
     const dominioRemitente = domainOf(message.from);
     if (dominioAutenticado === null || dominioAutenticado !== dominioRemitente) {
       await this.discard(

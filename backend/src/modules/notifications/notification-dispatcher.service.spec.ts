@@ -1,6 +1,7 @@
 import {
   NotificationDispatchError,
   NotificationDispatcher,
+  isWellFormedMessageId,
 } from './notification-dispatcher.service';
 import { CLIENT_VARIABLES, TEAM_VARIABLES } from './domain/template-renderer';
 import { TICKET_STATUSES } from '../tickets/domain/ticket-state-machine';
@@ -1281,6 +1282,24 @@ describe('el Message-ID del aviso al cliente', () => {
   });
 });
 
+describe('isWellFormedMessageId', () => {
+  it('acepta un Message-ID bien formado', () => {
+    expect(isWellFormedMessageId('<abrio-el-ticket@cliente.com>')).toBe(true);
+  });
+
+  it('rechaza el sustituto sintético de un Message-ID no-ASCII (sin < ni >)', () => {
+    expect(isWellFormedMessageId('sha256:2c624232cdd221771294dfbb310aca000a0df6ac8b66b696d90ef06fdefb64a')).toBe(
+      false,
+    );
+  });
+
+  it('rechaza una cadena vacía, sin ángulos, o con espacios dentro', () => {
+    expect(isWellFormedMessageId('')).toBe(false);
+    expect(isWellFormedMessageId('sin-angulos@cliente.com')).toBe(false);
+    expect(isWellFormedMessageId('<con espacio@cliente.com>')).toBe(false);
+  });
+});
+
 describe('cabeceras que no dependen de la plantilla', () => {
   it('todo aviso va marcado como automático (RFC 3834), para no disparar un bucle', async () => {
     const { dispatcher, email } = montar();
@@ -1323,6 +1342,28 @@ describe('cabeceras que no dependen de la plantilla', () => {
 
     const [correo] = enviados(email);
     expect(correo.headers).not.toHaveProperty('In-Reply-To');
+  });
+
+  /**
+   * Tanda de cierre: si el correo que abrió el ticket traía un `Message-ID`
+   * no-ASCII, `ticket.emailMessageId` guarda el sustituto sintético de
+   * `normalizeMessageId` (`sha256:<hash>`, sin los signos `<`/`>` que RFC
+   * 5322 exige) -- no un `Message-ID` válido. Emitirlo tal cual dejaría
+   * `In-Reply-To`/`References` malformadas en todos los avisos del ticket, y
+   * un receptor estricto puede rechazar el mensaje entero por eso.
+   */
+  it('un emailMessageId con forma de hash (Message-ID original no-ASCII) no se emite como In-Reply-To/References', async () => {
+    const { dispatcher, email } = montar({
+      ticket: unTicket({
+        emailMessageId: 'sha256:2c624232cdd221771294dfbb310aca000a0df6ac8b66b696d90ef06fdefb64a',
+      }),
+    });
+
+    await dispatcher.dispatchForEvent(unEvento());
+
+    const [correo] = enviados(email);
+    expect(correo.headers).not.toHaveProperty('In-Reply-To');
+    expect(correo.headers).not.toHaveProperty('References');
   });
 
   it('las cabeceras van también en el aviso de equipo', async () => {

@@ -104,6 +104,19 @@ function errorText(error: unknown): string {
   return String(error);
 }
 
+/**
+ * `true` si `value` tiene al menos la forma mínima de un `Message-ID` de RFC
+ * 5322 §3.6.4: entre `<` y `>`, sin espacios ni ángulos anidados dentro. No
+ * valida la gramática completa (`id-left "@" id-right`) -- solo lo
+ * suficiente para distinguir un identificador real del sustituto sintético
+ * que `normalizeMessageId` (`inbound-email/message-id.ts`) guarda cuando el
+ * `Message-ID` original no era ASCII (`sha256:<hash>`, sin `<`/`>` en
+ * absoluto). Exportada para poder probarla sin montar el dispatcher.
+ */
+export function isWellFormedMessageId(value: string): boolean {
+  return /^<[^\s<>]+>$/.test(value);
+}
+
 /** Cómo se ve un dato que falta en el correo del equipo. Nunca la llave cruda. */
 const SIN_RESPONSABLE = 'Sin asignar';
 
@@ -617,10 +630,24 @@ export class NotificationDispatcher {
    * no tiene con qué enlazar -- forzar aquí un valor inventado sería peor que
    * no llevar la cabecera, porque un `In-Reply-To` que no señala a nada real
    * es indistinguible de una cabecera corrupta para quien lo reciba.
+   *
+   * **Tanda de cierre: `threadMessageId` puede no tener forma de `Message-ID`
+   * en absoluto.** `ticket.emailMessageId` es `messageId` ya normalizado
+   * (`normalizeMessageId`, `inbound-email/message-id.ts`): si el correo que
+   * abrió el ticket traía un `Message-ID` no-ASCII (RFC 6532 lo permite), ese
+   * valor es un sustituto con forma de hash (`sha256:<...>`, sin los signos
+   * `<`/`>` que RFC 5322 §3.6.4 exige) -- necesario para poder guardarlo en
+   * una columna `ascii`, pero inválido como valor de `In-Reply-To`/`References`.
+   * Emitirlo tal cual dejaría esas dos cabeceras malformadas en **todos** los
+   * avisos de ese ticket, y un receptor estricto puede rechazar el mensaje
+   * entero por eso. `isWellFormedMessageId` exige la forma mínima de RFC 5322
+   * (`<algo-sin-espacios-ni-ángulos>`) antes de emitir la cabecera; si no la
+   * tiene, se omite -- el mismo criterio que ya aplica un ticket sin
+   * `emailMessageId`: una cabecera ausente es mejor que una corrupta.
    */
   private automatedHeaders(threadMessageId: string | null): Record<string, string> {
     const headers: Record<string, string> = { 'Auto-Submitted': 'auto-generated' };
-    if (threadMessageId !== null) {
+    if (threadMessageId !== null && isWellFormedMessageId(threadMessageId)) {
       headers['In-Reply-To'] = threadMessageId;
       headers['References'] = threadMessageId;
     }

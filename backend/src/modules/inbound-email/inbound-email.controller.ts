@@ -12,13 +12,17 @@ import {
 
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { formatPeruDateTime } from '../../common/peru-date-time';
 
 import { InboundEmailsRepository } from './inbound-emails.repository';
 import { InboundEmailService } from './inbound-email.service';
 import { isRequeuedMessageId } from './domain/retry';
+import { isSyntheticMessageId } from './imap-mailbox.service';
 import { INBOUND_EMAIL_OUTCOMES, InboundEmail, InboundEmailOutcome } from './entities/inbound-email.entity';
+import { WorkspaceService } from '../workspace/workspace.service';
 
 /**
  * Lo que la pantalla de correo entrante (Task 9) necesita de una fila de
@@ -67,15 +71,39 @@ export interface InboundEmailListItem {
  * La proyección de una fila. Función libre y exportada para poder probarla
  * sin montar el controlador.
  *
- * `retryable` exige `outcome === 'ERROR'` **y** que la fila no se haya
- * reencolado ya (`isRequeuedMessageId`, sobre el `messageId` interno --
- * nunca expuesto, ver el comentario de `InboundEmailListItem` arriba). Sin
- * la segunda condición, una fila ya reencolada seguiría ofreciendo el botón
- * para siempre (su `outcome` se queda en `ERROR` a propósito, como rastro
- * histórico -- ver `domain/retry.ts`), y un segundo clic reencolaría el
- * mismo correo una segunda vez.
+ * `retryable` exige `outcome === 'ERROR'` **y** las mismas cuatro guardas que
+ * `InboundEmailService.retry` comprueba antes de reencolar de verdad -- ver
+ * el docblock de ese método para el porqué de cada una:
+ *
+ * 1. Que la fila no se haya reencolado ya (`isRequeuedMessageId`, sobre el
+ *    `messageId` interno -- nunca expuesto, ver el comentario de
+ *    `InboundEmailListItem` arriba). Sin esto, una fila ya reencolada seguiría
+ *    ofreciendo el botón para siempre (su `outcome` no cambia), y un segundo
+ *    clic reencolaría el mismo correo una segunda vez.
+ * 2. Que no tenga ya un `ticketId` asociado: podría tener el mensaje (y su
+ *    aviso al cliente) ya escrito, y reencolar arriesgaría un duplicado.
+ * 3. Que traiga un `messageIdRaw` propio, no un sustituto sintético
+ *    (`isSyntheticMessageId`): sin cabecera `Message-ID` real no hay forma de
+ *    localizar el correo de nuevo en el buzón.
+ * 4. Que la ingesta esté encendida (`ingestionEnabled`, resuelto una sola vez
+ *    por listado, no por fila -- `WorkspaceService.isImapIngestionEnabled`):
+ *    apagada -- el estado por defecto -- reencolar no logra nada, porque nada
+ *    va a leer el buzón hasta que se encienda.
+ *
+ * **Antes de esta corrección solo se comprobaba la primera.** Con la ingesta
+ * apagada (el estado de salida del proyecto), eso significaba que TODAS las
+ * filas en error ofrecían un botón que iba a fallar siempre -- el mensaje de
+ * error que devuelve el servicio es honesto, pero es un clic sin salida.
  */
-export function toInboundEmailListItem(row: InboundEmail): InboundEmailListItem {
+export function toInboundEmailListItem(row: InboundEmail, ingestionEnabled: boolean): InboundEmailListItem {
+  const retryable =
+    row.outcome === 'ERROR' &&
+    !isRequeuedMessageId(row.messageId) &&
+    row.ticketId === null &&
+    row.messageIdRaw !== null &&
+    !isSyntheticMessageId(row.messageIdRaw) &&
+    ingestionEnabled;
+
   return {
     id: Number(row.id),
     messageIdRaw: row.messageIdRaw,
@@ -88,7 +116,7 @@ export function toInboundEmailListItem(row: InboundEmail): InboundEmailListItem 
     ticketId: row.ticketId === null ? null : Number(row.ticketId),
     attachmentCount: row.attachmentCount,
     attachmentNames: row.attachmentNames,
-    retryable: row.outcome === 'ERROR' && !isRequeuedMessageId(row.messageId),
+    retryable,
   };
 }
 
@@ -99,30 +127,50 @@ export function toInboundEmailListItem(row: InboundEmail): InboundEmailListItem 
  * mismos dos guardas que el resto del panel (`tickets.controller.ts`,
  * `client-users.controller.ts`): `JwtAuthGuard` primero, `StaffOnlyGuard`
  * después como segunda barrera explícita contra un token de portal.
+ *
+ * `RolesGuard` se añade a la clase (tercero, como en `WorkspaceController`) y
+ * no cambia nada para `list()`, que no lleva `@Roles(...)`: sin metadatos que
+ * exigir, el guarda deja pasar a cualquier miembro del personal, igual que
+ * antes. Solo `retry()` lo usa de verdad -- ver su comentario.
  */
 @Controller('inbound-emails')
-@UseGuards(JwtAuthGuard, StaffOnlyGuard)
+@UseGuards(JwtAuthGuard, StaffOnlyGuard, RolesGuard)
 export class InboundEmailController {
   constructor(
     private readonly repo: InboundEmailsRepository,
     private readonly service: InboundEmailService,
+    private readonly workspace: WorkspaceService,
   ) {}
 
   @Get()
   async list(@Query('outcome') outcome?: string): Promise<InboundEmailListItem[]> {
     const filtro = this.parseOutcomeFilter(outcome);
-    const filas = await this.repo.list(filtro ? { outcome: filtro } : {});
-    return filas.map(toInboundEmailListItem);
+    const [filas, ingestionEnabled] = await Promise.all([
+      this.repo.list(filtro ? { outcome: filtro } : {}),
+      this.workspace.isImapIngestionEnabled(),
+    ]);
+    return filas.map((fila) => toInboundEmailListItem(fila, ingestionEnabled));
   }
 
+  /**
+   * **Tanda de cierre: `@Roles('ADMIN')` (con `RolesGuard` en la clase, ver
+   * arriba).** La entrada de menú que lleva aquí ya era solo para ADMIN en el
+   * frontend, pero el endpoint en sí aceptaba a cualquier miembro del
+   * personal -- el frontend afirmaba una restricción que el backend no
+   * imponía, el mismo patrón de control por rol que ya llevan todas las
+   * mutaciones hermanas del panel (`WorkspaceController.update`,
+   * `ClientUsersController`, ...).
+   */
   @Post(':id/retry')
   @HttpCode(200)
+  @Roles('ADMIN')
   async retry(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseIntPipe) id: number,
   ): Promise<InboundEmailListItem> {
     const updated = await this.service.retry(id, user.email);
-    return toInboundEmailListItem(updated);
+    const ingestionEnabled = await this.workspace.isImapIngestionEnabled();
+    return toInboundEmailListItem(updated, ingestionEnabled);
   }
 
   /**
