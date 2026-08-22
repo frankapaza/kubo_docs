@@ -21,6 +21,61 @@ import { TicketsModule } from '../tickets/tickets.module';
 import { TicketMessagesModule } from '../ticket-messages/ticket-messages.module';
 
 /**
+ * La dirección del propio buzón, para el proveedor `INBOUND_MAILBOX_ADDRESS`.
+ * Función libre y exportada -- no una función anónima dentro de `useFactory`
+ * -- por dos motivos: se puede probar sin compilar ningún módulo de Nest
+ * (`inbound-email.module.spec.ts`), y así queda claro que su firma es
+ * exactamente la que Nest invoca al resolver el proveedor.
+ *
+ * Se resuelve **una vez**, al arrancar: `INBOUND_MAILBOX_ADDRESS` es un
+ * `string` plano por contrato (ver su comentario en `inbound-email.service.ts`),
+ * no una promesa que se vuelva a consultar en cada correo -- a diferencia de
+ * `ImapMailboxService`, que sí relee la configuración en cada (re)conexión.
+ * Si el usuario IMAP cambia más tarde desde los ajustes, esta dirección
+ * necesita un reinicio del backend para actualizarse; el propio buzón (host,
+ * puerto, credenciales) no lo necesita. Documentado también en el informe de
+ * la Task 8.
+ *
+ * **Nunca deja escapar una excepción -- ronda de correcciones 1, el otro
+ * crítico de esta tarea.** Un proveedor de Nest con `useFactory` async se
+ * resuelve durante la instanciación del árbol de proveedores, **antes** de
+ * que corra ningún `onApplicationBootstrap` -- en particular, antes de
+ * `PortalSchemaValidator`, que es quien sabe explicar con un mensaje legible
+ * que falta la migración 023 o la fila de ajustes. Si esta función dejara
+ * escapar el error de `WorkspaceService.getImapConfig()` (que ya se blinda
+ * él solo, pero no hay que confiar en eso desde aquí también, por si algún
+ * día deja de ser cierto), Nest abortaría el arranque con la excepción cruda
+ * de TypeORM/MySQL, tapando ese mensaje -- y lo haría **incluso con el
+ * interruptor de la ingesta apagado**, que es exactamente el escenario que
+ * "nace apagada" promete no tocar nada. Cualquier fallo aquí degrada a `''`:
+ * mismo valor, mismo efecto seguro, que "el buzón no está configurado
+ * todavía" (ver más abajo).
+ *
+ * Vacía (`''`) si el buzón no está configurado, o si algo revienta al
+ * consultarlo: `isOwnMailbox` nunca compara igual contra una cadena vacía
+ * (ninguna dirección real lo es), así que degrada a "nunca es el propio
+ * buzón" -- el lado seguro, nunca a "todo correo es el propio buzón".
+ *
+ * **Limitación conocida, anotada para la lista de puesta en marcha**: esta
+ * dirección sale del **usuario IMAP** de autenticación, no de un campo
+ * aparte. Si ese usuario no es en sí mismo una dirección de correo (algunos
+ * servidores autentican con un nombre de cuenta que no lo es), esta función
+ * devuelve igualmente ese valor tal cual -- `extractSenderAddress` no lo
+ * rechaza, solo lo recorta y lo pone en minúsculas -- y `isOwnMailbox` nunca
+ * podrá compararlo con éxito contra un `From` real: la guarda contra el
+ * propio eco del sistema queda apagada en silencio, aunque el resto de la
+ * ingesta funcione con normalidad.
+ */
+export async function resolveMailboxAddress(workspace: WorkspaceService): Promise<string> {
+  try {
+    const config = await workspace.getImapConfig();
+    return config ? extractSenderAddress(config.user) : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
  * El buzón IMAP real, la configuración y el reloj (Task 8): el módulo que por
  * fin monta `InboundEmailService` (Task 6-7, hasta ahora solo probado con un
  * doble de `Mailbox`) contra un buzón de verdad.
@@ -62,26 +117,7 @@ import { TicketMessagesModule } from '../ticket-messages/ticket-messages.module'
     {
       provide: INBOUND_MAILBOX_ADDRESS,
       inject: [WorkspaceService],
-      /**
-       * Se resuelve **una vez**, al arrancar: `INBOUND_MAILBOX_ADDRESS` es un
-       * `string` plano por contrato (ver su comentario en
-       * `inbound-email.service.ts`), no una promesa que se vuelva a
-       * consultar en cada correo -- a diferencia de `ImapMailboxService`, que
-       * sí relee la configuración en cada (re)conexión. Si el usuario IMAP
-       * cambia más tarde desde los ajustes, esta dirección necesita un
-       * reinicio del backend para actualizarse; el propio buzón (host,
-       * puerto, credenciales) no lo necesita. Documentado también en el
-       * informe de esta tarea.
-       *
-       * Vacía (`''`) si el buzón todavía no está configurado: `isOwnMailbox`
-       * nunca compara igual contra una cadena vacía (ninguna dirección real lo
-       * es), así que degrada a "nunca es el propio buzón" -- el lado seguro,
-       * nunca a "todo correo es el propio buzón".
-       */
-      useFactory: async (workspace: WorkspaceService): Promise<string> => {
-        const config = await workspace.getImapConfig();
-        return config ? extractSenderAddress(config.user) : '';
-      },
+      useFactory: resolveMailboxAddress,
     },
   ],
   exports: [InboundEmailService],

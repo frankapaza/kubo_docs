@@ -268,6 +268,21 @@ export class TicketMessagesService {
    * ("la única puerta al hilo es el servicio", ver `TicketMessagesModule`), y
    * la ingesta de correo es el único consumidor de fuera de este módulo que
    * necesita este enlace informativo.
+   *
+   * **Deliberadamente sin actor ni ámbito, a diferencia de `post`/`listThread`.**
+   * No es un descuido: la razón por la que `TicketMessagesRepository` no se
+   * exporta es precisamente que este servicio es quien impone la
+   * autorización sobre el hilo (de quién es el ticket, qué visibilidad
+   * puede leer o escribir cada actor) -- y ese control ya se aplicó **antes**
+   * de llegar aquí. `messageId` es el id de un mensaje que `post` ya validó,
+   * autorizó y escribió en esta misma pasada de `InboundEmailService.processOne`;
+   * este método no decide nada sobre el hilo, solo rellena a posteriori una
+   * columna puramente informativa (`ticket_messages.inbound_email_id`) sobre
+   * una fila que ya existe y ya pasó ese control. Repetir aquí la resolución
+   * de ámbito no protegería nada -- no hay ninguna pertenencia que comprobar
+   * en un `UPDATE` de una sola columna sobre un id ya autorizado -- y sí
+   * obligaría a inventar un actor synthetic para un enlace que no es una
+   * acción del actor, es un efecto secundario de haber escrito el mensaje.
    */
   attachInboundEmail(messageId: Id, inboundEmailId: number): Promise<void> {
     return this.messages.attachInboundEmail(messageId, inboundEmailId);
