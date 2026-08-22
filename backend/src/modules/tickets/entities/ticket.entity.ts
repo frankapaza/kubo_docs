@@ -74,6 +74,7 @@ export const AGENT_LEVELS: AgentLevel[] = ['N1', 'N2', 'N3'];
 @Index('idx_tickets_status', ['status'])
 @Index('idx_tickets_assignee', ['assigneeUserId'])
 @Index('idx_tickets_resolution_due', ['slaResolutionDueAt'])
+@Index('idx_tickets_email_message_id', ['emailMessageId'])
 export class Ticket {
   @PrimaryGeneratedColumn({ type: 'bigint', unsigned: true })
   id!: number;
@@ -221,6 +222,15 @@ export class Ticket {
 
   @Column({ name: 'created_by_client_user_id', type: 'bigint', unsigned: true, nullable: true })
   createdByClientUserId!: number | null;
+
+  /**
+   * El Message-ID del correo que abrió este ticket, si nació de uno (columna
+   * de la migración 021). `null` en cualquier ticket creado desde el panel,
+   * el portal u otro canal: no hay correo original con el que correlacionar
+   * una respuesta por este lado — sigue quedando el hilo de mensajes.
+   */
+  @Column({ name: 'email_message_id', type: 'varchar', length: 998, nullable: true })
+  emailMessageId!: string | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

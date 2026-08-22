@@ -65,6 +65,10 @@ describe('TicketEventsRepository', () => {
         'notifyAttempts',
         'notifyNextAttemptAt',
         'notifyLastError',
+        // Migración 021: columna de la bandeja de salida de correo, igual que
+        // las cuatro de arriba — contabilidad del envío, no el hecho del
+        // ticket. Ver el comentario de `sentMessageId` en `TicketEvent`.
+        'sentMessageId',
       ];
 
       const declaradas = getMetadataArgsStorage()

@@ -52,6 +52,16 @@ export class TicketMessage {
   @Column({ name: 'body_md', type: 'text' })
   bodyMd!: string;
 
+  /**
+   * El cuerpo completo del correo entrante, sin recortar (migración 021).
+   * `bodyMd` sigue siendo lo que se enseña en el hilo — el texto nuevo, sin la
+   * cita de la conversación anterior que arrastra cada respuesta. `null` en
+   * cualquier mensaje que no vino de un correo, y también en uno que sí vino
+   * pero cuyo cuerpo completo no se conservó.
+   */
+  @Column({ name: 'body_full', type: 'mediumtext', nullable: true })
+  bodyFull!: string | null;
+
   @Column({ type: 'enum', enum: TICKET_MESSAGE_VISIBILITIES })
   visibility!: TicketMessageVisibility;
 
@@ -62,6 +72,13 @@ export class TicketMessage {
   /** Autor del cliente. Excluyente con `authorUserId`: ver el comentario de la clase. */
   @Column({ name: 'author_client_user_id', type: 'bigint', unsigned: true, nullable: true })
   authorClientUserId!: number | null;
+
+  /**
+   * De qué correo entrante salió este mensaje, si vino de uno (migración
+   * 021). `null` para cualquier mensaje escrito desde el panel o el portal.
+   */
+  @Column({ name: 'inbound_email_id', type: 'bigint', unsigned: true, nullable: true })
+  inboundEmailId!: number | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

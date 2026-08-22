@@ -136,4 +136,16 @@ export class TicketEvent {
    */
   @Column({ name: 'notify_last_error', type: 'varchar', length: 500, nullable: true })
   notifyLastError!: string | null;
+
+  /**
+   * El Message-ID con el que se envió este aviso (migración 021), en la misma
+   * tabla que ya hace de bandeja de salida. Es contra lo que se correlaciona
+   * el `In-Reply-To` de una respuesta del cliente cuando contesta a un aviso
+   * posterior en vez de al acuse inicial del ticket (`tickets.email_message_id`,
+   * que solo cubre ese primer correo): `InboundEmailsRepository.findTicketsByEmailMessageIds`
+   * busca en las dos columnas porque un cliente responde igual a cualquiera de
+   * las dos. `null` en cualquier evento que no generó un aviso por correo.
+   */
+  @Column({ name: 'sent_message_id', type: 'varchar', length: 998, nullable: true })
+  sentMessageId!: string | null;
 }
