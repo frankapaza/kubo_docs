@@ -62,10 +62,6 @@ function lastClosedMonth(): string {
   return prevMonth === 0 ? `${year - 1}-12` : `${year}-${String(prevMonth).padStart(2, '0')}`;
 }
 
-function fmtOptDate(v: string | null): string {
-  return v ? fmtDate(v) : '—';
-}
-
 export default function PortalMonthlyReportPage() {
   // Se calcula una sola vez al montar: esta pantalla no queda abierta el
   // tiempo suficiente para que cambie el mes ya cerrado más reciente.
@@ -350,9 +346,15 @@ function TicketsBlockCard({ tickets }: { tickets: MonthlyReportTicketsBlock }) {
                     <td className="px-3 py-2 font-mono text-xs text-slate-500">{r.code ?? `#${r.id}`}</td>
                     <td className="px-3 py-2 text-slate-800">{r.subject ?? '—'}</td>
                     <td className="px-3 py-2 text-slate-700">{r.status}</td>
-                    <td className="px-3 py-2 text-xs text-slate-500">{fmtDate(r.capturedAt)}</td>
-                    <td className="px-3 py-2 text-xs text-slate-500">{fmtOptDate(r.firstResponseAt)}</td>
-                    <td className="px-3 py-2 text-xs text-slate-500">{fmtOptDate(r.resolvedAt)}</td>
+                    {/*
+                      `...Label`, nunca el ISO reformateado aquí: ya viene en
+                      hora de Perú, con la hora y la zona escritas -- lo que
+                      hace verificable el veredicto de las dos columnas de al
+                      lado. Ver el JSDoc de `MonthlyReportTicketRow`.
+                    */}
+                    <td className="px-3 py-2 text-xs text-slate-500">{r.capturedAtLabel}</td>
+                    <td className="px-3 py-2 text-xs text-slate-500">{r.firstResponseAtLabel ?? '—'}</td>
+                    <td className="px-3 py-2 text-xs text-slate-500">{r.resolvedAtLabel ?? '—'}</td>
                     <td className="px-3 py-2">
                       <ComplianceBadge value={r.responseCompliance} />
                     </td>

@@ -25,6 +25,19 @@ export function fmtPercent(p: number | null): string {
   return p === null ? '—' : `${p}%`;
 }
 
+/**
+ * Igual que `fmtPercent`, pero con la nota escrita al lado del «—» en vez de
+ * dejarla aparte: en la pantalla ese guion vive junto a un texto pequeño que
+ * ya avisa «sin compromisos que medir», pero en un documento -- lo que el
+ * cliente archiva, reenvía o le enseña a un auditor -- una cifra sin ese
+ * texto pegado al lado se vuelve ambigua otra vez. Sin esto un «—» a secas
+ * en el PDF o el CSV se puede leer como «no cumplieron nada», que es
+ * exactamente lo que esta regla existe para evitar.
+ */
+export function fmtPercentForDocument(p: number | null): string {
+  return p === null ? '— (sin compromisos que medir)' : `${p}%`;
+}
+
 /** Marca de tiempo opcional (ISO, con hora) -- `fmtDate`, nunca `fmtDateOnly`, o desplaza el día. */
 function fmtOptDate(v: string | null): string {
   return v ? fmtDate(v) : '—';
@@ -67,6 +80,14 @@ const TICKETS_TABLE_HEAD = [
   'Cumpl. respuesta', 'Cumpl. resolución',
 ];
 
+/**
+ * Las cinco marcas de tiempo del ticket usan su `...Label`, nunca `fmtDate`
+ * sobre el ISO: este documento existe para evidenciar cumplimiento de SLA, y
+ * un veredicto («Incumplido») que no se puede verificar contra la hora
+ * impresa al lado no prueba nada. El `...Label` ya viene del backend en hora
+ * de Perú, con la hora y la zona escritas -- ver el JSDoc de
+ * `MonthlyReportTicketRow` en `../../api/types`.
+ */
 function ticketRows(report: PortalMonthlyReport): string[][] {
   return report.tickets!.rows.map((r, i) => [
     String(i + 1),
@@ -75,11 +96,11 @@ function ticketRows(report: PortalMonthlyReport): string[][] {
     r.category ?? '—',
     r.priority,
     r.status,
-    fmtDate(r.capturedAt),
-    fmtOptDate(r.firstResponseAt),
-    fmtOptDate(r.resolvedAt),
-    fmtOptDate(r.slaResponseDueAt),
-    fmtOptDate(r.slaResolutionDueAt),
+    r.capturedAtLabel,
+    r.firstResponseAtLabel ?? '—',
+    r.resolvedAtLabel ?? '—',
+    r.slaResponseDueAtLabel ?? '—',
+    r.slaResolutionDueAtLabel ?? '—',
     COMPLIANCE_LABELS[r.responseCompliance],
     COMPLIANCE_LABELS[r.resolutionCompliance],
   ]);
@@ -138,8 +159,8 @@ export function exportMonthlyReportCsv(report: PortalMonthlyReport): void {
     lines.push(csvLine(['Resueltos', String(t.resolved)]));
     lines.push(csvLine(['Pendientes', String(t.pending)]));
     lines.push(csvLine(['Resueltos en el periodo', String(t.resolvedInPeriod)]));
-    lines.push(csvLine(['% cumplimiento de respuesta', fmtPercent(t.responseCompliancePercent)]));
-    lines.push(csvLine(['% cumplimiento de resolución', fmtPercent(t.resolutionCompliancePercent)]));
+    lines.push(csvLine(['% cumplimiento de respuesta', fmtPercentForDocument(t.responseCompliancePercent)]));
+    lines.push(csvLine(['% cumplimiento de resolución', fmtPercentForDocument(t.resolutionCompliancePercent)]));
     lines.push(csvLine(['Sin compromiso de resolución', String(t.withoutCommitment)]));
     lines.push(csvLine(['Aún no vence', String(t.notYetDue)]));
     lines.push('');
@@ -155,7 +176,7 @@ export function exportMonthlyReportCsv(report: PortalMonthlyReport): void {
     lines.push(csvLine(['Aceptados', String(rq.accepted)]));
     lines.push(csvLine(['Entregados', String(rq.delivered)]));
     lines.push(csvLine(['Rechazados', String(rq.rejected)]));
-    lines.push(csvLine(['% cumplimiento de compromiso', fmtPercent(rq.commitmentCompliancePercent)]));
+    lines.push(csvLine(['% cumplimiento de compromiso', fmtPercentForDocument(rq.commitmentCompliancePercent)]));
     lines.push('');
     lines.push(csvLine(REQUIREMENTS_TABLE_HEAD));
     requirementRows(report).forEach((row) => lines.push(csvLine(row)));
@@ -214,8 +235,8 @@ export function exportMonthlyReportPdf(report: PortalMonthlyReport): void {
     );
     y += 5;
     doc.text(
-      `% cumplimiento respuesta: ${fmtPercent(t.responseCompliancePercent)}   ` +
-        `% cumplimiento resolución: ${fmtPercent(t.resolutionCompliancePercent)}   ` +
+      `% cumplimiento respuesta: ${fmtPercentForDocument(t.responseCompliancePercent)}   ` +
+        `% cumplimiento resolución: ${fmtPercentForDocument(t.resolutionCompliancePercent)}   ` +
         `Sin compromiso: ${t.withoutCommitment}   Aún no vence: ${t.notYetDue}`,
       marginX,
       y,
@@ -253,7 +274,7 @@ export function exportMonthlyReportPdf(report: PortalMonthlyReport): void {
     doc.setFontSize(9);
     doc.text(
       `Solicitados: ${rq.requested}   Aceptados: ${rq.accepted}   Entregados: ${rq.delivered}   ` +
-        `Rechazados: ${rq.rejected}   % cumplimiento de compromiso: ${fmtPercent(rq.commitmentCompliancePercent)}`,
+        `Rechazados: ${rq.rejected}   % cumplimiento de compromiso: ${fmtPercentForDocument(rq.commitmentCompliancePercent)}`,
       marginX,
       y,
     );

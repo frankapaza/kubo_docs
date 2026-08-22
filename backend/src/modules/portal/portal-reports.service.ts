@@ -55,6 +55,17 @@ function formatPeruDateTime(instant: Date): string {
 }
 
 /**
+ * Igual que `formatPeruDateTime`, para una marca de tiempo del ticket que
+ * puede no existir todavía (`firstResponseAt`/`resolvedAt` en uno sin
+ * responder o resolver, o un SLA sin vencimiento pactado). `null` entra,
+ * `null` sale — esta capa solo formatea, no decide qué texto le corresponde
+ * a la ausencia (eso lo hace quien pinta la vista).
+ */
+function formatPeruDateTimeOrNull(instant: Date | null): string | null {
+  return instant === null ? null : formatPeruDateTime(instant);
+}
+
+/**
  * Lista blanca campo a campo hacia el módulo de cálculo. Nunca `{...t}`: por
  * ahí saldrían `rootCause`, `correctiveAction`, `resolutionMd` o
  * `assigneeUserId` hacia un módulo cuyo resultado, tarde o temprano, ve el
@@ -108,10 +119,15 @@ export function toTicketView(r: ReportTicketRowWithCompliance): MonthlyReportTic
     priority: r.priority,
     status: TICKET_STATUS_LABELS[r.status as keyof typeof TICKET_STATUS_LABELS],
     capturedAt: toIso(r.capturedAt)!,
+    capturedAtLabel: formatPeruDateTime(r.capturedAt),
     firstResponseAt: toIso(r.firstResponseAt),
+    firstResponseAtLabel: formatPeruDateTimeOrNull(r.firstResponseAt),
     resolvedAt: toIso(r.resolvedAt),
+    resolvedAtLabel: formatPeruDateTimeOrNull(r.resolvedAt),
     slaResponseDueAt: toIso(r.slaResponseDueAt),
+    slaResponseDueAtLabel: formatPeruDateTimeOrNull(r.slaResponseDueAt),
     slaResolutionDueAt: toIso(r.slaResolutionDueAt),
+    slaResolutionDueAtLabel: formatPeruDateTimeOrNull(r.slaResolutionDueAt),
     responseCompliance: r.responseCompliance,
     resolutionCompliance: r.resolutionCompliance,
   };

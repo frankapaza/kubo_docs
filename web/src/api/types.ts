@@ -875,7 +875,20 @@ export type ReportScope = 'TICKETS' | 'REQUERIMIENTOS' | 'AMBOS';
  */
 export type Compliance = 'CUMPLIDO' | 'INCUMPLIDO' | 'SIN_COMPROMISO';
 
-/** Fila de ticket del informe: fechas ya en ISO, estado ya traducido por el backend. */
+/**
+ * Fila de ticket del informe: fechas ya en ISO, estado ya traducido por el
+ * backend.
+ *
+ * Cada marca de tiempo con hora viaja por duplicado: el ISO, solo para uso de
+ * máquina, y su `...Label` gemelo -- ya en texto legible, en español, en hora
+ * de Perú y con la hora y la zona escritas, igual que `generatedAtLabel` en
+ * `PortalMonthlyReport`. Quien pinte esta fila (pantalla, PDF o CSV) usa
+ * siempre el `...Label`, nunca el ISO reformateado aquí: este es un informe
+ * que evidencia cumplimiento de SLA, y un veredicto sin la hora que lo
+ * sustenta impresa al lado no se puede verificar. De unos veinte
+ * formateadores de fecha de este frontend, solo uno pasa la zona horaria --
+ * por ahí es por donde este proyecto ya se ha equivocado varias veces.
+ */
 export interface MonthlyReportTicketRow {
   id: number;
   code: string | null;
@@ -884,10 +897,15 @@ export interface MonthlyReportTicketRow {
   priority: string;
   status: string;
   capturedAt: string;
+  capturedAtLabel: string;
   firstResponseAt: string | null;
+  firstResponseAtLabel: string | null;
   resolvedAt: string | null;
+  resolvedAtLabel: string | null;
   slaResponseDueAt: string | null;
+  slaResponseDueAtLabel: string | null;
   slaResolutionDueAt: string | null;
+  slaResolutionDueAtLabel: string | null;
   responseCompliance: Compliance;
   resolutionCompliance: Compliance;
 }

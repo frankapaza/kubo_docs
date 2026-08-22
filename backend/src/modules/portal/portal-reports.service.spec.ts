@@ -256,6 +256,48 @@ describe('PortalReportsService.monthly', () => {
   });
 
   /**
+   * Ronda de correcciones 1 (tarea 7): el frontend pintaba estas marcas de
+   * tiempo con `fmtDate` -- sin hora y sin zona. En un informe cuyo
+   * propósito es evidenciar cumplimiento de SLA, un veredicto
+   * («Incumplido») que no se puede verificar contra la hora del vencimiento
+   * impresa en el propio documento no prueba nada. Mismo remedio que
+   * `generatedAtLabel`: la etiqueta se calcula aquí, en el backend que corre
+   * con `TZ=UTC` fijo, no en el navegador de quien lo lee.
+   *
+   * `slaResponseDueAt` cae de madrugada en UTC (06 jul, 01:00Z) pero de
+   * noche del día anterior en Lima (05 jul, 8:00 p.m.): si la etiqueta
+   * saliera sin `timeZone: PERU_TIME_ZONE`, esta prueba la cazaría con la
+   * fecha corrida un día, el mismo desplazamiento que ya mordió tres veces
+   * a este proyecto.
+   */
+  it('las marcas de tiempo del ticket llevan su etiqueta en hora de Peru, y null cuando el instante no existe', async () => {
+    const { service } = make({
+      ticketRows: [
+        {
+          id: 1,
+          code: 'TK-0001',
+          subject: 'Algo falla',
+          serviceCategory: 'SOPORTE',
+          priority: 'P3',
+          status: 'ASIGNADO',
+          capturedAt: new Date('2026-07-05T14:00:00Z'),
+          firstResponseAt: null,
+          resolvedAt: null,
+          slaResponseDueAt: new Date('2026-07-06T01:00:00Z'), // 5 jul, 8:00 p.m. en Lima
+          slaResolutionDueAt: null,
+        } as Partial<Ticket>,
+      ],
+    });
+    const v = await service.monthly(7, { year: 2026, month: 7, scope: 'TICKETS' });
+    const fila = v.tickets!.rows[0];
+    expect(fila.slaResponseDueAtLabel).toBe('5 de julio de 2026 a las 8:00 p. m. (hora de Perú)');
+    // `null` entra, `null` sale: sin instante no hay etiqueta que inventar.
+    expect(fila.firstResponseAtLabel).toBeNull();
+    expect(fila.resolvedAtLabel).toBeNull();
+    expect(fila.slaResolutionDueAtLabel).toBeNull();
+  });
+
+  /**
    * Ronda de correcciones 1: dos expresiones regulares sueltas sobreviven a
    * mutaciones reales del texto — formatear `hasta` con `to` en vez de
    * `to - 1ms` (el documento diría cubrir «hasta el 1 de agosto», un día que

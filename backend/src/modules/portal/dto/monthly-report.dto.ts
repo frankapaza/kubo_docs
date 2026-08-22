@@ -40,6 +40,17 @@ export class MonthlyReportQueryDto {
  * `status` ya traducido con `TICKET_STATUS_LABELS`. El módulo de cálculo
  * necesita el estado crudo para decidir "resuelto"; el documento que lee el
  * cliente no.
+ *
+ * Cada marca de tiempo con hora viaja **por duplicado**: el ISO (`capturedAt`,
+ * `firstResponseAt`, `resolvedAt`, `slaResponseDueAt`, `slaResolutionDueAt`),
+ * solo para uso de máquina, y su `...Label` gemelo, ya en texto legible, en
+ * español, en hora de Perú y con la hora y la zona escritas — mismo criterio
+ * que `generatedAtLabel` en `MonthlyReportView`, y por el mismo motivo: este
+ * documento existe para evidenciar cumplimiento de SLA, y un veredicto
+ * («Incumplido») que no se puede verificar contra la hora impresa no prueba
+ * nada. Quien pinte el documento usa el `...Label`, nunca el ISO reformateado
+ * en el navegador — de una veintena de formateadores de fecha en el
+ * frontend, solo uno pasa la zona horaria.
  */
 export interface MonthlyReportTicketRow {
   id: number;
@@ -49,10 +60,15 @@ export interface MonthlyReportTicketRow {
   priority: string;
   status: string;
   capturedAt: string;
+  capturedAtLabel: string;
   firstResponseAt: string | null;
+  firstResponseAtLabel: string | null;
   resolvedAt: string | null;
+  resolvedAtLabel: string | null;
   slaResponseDueAt: string | null;
+  slaResponseDueAtLabel: string | null;
   slaResolutionDueAt: string | null;
+  slaResolutionDueAtLabel: string | null;
   responseCompliance: Compliance;
   resolutionCompliance: Compliance;
 }
