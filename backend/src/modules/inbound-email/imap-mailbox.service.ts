@@ -479,9 +479,36 @@ export function extractFromAddress(parsed: Pick<ParsedMail, 'from'>): string {
  * (Task 6) no admite otra salida: exige un `string` siempre, así que algún
  * valor hay que producir.
  */
+const SYNTHETIC_MESSAGE_ID_PREFIX = '<sin-message-id.';
+const SYNTHETIC_MESSAGE_ID_SUFFIX = '@buzon-imap.invalid>';
+
 export function syntheticMessageId(rawSource: Buffer): string {
   const hash = createHash('sha256').update(rawSource).digest('hex');
-  return `<sin-message-id.${hash}@buzon-imap.invalid>`;
+  return `${SYNTHETIC_MESSAGE_ID_PREFIX}${hash}${SYNTHETIC_MESSAGE_ID_SUFFIX}`;
+}
+
+/**
+ * Si `value` es un `Message-ID` sintético que esta misma función genera (ver
+ * arriba) -- la señal de que el correo original no traía ninguna cabecera
+ * `Message-ID` propia. Comparte el prefijo y el sufijo con `syntheticMessageId`
+ * a propósito (una sola vez, en las dos constantes de arriba), para que las
+ * dos funciones no puedan desincronizarse.
+ *
+ * Existe para `InboundEmailService.retry` (Task 9, ronda de correcciones
+ * final): la guarda que ese método tenía antes solo comprobaba
+ * `messageIdRaw === null`, y esa comprobación es código muerto -- esta
+ * ingesta nunca guarda `null` ahí, siempre guarda `message.messageId` (ver
+ * `toIncomingMessage`), que para un correo sin cabecera propia YA ES este
+ * sustituto sintético, nunca `null`. Un valor sintético nunca fue una
+ * cabecera real del buzón, así que buscarlo con `markUnprocessed` (que busca
+ * por `header: {'message-id': ...}`, ver esa función más abajo) nunca lo
+ * encontraría, y el motivo que devolvería el adaptador ("puede que alguien lo
+ * haya borrado a mano del buzón, o que ya se haya reencolado antes") sería
+ * inventado: el correo nunca fue localizable por esta vía, no es que lo hayan
+ * borrado ni que ya se reencolara.
+ */
+export function isSyntheticMessageId(value: string): boolean {
+  return value.startsWith(SYNTHETIC_MESSAGE_ID_PREFIX) && value.endsWith(SYNTHETIC_MESSAGE_ID_SUFFIX);
 }
 
 /**

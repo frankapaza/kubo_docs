@@ -4,6 +4,7 @@
  * (para no crear un ticket a partir de un correo que el propio sistema
  * mando y que un reenvio o una regla de copia le devolvio). Dominio puro.
  */
+import { normalizeDomain } from './message-headers';
 
 /**
  * El veredicto de autenticacion de un correo, con **cuatro** valores.
@@ -258,12 +259,21 @@ type DmarcOutcome = 'PASS' | 'NOT_PASS' | 'ABSENT' | 'COMPROMISED';
  *
  * El valor puede venir entre comillas (`header.from="dominio.com"`, RFC 8601
  * lo permite como `quoted-string`); las comillas, si las hay, se quitan.
+ *
+ * El dominio se normaliza con `normalizeDomain` (`domain/message-headers.ts`)
+ * a su forma codificada (punycode) -- lo mismo que `domainOf` aplica del otro
+ * lado del cruce en `InboundEmailService.processOne`. Un servidor cumplidor
+ * siempre escribe ya la forma codificada aqui, asi que en la practica esto no
+ * cambia nada; existe por defensa en profundidad, para el reverso teorico de
+ * un servidor que (contra RFC 8601) escribiera la forma con caracteres
+ * nacionales: sin normalizar aqui tambien, ese valor no convergeria con el
+ * `domainOf(message.from)`, ya normalizado, y el correo se rechazaria pese a
+ * que los dos lados nombran el mismo dominio.
  */
 function extractHeaderFromDomain(segmentText: string): string | null {
   const match = /\bheader\.from\s*=\s*"?([^\s;()"]+)"?/i.exec(segmentText);
   if (!match) return null;
-  const domain = match[1].trim().toLowerCase();
-  return domain.length > 0 ? domain : null;
+  return normalizeDomain(match[1].trim());
 }
 
 /**
@@ -358,7 +368,9 @@ function evaluateDmarc(header: string): { outcome: DmarcOutcome; headerFromDomai
  * que esa politica de rechazo en SMTP esta configurada y activa en el
  * servidor de correo real.** Sin ella, `SIN_DMARC` seguira bloqueando el
  * caso feliz (el proveedor no informa DMARC en absoluto), pero el vector
- * residual de abajo queda abierto.
+ * residual de abajo queda abierto -- y, desde que existe
+ * `extractAuthenticatedDomain`, con un costo mayor del que este parrafo
+ * describia antes: no es solo "aceptar un correo no autenticado".
  *
  * ## Un vector residual que este analisis NO PUEDE detectar
  *
@@ -386,6 +398,20 @@ function evaluateDmarc(header: string): { outcome: DmarcOutcome; headerFromDomai
  * aqui -- por eso el vector se deja documentado como limitacion conocida
  * (ver el test `LIMITACION CONOCIDA` en el spec) y no como un bug
  * pendiente: cerrarlo exige la politica SMTP de arriba, no mas codigo aqui.
+ *
+ * **El costo real ya no es solo "aceptar un correo no autenticado": es
+ * suplantacion completa.** El mismo `;` sin comillas que fabrica el
+ * segmento `dmarc=pass` de mentira deja al remitente escribir lo que
+ * quiera detras de el en ese mismo segmento -- incluido su propio
+ * `header.from=<dominio de la victima>`. `extractAuthenticatedDomain` lee
+ * `header.from=` de ese mismo segmento fabricado (comparte `evaluateDmarc`
+ * con `judgeAuthentication`, ver arriba), asi que el vector no solo
+ * finge que DMARC paso: tambien finge para QUE dominio paso. Y si el
+ * remitente pone ademas ese mismo dominio en su propia cabecera `From`
+ * (que nadie mas autentica), el cruce de `InboundEmailService.processOne`
+ * (`extractAuthenticatedDomain` vs `domainOf(message.from)`) tambien ve
+ * coincidencia -- el mismo punto y coma que regalaba el paso ahora regala
+ * tambien la identidad.
  *
  * # El contrato de la cabecera que se pasa
  *

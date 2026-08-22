@@ -1,9 +1,12 @@
 import {
+  domainOf,
   extractSenderAddress,
   extractTicketCode,
   isAutomaticMessage,
+  normalizeDomain,
   parseMessageIds,
   stripSubjectPrefixes,
+  withEncodedDomain,
 } from './message-headers';
 
 describe('extractSenderAddress', () => {
@@ -170,5 +173,52 @@ describe('isAutomaticMessage', () => {
   // `list-id` en blanco no lo es.
   it('auto-submitted con valor en blanco no es automatico', () => {
     expect(isAutomaticMessage({ 'auto-submitted': '   ' })).toBe(false);
+  });
+});
+
+/**
+ * Los tres casos en los que `mailparser` decodifica un dominio
+ * internacionalizado (IDN) de forma INCONSISTENTE -- ver el docblock de
+ * `normalizeDomain` para el porque completo. Un servidor de correo escribe
+ * SIEMPRE la forma codificada (punycode) en `header.from=`; si `domainOf`
+ * (sobre lo que entrego `mailparser` como `From`) no convergiera a la misma
+ * forma en los tres casos, el cruce de dominios (`InboundEmailService.processOne`)
+ * descartaria en silencio a cualquier cliente cuyo dominio caiga en el caso
+ * que no converge.
+ */
+describe('normalizeDomain / domainOf: dominio internacionalizado', () => {
+  it('un IDN directo que mailparser decodifico a caracteres nacionales normaliza a su forma codificada', () => {
+    expect(normalizeDomain('пример.com')).toBe('xn--e1afmkfd.com');
+    expect(domainOf('cliente@пример.com')).toBe('xn--e1afmkfd.com');
+  });
+
+  it('un IDN en un subdominio, que mailparser deja en punycode, se mantiene en su forma codificada', () => {
+    expect(domainOf('cliente@correo.xn--e1afmkfd.com')).toBe('correo.xn--e1afmkfd.com');
+  });
+
+  it('un IDN en mayusculas, que mailparser tampoco decodifica ahi, se normaliza a minuscula', () => {
+    expect(domainOf('cliente@XN--E1AFMKFD.COM')).toBe('xn--e1afmkfd.com');
+  });
+
+  it('un dominio ASCII normal no cambia', () => {
+    expect(domainOf('ana@Empresa.COM')).toBe('empresa.com');
+  });
+
+  it('null sin ningun @, igual que antes de normalizar', () => {
+    expect(domainOf('no-es-una-direccion')).toBeNull();
+  });
+});
+
+describe('withEncodedDomain', () => {
+  it('reescribe el dominio internacionalizado decodificado a su forma codificada, sin tocar la parte local', () => {
+    expect(withEncodedDomain('Cliente@пример.com')).toBe('Cliente@xn--e1afmkfd.com');
+  });
+
+  it('deja igual una direccion sin @ (nada seguro que reescribir)', () => {
+    expect(withEncodedDomain('no-es-una-direccion')).toBe('no-es-una-direccion');
+  });
+
+  it('un dominio ASCII normal solo se recorta/normaliza, no cambia de forma', () => {
+    expect(withEncodedDomain('ana@empresa.com')).toBe('ana@empresa.com');
   });
 });

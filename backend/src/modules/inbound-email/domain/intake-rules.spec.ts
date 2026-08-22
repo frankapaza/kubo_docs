@@ -268,6 +268,19 @@ describe('judgeAuthentication', () => {
   it('LIMITACION CONOCIDA: un ";" sin comillas en smtp.helo es indistinguible de una cabecera legitima', () => {
     expect(judgeAuthentication('mx.kubo.com; spf=fail smtp.helo=evil; dmarc=pass')).toBe('PASA');
   });
+
+  /**
+   * El mismo vector de arriba, pero mostrando el costo real: no es solo un
+   * `PASA` de mentira, es un `header.from=` de mentira tambien -- el
+   * remitente lo escribe en el mismo segmento fabricado por su propio `;`
+   * sin comillas en `smtp.helo`. Documenta el comportamiento ACTUAL, igual
+   * que el test anterior: no lo aprueba, lo deja visible.
+   */
+  it('LIMITACION CONOCIDA: el mismo ";" sin comillas tambien fabrica un header.from de mentira', () => {
+    const cabecera = 'mx.kubo.com; spf=fail smtp.helo=evil; dmarc=pass header.from=victima.com';
+    expect(judgeAuthentication(cabecera)).toBe('PASA');
+    expect(extractAuthenticatedDomain(cabecera)).toBe('victima.com');
+  });
 });
 
 /**
@@ -293,6 +306,20 @@ describe('extractAuthenticatedDomain', () => {
     expect(
       extractAuthenticatedDomain('mx.kuboti.com; dmarc=pass header.from="Cliente.COM"'),
     ).toBe('cliente.com');
+  });
+
+  /**
+   * Reverso teorico del bug de `mailparser` que `normalizeDomain` cierra
+   * (ver su docblock en `domain/message-headers.ts`): un servidor real
+   * siempre escribe `header.from=` ya en forma codificada, pero si alguno
+   * escribiera la forma con caracteres nacionales, el dominio tiene que
+   * normalizar igual a punycode -- la misma forma a la que converge
+   * `domainOf(message.from)` del otro lado del cruce.
+   */
+  it('normaliza a su forma codificada un header.from internacionalizado', () => {
+    expect(
+      extractAuthenticatedDomain('mx.kuboti.com; dmarc=pass header.from=пример.com'),
+    ).toBe('xn--e1afmkfd.com');
   });
 
   it('null si dmarc no pasa', () => {

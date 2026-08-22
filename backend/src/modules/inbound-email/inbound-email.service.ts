@@ -4,6 +4,7 @@ import { QueryFailedError } from 'typeorm';
 import { InboundEmailsRepository } from './inbound-emails.repository';
 import { IncomingMessage, Mailbox, MAILBOX } from './mailbox.interface';
 import { normalizeMessageId } from './message-id';
+import { isSyntheticMessageId } from './imap-mailbox.service';
 import { correlate } from './domain/correlation';
 import {
   domainOf,
@@ -11,10 +12,11 @@ import {
   isAutomaticMessage,
   parseMessageIds,
   stripSubjectPrefixes,
+  withEncodedDomain,
 } from './domain/message-headers';
 import { extractAuthenticatedDomain, isOwnMailbox, judgeAuthentication } from './domain/intake-rules';
 import { stripQuotedText } from './domain/quoted-text';
-import { appendRequeuedReason, buildRequeuedMessageId } from './domain/retry';
+import { appendRequeuedReason, buildRequeuedMessageId, isRequeuedMessageId } from './domain/retry';
 import {
   UNKNOWN_REPLY_COOLDOWN_DAYS,
   hasReachedNewTicketCap,
@@ -30,6 +32,7 @@ import { UsersService } from '../users/users.service';
 import { CreateTicketDto } from '../tickets/dto/create-ticket.dto';
 import { EmailOrigin, TicketsService } from '../tickets/tickets.service';
 import { PostMessageInput, TicketMessagesService } from '../ticket-messages/ticket-messages.service';
+import { WorkspaceService } from '../workspace/workspace.service';
 
 /**
  * Token de inyección para la dirección del propio buzón (p. ej.
@@ -200,9 +203,23 @@ function headerMessageIds(message: IncomingMessage): string[] {
  * el regex en sí: por eso aquí ya no se aplica ninguna, solo se normaliza
  * mayúsculas/espacios -- lo mismo que ya hacía `extractSenderAddress` al
  * final, sin la parte que interpretaba `<...>`.
+ *
+ * **El dominio, además, se reescribe a su forma codificada (`withEncodedDomain`,
+ * ronda de correcciones final de la Task 9).** No solo por el cruce de
+ * dominios de `processOne` (que ya normaliza los dos lados por su cuenta, vía
+ * `domainOf`/`extractAuthenticatedDomain`): `message.from` tal cual sale de
+ * aquí es también lo que `ClientUsersService.findByEmail` usa para buscar al
+ * cliente, lo que `isOwnMailbox` compara, y lo que se guarda en
+ * `inbound_emails.from_address`. Si un dominio internacionalizado llegara
+ * aquí con caracteres nacionales (el mismo defecto de `mailparser` que
+ * `normalizeDomain` documenta), esa búsqueda viajaría a una columna MySQL
+ * cuya ordenación por defecto ignora los acentos -- y un dominio real pero
+ * distinto, que solo difiera de otro en una tilde, podría confundirse con él.
+ * Reescribir aquí, antes de que `from` se use para nada, cierra ese reverso
+ * además del cruce.
  */
 function withNormalizedFrom(message: IncomingMessage): IncomingMessage {
-  return { ...message, from: message.from.trim().toLowerCase() };
+  return { ...message, from: withEncodedDomain(message.from.trim().toLowerCase()) };
 }
 
 /**
@@ -280,6 +297,7 @@ export class InboundEmailService {
     private readonly clientUsers: ClientUsersService,
     private readonly users: UsersService,
     private readonly email: EmailService,
+    private readonly workspace: WorkspaceService,
   ) {}
 
   async drain(limit: number = INBOUND_EMAIL_BATCH_SIZE): Promise<DrainSummary> {
@@ -1006,14 +1024,38 @@ export class InboundEmailService {
    * lleva la bandera --, y nada lo repararía salvo que alguien note el
    * problema y pulse "reintentar" otra vez a mano.
    *
-   * **No puede duplicar un ticket ya creado.** El botón solo existe para
-   * filas en `ERROR` -- se comprueba aquí, y además la pantalla no lo ofrece
-   * para otras --, así que no hay ningún ticket que duplicar de por medio. Y
-   * aunque se invocara de todos modos sobre una fila que en realidad ya
-   * terminó bien en OTRO intento (con el mismo correo, otro `message_id`
-   * normalizado no aplica aquí: sería el mismo message_id exacto, caso que
-   * el paso anterior ya descarta), el camino normal de `processOne` la
-   * volvería a tratar como duplicada por la clave única de `message_id`.
+   * **No puede duplicar un ticket ya creado.** Si `processOne` falló DESPUÉS
+   * de que `tickets.create` ya escribiera el ticket (y solo falló el
+   * `updateOutcome` que le iba a poner el `ticketId` a esta fila -- ver
+   * `handleClientSender`), la fila queda en `ERROR` con `ticketId: null`: se
+   * prefiere perder ese correo a duplicar el ticket (ver el docblock de
+   * `claim`). Y si de verdad hay un ticket huérfano de esa caída, el propio
+   * `tickets.email_message_id` que `tickets.create` ya escribió con este
+   * mismo `Message-ID` hace que el reproceso lo detecte por
+   * `findTicketsByEmailMessageIds` y lo descarte como duplicado -- no cree
+   * uno segundo. Un `ticketId: null` en una fila `ERROR` es, por construcción,
+   * siempre seguro de reencolar por este camino.
+   *
+   * **Pero SÍ puede duplicar un mensaje de un hilo (y su aviso al cliente) --
+   * y aquí no hay ninguna protección equivalente.** Para `MENSAJE_ANADIDO`
+   * (cliente o personal), `claim` reclama la fila con el `ticketId` YA
+   * CONOCIDO desde el principio (`handleClientSender`/`handleStaffSender`),
+   * antes incluso de intentar escribir el mensaje. Si `ticketMessages.post`
+   * escribe el mensaje (su transacción confirma) y el fallo llega DESPUÉS
+   * -- de vuelta al llamador, antes de que el `catch` de este servicio
+   * termine de correr --, la fila igual acaba en `ERROR`, pero con el
+   * `ticketId` puesto desde `claim`, no corregido después como en el camino
+   * de arriba. **No hay forma de distinguir, solo mirando la fila, esa
+   * escritura-que-sí-aterrizó de una que de verdad nunca llegó a escribirse**
+   * (`post` rechazando por validación, un ticket cerrado, un fallo de red
+   * antes de la transacción...). Ante esa ambigüedad se decide por el mismo
+   * criterio que ya sostiene todo este módulo (`claim`): se prefiere perder
+   * -- negarse a reencolar -- antes que arriesgar un mensaje repetido y un
+   * segundo aviso al mismo cliente, que sí lo nota quien lo recibe. Por eso
+   * una fila `ERROR` con `ticketId` puesto no se reencola nunca, aunque en
+   * la mayoría de los casos reales el mensaje de verdad no se llegó a
+   * escribir: el hecho que se puede leer de la fila no basta para decidir
+   * los dos casos por separado, así que se decide por el más seguro.
    */
   async retry(id: number, actorEmail: string): Promise<InboundEmail> {
     const row = await this.repo.findById(id);
@@ -1026,14 +1068,81 @@ export class InboundEmailService {
         message: 'Solo se pueden reintentar los correos que quedaron en error.',
       });
     }
-    // Decidido por el hecho (¿se guardó el valor crudo?), nunca por asumir
-    // uno en su lugar: sin él no hay nada que buscar en el buzón, y fingir
-    // que se reencoló sin haberlo hecho de verdad es peor que decir que no
-    // se pudo.
-    if (row.messageIdRaw === null) {
+    // El hecho que decide si esta fila YA se reencoló antes no es su
+    // `outcome` (que se queda en `ERROR` a propósito, como rastro histórico
+    // -- ver el docblock de `domain/retry.ts`): es si su `message_id` ya
+    // lleva el sufijo de un reintento anterior. Sin esta comprobación, la
+    // pantalla seguiría ofreciendo "reintentar" para siempre sobre la misma
+    // fila, y un segundo reintento intentaría desmarcar en el buzón el
+    // `Message-ID` ORIGINAL -- que la ingesta ya pudo haber vuelto a procesar
+    // hace tiempo con una fila nueva -- reprocesando el correo una segunda
+    // vez.
+    if (isRequeuedMessageId(row.messageId)) {
       throw new BadRequestException({
         code: 'CONFLICT',
-        message: 'Este correo no guardó su identificador original: no se puede reencolar sin él.',
+        message: 'Este correo ya se reencoló antes: no se puede reencolar la misma fila dos veces.',
+      });
+    }
+    // Ver el docblock de este método ("No puede duplicar un ticket ya
+    // creado" / "Pero SÍ puede duplicar un mensaje de un hilo") para el
+    // porqué exacto de decidir por este hecho.
+    if (row.ticketId !== null) {
+      throw new BadRequestException({
+        code: 'CONFLICT',
+        message:
+          'Esta fila ya tiene un ticket asociado: es posible que el mensaje ya se hubiera escrito antes ' +
+          'de que el proceso fallara, y reencolarlo podría duplicarlo (y su aviso al cliente). ' +
+          'Comprueba el hilo de ese ticket antes de decidir qué hacer.',
+      });
+    }
+    // Decidido por el hecho (¿es un identificador sintético, que esta
+    // ingesta genera cuando el correo original no traía ninguna cabecera
+    // `Message-ID` propia -- ver `syntheticMessageId`, `imap-mailbox.service.ts`?),
+    // nunca por asumir uno en su lugar. La comprobación anterior aquí
+    // (`messageIdRaw === null`) era código muerto: esta ingesta nunca guarda
+    // `null` en esa columna, siempre guarda `message.messageId` (ver
+    // `toIncomingMessage`), que para un correo sin cabecera propia YA ES el
+    // sustituto sintético. Buscar ese valor en el buzón (`markUnprocessed`,
+    // que busca por la cabecera `Message-ID`) nunca lo iba a encontrar -- no
+    // porque alguien lo haya borrado, sino porque nunca fue una cabecera real
+    // del mensaje -- así que se decide aquí, con un motivo verdadero, en vez
+    // de dejar que el adaptador lo intente y devuelva un motivo inventado.
+    if (row.messageIdRaw === null || isSyntheticMessageId(row.messageIdRaw)) {
+      throw new BadRequestException({
+        code: 'CONFLICT',
+        message:
+          'Este correo no traía ninguna cabecera Message-ID propia: no se puede localizar de nuevo en ' +
+          'el buzón para reencolarlo.',
+      });
+    }
+
+    // El interruptor de la ingesta (`WorkspaceService.isImapIngestionEnabled`,
+    // el mismo que consulta `InboundEmailScheduler` antes de cada pasada):
+    // apagado -- el estado de salida, y el normal durante buena parte de la
+    // vida de este proyecto -- ningún reloj automático va a leer el buzón
+    // nunca, así que desmarcar el correo y liberar la fila no logra nada:
+    // el correo se queda desmarcado en el buzón para siempre, sin que nada
+    // lo recoja, mientras la pantalla dice en verde que "se procesará en el
+    // siguiente ciclo". Fallo cerrado, igual que `allowedToReplyToUnknown`/
+    // `newTicketCapReached`: si la propia consulta revienta, se trata como
+    // apagada y no se reencola -- no saber si está encendida nunca debe
+    // tratarse como que lo está.
+    let ingestionEncendida: boolean;
+    try {
+      ingestionEncendida = await this.workspace.isImapIngestionEnabled();
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo comprobar el interruptor de la ingesta antes de reencolar la fila ${id}: ` +
+          errorText(error),
+      );
+      ingestionEncendida = false;
+    }
+    if (!ingestionEncendida) {
+      throw new BadRequestException({
+        code: 'CONFLICT',
+        message:
+          'La ingesta de correo está apagada: reencolar este correo no serviría de nada, porque nada ' +
+          'lo va a leer del buzón hasta que se encienda.',
       });
     }
 

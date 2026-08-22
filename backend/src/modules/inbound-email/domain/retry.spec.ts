@@ -1,4 +1,9 @@
-import { MESSAGE_ID_COLUMN_MAX_LENGTH, appendRequeuedReason, buildRequeuedMessageId } from './retry';
+import {
+  MESSAGE_ID_COLUMN_MAX_LENGTH,
+  appendRequeuedReason,
+  buildRequeuedMessageId,
+  isRequeuedMessageId,
+} from './retry';
 
 const UN_INSTANTE = new Date('2026-08-22T15:30:00Z');
 
@@ -48,6 +53,25 @@ describe('buildRequeuedMessageId', () => {
     const resultado = buildRequeuedMessageId('<corto@x.com>', 1, UN_INSTANTE);
 
     expect(resultado.startsWith('<corto@x.com>')).toBe(true);
+  });
+});
+
+describe('isRequeuedMessageId', () => {
+  it('reconoce un message_id que ya lleva el sufijo de un reintento anterior', () => {
+    const reencolado = buildRequeuedMessageId('<falla@empresa.com>', 55, UN_INSTANTE);
+
+    expect(isRequeuedMessageId(reencolado)).toBe(true);
+  });
+
+  it('un message_id original (nunca reencolado) no lo reconoce', () => {
+    expect(isRequeuedMessageId('<falla@empresa.com>')).toBe(false);
+  });
+
+  // El sustituto sintético de un correo sin Message-ID propio tampoco es un
+  // reintento: no lleva el sufijo, solo se parece en que ninguno de los dos
+  // es un Message-ID "normal".
+  it('un identificador sintético (sin Message-ID propio) tampoco lo reconoce', () => {
+    expect(isRequeuedMessageId('<sin-message-id.abc123@buzon-imap.invalid>')).toBe(false);
   });
 });
 

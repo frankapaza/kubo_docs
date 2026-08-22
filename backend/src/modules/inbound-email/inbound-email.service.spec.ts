@@ -187,6 +187,8 @@ interface Opciones {
   staffUser?: typeof STAFF_USER | null;
   crearTicketImpl?: (...args: unknown[]) => Promise<unknown>;
   postMensajeImpl?: (...args: unknown[]) => Promise<unknown>;
+  /** El interruptor de la ingesta (`WorkspaceService.isImapIngestionEnabled`) que ve `retry`. Encendido por omisión. */
+  ingestionEnabled?: boolean;
 }
 
 function montar(opciones: Opciones = {}) {
@@ -196,6 +198,7 @@ function montar(opciones: Opciones = {}) {
     staffUser = null,
     crearTicketImpl,
     postMensajeImpl,
+    ingestionEnabled = true,
   } = opciones;
 
   const mailbox = mailboxDoble(mensajes);
@@ -216,6 +219,7 @@ function montar(opciones: Opciones = {}) {
   const email = {
     send: jest.fn().mockResolvedValue({ messageId: '<respuesta@kuboti.com>', accepted: [], rejected: [] }),
   };
+  const workspace = { isImapIngestionEnabled: jest.fn().mockResolvedValue(ingestionEnabled) };
 
   const service = new InboundEmailService(
     mailbox as any,
@@ -226,9 +230,10 @@ function montar(opciones: Opciones = {}) {
     clientUsers as any,
     users as any,
     email as any,
+    workspace as any,
   );
 
-  return { service, mailbox, repo, tickets, ticketMessages, clientUsers, users, email };
+  return { service, mailbox, repo, tickets, ticketMessages, clientUsers, users, email, workspace };
 }
 
 /** La fila final de `inbound_emails` para un `messageIdRaw` dado, o `undefined` si no hay ninguna. */
@@ -771,6 +776,38 @@ describe('InboundEmailService.drain', () => {
       expect(resumen.discarded).toBe(1);
     });
 
+    /**
+     * Ronda de correcciones final de la Task 9: antes de normalizar los dos
+     * lados del cruce de dominios a su forma codificada (`normalizeDomain`,
+     * `domain/message-headers.ts`), un cliente con un dominio
+     * internacionalizado se descartaba SIEMPRE, en silencio -- `mailparser`
+     * decodifica el dominio de `From` a caracteres nacionales (`пример.com`)
+     * cuando es de nivel superior y en minúscula, mientras el servidor de
+     * correo escribe `header.from=` siempre en su forma codificada
+     * (`xn--e1afmkfd.com`): dos representaciones del MISMO dominio que nunca
+     * coincidían como cadena, y el cruce de dominios -- que existe para
+     * proteger al cliente legítimo -- lo descartaba a él en su lugar.
+     */
+    it('un cliente con dominio internacionalizado no se descarta aunque mailparser decodifique el From a caracteres nacionales', async () => {
+      const { service, repo, tickets } = montar({
+        clientUser: CLIENT_USER,
+        mensajes: [
+          unMensaje({
+            from: 'ana@пример.com',
+            authenticationResults: 'mx.kuboti.com; dmarc=pass header.from=xn--e1afmkfd.com',
+          }),
+        ],
+      });
+
+      const resumen = await service.drain();
+
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('TICKET_CREADO');
+      expect(tickets.create).toHaveBeenCalled();
+      expect(resumen.discarded).toBe(0);
+      expect(resumen.ticketsCreated).toBe(1);
+    });
+
     it('un correo automático: DESCARTADO_AUTOMATICO, no se responde y no crea nada', async () => {
       const { service, repo, email, tickets } = montar({
         clientUser: CLIENT_USER,
@@ -847,17 +884,53 @@ describe('InboundEmailService.drain', () => {
      * "nombre <dirección>" (el contrato cambió, ver `IncomingMessage.from`),
      * pero si alguno lo hiciera de todos modos, el resultado correcto es
      * remitente irreconocible -- nunca una identidad adivinada.
+     *
+     * Ronda de correcciones final de la Task 9: desde que `domainOf` valida
+     * de verdad el dominio (`normalizeDomain`, con `domainToASCII`) en vez de
+     * aceptar "lo que siga al último @" tal cual, esa cadena sin desenvolver
+     * ya ni siquiera llega a `clientUsers.findByEmail` -- `domainOf` sobre
+     * `'"ana quispe" <ana@empresa.com>'` da `null` (el `>` final no es un
+     * dominio válido), así que el cruce de dominios la rechaza como no
+     * autenticada antes de buscar ningún remitente. Es un resultado más
+     * seguro todavía que el anterior (que dependía de que la búsqueda,
+     * hecha con la cadena sucia, no encontrara nada por casualidad): aquí ni
+     * siquiera se llega a intentar la búsqueda.
      */
-    it('un "nombre <dirección>" ya no se desenvuelve: la búsqueda del remitente usa la cadena tal cual, no la dirección limpia', async () => {
-      const { service, clientUsers } = montar({
+    it('un "nombre <dirección>" ya no se desenvuelve: el dominio resultante es inválido y se rechaza sin buscar remitente', async () => {
+      const { service, repo, clientUsers, tickets } = montar({
         clientUser: CLIENT_USER,
         mensajes: [unMensaje({ from: '"Ana Quispe" <ana@empresa.com>' })],
       });
 
       await service.drain();
 
-      expect(clientUsers.findByEmail).toHaveBeenCalledWith('"ana quispe" <ana@empresa.com>');
-      expect(clientUsers.findByEmail).not.toHaveBeenCalledWith('ana@empresa.com');
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('DESCARTADO_NO_AUTENTICADO');
+      expect(clientUsers.findByEmail).not.toHaveBeenCalled();
+      expect(tickets.create).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Ronda de correcciones final de la Task 9: el dominio, además de
+     * recortarse y pasarse a minúscula, se reescribe a su forma codificada
+     * (`withEncodedDomain`). Cierra un reverso teórico: si el dominio
+     * llegara con caracteres nacionales (el mismo defecto de `mailparser`
+     * que descarta a un cliente con dominio internacionalizado, ver
+     * `domain/message-headers.spec.ts`), la búsqueda de cliente viajaría a
+     * una columna MySQL cuya ordenación por defecto ignora los acentos --
+     * un dominio real pero distinto podría confundirse con él. Reescribir
+     * antes de buscar cierra eso.
+     */
+    it('el dominio se busca en su forma codificada, no con caracteres nacionales', async () => {
+      const { service, clientUsers } = montar({
+        clientUser: CLIENT_USER,
+        mensajes: [unMensaje({ from: 'ana@пример.com' })],
+      });
+
+      await service.drain();
+
+      expect(clientUsers.findByEmail).toHaveBeenCalledWith('ana@xn--e1afmkfd.com');
+      expect(clientUsers.findByEmail).not.toHaveBeenCalledWith('ana@пример.com');
     });
   });
 
@@ -1228,6 +1301,11 @@ describe('InboundEmailService.retry', () => {
     fromAddress: 'ana@empresa.com',
     outcome: 'ERROR' as const,
     reason: 'Fallo de red al escribir el ticket.',
+    // `null` explícito, no ausente: el camino de `TICKET_CREADO` (`claim` con
+    // `ticketId: null`, corregido solo si `tickets.create` termina bien) es
+    // el único que puede acabar en `ERROR` con este campo en `null` -- ver el
+    // docblock de `InboundEmailService.retry`.
+    ticketId: null as number | null,
   };
 
   it('quita la marca en el buzón por el Message-ID crudo, y renombra la fila para liberar la clave única', async () => {
@@ -1309,5 +1387,87 @@ describe('InboundEmailService.retry', () => {
     expect(mailbox.markUnprocessed).toHaveBeenNthCalledWith(1, '<falla@empresa.com>');
     expect(mailbox.markUnprocessed).toHaveBeenNthCalledWith(2, '<otra@empresa.com>');
     expect(repo.filas.find((f) => f.id === 55)!.messageId).not.toBe(repo.filas.find((f) => f.id === 56)!.messageId);
+  });
+
+  /**
+   * B1: con la ingesta apagada -- el estado por omisión -- reencolar no toca
+   * nada del buzón ni de la fila: nada va a leerla nunca, así que fingir que
+   * se reencoló sería mentirle al operador (la pantalla diría "se procesará
+   * en el siguiente ciclo" sobre un correo que ningún reloj va a mirar).
+   */
+  it('con la ingesta apagada, no reencola y no toca el buzón', async () => {
+    const { service, mailbox, repo, workspace } = montar({ ingestionEnabled: false });
+    repo.filas.push({ ...FILA_ERROR });
+
+    await expect(service.retry(55, 'tecnico@kuboti.com')).rejects.toThrow(/ingesta de correo está apagada/);
+
+    expect(workspace.isImapIngestionEnabled).toHaveBeenCalled();
+    expect(mailbox.markUnprocessed).not.toHaveBeenCalled();
+    expect(repo.filas.find((f) => f.id === 55)!.messageId).toBe('<falla@empresa.com>');
+  });
+
+  it('si la consulta del interruptor revienta, se trata como apagada (falla cerrado) y no se reencola', async () => {
+    const { service, mailbox, repo, workspace } = montar();
+    workspace.isImapIngestionEnabled.mockRejectedValueOnce(new Error('la base no responde'));
+    repo.filas.push({ ...FILA_ERROR });
+
+    await expect(service.retry(55, 'tecnico@kuboti.com')).rejects.toThrow(/ingesta de correo está apagada/);
+    expect(mailbox.markUnprocessed).not.toHaveBeenCalled();
+  });
+
+  /**
+   * B2: el hecho que decide si una fila ya se reencoló no es su `outcome`
+   * (se queda en `ERROR` a propósito) sino si su `messageId` ya lleva el
+   * sufijo de `buildRequeuedMessageId`. Sin esto, un segundo reintento
+   * desmarcaría en el buzón el `Message-ID` ORIGINAL -- que la ingesta
+   * automática ya pudo haber vuelto a procesar hace tiempo -- y lo
+   * reprocesaría una segunda vez.
+   */
+  it('una fila que ya se reencoló antes (su messageId lleva el sufijo) no se vuelve a reencolar', async () => {
+    const { service, mailbox, repo } = montar();
+    repo.filas.push({
+      ...FILA_ERROR,
+      messageId: '<falla@empresa.com>#reintento-55-1755882600000',
+    });
+
+    await expect(service.retry(55, 'tecnico@kuboti.com')).rejects.toThrow(/ya se reencoló antes/);
+    expect(mailbox.markUnprocessed).not.toHaveBeenCalled();
+  });
+
+  /**
+   * B3: la ingesta nunca guarda `null` en `messageIdRaw` -- para un correo
+   * sin cabecera `Message-ID` propia guarda el sustituto sintético
+   * (`syntheticMessageId`). Ese valor nunca fue una cabecera real del buzón,
+   * así que hay que negarse aquí, con un motivo verdadero, en vez de dejar
+   * que `markUnprocessed` lo intente y falle con un motivo inventado ("puede
+   * que alguien lo haya borrado a mano").
+   */
+  it('con un identificador sintético (correo sin Message-ID propio), no se puede reencolar y no se intenta nada en el buzón', async () => {
+    const { service, mailbox, repo } = montar();
+    repo.filas.push({
+      ...FILA_ERROR,
+      messageIdRaw: '<sin-message-id.abc123@buzon-imap.invalid>',
+    });
+
+    await expect(service.retry(55, 'tecnico@kuboti.com')).rejects.toThrow(
+      /no traía ninguna cabecera Message-ID propia/,
+    );
+    expect(mailbox.markUnprocessed).not.toHaveBeenCalled();
+  });
+
+  /**
+   * B4: una fila `ERROR` con `ticketId` puesto es exactamente aquella donde
+   * una escritura (el mensaje de un hilo) pudo aterrizar antes de que el
+   * proceso fallara -- a diferencia del camino de `TICKET_CREADO`, que solo
+   * corrige el `ticketId` de la fila DESPUÉS de que la creación completa del
+   * ticket haya tenido éxito. Reencolar arriesgaría duplicar ese mensaje y
+   * su aviso al cliente, así que se rechaza sin tocar nada.
+   */
+  it('una fila ERROR con ticketId ya puesto no se reencola (podría duplicar un mensaje del hilo)', async () => {
+    const { service, mailbox, repo } = montar();
+    repo.filas.push({ ...FILA_ERROR, ticketId: 501 });
+
+    await expect(service.retry(55, 'tecnico@kuboti.com')).rejects.toThrow(/ya tiene un ticket asociado/);
+    expect(mailbox.markUnprocessed).not.toHaveBeenCalled();
   });
 });

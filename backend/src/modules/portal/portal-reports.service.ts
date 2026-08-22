@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 
 import { peruMonthBounds, isPeruMonthClosed } from '../../common/peru-month';
 import { PERU_TIME_ZONE } from '../../common/time-zone';
+import { formatPeruDateTime as formatPeruInstant } from '../../common/peru-date-time';
 import { TicketsRepository } from '../tickets/tickets.repository';
 import { Ticket } from '../tickets/entities/ticket.entity';
 import { TICKET_STATUS_LABELS } from '../tickets/domain/ticket-state-machine';
@@ -44,14 +45,13 @@ function formatPeruDate(instant: Date): string {
  * deja para que la formatee el navegador del cliente: el backend corre en
  * `TZ=UTC` a propósito, y es la única capa que puede garantizar que el mismo
  * instante se lea igual sin importar en qué máquina abran el documento.
+ *
+ * Delega en el formateador compartido (`common/peru-date-time.ts`) con el
+ * estilo `'long'` -- el único que este documento necesita -- para no
+ * mantener una segunda copia de la llamada a `Intl.DateTimeFormat`.
  */
 function formatPeruDateTime(instant: Date): string {
-  const texto = new Intl.DateTimeFormat('es-PE', {
-    dateStyle: 'long',
-    timeStyle: 'short',
-    timeZone: PERU_TIME_ZONE,
-  }).format(instant);
-  return `${texto} (hora de Perú)`;
+  return formatPeruInstant(instant, 'long');
 }
 
 /**

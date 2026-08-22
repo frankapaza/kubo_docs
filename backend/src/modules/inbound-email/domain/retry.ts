@@ -1,4 +1,4 @@
-import { PERU_TIME_ZONE } from '../../../common/time-zone';
+import { formatPeruDateTime } from '../../../common/peru-date-time';
 
 /**
  * El texto de un reintento (Task 9, pantalla de correo entrante). Dominio
@@ -52,22 +52,27 @@ export function buildRequeuedMessageId(originalMessageId: string, rowId: number,
   return `${truncatedOriginal}${suffix}`;
 }
 
+/** El sufijo exacto que añade `buildRequeuedMessageId`, siempre al final del valor. */
+const REQUEUED_MESSAGE_ID_SUFFIX_PATTERN = /#reintento-\d+-\d+$/;
+
 /**
- * Fecha y hora en español y en hora de Perú, con la zona escrita -- mismo
- * criterio que `portal-reports.service.ts` (`formatPeruDateTime`): el
- * backend corre en `TZ=UTC`, y este texto lo va a leer una persona en la
- * pantalla de correo entrante, así que tiene que llevar la zona de negocio,
- * no la del proceso. Este proyecto ya lleva cinco fallos de zona horaria;
- * este es el único punto donde el reintento escribe una fecha en texto, y no
- * se le exime de la regla por ser "solo un motivo interno".
+ * Si `messageId` ya lleva el sufijo de un reintento anterior
+ * (`buildRequeuedMessageId`) -- es decir, si esta fila **ya se reencoló una
+ * vez**.
+ *
+ * El hecho que decide si una fila se puede volver a reencolar no es su
+ * `outcome` (que se queda en `ERROR` a propósito, como rastro histórico del
+ * intento que falló -- ver la cabecera de este módulo), sino si ya se liberó
+ * su `message_id` original: eso es justo lo que este sufijo hace visible.
+ * Sin esta comprobación, la pantalla de correo entrante seguiría ofreciendo
+ * "reintentar" para siempre sobre la misma fila -- su `outcome` nunca
+ * cambia --, y un segundo reintento intentaría desmarcar en el buzón el
+ * `Message-ID` ORIGINAL, que la ingesta automática ya pudo haber vuelto a
+ * procesar hace tiempo con una fila nueva: el mismo correo se reprocesaría
+ * una segunda vez.
  */
-function formatPeruDateTime(instant: Date): string {
-  const texto = new Intl.DateTimeFormat('es-PE', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: PERU_TIME_ZONE,
-  }).format(instant);
-  return `${texto} (hora de Perú)`;
+export function isRequeuedMessageId(messageId: string): boolean {
+  return REQUEUED_MESSAGE_ID_SUFFIX_PATTERN.test(messageId);
 }
 
 /**

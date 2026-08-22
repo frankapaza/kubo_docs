@@ -13,34 +13,21 @@ import {
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
-import { PERU_TIME_ZONE } from '../../common/time-zone';
+import { formatPeruDateTime } from '../../common/peru-date-time';
 
 import { InboundEmailsRepository } from './inbound-emails.repository';
 import { InboundEmailService } from './inbound-email.service';
+import { isRequeuedMessageId } from './domain/retry';
 import { INBOUND_EMAIL_OUTCOMES, InboundEmail, InboundEmailOutcome } from './entities/inbound-email.entity';
-
-/**
- * Fecha y hora en español y en hora de Perú, con la zona escrita -- mismo
- * criterio que `portal-reports.service.ts` (`formatPeruDateTime`) y que
- * `domain/retry.ts`: el backend corre en `TZ=UTC`, y esta etiqueta la va a
- * leer una persona en la pantalla de correo entrante. Este proyecto lleva
- * cinco fallos de zona horaria y, de sus formateadores de fecha en el
- * frontend, solo uno pasaba la zona -- por eso esta pantalla no le manda al
- * navegador un `Date`/ISO para que lo formatee él: le manda el texto ya
- * hecho, en la zona correcta, y el frontend solo lo pinta.
- */
-function formatPeruDateTime(instant: Date): string {
-  const texto = new Intl.DateTimeFormat('es-PE', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: PERU_TIME_ZONE,
-  }).format(instant);
-  return `${texto} (hora de Perú)`;
-}
 
 /**
  * Lo que la pantalla de correo entrante (Task 9) necesita de una fila de
  * `inbound_emails`, y ni un campo más.
+ *
+ * `sentAtLabel`/`receivedAtLabel` van ya formateados en texto
+ * (`formatPeruDateTime`, `common/peru-date-time.ts`) -- esta pantalla no le
+ * manda al navegador un `Date`/ISO para que lo formatee él: el backend corre
+ * en `TZ=UTC`, y este proyecto lleva cinco fallos de zona horaria.
  *
  * **Proyección campo a campo, nunca `{...row}`.** Dos columnas de la tabla se
  * quedan fuera a propósito:
@@ -76,7 +63,18 @@ export interface InboundEmailListItem {
   retryable: boolean;
 }
 
-/** La proyección de una fila. Función libre y exportada para poder probarla sin montar el controlador. */
+/**
+ * La proyección de una fila. Función libre y exportada para poder probarla
+ * sin montar el controlador.
+ *
+ * `retryable` exige `outcome === 'ERROR'` **y** que la fila no se haya
+ * reencolado ya (`isRequeuedMessageId`, sobre el `messageId` interno --
+ * nunca expuesto, ver el comentario de `InboundEmailListItem` arriba). Sin
+ * la segunda condición, una fila ya reencolada seguiría ofreciendo el botón
+ * para siempre (su `outcome` se queda en `ERROR` a propósito, como rastro
+ * histórico -- ver `domain/retry.ts`), y un segundo clic reencolaría el
+ * mismo correo una segunda vez.
+ */
 export function toInboundEmailListItem(row: InboundEmail): InboundEmailListItem {
   return {
     id: Number(row.id),
@@ -90,7 +88,7 @@ export function toInboundEmailListItem(row: InboundEmail): InboundEmailListItem 
     ticketId: row.ticketId === null ? null : Number(row.ticketId),
     attachmentCount: row.attachmentCount,
     attachmentNames: row.attachmentNames,
-    retryable: row.outcome === 'ERROR',
+    retryable: row.outcome === 'ERROR' && !isRequeuedMessageId(row.messageId),
   };
 }
 

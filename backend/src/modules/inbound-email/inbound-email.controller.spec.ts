@@ -72,6 +72,21 @@ describe('toInboundEmailListItem — la proyección', () => {
     expect(toInboundEmailListItem(unaFila({ outcome: 'DESCARTADO_SIN_CONTENIDO' })).retryable).toBe(false);
   });
 
+  /**
+   * Una fila `ERROR` que ya se reencoló antes lleva el sufijo de
+   * `buildRequeuedMessageId` en su `messageId` interno -- su `outcome` no
+   * cambia, así que sin esta condición el botón se seguiría ofreciendo para
+   * siempre y un segundo clic reencolaría el mismo correo dos veces.
+   */
+  it('retryable es false para una fila ERROR que ya se reencoló antes', () => {
+    const fila = unaFila({
+      outcome: 'ERROR',
+      messageId: '<falla@empresa.com>#reintento-55-1755882600000',
+    });
+
+    expect(toInboundEmailListItem(fila).retryable).toBe(false);
+  });
+
   it('conserva el motivo y el ticket, campo a campo', () => {
     const item = toInboundEmailListItem(unaFila({ ticketId: 501 }));
 

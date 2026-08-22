@@ -121,7 +121,14 @@ export default function InboundEmailPage() {
     }
 
     try {
-      await refetch();
+      // `throwOnError: true`: en la versión instalada de React Query, `refetch()`
+      // sin esta opción NUNCA rechaza -- atrapa internamente el fallo de la
+      // consulta con un `.catch(noop)` propio (`QueryObserver.executeFetch`) y
+      // resuelve igual. Sin esto, el `catch` de abajo era código inalcanzable:
+      // un refresco fallido caía en el camino de éxito (`toast.success` de
+      // todas formas) mientras `isError` del propio `useQuery` sustituía la
+      // tabla entera por el panel de error, un instante después.
+      await refetch({ throwOnError: true });
       toast.success('Correo reencolado. Se procesará en el siguiente ciclo del buzón (cada minuto).');
     } catch {
       setFeedback((prev) => ({
