@@ -23,9 +23,19 @@ Acordadas antes de escribir este documento:
 
 Estas las tomo yo, por ausencia del interlocutor, y quedan registradas para poder revertirse:
 
-5. **La autenticación se lee de la cabecera `Authentication-Results` que añade nuestro propio servidor de correo.** No se verifica SPF ni DKIM por nuestra cuenta: SPF necesita la IP de conexión, que ya no existe cuando leemos el buzón. Se confía **solo en la cabecera más alta**, la que añadió nuestro servidor, y se ignoran las demás — cualquiera puede escribir una cabecera con ese nombre en el cuerpo de su mensaje.
-   **Si la cabecera no existe, el correo se trata como no autenticado.** El fallo es cerrado.
-   *Riesgo asumido, y hay que verificarlo antes de desplegar:* si el proveedor de correo no añade esa cabecera, **no entrará ningún correo**. Es la primera comprobación de la puesta en marcha.
+5. **La frontera de confianza vive en el servidor de correo, no en este código.**
+
+   *Esta decisión se revisó durante la implementación y cambió. Se deja escrito el porqué, porque es lo más importante del proyecto.*
+
+   La primera versión leía la cabecera `Authentication-Results` que añade nuestro servidor y exigía que SPF o DKIM pasaran. Esa comprobación **se eludió cinco veces** en revisión adversaria, cada vez por un camino distinto: buscar una subcadena; partir por `;` sin tokenizar; aceptar un DKIM auténtico **de otro dominio** (se corrigió exigiendo `dmarc=pass`); un comentario cerrado antes de tiempo por una dirección entrecomillada; y varias cabeceras unidas donde el atacante aporta la suya.
+
+   La quinta reveló el fondo del asunto: **nuestro propio servidor construye esa cabecera concatenando datos del remitente sin escaparlos**. Con un punto y coma sin comillas en un campo que el atacante controla, la cabecera resultante es **indistinguible** de una legítima. La información necesaria para decidir no está en la cadena, así que **ningún análisis puede resolverlo**.
+
+   Por eso: **el servidor de correo debe rechazar, en el momento de la entrega, todo lo que no pase DMARC.** Así lo que llegue al buzón ya viene autenticado y no hay que interpretar nada escrito por el remitente.
+
+   `judgeAuthentication` se conserva como **defensa en profundidad**, no como la puerta. Exige `dmarc=pass`, distingue cuatro veredictos —pasa, falla, sin cabecera, sin DMARC—, y falla cerrado ante la ausencia. Su limitación residual está documentada en el código y fijada como prueba de caracterización, marcada como conocida.
+
+   *Comprobación bloqueante de la puesta en marcha:* verificar esa política en el servidor **antes** de encender la ingesta. Por eso la ingesta nace apagada.
 6. **Un técnico que responde desde su Outlook escribe un mensaje público del equipo**, no una nota interna. Un canal en el que uno puede equivocarse de destinatario no debe poder crear notas internas. Si quiere una nota interna, entra a la aplicación.
    *Consecuencia conocida:* si el técnico responde con «responder a todos», el cliente recibirá su correo directo **y** nuestra notificación. Dos mensajes con el mismo contenido. Se acepta; la alternativa —callar la notificación cuando el mensaje llegó por correo— es más lista de lo que conviene y rompe el hilo del portal.
 7. **Se guarda el cuerpo entero y se muestra recortado.** Recortar y tirar pierde información que a veces importa; guardar sin recortar repite la conversación completa en cada mensaje. Se almacenan los dos: el texto recortado, que es lo que se ve, y el original, detrás de un «ver mensaje completo».
