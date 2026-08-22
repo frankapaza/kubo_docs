@@ -28,6 +28,20 @@ const makeRepo = () => {
   return { repo, typeormRepo, eventsTypeormRepo };
 };
 
+/**
+ * Mismo helper y mismo motivo que en `tickets.repository.spec.ts`: afirma
+ * que el operador es un `and` de `moreThanOrEqual` + `lessThan`, por su
+ * forma, no por si las fechas aparecen en su serialización.
+ */
+function expectOpenRangeOperator(op: any, from: Date, to: Date) {
+  expect(op.type).toBe('and');
+  expect(op.value).toHaveLength(2);
+  expect(op.value[0].type).toBe('moreThanOrEqual');
+  expect(op.value[0].value).toEqual(from);
+  expect(op.value[1].type).toBe('lessThan');
+  expect(op.value[1].value).toEqual(to);
+}
+
 describe('WorkItemsRepository', () => {
   describe('listPortalRequirements', () => {
     it('filtra por clientId y origin PORTAL a la vez, en el mismo where', async () => {
@@ -43,15 +57,18 @@ describe('WorkItemsRepository', () => {
   describe('listPortalRequirementsInPeriod', () => {
     it('lleva empresa, origen y rango, los tres en el mismo where', async () => {
       const { repo, typeormRepo } = makeRepo();
-      await repo.listPortalRequirementsInPeriod(
-        7,
-        new Date('2026-08-01T05:00:00Z'),
-        new Date('2026-09-01T05:00:00Z'),
-      );
-      const arg = typeormRepo.find.mock.calls[0][0];
-      expect(arg.where.clientId).toBe(7);
-      expect(arg.where.origin).toBe('PORTAL');
-      expect(arg.where.createdAt).toBeDefined();
+      const from = new Date('2026-08-01T05:00:00Z');
+      const to = new Date('2026-09-01T05:00:00Z');
+      await repo.listPortalRequirementsInPeriod(7, from, to);
+      expect(typeormRepo.find).toHaveBeenCalledWith({
+        where: { clientId: 7, origin: 'PORTAL', createdAt: expect.anything() },
+        order: { createdAt: 'ASC', id: 'ASC' },
+      });
+      // Forma del operador, no solo las fechas: ver el comentario de
+      // `expectOpenRangeOperator` en tickets.repository.spec.ts — un
+      // `Between` serializa las mismas dos fechas que este `And`, así que
+      // una prueba que solo buscara las fechas no distinguiría uno de otro.
+      expectOpenRangeOperator(typeormRepo.find.mock.calls[0][0].where.createdAt, from, to);
     });
   });
 
