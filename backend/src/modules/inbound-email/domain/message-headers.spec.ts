@@ -20,6 +20,14 @@ describe('parseMessageIds', () => {
     expect(parseMessageIds(undefined)).toEqual([]);
     expect(parseMessageIds('   ')).toEqual([]);
   });
+
+  // References separado por comas existe en la practica (algunos clientes lo
+  // escriben asi). Si se tratara la coma como parte del identificador, la
+  // correlacion posterior por igualdad de cadena nunca encontraria pareja y
+  // el hilo se romperia.
+  it('extrae varios identificadores con corchetes separados por comas', () => {
+    expect(parseMessageIds('<a@x>,<b@x>')).toEqual(['<a@x>', '<b@x>']);
+  });
 });
 
 describe('stripSubjectPrefixes', () => {
@@ -51,10 +59,20 @@ describe('extractTicketCode', () => {
     expect(extractTicketCode('Algo falla')).toBeNull();
   });
 
-  // Si hay dos, no adivinamos: es un reenvio de una conversacion mezclada y
-  // acertar por casualidad es peor que abrir un ticket nuevo.
+  // Si hay dos codigos DISTINTOS, no adivinamos: es un reenvio de una
+  // conversacion mezclada y acertar por casualidad es peor que abrir un
+  // ticket nuevo.
   it('devuelve null si hay mas de uno', () => {
     expect(extractTicketCode('[KB-1] y [KB-2]')).toBeNull();
+  });
+
+  // El mismo codigo repetido no es una mezcla de conversaciones: es un
+  // asunto acumulado por reenvios sucesivos ("Fwd: [KB-1234] Fwd:
+  // [KB-1234] ..."), algo corriente. Contar apariciones en vez de codigos
+  // unicos forzaria un ticket nuevo justo en el caso que este modulo existe
+  // para evitar: la respuesta de un cliente a su propio ticket.
+  it('no cuenta como ambiguo el mismo codigo repetido', () => {
+    expect(extractTicketCode('Re: [KB-1234] Fwd: [KB-1234] Algo falla')).toBe('KB-1234');
   });
 });
 
@@ -80,4 +98,28 @@ describe('isAutomaticMessage', () => {
   it('Auto-Submitted: no NO es automatico', () => {
     expect(isAutomaticMessage({ 'auto-submitted': 'no' })).toBe(false);
   });
+
+  // `precedence: normal` y `precedence: first-class` son los valores que la
+  // cabecera define para correo escrito por una persona -- lo mismo que
+  // `Auto-Submitted: no`, pero para `Precedence`. Decidir por la sola
+  // presencia de la clave (en vez de por el valor que trae) silenciaria sin
+  // aviso a cualquier cliente cuyo servidor la anada con uno de estos dos
+  // valores: su respuesta se descartaria como automatica y nunca se le
+  // contestaria.
+  it.each([{ precedence: 'normal' }, { precedence: 'first-class' }])(
+    'precedence con valor de persona no es automatico: %o',
+    (cabeceras) => {
+      expect(isAutomaticMessage(cabeceras)).toBe(false);
+    },
+  );
+
+  // Lo mismo para las cabeceras que si decidimos por presencia: la cabecera
+  // tiene que estar de verdad, no solo la clave con un valor vacio (que en
+  // la practica es como si no estuviera).
+  it.each(['x-auto-response-suppress', 'list-id'] as const)(
+    '%s con valor en blanco no es automatico',
+    (clave) => {
+      expect(isAutomaticMessage({ [clave]: '   ' })).toBe(false);
+    },
+  );
 });
