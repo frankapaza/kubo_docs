@@ -70,54 +70,63 @@ function isQuotedTerritory(kind: LineKind): boolean {
 }
 
 /**
- * La linea marcadora, cuando **es en su totalidad** el verbo de atribucion
- * ("escribio:"/"wrote:" y nada mas, sin nombre ni fecha delante). Esa forma
- * solo ocurre cuando Gmail envuelve una atribucion larga en dos lineas
- * fisicas: el resto (fecha, remitente, direccion) queda en la linea
- * anterior, y el verbo solitario en la suya. Una atribucion que cabe entera
- * en una linea (el caso normal) nunca tiene esta forma exacta.
+ * El principio reconocible de un preambulo de atribucion envuelto: "El..."
+ * (espanol) u "On..." (ingles), seguido de fecha/remitente/direccion. Es la
+ * unica forma fiable de saber DONDE empieza una atribucion que Gmail
+ * partio en varias lineas fisicas -- ver `expandAttributionStart`.
  */
-const BARE_ATTRIBUTION_VERB_PATTERN = /^(escribi[oó]|wrote)\s*:\s*$/i;
+const ATTRIBUTION_PREAMBLE_START_PATTERN = /^(el|on)\b/i;
 
 /**
- * Ronda de correcciones 2, punto 3: la heuristica anterior ("retrocede
- * mientras la linea previa no acabe en puntuacion de cierre") se aplicaba a
- * **toda** atribucion, envuelta o no, y ninguna linea de una firma (nombre,
- * departamento, telefono) termina en esa puntuacion -- es as[i] como una
- * firma entera de tres lineas desaparecia detras de una atribucion que ni
- * siquiera estaba envuelta. Ademas, unir dos lineas cualesquiera con un
- * espacio y comprobar si el resultado "termina en escribio:" es una prueba
- * que no prueba nada: pegar CUALQUIER texto delante de una linea que ya
- * termina asi sigue terminando asi.
+ * Ronda de correcciones 2, punto 3 (heuristica anterior, ya descartada):
+ * "retrocede mientras la linea previa no acabe en puntuacion de cierre" se
+ * aplicaba a **toda** atribucion, envuelta o no, y ninguna linea de una
+ * firma (nombre, departamento, telefono) termina en esa puntuacion -- una
+ * firma entera desaparecia detras de una atribucion que ni siquiera estaba
+ * envuelta.
  *
- * La condicion correcta no es sobre puntuacion ni sobre la union: es sobre
- * la **forma de la propia linea marcadora**. Solo se extiende el corte hacia
- * atras -- y solo un paso -- cuando se cumplen las dos señales especificas
- * del envoltorio real de Gmail:
+ * Ronda de correcciones 3, punto 6 (esta version, tambien descartada antes
+ * de esta): exigir que la linea marcadora fuera **solo** el verbo
+ * ("escribio:" a solas) funcionaba para el plegado de dos lineas en el que
+ * Gmail corta justo antes del verbo, pero el plegado real de Gmail no
+ * siempre corta ahi -- lo habitual es que la direccion de correo (el
+ * `<...>` de cierre) quede en la MISMA linea que el verbo
+ * (`<ticket@kuboti.com> escribio:`), con el nombre y la fecha en una o mas
+ * lineas anteriores. Esa forma no es "el verbo a solas", asi que la version
+ * anterior no la reconocia y dejaba la primera linea de la atribucion
+ * pegada al mensaje del cliente.
  *
- * 1. La linea marcadora es, ella sola, el verbo de atribucion
- *    (`BARE_ATTRIBUTION_VERB_PATTERN`) -- nunca ocurre en una atribucion sin
- *    envolver, que trae el nombre y la fecha en la misma linea.
- * 2. La linea anterior termina en `>` -- el corchete de cierre de la
- *    direccion de correo con la que termina el preambulo envuelto
- *    ("... Soporte <ticket@kuboti.com>"). Ninguna linea de una firma (un
- *    nombre, un cargo, un telefono) termina asi.
+ * **La condicion correcta es sobre donde EMPIEZA la atribucion, no sobre
+ * como TERMINA la linea marcadora.** Se retrocede linea a linea, sin
+ * limite de cuantas, mientras la linea marcadora (o la que se esta
+ * evaluando) no sea ya el principio reconocible de una atribucion
+ * (`ATTRIBUTION_PREAMBLE_START_PATTERN`, "El..."/"On..."):
  *
- * Si cualquiera de las dos no se cumple, el corte se queda en la propia
- * linea marcadora, sin tocar nada de lo que la precede -- ese es
- * exactamente el caso de una atribucion completa en su propia linea,
- * envuelta o no por una firma.
+ * - Si la propia linea marcadora YA empieza por "El"/"On" (la atribucion
+ *   cabe entera en una sola linea, envuelta o no por una firma), no hay
+ *   nada que retroceder: el corte se queda ahi mismo.
+ * - Si no, se retrocede una linea. Si esa linea empieza por "El"/"On", ahi
+ *   esta el principio real de la atribucion: el corte se mueve a esa
+ *   linea. Si no, y no esta en blanco, se sigue retrocediendo (para
+ *   cubrir plegados de tres o mas lineas fisicas).
+ * - Si se llega a una linea en blanco (o al principio del mensaje) sin
+ *   haber encontrado un "El"/"On", no hay preambulo reconocible que
+ *   recuperar: el corte se queda en la linea marcadora original, sin tocar
+ *   lo anterior -- ese es el caso de una firma (u otro texto) que no forma
+ *   parte de ninguna atribucion envuelta.
  */
 function expandAttributionStart(lines: string[], markerIndex: number): number {
-  if (markerIndex === 0) return markerIndex;
-
   const markerLine = lines[markerIndex].trim();
-  if (!BARE_ATTRIBUTION_VERB_PATTERN.test(markerLine)) return markerIndex;
+  if (ATTRIBUTION_PREAMBLE_START_PATTERN.test(markerLine)) return markerIndex;
 
-  const previous = lines[markerIndex - 1].trim();
-  if (!previous.endsWith('>')) return markerIndex;
-
-  return markerIndex - 1;
+  let start = markerIndex;
+  while (start > 0) {
+    const previous = lines[start - 1].trim();
+    if (previous.length === 0) return markerIndex; // sin preambulo reconocible: no tocar nada anterior
+    if (ATTRIBUTION_PREAMBLE_START_PATTERN.test(previous)) return start - 1;
+    start--;
+  }
+  return markerIndex; // se llego al principio del mensaje sin encontrar "El"/"On"
 }
 
 /**
@@ -158,6 +167,13 @@ export function stripQuotedText(body: string): string {
     }
 
     if (kind === 'quote' || kind === 'attribution') {
+      // Una atribucion existe para introducir una cita que viene DESPUES.
+      // Si es la ultima linea del mensaje, no hay nada que introducir --
+      // es, igual que el parrafo real de mas arriba, una frase que termina
+      // asi por casualidad. (Un bloque `>` no tiene este problema: el
+      // propio prefijo ya es, el solo, contenido citado.)
+      if (kind === 'attribution' && i === lines.length - 1) continue;
+
       const restIsQuotedTerritory = lines.slice(i).every((candidate) => isQuotedTerritory(classifyLine(candidate)));
       if (!restIsQuotedTerritory) continue;
       cutAt = kind === 'attribution' ? expandAttributionStart(lines, i) : i;

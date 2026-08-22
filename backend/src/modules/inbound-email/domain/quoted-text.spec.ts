@@ -79,4 +79,36 @@ describe('stripQuotedText', () => {
       'Gracias.\nAna Perez\nDepartamento de Compras\nTel 600 123 456',
     );
   });
+
+  // Ronda de correcciones 3, punto 6: el plegado real de Gmail no siempre
+  // deja el verbo solo en su propia linea -- lo habitual es que la
+  // direccion de correo (el "<...>" de cierre) quede en la MISMA linea que
+  // "escribio:", y el nombre/fecha en la linea anterior. La version
+  // anterior de `expandAttributionStart` solo reconocia el verbo a solas, y
+  // dejaba la primera linea de la atribucion pegada al mensaje del cliente.
+  it('corta las dos lineas de una atribucion de Gmail plegada con la direccion junto al verbo', () => {
+    const cuerpo =
+      'Gracias, todo listo.\n\nEl mie, 12 ago 2026 a las 9:03, Soporte de Kuboti\n<ticket@kuboti.com> escribio:\n> Le confirmamos...';
+    expect(stripQuotedText(cuerpo)).toBe('Gracias, todo listo.');
+  });
+
+  // La misma atribucion, plegada en TRES lineas fisicas -- el mismo
+  // mecanismo tiene que extenderse tantas lineas como haga falta hasta
+  // encontrar el principio real de la atribucion ("El...").
+  it('corta las tres lineas de una atribucion de Gmail plegada en tres partes', () => {
+    const cuerpo =
+      'Gracias, todo listo.\n\nEl miercoles 12 de agosto de 2026 a las\n9:03, Soporte de Kuboti <ticket@kuboti.com>\nescribio:\n> Le confirmamos...';
+    expect(stripQuotedText(cuerpo)).toBe('Gracias, todo listo.');
+  });
+
+  // Caso pequeno senalado en la ronda 3: un mensaje cuya ULTIMA linea acaba
+  // en "escribio:" pero sin ninguna cita despues (no hay nada que
+  // "introducir") no es una atribucion real -- es, como en el caso del
+  // parrafo real de mas arriba, una frase que termina asi por casualidad.
+  // Sin una linea de cita despues, no hay nada que la convierta en
+  // atribucion.
+  it('no recorta la ultima linea de un mensaje que termina en "escribio:" sin cita detras', () => {
+    const cuerpo = 'Hola,\n\nRecuerda que el soporte externo escribio:';
+    expect(stripQuotedText(cuerpo)).toBe(cuerpo);
+  });
 });
