@@ -2,6 +2,7 @@ import { QueryFailedError } from 'typeorm';
 
 import { InboundEmailService } from './inbound-email.service';
 import { IncomingMessage } from './mailbox.interface';
+import { domainOf } from './domain/message-headers';
 
 /** El error con el que MySQL/mysql2 reporta un choque contra una clave única, tal y como lo envuelve TypeORM. */
 function unErrorDeClaveDuplicada(): QueryFailedError {
@@ -32,17 +33,30 @@ function unErrorDeClaveDuplicada(): QueryFailedError {
 
 const BUZON_PROPIO = 'ticket@kuboti.com';
 
-/** Un correo de ejemplo, ya autenticado y sin ninguna de las señales de descarte. */
+/**
+ * Un correo de ejemplo, ya autenticado y sin ninguna de las señales de
+ * descarte.
+ *
+ * `authenticationResults` lleva `header.from=<dominio de "from">` calculado
+ * con la MISMA función que usa `InboundEmailService` (`domainOf`, ronda de
+ * correcciones 2) -- no un valor fijo. Así, cualquier test que solo cambie
+ * `from` (a `tecnico@kuboti.com`, a `nadie@fuera.com`, etc.) sigue
+ * autenticando sin tener que acordarse de tocar también la cabecera; los
+ * tests que sí quieren probar el veredicto de autenticación en sí
+ * (`authenticationResults: null`, `dmarc=fail`...) lo sobrescriben
+ * explícitamente vía `overrides`, que gana sobre este cálculo.
+ */
 function unMensaje(overrides: Partial<IncomingMessage> = {}): IncomingMessage {
+  const from = overrides.from ?? 'ana@empresa.com';
   return {
     mailboxRef: 'uid-1',
     messageId: '<msg-1@empresa.com>',
-    from: 'ana@empresa.com',
+    from,
     subject: 'No carga el reporte',
     sentAt: new Date('2026-08-20T10:00:00Z'),
     textBody: 'Hola, el reporte de ventas no carga desde ayer.',
     headers: {},
-    authenticationResults: 'mx.kuboti.com; dmarc=pass',
+    authenticationResults: `mx.kuboti.com; dmarc=pass header.from=${domainOf(from) ?? 'sin-dominio.invalid'}`,
     attachmentNames: [],
     ...overrides,
   };
@@ -82,6 +96,7 @@ function mailboxDoble(mensajes: IncomingMessage[]) {
   return {
     fetchUnprocessed: jest.fn().mockResolvedValue(mensajes),
     markProcessed: jest.fn().mockResolvedValue(undefined),
+    markUnprocessed: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -111,6 +126,7 @@ function repoDoble() {
     findByMessageId: jest.fn(async (messageId: string) => {
       return filas.find((f) => f.messageId === messageId) ?? null;
     }),
+    findById: jest.fn(async (id: number) => filas.find((f) => f.id === id) ?? null),
     record: jest.fn(async (fila: Record<string, unknown>) => {
       const nueva = { id: siguienteId++, ...fila };
       filas.push(nueva);
@@ -787,14 +803,16 @@ describe('InboundEmailService.drain', () => {
   });
 
   // -------------------------------------------------------------------------
-  // El From con nombre para mostrar: se normaliza una vez, al principio.
+  // El From ya llega resuelto por el adaptador: aquí solo se recorta y se
+  // pone en minúsculas -- nunca se desenvuelve un "<...>" (ronda de
+  // correcciones 2, ver el docblock de `withNormalizedFrom`).
   // -------------------------------------------------------------------------
 
-  describe('el remitente con nombre para mostrar', () => {
-    it('isOwnMailbox reconoce el buzón propio aunque venga con un nombre delante', async () => {
+  describe('el remitente ya llega resuelto: from solo se recorta y se pone en minúsculas', () => {
+    it('isOwnMailbox reconoce el buzón propio con mayúsculas y espacios distintos', async () => {
       const { service, repo, tickets } = montar({
         clientUser: CLIENT_USER,
-        mensajes: [unMensaje({ from: '"Soporte Kuboti" <ticket@kuboti.com>' })],
+        mensajes: [unMensaje({ from: '  Ticket@Kuboti.com  ' })],
       });
 
       await service.drain();
@@ -804,10 +822,10 @@ describe('InboundEmailService.drain', () => {
       expect(tickets.create).not.toHaveBeenCalled();
     });
 
-    it('la búsqueda de cliente y la respuesta usan la dirección ya desenvuelta', async () => {
+    it('la búsqueda de cliente usa la dirección en minúsculas', async () => {
       const { service, clientUsers, tickets } = montar({
         clientUser: CLIENT_USER,
-        mensajes: [unMensaje({ from: '"Ana Quispe" <ana@empresa.com>' })],
+        mensajes: [unMensaje({ from: 'Ana@Empresa.COM' })],
       });
 
       await service.drain();
@@ -815,6 +833,31 @@ describe('InboundEmailService.drain', () => {
       expect(clientUsers.findByEmail).toHaveBeenCalledWith('ana@empresa.com');
       const [, dto] = tickets.create.mock.calls[0];
       expect(dto.clientId).toBe(7);
+    });
+
+    /**
+     * El crítico de la ronda de correcciones 2 (el séptimo intento contra la
+     * suplantación del remitente): `withNormalizedFrom` YA NO desenvuelve un
+     * `"<...>"`. La versión anterior sí lo hacía con `extractSenderAddress`,
+     * y eso era exactamente el defecto -- `IncomingMessage.from` puede,
+     * legítimamente, contener un `<...>` DENTRO de un local-part
+     * entrecomillado (`"<jefe@kuboti.com>"@evil.com`, válido por RFC 5322),
+     * y ese regex tomaba el `<...>` de dentro como si envolviera la
+     * dirección real. Ningún adaptador debería entregar ya la forma
+     * "nombre <dirección>" (el contrato cambió, ver `IncomingMessage.from`),
+     * pero si alguno lo hiciera de todos modos, el resultado correcto es
+     * remitente irreconocible -- nunca una identidad adivinada.
+     */
+    it('un "nombre <dirección>" ya no se desenvuelve: la búsqueda del remitente usa la cadena tal cual, no la dirección limpia', async () => {
+      const { service, clientUsers } = montar({
+        clientUser: CLIENT_USER,
+        mensajes: [unMensaje({ from: '"Ana Quispe" <ana@empresa.com>' })],
+      });
+
+      await service.drain();
+
+      expect(clientUsers.findByEmail).toHaveBeenCalledWith('"ana quispe" <ana@empresa.com>');
+      expect(clientUsers.findByEmail).not.toHaveBeenCalledWith('ana@empresa.com');
     });
   });
 
@@ -1170,5 +1213,101 @@ describe('InboundEmailService.drain', () => {
     expect(resumen.errors).toBe(0);
     expect(resumen.ticketsCreated).toBe(1);
     expect(filaDe(repo, '<msg-1@empresa.com>')!.outcome).toBe('TICKET_CREADO');
+  });
+});
+
+/**
+ * El reintento (Task 9): "no reprocesa, re-encola". Se prueba aparte de
+ * `drain` porque no comparte ningún camino con él salvo los dobles.
+ */
+describe('InboundEmailService.retry', () => {
+  const FILA_ERROR = {
+    id: 55,
+    messageId: '<falla@empresa.com>',
+    messageIdRaw: '<falla@empresa.com>',
+    fromAddress: 'ana@empresa.com',
+    outcome: 'ERROR' as const,
+    reason: 'Fallo de red al escribir el ticket.',
+  };
+
+  it('quita la marca en el buzón por el Message-ID crudo, y renombra la fila para liberar la clave única', async () => {
+    const { service, mailbox, repo } = montar();
+    repo.filas.push({ ...FILA_ERROR });
+
+    const resultado = await service.retry(55, 'tecnico@kuboti.com');
+
+    expect(mailbox.markUnprocessed).toHaveBeenCalledWith('<falla@empresa.com>');
+    expect(resultado.messageId).not.toBe('<falla@empresa.com>');
+    expect(resultado.messageId).toMatch(/^<falla@empresa\.com>#reintento-55-\d+$/);
+    // El outcome NO cambia: la fila sigue siendo el rastro histórico del error.
+    expect(resultado.outcome).toBe('ERROR');
+  });
+
+  it('conserva el motivo original y añade quién lo reintentó y cuándo', async () => {
+    const { service, repo } = montar();
+    repo.filas.push({ ...FILA_ERROR });
+
+    const resultado = await service.retry(55, 'tecnico@kuboti.com');
+
+    expect(resultado.reason).toContain('Fallo de red al escribir el ticket.');
+    expect(resultado.reason).toContain('tecnico@kuboti.com');
+    expect(resultado.reason).toContain('Reencolado el');
+  });
+
+  it('sin esa fila, no toca el buzón y lo dice', async () => {
+    const { service, mailbox } = montar();
+
+    await expect(service.retry(999, 'tecnico@kuboti.com')).rejects.toThrow();
+    expect(mailbox.markUnprocessed).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['TICKET_CREADO' as const],
+    ['MENSAJE_ANADIDO' as const],
+    ['DESCARTADO_SIN_CONTENIDO' as const],
+  ])('una fila que no está en ERROR (%s) no se reintenta, y no toca el buzón', async (outcome) => {
+    const { service, mailbox, repo } = montar();
+    repo.filas.push({ ...FILA_ERROR, outcome });
+
+    await expect(service.retry(55, 'tecnico@kuboti.com')).rejects.toThrow();
+    expect(mailbox.markUnprocessed).not.toHaveBeenCalled();
+  });
+
+  it('sin messageIdRaw guardado, no se puede reencolar y no se intenta nada en el buzón', async () => {
+    const { service, mailbox, repo } = montar();
+    repo.filas.push({ ...FILA_ERROR, messageIdRaw: null });
+
+    await expect(service.retry(55, 'tecnico@kuboti.com')).rejects.toThrow();
+    expect(mailbox.markUnprocessed).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Si el buzón no pudo quitar la marca (el correo ya no está, o cualquier
+   * otro fallo de red/protocolo), la fila NO se toca: renombrarla igual
+   * liberaría la clave única de un correo que en realidad nunca va a volver,
+   * perdiéndolo en vez de reencolarlo.
+   */
+  it('si el buzón no pudo reencolar, la fila queda exactamente igual y el fallo se ve', async () => {
+    const { service, mailbox, repo } = montar();
+    repo.filas.push({ ...FILA_ERROR });
+    mailbox.markUnprocessed.mockRejectedValueOnce(new Error('el correo ya no está en el buzón'));
+
+    await expect(service.retry(55, 'tecnico@kuboti.com')).rejects.toThrow(/el correo ya no está en el buzón/);
+
+    const filaTrasElIntento = repo.filas.find((f) => f.id === 55)!;
+    expect(filaTrasElIntento.messageId).toBe('<falla@empresa.com>');
+    expect(filaTrasElIntento.reason).toBe('Fallo de red al escribir el ticket.');
+  });
+
+  it('dos filas en error distintas se reencolan de forma independiente', async () => {
+    const { service, mailbox, repo } = montar();
+    repo.filas.push({ ...FILA_ERROR }, { ...FILA_ERROR, id: 56, messageId: '<otra@empresa.com>', messageIdRaw: '<otra@empresa.com>' });
+
+    await service.retry(55, 'tecnico@kuboti.com');
+    await service.retry(56, 'otra@kuboti.com');
+
+    expect(mailbox.markUnprocessed).toHaveBeenNthCalledWith(1, '<falla@empresa.com>');
+    expect(mailbox.markUnprocessed).toHaveBeenNthCalledWith(2, '<otra@empresa.com>');
+    expect(repo.filas.find((f) => f.id === 55)!.messageId).not.toBe(repo.filas.find((f) => f.id === 56)!.messageId);
   });
 });

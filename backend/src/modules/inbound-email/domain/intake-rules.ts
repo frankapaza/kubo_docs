@@ -244,6 +244,29 @@ function findRawDmarcMentions(header: string): number[] {
 type DmarcOutcome = 'PASS' | 'NOT_PASS' | 'ABSENT' | 'COMPROMISED';
 
 /**
+ * Busca `header.from=<dominio>` DENTRO del texto de un segmento ya aislado
+ * -- nunca en la cabecera entera. RFC 8601 §2.7.3: el metodo `dmarc` informa
+ * en esta propiedad el dominio del `From:` que de verdad evaluo, y es lo
+ * unico que permite comprobar despues que ese dominio es el mismo que el
+ * sistema identifico como remitente (ver `extractAuthenticatedDomain`).
+ *
+ * Buscarlo en la cabecera completa (en vez de en el segmento ya validado
+ * como el unico resultado `dmarc=` legitimo) reabriria exactamente el
+ * vector que el aislamiento de segmentos existe para cerrar: un
+ * `header.from=` de mentira colado en un segmento distinto, o en un
+ * comentario de otro metodo.
+ *
+ * El valor puede venir entre comillas (`header.from="dominio.com"`, RFC 8601
+ * lo permite como `quoted-string`); las comillas, si las hay, se quitan.
+ */
+function extractHeaderFromDomain(segmentText: string): string | null {
+  const match = /\bheader\.from\s*=\s*"?([^\s;()"]+)"?/i.exec(segmentText);
+  if (!match) return null;
+  const domain = match[1].trim().toLowerCase();
+  return domain.length > 0 ? domain : null;
+}
+
+/**
  * Evalua el resultado `dmarc` de `header` con tres capas, **las tres a la
  * vez** -- ronda de correcciones 3, ninguna basta sola:
  *
@@ -276,12 +299,19 @@ type DmarcOutcome = 'PASS' | 'NOT_PASS' | 'ABSENT' | 'COMPROMISED';
  *    tokenizador la neutralizo bien. Es defensa en profundidad: detecta el
  *    intento en si, no el resultado de analizarlo.
  */
-function evaluateDmarc(header: string): DmarcOutcome {
+/**
+ * `outcome` es exactamente lo que devolvia esta funcion antes de la ronda de
+ * correcciones 2 de la Task 8 -- ningun test existente sobre ese valor
+ * cambia. `headerFromDomain` es el añadido: solo se calcula (y solo importa)
+ * cuando `outcome === 'PASS'`, así que `judgeAuthentication` (que solo lee
+ * `outcome`) queda bit a bit igual que antes.
+ */
+function evaluateDmarc(header: string): { outcome: DmarcOutcome; headerFromDomain: string | null } {
   const tokenized = splitTopLevelSegments(header);
-  if (!tokenized.ok) return 'COMPROMISED';
+  if (!tokenized.ok) return { outcome: 'COMPROMISED', headerFromDomain: null };
 
   const rawMentions = findRawDmarcMentions(header);
-  if (rawMentions.length === 0) return 'ABSENT';
+  if (rawMentions.length === 0) return { outcome: 'ABSENT', headerFromDomain: null };
 
   const resultSegments = tokenized.segments.slice(1); // descarta el identificador del servidor
   const dmarcMatches = resultSegments
@@ -291,13 +321,14 @@ function evaluateDmarc(header: string): DmarcOutcome {
         entry.match !== null && entry.match[1].toLowerCase() === 'dmarc',
     );
 
-  if (dmarcMatches.length !== 1) return 'COMPROMISED';
+  if (dmarcMatches.length !== 1) return { outcome: 'COMPROMISED', headerFromDomain: null };
 
   const { segment, match } = dmarcMatches[0];
   const allMentionsInsideSegment = rawMentions.every((index) => index >= segment.start && index < segment.end);
-  if (!allMentionsInsideSegment) return 'COMPROMISED';
+  if (!allMentionsInsideSegment) return { outcome: 'COMPROMISED', headerFromDomain: null };
 
-  return match[2].toLowerCase() === 'pass' ? 'PASS' : 'NOT_PASS';
+  if (match[2].toLowerCase() !== 'pass') return { outcome: 'NOT_PASS', headerFromDomain: null };
+  return { outcome: 'PASS', headerFromDomain: extractHeaderFromDomain(segment.text) };
 }
 
 /**
@@ -400,10 +431,63 @@ export function judgeAuthentication(topmostHeader: string | null | undefined): A
   if (topmostHeader == null || topmostHeader.trim().length === 0) return 'SIN_CABECERA';
   if (/[\r\n]/.test(topmostHeader)) return 'FALLA';
 
-  const outcome = evaluateDmarc(topmostHeader);
+  const { outcome } = evaluateDmarc(topmostHeader);
   if (outcome === 'PASS') return 'PASA';
   if (outcome === 'ABSENT') return 'SIN_DMARC';
   return 'FALLA'; // NOT_PASS o COMPROMISED
+}
+
+/**
+ * El dominio que DMARC certifico -- el `header.from=` del unico segmento
+ * `dmarc=pass` legitimo --, o `null` si `judgeAuthentication` no daria
+ * `PASA` para esta misma cabecera, o si el segmento no declara ese dato.
+ *
+ * # Por que esto, y no "analizar mejor" el remitente
+ *
+ * Ronda de correcciones 2 de la Task 8, el septimo intento contra la
+ * suplantacion del remitente y el que por fin cierra la familia entera de
+ * vectores, no solo el ultimo encontrado. Los intentos anteriores
+ * mejoraban CADA VEZ el analisis de la cabecera `From` (primero se dejo de
+ * usar la re-serializacion `.text` de `mailparser`, cayendo a
+ * `.value[0].address`), y cada vez aparecia un vector nuevo: un local-part
+ * entrecomillado que contiene su propio `<victima@dominio.com>` sin
+ * escapar (RFC 5322 lo permite), un `From` de grupo sin direccion directa
+ * que forzaba caer a una alternativa insegura, dos cabeceras `From` donde
+ * `mailparser` toma la ULTIMA que declaró, un `From` con una lista de
+ * dos direcciones (RFC 6854) -- y, el que de verdad demuestra que "analizar
+ * mejor" no es el camino, un caso donde **la propia `mailparser`, con su
+ * gramatica completa, se equivoca** y devuelve la direccion de la victima.
+ *
+ * Ninguna cantidad de analisis adicional sobre el `From` cierra ese ultimo
+ * caso: si la libreria en la que confiamos para analizarlo ya se equivoca,
+ * doblar la apuesta sobre "analizar mejor" es exactamente el error que la
+ * cabecera `Authentication-Results` (ver el docblock de `judgeAuthentication`)
+ * ya enseño a no repetir. La salida no es un analisis mas fino: es una
+ * **invariante que tiene que cumplirse**, independiente de como se extrajo
+ * el remitente -- el dominio que el servidor de correo certifico contra
+ * DMARC tiene que ser el mismo dominio de la direccion que el sistema
+ * termina usando. Si no coinciden, el "pass" de DMARC -- por honesto que
+ * sea, y en los seis vectores de esta ronda lo es: certifica de verdad el
+ * dominio del atacante, con su propio SPF/DKIM/DMARC -- no dice nada sobre
+ * la direccion equivocada que un analisis (el nuestro, o el de la propia
+ * `mailparser`) haya terminado usando.
+ *
+ * # Como se usa
+ *
+ * Quien llama (`InboundEmailService`) tiene que comparar el valor devuelto
+ * aqui contra `domainOf(message.from)` (`domain/message-headers.ts`) --
+ * `message.from` ya extraido por el adaptador -- y rechazar el correo si no
+ * son exactamente iguales, o si cualquiera de los dos es `null`. No hay
+ * "casi iguales" ni subdominios: la comparacion es una igualdad de cadenas,
+ * sobre dominios ya en minuscula.
+ */
+export function extractAuthenticatedDomain(topmostHeader: string | null | undefined): string | null {
+  if (topmostHeader == null || topmostHeader.trim().length === 0) return null;
+  if (/[\r\n]/.test(topmostHeader)) return null;
+
+  const { outcome, headerFromDomain } = evaluateDmarc(topmostHeader);
+  if (outcome !== 'PASS') return null;
+  return headerFromDomain;
 }
 
 /**

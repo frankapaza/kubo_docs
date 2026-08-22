@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, MoreThanOrEqual, Repository } from 'typeorm';
 
-import { InboundEmail } from './entities/inbound-email.entity';
+import { InboundEmail, InboundEmailOutcome } from './entities/inbound-email.entity';
 import { Ticket } from '../tickets/entities/ticket.entity';
 import { TicketEvent } from '../tickets/entities/ticket-event.entity';
 import { isUsableId, sameId } from '../../common/ids';
@@ -31,6 +31,26 @@ export class InboundEmailsRepository {
     return this.repo.findOne({ where: { messageId } });
   }
 
+  /** Una fila por su id -- la pantalla de correo entrante (Task 9) la pide para reintentar una en concreto. */
+  findById(id: number): Promise<InboundEmail | null> {
+    return this.repo.findOne({ where: { id } });
+  }
+
+  /**
+   * El listado de la pantalla de correo entrante (Task 9): la caja negra
+   * completa, opcionalmente acotada a un solo `outcome` (el filtro que esa
+   * pantalla ofrece). Más reciente primero, con el mismo tope de 500 que
+   * `TicketsRepository.list` -- sin paginación todavía, aceptado como límite
+   * conocido de esta primera entrega.
+   */
+  list(filter: { outcome?: InboundEmailOutcome } = {}): Promise<InboundEmail[]> {
+    return this.repo.find({
+      where: filter.outcome ? { outcome: filter.outcome } : {},
+      order: { createdAt: 'DESC' },
+      take: 500,
+    });
+  }
+
   /** Inserta el registro del correo. Un `INSERT` por correo, se procese como se procese. */
   record(row: Partial<InboundEmail>): Promise<InboundEmail> {
     return this.repo.save(this.repo.create(row));
@@ -40,16 +60,25 @@ export class InboundEmailsRepository {
    * Corrige una fila ya insertada -- nunca un segundo `INSERT` para el mismo
    * correo, que la clave única de `message_id` rechazaría.
    *
-   * La usa `InboundEmailService` en dos momentos, los dos para cerrar la
-   * ventana de atomicidad entre escribir el ticket (o el mensaje) y dejar
-   * constancia de él: la fila se inserta **antes** de crear el ticket, con el
-   * resultado que se espera y `ticketId: null` si todavía no existe, y esta
-   * función la corrige después -- con el `ticketId` real si todo salió bien,
-   * o con `outcome: 'ERROR'` si no. Así, si el proceso muere entre medias, un
-   * reinicio encuentra la fila ya reclamada (`findByMessageId` no da `null`)
-   * y no repite el correo -- se pierde ese correo en vez de duplicar el
-   * ticket, que es el cambio que pide la ronda de correcciones 1: duplicar
-   * significa un segundo acuse al mismo cliente.
+   * La usa `InboundEmailService` en tres momentos. Los dos primeros son para
+   * cerrar la ventana de atomicidad entre escribir el ticket (o el mensaje) y
+   * dejar constancia de él: la fila se inserta **antes** de crear el ticket,
+   * con el resultado que se espera y `ticketId: null` si todavía no existe, y
+   * esta función la corrige después -- con el `ticketId` real si todo salió
+   * bien, o con `outcome: 'ERROR'` si no. Así, si el proceso muere entre
+   * medias, un reinicio encuentra la fila ya reclamada (`findByMessageId` no
+   * da `null`) y no repite el correo -- se pierde ese correo en vez de
+   * duplicar el ticket, que es el cambio que pide la ronda de correcciones 1:
+   * duplicar significa un segundo acuse al mismo cliente.
+   *
+   * El tercero es `InboundEmailService.retry` (Task 9): ahí el patch no toca
+   * `outcome` en absoluto -- la fila reintentada sigue siendo, a propósito,
+   * un `ERROR` histórico -- sino `messageId` (para liberar la clave única y
+   * poder reencolar el correo) y `reason` (para anotar quién lo reintentó y
+   * cuándo, sin perder el motivo original). El nombre del método sigue
+   * siendo el de sus dos usos originales; lo genérico es el propio
+   * `Partial<InboundEmail>` que recibe, no una promesa de que solo toque
+   * `outcome`.
    */
   async updateOutcome(id: number, patch: Partial<InboundEmail>): Promise<void> {
     await this.repo.update(id, patch);

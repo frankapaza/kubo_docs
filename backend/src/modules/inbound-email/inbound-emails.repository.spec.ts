@@ -14,6 +14,7 @@ import { InboundEmailsRepository } from './inbound-emails.repository';
 function montar() {
   const repo = {
     findOne: jest.fn().mockResolvedValue(null),
+    find: jest.fn().mockResolvedValue([]),
     create: jest.fn((row: unknown) => ({ ...(row as object), id: 'creado' })),
     save: jest.fn((row: unknown) => Promise.resolve(row)),
     count: jest.fn().mockResolvedValue(0),
@@ -38,6 +39,42 @@ describe('InboundEmailsRepository', () => {
       await repository.findByMessageId('<abc@remitente.com>');
 
       expect(repo.findOne).toHaveBeenCalledWith({ where: { messageId: '<abc@remitente.com>' } });
+    });
+  });
+
+  describe('findById', () => {
+    it('busca por id exacto, nada más', async () => {
+      const { repository, repo } = montar();
+
+      await repository.findById(9);
+
+      expect(repo.findOne).toHaveBeenCalledWith({ where: { id: 9 } });
+    });
+  });
+
+  describe('list', () => {
+    it('sin filtro, pide todas las filas más recientes primero, con un tope', async () => {
+      const { repository, repo } = montar();
+
+      await repository.list();
+
+      expect(repo.find).toHaveBeenCalledWith({
+        where: {},
+        order: { createdAt: 'DESC' },
+        take: 500,
+      });
+    });
+
+    it('con outcome, filtra por él', async () => {
+      const { repository, repo } = montar();
+
+      await repository.list({ outcome: 'ERROR' });
+
+      expect(repo.find).toHaveBeenCalledWith({
+        where: { outcome: 'ERROR' },
+        order: { createdAt: 'DESC' },
+        take: 500,
+      });
     });
   });
 

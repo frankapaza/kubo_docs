@@ -41,20 +41,45 @@ export interface IncomingMessage {
    */
   messageId: string;
   /**
-   * El remitente, **tal cual trae la cabecera `From`**: puede llegar con un
-   * nombre para mostrar delante (`"Ana Quispe" <ana@empresa.com>`), que es
-   * como aparece la mayoría de las veces en la práctica, o como una dirección
-   * desnuda (`ana@empresa.com`) -- las dos formas son válidas por RFC 5322
-   * §3.4, y este contrato no elige entre ellas.
+   * El remitente, **ya reducido a una dirección de correo desnuda** --
+   * `ana@empresa.com`, nunca `"Ana Quispe" <ana@empresa.com>`. A quien
+   * produce este valor (el adaptador: `ImapMailboxService.extractFromAddress`
+   * para IMAP) le corresponde resolverlo con un analizador de direcciones
+   * consciente de la gramática completa de RFC 5322 (comillas, comentarios,
+   * grupos) -- nunca entregar la cabecera cruda para que otra capa la
+   * desenvuelva con una expresión regular más abajo.
    *
-   * **Nadie debe comparar este campo directamente contra una dirección.**
-   * `isOwnMailbox`, y cualquier búsqueda de usuario por correo, necesitan la
-   * dirección desnuda: hay que pasar este valor por
-   * `extractSenderAddress` (`./domain/message-headers.ts`) antes de
-   * comparar. Un adaptador (IMAP, la Task 8) que entregue el nombre completo
-   * aquí no es un caso raro que haya que blindar aparte -- es la forma normal
-   * de la cabecera, y por eso la responsabilidad de desenvolverla vive en un
-   * único sitio del recorrido y no en cada comparación por separado.
+   * **Contrato revisado en la ronda de correcciones 2 de la Task 8, y por
+   * una razón de seguridad, no de estilo.** La versión original de este
+   * contrato pedía la cabecera cruda y delegaba en `extractSenderAddress`
+   * (`./domain/message-headers.ts`) desenvolverla en un único sitio del
+   * recorrido. Eso funciona mientras el "nombre para mostrar" es lo único
+   * que puede contener un `<...>` engañoso -- pero RFC 5322 también permite
+   * que el **local-part** de la dirección real sea una `quoted-string` que
+   * contenga, sin escapar, su propio `<direccion@dominio>`
+   * (`"<jefe@kuboti.com>"@evil.com` es una dirección válida). Una expresión
+   * regular no puede distinguir ese caso de un nombre para mostrar ambiguo:
+   * las dos formas se ven idénticas en texto plano. Un analizador de
+   * direcciones de verdad (el de `mailparser`, usado por
+   * `ImapMailboxService`) sí las distingue, porque entiende la gramática
+   * completa -- por eso la resolución tiene que ocurrir en el adaptador, con
+   * ese analizador, y no reintentarse después con una aproximación más
+   * pobre. Ver el docblock de `ImapMailboxService` (punto 2) para la
+   * cadena completa de vectores que enseñó esto.
+   *
+   * **Ni siquiera así basta por sí solo.** Un `From` duplicado (dos
+   * cabeceras `From:`) o un error genuino del propio analizador pueden
+   * seguir dando una dirección de un dominio que no es el que de verdad
+   * autenticó DMARC. La defensa que cierra esos casos no vive aquí ni en el
+   * adaptador: es el cruce de dominios en `InboundEmailService.processOne`
+   * (`extractAuthenticatedDomain` contra `domainOf(message.from)`), que no
+   * depende de que esta extracción haya acertado.
+   *
+   * Cadena vacía si el adaptador no pudo resolver ninguna dirección directa
+   * (un `From` en forma de grupo, sin miembro directo) -- nunca una
+   * alternativa insegura como la re-serialización de nombre+dirección.
+   * `isOwnMailbox` y cualquier búsqueda de usuario por correo comparan este
+   * valor directamente, sin ningún paso intermedio.
    */
   from: string;
   subject: string | null;
@@ -82,4 +107,37 @@ export interface Mailbox {
   fetchUnprocessed(limit: number): Promise<IncomingMessage[]>;
   /** Marca procesado por `mailboxRef` (ver su comentario en `IncomingMessage`), nunca por `messageId`. */
   markProcessed(mailboxRef: string): Promise<void>;
+  /**
+   * Deshace `markProcessed` para poder reencolar un correo que quedó
+   * `ERROR` (Task 9, pantalla de correo entrante): **el reintento no
+   * reprocesa, re-encola**. El correo sigue en el buzón -- `markProcessed`
+   * solo pone una bandera, no borra ni mueve nada --, así que basta con
+   * quitarla para que el lector de cada minuto (`InboundEmailService.drain`)
+   * lo vuelva a leer por el camino de siempre, con una fila nueva.
+   *
+   * **Por qué recibe el `Message-ID` crudo y no un `mailboxRef`, a pesar de
+   * ser "el espejo" de `markProcessed`.** `mailboxRef` es deliberadamente
+   * efímero: nace en `fetchUnprocessed`, vive lo que dura una pasada de
+   * `drain`, y **nunca se persiste** en `inbound_emails` (ver el comentario
+   * de esa columna, que no existe). Un reintento se pide minutos, horas o
+   * días después de que esa pasada terminó, así que para entonces no hay
+   * ningún `mailboxRef` al que volver -- lo único que `inbound_emails` sí
+   * guarda de forma durable, y que además coincide con lo que trae de verdad
+   * la cabecera del mensaje, es `messageIdRaw`. Buscar por él en el buzón
+   * (en vez de por un identificador propio del buzón) es exactamente la
+   * comparación que `IncomingMessage.mailboxRef` advierte que **no** hay que
+   * usar para marcar -- con dos límites aceptados, documentados donde se
+   * implementa: un `Message-ID` no es único por protocolo (una copia oculta,
+   * un reenvío, una lista de distribución pueden compartirlo) y un mensaje
+   * sin cabecera `Message-ID` propia (identificador sintético, ver
+   * `syntheticMessageId`) no se puede volver a encontrar por este camino.
+   *
+   * **Lanza si no pudo completar la operación**, a diferencia de
+   * `markProcessed` (cuyo fallo es inofensivo: el correo se reprocesa solo y
+   * se deduplica). Aquí sí importa que quien llama sepa si de verdad quedó
+   * reencolado, porque de eso depende si es seguro renombrar la fila en la
+   * base de datos (liberar la clave única de `message_id`) -- ver
+   * `InboundEmailService.retry`.
+   */
+  markUnprocessed(messageIdRaw: string): Promise<void>;
 }

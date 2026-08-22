@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { QueryFailedError } from 'typeorm';
 
 import { InboundEmailsRepository } from './inbound-emails.repository';
@@ -6,14 +6,15 @@ import { IncomingMessage, Mailbox, MAILBOX } from './mailbox.interface';
 import { normalizeMessageId } from './message-id';
 import { correlate } from './domain/correlation';
 import {
-  extractSenderAddress,
+  domainOf,
   extractTicketCode,
   isAutomaticMessage,
   parseMessageIds,
   stripSubjectPrefixes,
 } from './domain/message-headers';
-import { isOwnMailbox, judgeAuthentication } from './domain/intake-rules';
+import { extractAuthenticatedDomain, isOwnMailbox, judgeAuthentication } from './domain/intake-rules';
 import { stripQuotedText } from './domain/quoted-text';
+import { appendRequeuedReason, buildRequeuedMessageId } from './domain/retry';
 import {
   UNKNOWN_REPLY_COOLDOWN_DAYS,
   hasReachedNewTicketCap,
@@ -176,18 +177,32 @@ function headerMessageIds(message: IncomingMessage): string[] {
 }
 
 /**
- * El mensaje tal y como llega, con `from` ya reducido a una dirección
- * desnuda (ver el comentario de `IncomingMessage.from`). Se hace **una sola
- * vez**, al principio del recorrido, y todo lo demás -- `isOwnMailbox`, las
- * dos búsquedas de remitente, lo que se guarda en `inbound_emails.from_address`,
- * a quién se le contesta -- lee de aquí. Si se comparara `message.from` sin
- * pasar por esto en cada sitio, un adaptador que entregue
- * `"Ana Quispe" <ana@empresa.com>` -- la forma normal de la cabecera, no un
- * caso raro -- haría fallar abierto `isOwnMailbox` y fallar cerrado las dos
- * búsquedas: todo correo pasaría a ser remitente desconocido.
+ * El mensaje tal y como llega, con `from` recortado y en minúscula. Se hace
+ * **una sola vez**, al principio del recorrido, y todo lo demás --
+ * `isOwnMailbox`, las dos búsquedas de remitente, lo que se guarda en
+ * `inbound_emails.from_address`, a quién se le contesta, el cruce de
+ * dominios de `processOne` -- lee de aquí.
+ *
+ * **Ronda de correcciones 2 de la Task 8**: esta función ya NO desenvuelve
+ * un `<...>` con `extractSenderAddress`. Antes sí lo hacía, confiando en que
+ * `IncomingMessage.from` podía llegar en forma "nombre <dirección>" y que
+ * `extractSenderAddress` la resolvería aquí, en un único sitio. El problema
+ * es que el adaptador (`ImapMailboxService.extractFromAddress`, Task 8) ya
+ * no entrega esa forma -- entrega la dirección que el propio analizador de
+ * `mailparser` extrajo, con su gramática completa (comillas, comentarios) --
+ * y esa dirección puede, legítimamente, contener un `<...>` **dentro de un
+ * local-part entrecomillado** (`"<jefe@kuboti.com>"@evil.com`, válido por
+ * RFC 5322). Volver a pasarla por el regex ingenuo de `extractSenderAddress`
+ * tomaba ese `<...>` interno como si fuera un nombre para mostrar envolviendo
+ * la dirección, y devolvía `jefe@kuboti.com` -- la víctima -- en vez de la
+ * dirección real del atacante. Aplicar una expresión pensada para
+ * desambiguar sobre un valor que **ya está desambiguado** es el defecto, no
+ * el regex en sí: por eso aquí ya no se aplica ninguna, solo se normaliza
+ * mayúsculas/espacios -- lo mismo que ya hacía `extractSenderAddress` al
+ * final, sin la parte que interpretaba `<...>`.
  */
 function withNormalizedFrom(message: IncomingMessage): IncomingMessage {
-  return { ...message, from: extractSenderAddress(message.from) };
+  return { ...message, from: message.from.trim().toLowerCase() };
 }
 
 /**
@@ -239,6 +254,18 @@ function withNormalizedFrom(message: IncomingMessage): IncomingMessage {
  * con otra dirección: un correo sin `dmarc=pass` en la cabecera más externa
  * se descarta en silencio. Contestarle a un remitente falsificado es
  * escribirle a la víctima cuya dirección usó.
+ *
+ * **`dmarc=pass` no basta por sí solo: tiene que ser pass PARA la dirección
+ * que se usa.** Ronda de correcciones 2 de la Task 8: un `dmarc=pass`
+ * honesto certifica el dominio del propio atacante (`evil.com`, con su
+ * propio SPF/DKIM/DMARC) mientras el sistema, por una ambigüedad genuina del
+ * `From` o un error de la librería de análisis, termina leyendo una
+ * dirección de OTRO dominio. `processOne` cruza el dominio que
+ * `extractAuthenticatedDomain` certificó contra `domainOf(message.from)`
+ * inmediatamente después de `judgeAuthentication`, y rechaza si no
+ * coinciden -- ver el docblock de `ImapMailboxService` para los seis
+ * vectores que este cruce cierra sin necesitar acertar ningún análisis del
+ * `From`.
  */
 @Injectable()
 export class InboundEmailService {
@@ -379,6 +406,34 @@ export class InboundEmailService {
         messageId,
         'DESCARTADO_NO_AUTENTICADO',
         `Autenticación: ${authVerdict}.`,
+      );
+      summary.discarded += 1;
+      return;
+    }
+
+    // Paso 5b (ronda de correcciones 2): el "pass" de DMARC certifica un
+    // dominio concreto -- el que declara en `header.from=`, dentro de la
+    // propia cabecera --, y ese dominio tiene que ser el mismo que el de la
+    // dirección que este sistema va a usar como remitente. Esta comprobación
+    // existe porque siete intentos de "analizar mejor" el `From`
+    // (`ImapMailboxService`, ver su docblock) no bastaron: al menos dos
+    // vectores no son un análisis insuficiente, sino ambigüedades genuinas
+    // (dos cabeceras `From` duplicadas) o un error de la propia `mailparser`
+    // -- una dependencia en la que hay que confiar para todo lo demás. Ningún
+    // análisis adicional del texto cierra esos dos; comprobar la invariante
+    // sí, sea cual sea la dirección que cualquier análisis haya extraído.
+    // `null` en cualquiera de los dos lados (sin `header.from=`, o un `from`
+    // sin `@`) cuenta como no coincidencia -- nunca como "probablemente
+    // igual".
+    const dominioAutenticado = extractAuthenticatedDomain(message.authenticationResults);
+    const dominioRemitente = domainOf(message.from);
+    if (dominioAutenticado === null || dominioAutenticado !== dominioRemitente) {
+      await this.discard(
+        message,
+        messageId,
+        'DESCARTADO_NO_AUTENTICADO',
+        `Autenticación: el dominio que DMARC certificó (${dominioAutenticado ?? 'ninguno'}) no ` +
+          `coincide con el dominio del remitente identificado (${dominioRemitente ?? 'ninguno'}).`,
       );
       summary.discarded += 1;
       return;
@@ -918,6 +973,100 @@ export class InboundEmailService {
           `(motivo original: ${errorText(error)}).`,
       );
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // El reintento (Task 9, pantalla de correo entrante).
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Reintenta una fila en `ERROR`. **No reprocesa: re-encola.** El correo
+   * sigue en el buzón -- `markProcessed` solo pone una bandera IMAP, nunca
+   * borra ni mueve nada --, así que no hay que releerlo ni guardarlo: basta
+   * con deshacer las dos cosas que lo sacaron de la cola. Ver el docblock de
+   * `Mailbox.markUnprocessed` para el porqué de este diseño (frente a la
+   * alternativa obvia -- volver a leer el correo -- que no es viable: nada
+   * en `inbound_emails` guarda el contenido de un correo que falló, y el
+   * propio guardián de duplicados (`findByMessageId`) trataría cualquier
+   * reproceso como "ya visto" mientras la fila vieja siga con su
+   * `message_id` original).
+   *
+   * **Orden de las dos operaciones, y por qué en ese orden.** Primero se
+   * quita la marca en el buzón; solo si eso tuvo éxito se libera la clave
+   * única renombrando la fila. Un proceso que muriera justo entre medias
+   * dejaría el correo desmarcado pero la fila todavía con su `message_id`
+   * original -- y ese es el estado MENOS malo posible: el lector automático
+   * de cada minuto (`drain`) va a volver a leer ese correo de todos modos, lo
+   * encontrará "ya procesado" por esta misma fila (`findByMessageId`), lo
+   * contará como duplicado y lo volverá a marcar como procesado -- el
+   * sistema converge solo a un estado consistente, sin que nadie tenga que
+   * notarlo. El orden contrario (renombrar primero) es estrictamente peor si
+   * se corta ahí: el correo quedaría marcado como procesado **para
+   * siempre** -- el reloj automático nunca vuelve a mirar un correo que ya
+   * lleva la bandera --, y nada lo repararía salvo que alguien note el
+   * problema y pulse "reintentar" otra vez a mano.
+   *
+   * **No puede duplicar un ticket ya creado.** El botón solo existe para
+   * filas en `ERROR` -- se comprueba aquí, y además la pantalla no lo ofrece
+   * para otras --, así que no hay ningún ticket que duplicar de por medio. Y
+   * aunque se invocara de todos modos sobre una fila que en realidad ya
+   * terminó bien en OTRO intento (con el mismo correo, otro `message_id`
+   * normalizado no aplica aquí: sería el mismo message_id exacto, caso que
+   * el paso anterior ya descarta), el camino normal de `processOne` la
+   * volvería a tratar como duplicada por la clave única de `message_id`.
+   */
+  async retry(id: number, actorEmail: string): Promise<InboundEmail> {
+    const row = await this.repo.findById(id);
+    if (!row) {
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'No se encontró ese correo.' });
+    }
+    if (row.outcome !== 'ERROR') {
+      throw new BadRequestException({
+        code: 'CONFLICT',
+        message: 'Solo se pueden reintentar los correos que quedaron en error.',
+      });
+    }
+    // Decidido por el hecho (¿se guardó el valor crudo?), nunca por asumir
+    // uno en su lugar: sin él no hay nada que buscar en el buzón, y fingir
+    // que se reencoló sin haberlo hecho de verdad es peor que decir que no
+    // se pudo.
+    if (row.messageIdRaw === null) {
+      throw new BadRequestException({
+        code: 'CONFLICT',
+        message: 'Este correo no guardó su identificador original: no se puede reencolar sin él.',
+      });
+    }
+
+    try {
+      await this.mailbox.markUnprocessed(row.messageIdRaw);
+    } catch (error) {
+      // No se toca la fila: si no se pudo reencolar de verdad, renombrarla
+      // igual dejaría un `message_id` liberado sin que el correo vaya a
+      // volver nunca -- perdido, no reencolado. Mejor decirlo tal cual.
+      throw new BadRequestException({
+        code: 'REQUEUE_FAILED',
+        message: `No se pudo volver a poner este correo en la cola: ${errorText(error)}`,
+      });
+    }
+
+    const now = new Date();
+    await this.repo.updateOutcome(row.id, {
+      messageId: buildRequeuedMessageId(row.messageId, row.id, now),
+      reason: appendRequeuedReason(row.reason, actorEmail, now),
+    });
+
+    const updated = await this.repo.findById(row.id);
+    // No debería faltar: se acaba de escribir con este mismo id un instante
+    // antes. Si faltara (alguien la borró en el rato entre medias) es un
+    // fallo real que hay que decir, no algo que se pueda fingir con los
+    // datos que ya se tenían en memoria.
+    if (!updated) {
+      throw new NotFoundException({
+        code: 'NOT_FOUND',
+        message: 'El correo se reencoló, pero ya no se pudo volver a leer su fila.',
+      });
+    }
+    return updated;
   }
 
   /**

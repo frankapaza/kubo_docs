@@ -36,41 +36,47 @@ import { ResolvedImapConfig, WorkspaceService } from '../workspace/workspace.ser
  *    recibirlo -- nunca las junta.
  *
  * 2. **`from`: la dirección que `mailparser` ya analizó, nunca su
- *    re-serialización.** Ronda de correcciones 1 -- el fallo más grave que ha
- *    tenido este proyecto: la primera versión entregaba `parsed.from.text`,
- *    confiando en que `extractSenderAddress`
- *    (`domain/message-headers.ts`) lo desenvolvería después con
- *    `/<([^>]+)>/`. Pero `.text` es una **re-serialización** de
- *    `nombre + dirección` en una sola cadena, y RFC 5322 permite que el
- *    nombre para mostrar sea una `quoted-string` que contenga sus propios
- *    `<`/`>` sin escapar (una comilla sí necesitaría escape; un ángulo, no).
- *    Un remitente puede mandar:
+ *    re-serialización, y nunca una alternativa insegura si esa lectura no
+ *    da nada.** Siete intentos, documentados aquí porque cada uno enseña por
+ *    qué el siguiente hacía falta:
  *
- *    ```
- *    From: "Soporte <victima@kuboti.com>" <atacante@evil.com>
- *    ```
+ *    - **Ronda de correcciones 1**: la primera versión entregaba
+ *      `parsed.from.text`, confiando en que `extractSenderAddress`
+ *      (`domain/message-headers.ts`) lo desenvolvería después con
+ *      `/<([^>]+)>/`. `.text` es una re-serialización de nombre+dirección, y
+ *      RFC 5322 permite que el nombre para mostrar sea una `quoted-string`
+ *      con sus propios `<`/`>` sin escapar: `From: "Soporte
+ *      <victima@kuboti.com>" <atacante@evil.com>` hace que el regex tome el
+ *      `<...>` de dentro del nombre. Se cambió a `parsed.from.value[0].address`
+ *      -- el resultado del propio analizador de direcciones de `mailparser`.
+ *    - **Ronda de correcciones 2, primer defecto**: `extractFromAddress`
+ *      todavía caía a `.text` cuando `value` venía vacío (un `From` en forma
+ *      de grupo, sin dirección directa) -- lo que reintroducía el vector
+ *      original por la puerta de atrás. Ahora nunca cae a `.text`: cadena
+ *      vacía si `value` no trae nada, que es la verdad ("no hay dirección
+ *      identificable"), no una alternativa insegura.
+ *    - **Ronda de correcciones 2, el defecto de fondo**: incluso con
+ *      `value[0].address` y sin caer nunca a `.text`, quedaban vectores que
+ *      **ningún análisis del `From` por sí solo cierra**: un local-part
+ *      entrecomillado que en sí mismo contiene una dirección ajena
+ *      (`"<jefe@kuboti.com>"@evil.com`, válido por RFC 5322 -- el resultado
+ *      de `value[0].address` es correcto, `"<jefe@kuboti.com>"@evil.com`, y
+ *      el defecto era que **una función más abajo** (`extractSenderAddress`,
+ *      en `inbound-email.service.ts`) le volvía a aplicar el mismo regex
+ *      ingenuo); dos cabeceras `From` duplicadas, donde `mailparser` toma la
+ *      **última** que declaró; un `From` con una lista de dos direcciones
+ *      (RFC 6854); y, el que demuestra que "analizar mejor" no basta, un
+ *      caso donde la propia `mailparser` -- con su gramática completa --
+ *      **se equivoca** y devuelve la dirección de una víctima. Ninguno de
+ *      estos depende de una re-serialización insegura: son ambigüedades
+ *      genuinas sobre qué domina "la" dirección del `From`, y un análisis
+ *      más fino del texto no las cierra, solo las desplaza.
  *
- *    `parsed.from.value[0].address` -- el resultado del propio analizador de
- *    direcciones de `mailparser`, consciente de comillas y comentarios --
- *    dice correctamente `atacante@evil.com`. Pero `parsed.from.text`
- *    reconstruye `'"Soporte <victima@kuboti.com>" <atacante@evil.com>'`, y el
- *    regex ingenuo de `extractSenderAddress` toma el **primer** `<...>` que
- *    encuentra: `victima@kuboti.com`. Y DMARC no lo frena -- no tiene por qué:
- *    valida el dominio de la dirección real del sobre, `evil.com`, que el
- *    atacante controla y para el que publica su propio SPF/DKIM/DMARC. A
- *    partir de ahí el atacante ES la víctima para el resto del recorrido:
- *    escribe en su hilo, abre tickets a su nombre, y si la víctima es del
- *    personal, su mensaje entra como nota interna.
- *
- *    Por eso `extractFromAddress` lee `parsed.from.value[0].address`
- *    directamente y solo cae a `.text` si esa lista viniera vacía (un `From`
- *    que solo es un grupo, sin ninguna dirección directa -- rarísimo, y sin
- *    ninguna dirección "correcta" que perder frente a esa alternativa). No es
- *    "entregar la dirección tal cual llegó, para que la desenvuelva
- *    `extractSenderAddress`" -- es reconocer que `mailparser` ya hizo, con una
- *    gramática completa, el trabajo que esa función solo aproxima con un
- *    regex, y que reconstruir su resultado a texto para volver a analizarlo
- *    con la aproximación más pobre es un paso atrás, no una traducción.
+ *    La solución no es analizar mejor: es comprobar una invariante que
+ *    tiene que cumplirse pase lo que pase, sea cual sea la dirección que
+ *    cualquier análisis (el nuestro, o el de `mailparser`) haya extraído --
+ *    ver `extractAuthenticatedDomain` (`domain/intake-rules.ts`) y su uso en
+ *    `InboundEmailService`, más abajo en esta cabecera.
  *
  * 3. **Solo texto, nunca HTML.** `chooseTextBody` prefiere `text/plain`; si
  *    el correo solo trae HTML, `stripHtmlToText` lo convierte y garantiza --
@@ -83,6 +89,24 @@ import { ResolvedImapConfig, WorkspaceService } from '../workspace/workspace.ser
  *    escribió alguien, y un `<`/`>` ahí (una URL con angle brackets, un
  *    fragmento de código pegado, la vieja costumbre de escribir
  *    `<correo@dominio.com>` en texto plano) no es marcado que neutralizar.
+ *
+ * ## El cruce de dominios (fuera de este archivo, pero nace aquí)
+ *
+ * Este adaptador entrega `from` y `authenticationResults`; no le corresponde
+ * a él cruzarlos -- eso es una decisión de negocio y vive en
+ * `InboundEmailService`. Pero el porqué nace exactamente de lo que este
+ * archivo tuvo que aprender por las malas (punto 2, de arriba): siete
+ * intentos de "analizar mejor" el `From` no bastaron, porque al menos dos de
+ * los vectores (dos `From` duplicados donde `mailparser` toma el que no
+ * toca, y un caso donde la propia `mailparser` se equivoca) no son fallos de
+ * un análisis insuficiente, son ambigüedades genuinas o errores de una
+ * dependencia en la que hay que confiar para todo lo demás. La única
+ * defensa que cierra ambos a la vez -- sin depender de acertar ningún
+ * análisis -- es comprobar que el dominio que DMARC certificó
+ * (`extractAuthenticatedDomain`, `domain/intake-rules.ts`) es el mismo que
+ * el de la dirección que el sistema terminó usando (`domainOf(message.from)`,
+ * `domain/message-headers.ts`). Si no coinciden, el correo se rechaza --
+ * ver `InboundEmailService.processOne` para dónde vive esa comprobación.
  *
  * ## `mailboxRef` lleva el UIDVALIDITY, y se comprueba al marcar
  *
@@ -232,6 +256,63 @@ export class ImapMailboxService implements Mailbox, OnModuleDestroy {
     }
   }
 
+  /**
+   * Deshace `markProcessed`, buscando el mensaje **por su Message-ID**, no
+   * por un `mailboxRef` -- ver el docblock de `Mailbox.markUnprocessed` para
+   * el porqué completo (esa referencia nunca se persiste, así que un
+   * reintento pedido después de que la pasada original terminó no tiene otra
+   * forma de encontrar el mensaje).
+   *
+   * A diferencia de `markProcessed`, aquí no basta con lanzar el `STORE` y
+   * confiar: quitar una bandera de un UID que ya no existe **no falla** por
+   * protocolo IMAP (el servidor simplemente no tiene nada que tocar y
+   * responde OK igual), así que sin comprobar antes que el mensaje sigue ahí
+   * un correo borrado a mano del buzón parecería reencolarse con
+   * normalidad. Por eso se busca primero con `SEARCH` -- que si no encuentra
+   * nada lo dice de verdad -- y solo entonces se quita la bandera.
+   *
+   * El filtro `seen: true` en la búsqueda no es solo "encuéntralo": es
+   * "encuéntralo si sigue marcado como procesado". Si un reintento anterior
+   * ya lo desmarcó y el proceso murió antes de renombrar la fila (ver el
+   * comentario de orden de operaciones en `InboundEmailService.retry`), un
+   * segundo intento no encontraría nada aquí -- pero no hace falta: el
+   * lector automático de cada minuto ya lo habrá recogido solo, por seguir
+   * sin la bandera `\Seen`, mucho antes de que alguien note el fallo.
+   *
+   * Esta vía **no depende del UIDVALIDITY** de `mailboxRef`/`markProcessed`:
+   * al buscar en vivo por Message-ID en vez de arrastrar un UID de una
+   * lectura anterior, no hay ninguna referencia que pueda quedar desfasada
+   * si la carpeta se recreó entre medias.
+   */
+  async markUnprocessed(messageIdRaw: string): Promise<void> {
+    const config = await this.requireConfig();
+    const client = await this.ensureConnected(config);
+
+    const lock = await client.getMailboxLock(config.folder);
+    try {
+      const uids = await client.search(
+        { header: { 'message-id': messageIdRaw }, seen: true },
+        { uid: true },
+      );
+      if (uids === false || uids.length === 0) {
+        throw new Error(
+          'No se encontró en el buzón, todavía marcado como procesado, ningún correo con ese ' +
+            'Message-ID. Puede que alguien lo haya borrado a mano del buzón, o que ya se haya ' +
+            'reencolado antes.',
+        );
+      }
+
+      // Puede haber más de una coincidencia: un Message-ID es único por
+      // convención, no por protocolo (ver el docblock de `Mailbox.markUnprocessed`).
+      // Se quita la bandera de todas las que compartan el identificador --
+      // limitación aceptada de esta vía, que no existiría si se pudiera
+      // reencolar por `mailboxRef`, pero esa referencia nunca se persiste.
+      await client.messageFlagsRemove(uids, ['\\Seen'], { uid: true });
+    } finally {
+      lock.release();
+    }
+  }
+
   /** La config IMAP, o un error explícito si la ingesta está encendida sin buzón configurado del todo. */
   private async requireConfig(): Promise<ResolvedImapConfig> {
     const config = await this.workspace.getImapConfig();
@@ -345,24 +426,30 @@ export function decodeMailboxRef(ref: string): { uidValidity: string; uid: numbe
 
 /**
  * La dirección del remitente, tal como la extrajo el propio analizador de
- * direcciones de `mailparser` -- **nunca** `parsed.from.text`. Ver el punto 2
- * del docblock de la clase para el porqué exacto: `.text` es una
- * re-serialización de nombre+dirección que no escapa los `<`/`>` que el
- * nombre pueda contener (RFC 5322 sí lo permite dentro de una
- * `quoted-string`), y volver a analizar esa cadena con el regex ingenuo de
- * `extractSenderAddress` puede tomar el `<...>` equivocado -- el que el
- * remitente escondió dentro de su propio nombre para mostrar, no el de su
- * dirección real.
+ * direcciones de `mailparser` -- **nunca** `parsed.from.text`, y **nunca**
+ * como último recurso tampoco. Ver el punto 2 del docblock de la clase para
+ * el porqué exacto: `.text` es una re-serialización de nombre+dirección que
+ * no escapa los `<`/`>` que el nombre pueda contener (RFC 5322 sí lo permite
+ * dentro de una `quoted-string`), y volver a analizar esa cadena con el
+ * regex ingenuo de `extractSenderAddress` puede tomar el `<...>` equivocado.
  *
- * Solo cae a `.text` cuando `value` viene vacío: un `From` que es puramente
- * un grupo de direcciones sin ninguna dirección directa es rarísimo, y ahí no
- * hay ninguna "dirección correcta" que perder frente a esa alternativa --
- * `extractSenderAddress`, aguas abajo, seguirá sin encontrar un `<...>` fiable
- * en ese caso tampoco, así que no se está renunciando a nada que sí
- * funcionara.
+ * **Ronda de correcciones 2 de la Task 8**: la versión anterior sí caía a
+ * `.text` cuando `value` venía vacío (un `From` en forma de grupo, sin
+ * ninguna dirección directa). Eso reintroducía exactamente el mismo vector
+ * por la puerta de atrás -- un grupo cuyo único miembro tiene un nombre para
+ * mostrar con un `<víctima@dominio.com>` sin escapar produce igual una
+ * `.text` ambigua, y `value` vacío es precisamente la condición bajo la que
+ * esa rama se activaba. Ahora, sin `value[0].address`, el resultado es
+ * cadena vacía -- el mismo valor que "no hay ninguna dirección", que es la
+ * verdad: un `From` que no resuelve a una dirección concreta no es un
+ * remitente identificable. Cadena vacía es además el lado seguro por
+ * construcción: `domainOf('')` (`domain/message-headers.ts`) da `null`, y
+ * ningún cruce de dominios (`extractAuthenticatedDomain` vs `domainOf`) pasa
+ * nunca contra `null` -- degrada a remitente rechazado o desconocido, nunca
+ * a una identidad prestada.
  */
 export function extractFromAddress(parsed: Pick<ParsedMail, 'from'>): string {
-  return parsed.from?.value?.[0]?.address ?? parsed.from?.text ?? '';
+  return parsed.from?.value?.[0]?.address ?? '';
 }
 
 /**

@@ -134,6 +134,18 @@ export function extractTicketCode(subject: string): string | null {
  *
  * Si no hay ningun `<...>`, se asume que `from` ya es la direccion (el otro
  * caso legitimo de la gramatica, `addr-spec` a secas) y solo se normaliza.
+ *
+ * **No aplicar esto sobre una direccion que un analizador de verdad ya
+ * resolvio** (p. ej. `IncomingMessage.from`, que desde la ronda de
+ * correcciones 2 de la Task 8 llega ya resuelta por `mailparser`). El
+ * regex de arriba no entiende que un local-part entrecomillado puede
+ * contener su propio `<...>` sin que sea un nombre para mostrar
+ * (`"<jefe@kuboti.com>"@evil.com` es una direccion valida por RFC 5322), y
+ * volver a aplicarlo ahi tomaba ese `<...>` interno como si envolviera la
+ * direccion real -- ver el docblock de `ImapMailboxService` (punto 2) para
+ * el vector completo. Hoy esta funcion solo se usa sobre valores de
+ * configuracion de confianza (el usuario IMAP de los ajustes,
+ * `inbound-email.module.ts`), no sobre nada que un remitente controle.
  */
 export function extractSenderAddress(from: string): string {
   const match = from.match(/<([^>]+)>/);
@@ -205,4 +217,34 @@ export function isAutomaticMessage(headers: Record<string, string | undefined>):
     const value = headers[key];
     return value !== undefined && value.trim().length > 0;
   });
+}
+
+/**
+ * El dominio de una direccion de correo ya resuelta -- todo lo que sigue al
+ * **ultimo** `@` de la cadena. Es correcto para cualquier `addr-spec` valido
+ * de RFC 5322 sin importar cuantos `@` traiga un local-part entre comillas
+ * (`"a@b"@dominio.com` es una direccion legitima con `@` DENTRO del
+ * local-part): el dominio en si nunca contiene un `@`, asi que el separador
+ * real entre local-part y dominio es, por construccion, el ultimo `@` de la
+ * cadena entera -- no el primero, que un local-part entrecomillado con `@`
+ * dentro haria apuntar al sitio equivocado.
+ *
+ * Ronda de correcciones 2 de la Task 8: esta funcion existe para poder
+ * comparar el dominio que DMARC certifico (`extractAuthenticatedDomain`,
+ * `domain/intake-rules.ts`) contra el dominio de la direccion que el sistema
+ * de verdad va a usar como remitente -- la unica comprobacion que cierra a
+ * la vez los vectores que ya se conocian Y los que ni el propio analizador
+ * de direcciones de `mailparser` acierta siempre: si los dos dominios no son
+ * el mismo, el "pass" de DMARC no dice nada sobre ESTA direccion, la haya
+ * extraido bien o mal cualquier analisis previo.
+ *
+ * `null` si no hay ningun `@` -- una direccion vacia o incompleta, no un
+ * dominio vacio: no decidir por la ausencia, decidir por el hecho de que no
+ * hay dominio que comparar.
+ */
+export function domainOf(address: string): string | null {
+  const at = address.lastIndexOf('@');
+  if (at === -1) return null;
+  const domain = address.slice(at + 1).trim().toLowerCase();
+  return domain.length > 0 ? domain : null;
 }

@@ -1,4 +1,4 @@
-import { isOwnMailbox, judgeAuthentication } from './intake-rules';
+import { extractAuthenticatedDomain, isOwnMailbox, judgeAuthentication } from './intake-rules';
 
 describe('judgeAuthentication', () => {
   it('acepta cuando dmarc pasa', () => {
@@ -267,6 +267,68 @@ describe('judgeAuthentication', () => {
   // pasar.
   it('LIMITACION CONOCIDA: un ";" sin comillas en smtp.helo es indistinguible de una cabecera legitima', () => {
     expect(judgeAuthentication('mx.kubo.com; spf=fail smtp.helo=evil; dmarc=pass')).toBe('PASA');
+  });
+});
+
+/**
+ * Ronda de correcciones 2 de la Task 8: el septimo intento contra la
+ * suplantacion del remitente, y el que cierra la familia entera de una vez
+ * -- no analizando mejor el `From`, sino comprobando una invariante que
+ * tiene que cumplirse pase lo que pase: el dominio que DMARC certifico
+ * (`header.from=`) tiene que ser el mismo que el de la direccion que el
+ * sistema usa. Ver el docblock de `extractAuthenticatedDomain` para el
+ * porque completo, y `imap-mailbox.service.spec.ts` (describe "los seis
+ * vectores") para los seis ataques reales, con el `simpleParser` de verdad,
+ * que esta comprobacion cierra sin necesitar acertar ningun analisis del
+ * `From`.
+ */
+describe('extractAuthenticatedDomain', () => {
+  it('da el dominio de header.from cuando dmarc pasa', () => {
+    expect(
+      extractAuthenticatedDomain('mx.kuboti.com; spf=pass; dkim=pass; dmarc=pass header.from=cliente.com'),
+    ).toBe('cliente.com');
+  });
+
+  it('recorta comillas y pone en minuscula el dominio', () => {
+    expect(
+      extractAuthenticatedDomain('mx.kuboti.com; dmarc=pass header.from="Cliente.COM"'),
+    ).toBe('cliente.com');
+  });
+
+  it('null si dmarc no pasa', () => {
+    expect(extractAuthenticatedDomain('mx.kuboti.com; dmarc=fail header.from=cliente.com')).toBeNull();
+  });
+
+  it('null si no hay ninguna cabecera', () => {
+    expect(extractAuthenticatedDomain(null)).toBeNull();
+    expect(extractAuthenticatedDomain(undefined)).toBeNull();
+  });
+
+  it('null si dmarc pasa pero el segmento no declara header.from', () => {
+    expect(extractAuthenticatedDomain('mx.kuboti.com; dmarc=pass')).toBeNull();
+  });
+
+  it('null si la cabecera esta comprometida (mismo criterio que judgeAuthentication)', () => {
+    const comprometida = 'mx.kuboti.com; spf=fail (razon: (detalle) ; dmarc=pass ) ; dkim=fail; dmarc=fail';
+    expect(judgeAuthentication(comprometida)).toBe('FALLA');
+    expect(extractAuthenticatedDomain(comprometida)).toBeNull();
+  });
+
+  it('null si el valor llega con un salto de linea (cabeceras concatenadas)', () => {
+    expect(extractAuthenticatedDomain('mx.kubo.com; spf=pass\nevil.example; dmarc=pass header.from=evil.example')).toBeNull();
+  });
+
+  /**
+   * Un `header.from=` de mentira colado en OTRO segmento (no en el del
+   * `dmarc=pass` legitimo) no debe leerse: la busqueda va sobre el texto del
+   * segmento ya aislado, nunca sobre la cabecera entera.
+   */
+  it('no lee un header.from que aparece fuera del segmento dmarc', () => {
+    expect(
+      extractAuthenticatedDomain(
+        'mx.kuboti.com; spf=pass header.from=victima-falsa.com; dmarc=pass',
+      ),
+    ).toBeNull();
   });
 });
 
