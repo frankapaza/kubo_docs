@@ -373,6 +373,37 @@ describe('judgeAuthentication / extractAuthenticatedDomain: el ancla del identif
       'SIN_SERVIDOR_PROPIO',
     );
   });
+
+  /**
+   * Correccion posterior a la tanda de cierre: la comprobacion original solo
+   * miraba `expectedServerId === null`. Una cadena vacia o de solo espacios
+   * no es `null` -- y si ademas el primer segmento de la cabecera tambien
+   * viene vacio (sin ningun identificador en absoluto, un `;` de entrada),
+   * las dos cadenas vacias "coincidian" y la cabecera pasaba: exactamente el
+   * caso sin ancla que esta capa existe para bloquear, aprobado por
+   * accidente. No hace falta legitima en la que `expectedServerId` se
+   * guarde asi (`WorkspaceService.getImapAuthServerId` ya recorta a `null`),
+   * pero la funcion es exportada y pura: no puede depender de que su unico
+   * llamador la proteja.
+   */
+  it('identificador configurado como cadena vacia: SIN_SERVIDOR_PROPIO, no PASA -- ni con una cabecera sin identificador', () => {
+    const sinIdentificador = '; dmarc=pass header.from=cliente.com';
+    expect(judgeAuthenticationReal(sinIdentificador, '')).toBe('SIN_SERVIDOR_PROPIO');
+    expect(extractAuthenticatedDomainReal(sinIdentificador, '')).toBeNull();
+  });
+
+  it('identificador configurado como solo espacios: igual que vacio, SIN_SERVIDOR_PROPIO', () => {
+    expect(judgeAuthenticationReal(CABECERA_LIMPIA, '   ')).toBe('SIN_SERVIDOR_PROPIO');
+  });
+
+  // El valor ausente (`undefined`, no `null`) no debe reventar con
+  // TypeError -- fallar cerrado significa devolver un veredicto, no lanzar.
+  it('identificador ausente (undefined): SIN_SERVIDOR_PROPIO, sin lanzar excepcion', () => {
+    expect(() => judgeAuthenticationReal(CABECERA_LIMPIA, undefined)).not.toThrow();
+    expect(judgeAuthenticationReal(CABECERA_LIMPIA, undefined)).toBe('SIN_SERVIDOR_PROPIO');
+    expect(() => extractAuthenticatedDomainReal(CABECERA_LIMPIA, undefined)).not.toThrow();
+    expect(extractAuthenticatedDomainReal(CABECERA_LIMPIA, undefined)).toBeNull();
+  });
 });
 
 /**

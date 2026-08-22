@@ -1,9 +1,84 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { WorkspaceSetting } from './entities/workspace-setting.entity';
 import { UpdateWorkspaceSettingsDto } from './dto/update-workspace.dto';
 import { decryptSecret, encryptSecret } from '../../common/crypto/aes-gcm.util';
+
+/**
+ * Nombres de método de RFC 8601 §2.7.1 (el registro IANA "Email
+ * Authentication Methods"). `assertValidImapAuthServerId` los usa para
+ * detectar el rodeo de Microsoft 365 -- ver su docblock.
+ */
+const AUTH_METHOD_NAMES = [
+  'auth',
+  'compauth',
+  'dkim',
+  'dkim-adsp',
+  'dkim-atps',
+  'domainkeys',
+  'dmarc',
+  'iprev',
+  'rrvs',
+  'sender-id',
+  'smime',
+  'spf',
+  'vbr',
+];
+
+/**
+ * Rechaza un identificador de servidor que en realidad es un rodeo contra el
+ * ancla (`judgeAuthentication`, `domain/intake-rules.ts`), no un nombre de
+ * servidor.
+ *
+ * Microsoft 365 no escribe ningún `authserv-id` en su
+ * `Authentication-Results` -- la cabecera empieza directamente por el primer
+ * resultado (`spf=pass ...`). Con `judgeAuthentication` fallando cerrado, eso
+ * bloquea el 100% del correo de ese proveedor: un problema de disponibilidad,
+ * no de seguridad, pero real. El rodeo que se le ocurre a quien configura
+ * esto es poner como identificador el propio nombre del método que sí ve al
+ * principio -- `spf` o `dkim` -- para que "algo" coincida. Verificado: con
+ * ese ajuste, una cabecera fabricada por un atacante para su propio dominio
+ * (que siempre trae `spf=pass` o `dkim=pass`, honesto para SU dominio) pasa
+ * exactamente igual. El ajuste no arregla Microsoft 365: reabre el vector
+ * completo que `SIN_SERVIDOR_PROPIO` existe para detectar.
+ *
+ * Dos formas de colar un método de autenticación en vez de un `authserv-id`:
+ *
+ * - **Con `=`**: escribir `spf=pass` tal cual como identificador. Cualquier
+ *   cabecera -- fabricada o real -- trae ese texto literal en cuanto SPF se
+ *   evalúa, así que compararla contra esto no distingue nada.
+ * - **Sin `=`**: si el propio servidor separa clave y valor con espacios
+ *   (`spf = pass ...`), `extractServerId` (`domain/intake-rules.ts`) toma
+ *   solo el primer token de la cabecera al partir por espacios -- `spf`,
+ *   sin el `=` -- así que un identificador igual a `spf` a secas cuela lo
+ *   mismo sin que el ajuste contenga ningún `=`.
+ *
+ * Ninguna de las dos identifica un servidor: comparten el mismo defecto, con
+ * o sin el signo.
+ */
+export function assertValidImapAuthServerId(value: string): void {
+  if (value.includes('=')) {
+    throw new BadRequestException({
+      code: 'BAD_INPUT',
+      message:
+        'El identificador del servidor de correo no puede contener "=": eso es un ' +
+        'resultado de autenticación (por ejemplo "spf=pass"), no el nombre de un ' +
+        'servidor -- y aceptarlo dejaría pasar cualquier cabecera fabricada por un ' +
+        'atacante para su propio dominio, que también trae ese mismo texto.',
+    });
+  }
+  if (AUTH_METHOD_NAMES.includes(value.toLowerCase())) {
+    throw new BadRequestException({
+      code: 'BAD_INPUT',
+      message:
+        `"${value}" es el nombre de un método de autenticación (como spf o dkim), no ` +
+        'el de un servidor de correo -- usarlo como identificador tampoco distingue un ' +
+        'correo legítimo de uno fabricado. Usa el hostname que tu propio servidor ' +
+        'escribe como primer segmento de la cabecera Authentication-Results.',
+    });
+  }
+}
 
 /** Config SMTP resuelta (con el password descifrado en memoria) */
 export interface ResolvedSmtpConfig {
@@ -58,6 +133,15 @@ export class WorkspaceService {
   async update(dto: UpdateWorkspaceSettingsDto): Promise<WorkspaceSetting> {
     const current = await this.get();
     const patch: Partial<WorkspaceSetting> = {};
+
+    // Ver `assertValidImapAuthServerId`: un identificador con "=" o igual a
+    // un método de autenticación no es un nombre de servidor, y aceptarlo
+    // reabre el vector que SIN_SERVIDOR_PROPIO existe para detectar (no para
+    // cerrar -- eso depende de la política SMTP del servidor de correo).
+    // Cadena vacía (limpiar el ajuste) no pasa por aquí -- `null` no es un rodeo.
+    if (dto.imapAuthServerId !== undefined && dto.imapAuthServerId.trim() !== '') {
+      assertValidImapAuthServerId(dto.imapAuthServerId.trim());
+    }
 
     // Mapeo 1:1 de campos simples, convirtiendo '' → null
     const simpleKeys: (keyof UpdateWorkspaceSettingsDto)[] = [

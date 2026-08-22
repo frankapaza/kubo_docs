@@ -7,7 +7,7 @@
 import { normalizeDomain } from './message-headers';
 
 /**
- * El veredicto de autenticacion de un correo, con **cuatro** valores.
+ * El veredicto de autenticacion de un correo, con **cinco** valores.
  *
  * `SIN_CABECERA` es la razon de ser original de este modulo: si el servidor
  * de correo no anade `Authentication-Results` en absoluto, la ausencia no
@@ -309,13 +309,31 @@ function extractHeaderFromDomain(segmentText: string): string | null {
  * Evalua el resultado `dmarc` de `header` con tres capas, **las tres a la
  * vez** -- ronda de correcciones 3, ninguna basta sola. La tanda de cierre
  * antepone una capa CERO, antes de las tres: **el identificador del propio
- * servidor.** Si `expectedServerId` es `null` (nadie configuro el ajuste) o
+ * servidor.** Si `expectedServerId` esta ausente -- `null`, `undefined`, o
+ * una cadena vacia o solo espacios, nadie configuro el ajuste todavia -- o
  * el primer segmento de `header` no coincide con el -- comparacion exacta del
  * primer token, sin distinguir mayusculas -- el resultado es
  * `SERVER_MISMATCH` de inmediato, sin llegar siquiera a mirar si hay un
  * `dmarc=pass`. Ver el docblock de `judgeAuthentication`, seccion "El ancla
  * que faltaba", para el porque esta capa tiene que ir PRIMERO y fallar
  * CERRADO.
+ *
+ * **Correccion posterior a la tanda de cierre: la comprobacion original solo
+ * contemplaba `expectedServerId === null`.** Una cadena vacia o de solo
+ * espacios no es `null`, así que pasaba de largo ese `if` -- y si el primer
+ * segmento de `header` TAMBIEN venia vacio (una cabecera sin ningun
+ * identificador en absoluto), `''.trim().toLowerCase() === ''` y la
+ * comparacion "coincidia" con exito: exactamente la cabecera sin ancla que
+ * esta capa existe para rechazar, aprobada por accidente. Y con
+ * `expectedServerId === undefined` (el valor ausente, no `null`, algo que el
+ * tipo declarado no impide en tiempo de ejecucion), `expectedServerId.trim()`
+ * lanzaba `TypeError` -- una excepcion sin capturar en vez de fallar cerrado,
+ * lo contrario de lo que esta funcion promete. Hoy no es alcanzable
+ * (`WorkspaceService.getImapAuthServerId` ya recorta a `null` antes de
+ * llamar), pero la funcion es exportada y pura: su contrato no puede depender
+ * de que su unico llamador actual la proteja. Por eso la comprobacion de
+ * abajo trata `null`, `undefined`, y cualquier cadena que quede vacia tras
+ * `trim()` como el mismo caso: ausente, y ausente falla cerrado.
  *
  * 1. **Tokenizar** con `splitTopLevelSegments`. Si la cabecera esta
  *    malformada (comentario/cadena sin cerrar, o un `)` suelto), el
@@ -355,7 +373,7 @@ function extractHeaderFromDomain(segmentText: string): string | null {
  */
 function evaluateDmarc(
   header: string,
-  expectedServerId: string | null,
+  expectedServerId: string | null | undefined,
 ): { outcome: DmarcOutcome; headerFromDomain: string | null } {
   const tokenized = splitTopLevelSegments(header);
   if (!tokenized.ok) return { outcome: 'COMPROMISED', headerFromDomain: null };
@@ -364,8 +382,18 @@ function evaluateDmarc(
   // `tokenized.segments[0]` siempre existe (`splitTopLevelSegments` siempre
   // devuelve al menos un segmento, vacio como mucho), pero su CONTENIDO nunca
   // se habia comprobado -- ver el docblock de `DmarcOutcome`/`evaluateDmarc`.
+  //
+  // `?.trim()` cubre `null` Y `undefined` con la misma expresion -- el valor
+  // ausente ya no revienta con `TypeError` -- y el `|| ''` que sigue colapsa
+  // "ausente" y "presente pero vacio/solo espacios" al mismo string vacio.
+  // `actualServerId` (mas abajo) nunca es `undefined` (`extractServerId`
+  // devuelve `?? ''` si el split no encuentra nada), asi que comparar
+  // cadenas vacias contra cadenas vacias SIEMPRE seria "coincide" si no se
+  // cortara antes: por eso `normalizedExpected === ''` se comprueba aparte,
+  // ANTES de comparar, y no se deja caer en la comparacion de igualdad.
   const actualServerId = extractServerId(tokenized.segments[0].text);
-  if (expectedServerId === null || actualServerId.toLowerCase() !== expectedServerId.trim().toLowerCase()) {
+  const normalizedExpected = expectedServerId?.trim().toLowerCase() ?? '';
+  if (normalizedExpected === '' || actualServerId.toLowerCase() !== normalizedExpected) {
     return { outcome: 'SERVER_MISMATCH', headerFromDomain: null };
   }
 
@@ -462,7 +490,7 @@ function evaluateDmarc(
  * coincidencia -- el mismo punto y coma que regalaba el paso ahora regala
  * tambien la identidad.
  *
- * # El ancla que faltaba, y por que sin ella el sistema queda abierto de par en par
+ * # El ancla contra el correo mal ruteado -- deteccion, no puerta
  *
  * Tanda de cierre: todo el parrafo anterior -- las cinco elusiones, la
  * politica SMTP como frontera real -- asumia algo que esta funcion **nunca
@@ -488,33 +516,74 @@ function evaluateDmarc(
  * (`extractAuthenticatedDomain` vs `domainOf(message.from)`) tampoco la para:
  * el atacante controla LOS DOS LADOS de esa comparacion, y basta con que
  * ponga el mismo `kuboti.com` en su `header.from=` fabricado y en su propio
- * `From`. El resultado es **suplantacion completa de cualquier remitente,
- * cliente o personal** -- no "un correo no autenticado que se cuela": un
- * correo que el sistema procesa exactamente como si lo hubiera escrito la
- * persona suplantada.
+ * `From`. El resultado, si nada mas interviene, es **suplantacion completa
+ * de cualquier remitente, cliente o personal** -- no "un correo no
+ * autenticado que se cuela": un correo que el sistema procesa exactamente
+ * como si lo hubiera escrito la persona suplantada.
  *
  * `expectedServerId` (el segundo parametro, `WorkspaceService.getImapAuthServerId`
- * -- ajunto de los demas ajustes IMAP) es el ancla que cierra esto:
- * `evaluateDmarc` exige que el PRIMER segmento de la cabecera -- el
- * `authserv-id` de RFC 8601 SS2.2 -- coincida con el valor configurado, antes
- * de mirar nada mas. Si no coincide, o si nadie configuro el ajuste todavia,
- * el resultado es `SIN_SERVIDOR_PROPIO`, sin excepcion: **falla cerrado**, no
- * "probablemente sea nuestro servidor".
+ * -- ajuste de los demas ajustes IMAP) exige que el PRIMER segmento de la
+ * cabecera -- el `authserv-id` de RFC 8601 SS2.2 -- coincida con el valor
+ * configurado, antes de mirar nada mas. Si no coincide, o si nadie configuro
+ * el ajuste todavia, el resultado es `SIN_SERVIDOR_PROPIO`, sin excepcion:
+ * **falla cerrado**, no "probablemente sea nuestro servidor".
+ *
+ * ## Correccion posterior a la tanda de cierre: esto NO cierra el escenario de
+ * arriba
+ *
+ * La version anterior de este docblock -- y del informe y del diseno de esa
+ * tanda -- decia que `expectedServerId` "cierra" el escenario de arriba. **Es
+ * falso.** `authserv-id` es, por diseno de RFC 8601, un nombre PUBLICO: es el
+ * hostname del propio servidor de entrada, esta publicado en el DNS/MX del
+ * dominio, y aparece en la cabecera de cualquier rebote que ese servidor haya
+ * mandado alguna vez. No es un secreto que este sistema guarde, y compararlo
+ * no lo convierte en uno: no hace mas dificil que un atacante lo consiga.
+ *
+ * En el escenario exacto para el que esta capa se escribio -- nuestro
+ * servidor de entrada no antepuso su cabecera, asi que la primera es la del
+ * atacante --, el atacante simplemente escribe ese mismo identificador
+ * publico como primer segmento de su cabecera fabricada. La cabecera de
+ * ejemplo de arriba YA lo hace (`mx.kubo.com` es el identificador publico que
+ * se compara): **verificado, entra igual, con suplantacion completa.** Esta
+ * capa no distingue nada en ese caso, porque el dato que compara nunca fue
+ * secreto.
+ *
+ * Lo que esta capa SI distingue es el correo **mal ruteado** del **bien
+ * ruteado**: si nuestro propio servidor de entrada SI antepone su cabecera
+ * (el caso normal en produccion, con el ruteo intacto), ningun remitente
+ * puede colar la suya por delante, y esta capa nunca dispara sobre trafico
+ * legitimo. Si el ruteo cambia o se rompe -- un proveedor mal configurado, un
+ * cambio de MX, entrega directa que se salta el MX esperado --, esta capa lo
+ * detecta de inmediato en vez de dejar pasar en silencio una cabecera que ya
+ * no es la que corresponde. Es **deteccion de una condicion operativa** (el
+ * ruteo esta mal, o falta la politica de abajo), **no una puerta contra un
+ * atacante** que ya conoce el identificador -- porque ese identificador
+ * nunca pudo ser, por diseno, un secreto.
+ *
+ * **Lo unico que de verdad cierra el vector de suplantacion es que el
+ * servidor de correo rechace en la entrega -- en el sobre SMTP, antes de
+ * aceptar el mensaje -- cualquier correo que no pase DMARC.** Con esa
+ * politica activa, el mensaje del atacante no llega al buzon en absoluto, y
+ * da igual que conozca el identificador de nuestro servidor: nunca llega a
+ * esta funcion. Esta capa no sustituye a esa politica. Sigue mereciendo la
+ * pena porque detecta que la politica falta, o que el ruteo cambio de forma
+ * que la cabecera ya no es de fiar -- y por eso el registro tiene que poder
+ * decir `SIN_SERVIDOR_PROPIO` por separado de los demas veredictos --, pero
+ * **no es, ni pretende ya ser, la puerta**.
  *
  * **Por que la comprobacion de puesta en marcha "verificar que la cabecera
- * llega" NO detecta este vector.** Esa comprobacion (ver el riesgo 1 del
- * diseno, `docs/superpowers/specs/2026-08-22-tickets-por-correo-design.md`)
- * confirma que `Authentication-Results` esta presente en el correo que
- * llega -- y un correo con la cabecera FALSIFICADA por el propio remitente
- * la satisface exactamente igual que uno legitimo: la cabecera "llega" en
- * los dos casos, con el mismo aspecto de superficie. El sintoma de "la
- * ingesta funciona" (llegan tickets, sin errores en el registro) y el
- * sintoma de "la ingesta esta abierta de par en par" (cualquiera puede
- * suplantar a cualquiera) son, vistos desde fuera, IDENTICOS. La unica
- * comprobacion que de verdad distingue los dos casos es esta: que el primer
- * segmento sea el identificador que solo nuestro servidor deberia escribir
- * ahi -- y por eso tiene que vivir en codigo, evaluandose en cada correo, no
- * en una lista de verificacion que se corre una vez al encender la ingesta.
+ * llega" NO basta para detectar el ruteo roto.** Esa comprobacion (ver el
+ * riesgo 1 del diseno,
+ * `docs/superpowers/specs/2026-08-22-tickets-por-correo-design.md`) confirma
+ * que `Authentication-Results` esta presente en el correo que llega -- y una
+ * cabecera FALSIFICADA por el propio remitente la satisface exactamente
+ * igual que una legitima: la cabecera "llega" en los dos casos, con el mismo
+ * aspecto de superficie. Por eso hace falta una comprobacion que corra en
+ * cada correo, no solo una vez al encender la ingesta: `SIN_SERVIDOR_PROPIO`
+ * es esa comprobacion, y detecta el ruteo roto en cuanto ocurre. Pero, como
+ * queda dicho arriba, no cierra por si sola la suplantacion -- eso depende
+ * de la politica SMTP del servidor de correo, verificada aparte en la puesta
+ * en marcha.
  *
  * # El contrato de la cabecera que se pasa
  *
@@ -569,7 +638,7 @@ function evaluateDmarc(
  */
 export function judgeAuthentication(
   topmostHeader: string | null | undefined,
-  expectedServerId: string | null,
+  expectedServerId: string | null | undefined,
 ): AuthVerdict {
   if (topmostHeader == null || topmostHeader.trim().length === 0) return 'SIN_CABECERA';
   if (/[\r\n]/.test(topmostHeader)) return 'FALLA';
@@ -633,7 +702,7 @@ export function judgeAuthentication(
  */
 export function extractAuthenticatedDomain(
   topmostHeader: string | null | undefined,
-  expectedServerId: string | null,
+  expectedServerId: string | null | undefined,
 ): string | null {
   if (topmostHeader == null || topmostHeader.trim().length === 0) return null;
   if (/[\r\n]/.test(topmostHeader)) return null;

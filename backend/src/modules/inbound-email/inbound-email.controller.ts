@@ -71,9 +71,9 @@ export interface InboundEmailListItem {
  * La proyección de una fila. Función libre y exportada para poder probarla
  * sin montar el controlador.
  *
- * `retryable` exige `outcome === 'ERROR'` **y** las mismas cuatro guardas que
- * `InboundEmailService.retry` comprueba antes de reencolar de verdad -- ver
- * el docblock de ese método para el porqué de cada una:
+ * `retryable` exige `outcome === 'ERROR'` **y** las mismas cinco guardas que
+ * hacen falta para que `POST :id/retry` de verdad reencole -- ver el
+ * docblock de `InboundEmailService.retry` para el porqué de cada una:
  *
  * 1. Que la fila no se haya reencolado ya (`isRequeuedMessageId`, sobre el
  *    `messageId` interno -- nunca expuesto, ver el comentario de
@@ -89,20 +89,33 @@ export interface InboundEmailListItem {
  *    por listado, no por fila -- `WorkspaceService.isImapIngestionEnabled`):
  *    apagada -- el estado por defecto -- reencolar no logra nada, porque nada
  *    va a leer el buzón hasta que se encienda.
+ * 5. **Que quien pregunta sea ADMIN (`isAdmin`).** El endpoint
+ *    (`POST :id/retry`) exige `@Roles('ADMIN')` desde la tanda de cierre,
+ *    pero esta pantalla no está protegida por rol -- solo la entrada del
+ *    menú lo está, en el frontend, y cualquiera que teclee la URL directa
+ *    llega igual. Sin esta guarda, un miembro del personal sin ese rol vería
+ *    el botón exactamente igual que un ADMIN, y su clic devolvería un 403 en
+ *    vez de reencolar: el mismo clic-sin-salida que esta función ya existe
+ *    para evitar con la ingesta apagada, ahora por una causa distinta.
  *
  * **Antes de esta corrección solo se comprobaba la primera.** Con la ingesta
  * apagada (el estado de salida del proyecto), eso significaba que TODAS las
  * filas en error ofrecían un botón que iba a fallar siempre -- el mensaje de
  * error que devuelve el servicio es honesto, pero es un clic sin salida.
  */
-export function toInboundEmailListItem(row: InboundEmail, ingestionEnabled: boolean): InboundEmailListItem {
+export function toInboundEmailListItem(
+  row: InboundEmail,
+  ingestionEnabled: boolean,
+  isAdmin: boolean,
+): InboundEmailListItem {
   const retryable =
     row.outcome === 'ERROR' &&
     !isRequeuedMessageId(row.messageId) &&
     row.ticketId === null &&
     row.messageIdRaw !== null &&
     !isSyntheticMessageId(row.messageIdRaw) &&
-    ingestionEnabled;
+    ingestionEnabled &&
+    isAdmin;
 
   return {
     id: Number(row.id),
@@ -143,13 +156,17 @@ export class InboundEmailController {
   ) {}
 
   @Get()
-  async list(@Query('outcome') outcome?: string): Promise<InboundEmailListItem[]> {
+  async list(
+    @CurrentUser() user: AuthUser,
+    @Query('outcome') outcome?: string,
+  ): Promise<InboundEmailListItem[]> {
     const filtro = this.parseOutcomeFilter(outcome);
     const [filas, ingestionEnabled] = await Promise.all([
       this.repo.list(filtro ? { outcome: filtro } : {}),
       this.workspace.isImapIngestionEnabled(),
     ]);
-    return filas.map((fila) => toInboundEmailListItem(fila, ingestionEnabled));
+    const isAdmin = user.role === 'ADMIN';
+    return filas.map((fila) => toInboundEmailListItem(fila, ingestionEnabled, isAdmin));
   }
 
   /**
@@ -170,7 +187,10 @@ export class InboundEmailController {
   ): Promise<InboundEmailListItem> {
     const updated = await this.service.retry(id, user.email);
     const ingestionEnabled = await this.workspace.isImapIngestionEnabled();
-    return toInboundEmailListItem(updated, ingestionEnabled);
+    // Quien llega hasta aquí ya pasó `@Roles('ADMIN')`: `isAdmin` siempre es
+    // `true` en este punto, pero se calcula igual (no se hardcodea) para que
+    // la proyección devuelta sea consistente si algún día el guarda cambia.
+    return toInboundEmailListItem(updated, ingestionEnabled, user.role === 'ADMIN');
   }
 
   /**

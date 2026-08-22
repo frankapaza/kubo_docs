@@ -176,7 +176,9 @@ jobs:
                      016_notify_next_attempt 017_plantillas_respuesta \
                      018_conversacion_adjuntos 019_adjunto_cuelga_de_mensaje \
                      020_requerimientos_portal 021_correo_entrante \
-                     022_correo_sin_contenido 023_correo_entrante_imap; do
+                     022_correo_sin_contenido 023_correo_entrante_imap \
+                     024_correo_entrante_identificador_servidor \
+                     025_normalizar_email_existente; do
               echo "--- $m"
               sql_file "backend/sql/migrations/$m.sql"
             done
