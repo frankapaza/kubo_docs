@@ -188,10 +188,16 @@ describe('buildMonthlyReport', () => {
           id: 2, status: 'EN_ATENCION', resolvedAt: null,
           slaResolutionDueAt: new Date('2026-09-05T12:00:00Z'),          // SLA vigente, aun no vence
         }),
+        ticket({ id: 3 }),                                               // SLA ya juzgado (CUMPLIDO)
       ],
-      ticketsResolvedInPeriod: 1, requirements: null,
+      ticketsResolvedInPeriod: 2, requirements: null,
     });
     expect(r.tickets!.totals.withoutCommitment).toBe(1);
+    // El universo de `notYetDue` son las filas SIN_COMPROMISO con plazo
+    // pactado, no cualquier fila con `slaResolutionDueAt`. El ticket 3 ya
+    // tiene veredicto (CUMPLIDO) y también tiene un plazo pactado: si se
+    // contara por "tiene slaResolutionDueAt" en lugar de por "está entre las
+    // SIN_COMPROMISO", colaría aquí también y el conteo daría 2, no 1.
     expect(r.tickets!.totals.notYetDue).toBe(1);
   });
 
