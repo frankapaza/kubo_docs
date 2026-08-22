@@ -301,21 +301,90 @@ function evaluateDmarc(header: string): DmarcOutcome {
 }
 
 /**
- * Juzga la cabecera `Authentication-Results` **mas externa** (la que anade
- * nuestro propio servidor de entrada, la unica en la que se puede confiar --
- * cualquier cabecera con ese nombre mas adentro de la cadena de `Received`
- * la pudo escribir el propio remitente). Quien llama es responsable de
- * pasar esa, y solo esa.
+ * Juzga la cabecera `Authentication-Results` de un correo.
  *
- * **La politica (ronda 2)**: se exige `dmarc=pass`. DMARC exige por
- * definicion un SPF o DKIM alineado con el dominio del `From:`, asi que
- * comprobarlo directamente es mas simple y mas correcto que reimplementar
- * la alineacion a mano -- y cierra el hueco de un `dkim=pass` autentico
- * pero de un dominio ajeno al `From:`.
+ * # Esto NO es la frontera de confianza -- es la segunda linea
+ *
+ * Ronda de correcciones 4: cinco elusiones seguidas contra esta funcion (dos
+ * en la ronda 2, una en la ronda 3, dos mas aqui) dejan claro que defender
+ * la aceptacion de un correo analizando texto que el propio remitente
+ * puede influir, por bien que se analice ese texto, es defender en el
+ * sitio equivocado. **La frontera de confianza real es la politica SMTP
+ * del servidor de correo**: tiene que rechazar en el sobre, antes de
+ * aceptar el mensaje, cualquier correo que no pase DMARC -- de forma que lo
+ * unico que le llegue a esta funcion ya haya pasado, y no haga falta
+ * analizar nada de lo que escribio el remitente.
+ *
+ * Esta funcion se queda como **defensa en profundidad**, no como la puerta.
+ * Sigue mereciendo la pena: cierra el hueco de un `dkim=pass` autentico
+ * pero no alineado (ronda 2), resiste comillas y comentarios bien formados
+ * usados para esconder un veredicto falso (ronda 2), resiste que el propio
+ * delimitador de un comentario se cierre antes de tiempo por una direccion
+ * mal escapada (ronda 3), y ahora rechaza si la alimentan con mas de una
+ * cabecera concatenada (mas abajo). Pero no puede ser la unica barrera.
+ *
+ * **Encender la ingesta de correo por este canal EXIGE haber verificado
+ * que esa politica de rechazo en SMTP esta configurada y activa en el
+ * servidor de correo real.** Sin ella, `SIN_DMARC` seguira bloqueando el
+ * caso feliz (el proveedor no informa DMARC en absoluto), pero el vector
+ * residual de abajo queda abierto.
+ *
+ * ## Un vector residual que este analisis NO PUEDE detectar
+ *
+ * ```
+ * mx.kubo.com; spf=fail smtp.helo=evil; dmarc=pass    ->  PASA (deberia ser FALLA)
+ * ```
+ *
+ * Si el servidor de correo copia `smtp.helo` (u otro campo que el
+ * remitente controle) en la cabecera **sin entrecomillarlo**, y el
+ * remitente elige un valor que contiene un `;` sin escapar (aqui,
+ * `evil; dmarc=pass` como HELO), el `;` crea un segmento de nivel superior
+ * nuevo -- exactamente igual que si de verdad hubiera dos resultados
+ * separados. No hay malformacion (nada se cierra mal), hay **exactamente
+ * un** resultado `dmarc=`, y su unica mencion cruda cae dentro de su
+ * propio segmento: las tres capas de `evaluateDmarc` lo aprueban
+ * **correctamente segun la cadena que reciben**.
+ *
+ * El problema no es que el analisis sea flojo: es que **la cadena, una vez
+ * serializada sin comillas, ya no contiene la informacion que hace falta
+ * para decidir**. `"smtp.helo=evil; dmarc=pass"` con un `;` que separa dos
+ * resultados de verdad, y `"smtp.helo=evil; dmarc=pass"` con un HELO que
+ * por casualidad (o por ataque) contiene un punto y coma, son la MISMA
+ * cadena de texto. Ninguna cantidad de analisis adicional sobre el texto
+ * recupera una distincion que se perdio antes de que el texto llegara
+ * aqui -- por eso el vector se deja documentado como limitacion conocida
+ * (ver el test `LIMITACION CONOCIDA` en el spec) y no como un bug
+ * pendiente: cerrarlo exige la politica SMTP de arriba, no mas codigo aqui.
+ *
+ * # El contrato de la cabecera que se pasa
+ *
+ * Debe ser la cabecera `Authentication-Results` **mas externa** (la que
+ * anade nuestro propio servidor de entrada, la unica en la que se puede
+ * confiar -- cualquier cabecera con ese nombre mas adentro de la cadena de
+ * `Received` la pudo escribir el propio remitente), **y solo esa**.
+ *
+ * Ronda de correcciones 4, punto 1: ese contrato no puede vivir solo en
+ * este parrafo. Cuando un correo pasa por varios saltos puede haber varias
+ * cabeceras `Authentication-Results`; si un adaptador las concatena (algo
+ * que RFC 5322 nunca pide, pero que un `join('\n')` descuidado puede
+ * producir), el remitente puede anadir su PROPIA cabecera dentro de su
+ * propio mensaje, con su propio `dmarc=pass` -- limpio, unico, sin ninguna
+ * malformacion, porque es una cabecera autentica dentro de la cadena que
+ * le llego a esta funcion. Ninguna de las tres capas de `evaluateDmarc`
+ * detecta esto: no hay nada mal formado que detectar. Por eso la funcion
+ * se niega a analizar cualquier valor que contenga un salto de linea
+ * (`\n` o `\r`): una cabecera ya desplegada (unfolded, como llega tras un
+ * parseo normal de RFC 5322) nunca deberia traer uno, y su presencia es la
+ * prueba de que se concatenaron varias. No se intenta detectar "mas de una
+ * cabecera" por ninguna otra via (p. ej. sin salto de linea, con espacio):
+ * como ya demuestra el vector residual de arriba, esa distincion puede no
+ * estar disponible en el texto en absoluto.
  *
  * Devuelve, en orden de prioridad:
  * - `SIN_CABECERA` si no hay cabecera que juzgar en absoluto -- `null`,
  *   `undefined`, o una cadena en blanco.
+ * - `FALLA` si el valor contiene un salto de linea (`\n`/`\r`): senal de
+ *   cabeceras concatenadas, ver arriba.
  * - `SIN_DMARC` si la cabecera llega pero no trae ningun rastro de
  *   `dmarc=` en ninguna parte del texto -- el proveedor no corre o no
  *   informa DMARC. Ver `AuthVerdict` para por que esto no es lo mismo que
@@ -325,14 +394,11 @@ function evaluateDmarc(header: string): DmarcOutcome {
  *   veredicto es `pass`.
  * - `FALLA` en cualquier otro caso: el resultado no es `pass`, hay mas de
  *   un resultado, la cabecera esta malformada, o aparece `dmarc=` fuera
- *   del unico segmento legitimo. Todos estos casos comparten la misma
- *   consecuencia -- no hay garantia -- y todos son responsabilidad del
- *   remitente o de una cabecera que ya no se puede analizar con
- *   confianza, a diferencia de `SIN_CABECERA`/`SIN_DMARC`, que son
- *   responsabilidad de nuestro propio servidor.
+ *   del unico segmento legitimo.
  */
 export function judgeAuthentication(topmostHeader: string | null | undefined): AuthVerdict {
   if (topmostHeader == null || topmostHeader.trim().length === 0) return 'SIN_CABECERA';
+  if (/[\r\n]/.test(topmostHeader)) return 'FALLA';
 
   const outcome = evaluateDmarc(topmostHeader);
   if (outcome === 'PASS') return 'PASA';

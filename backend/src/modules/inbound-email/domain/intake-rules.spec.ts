@@ -221,6 +221,53 @@ describe('judgeAuthentication', () => {
       ).toBe('FALLA');
     });
   });
+
+  // Ronda de correcciones 4, punto 1: la funcion asume que recibe UNA sola
+  // cabecera. Si un salto que une varias cabeceras (p. ej. porque hay mas
+  // de un `Authentication-Results` en la cadena de saltos y el adaptador
+  // las concateno) llega hasta aqui, el atacante puede aportar su propio
+  // "dmarc=pass" en SU PROPIA cabecera -- limpio, unico, sin malformacion
+  // alguna -- y las tres defensas de `evaluateDmarc` quedan inertes: no hay
+  // nada que analizar mal, el segmento es autentico DENTRO de la cadena
+  // que le llego a la funcion. El contrato ("pasa solo la cabecera mas
+  // externa") no puede vivir solo en un comentario.
+  describe('ronda de correcciones 4: la funcion debe negarse si la alimentan mal', () => {
+    it('rechaza un valor con salto de linea (senal de cabeceras concatenadas)', () => {
+      // Lo que escribio nuestro servidor, a solas, seria SIN_DMARC (no
+      // trae dmarc=) y bloquearia. El "dmarc=pass" es una segunda cabecera
+      // que el propio atacante anadio a su mensaje.
+      expect(judgeAuthentication('mx.kubo.com; spf=pass\nevil.example; dmarc=pass')).toBe('FALLA');
+    });
+
+    it('rechaza tambien con el salto de linea en forma CRLF', () => {
+      expect(judgeAuthentication('mx.kubo.com; spf=pass\r\nevil.example; dmarc=pass')).toBe('FALLA');
+    });
+  });
+
+  // Ronda de correcciones 4, punto 2 -- LIMITACION CONOCIDA Y ACEPTADA, no
+  // un bug pendiente. Ver el docblock de `judgeAuthentication`: un ";" sin
+  // comillas dentro de un campo que controla el remitente (aqui,
+  // `smtp.helo`) es indistinguible, en el texto ya serializado, de una
+  // cabecera legitima en la que ese campo simplemente contenga un punto y
+  // coma. No hay malformacion que detectar, hay exactamente un resultado
+  // `dmarc=`, y su unica mencion cruda cae dentro de su propio segmento:
+  // las tres capas de `evaluateDmarc` lo aprueban correctamente SEGUN LA
+  // CADENA QUE RECIBEN -- el problema es que la cadena, una vez
+  // serializada sin comillas, ya perdio la informacion que hacia falta
+  // para decidir. Ningun analisis sobre el texto puede recuperar esa
+  // informacion; la defensa real es que el servidor de correo rechace en
+  // el sobre SMTP el correo que no pase DMARC, ANTES de escribir esta
+  // cabecera.
+  //
+  // Este test documenta el comportamiento ACTUAL (`PASA`), no lo aprueba.
+  // Si algun dia empieza a fallar porque alguien encontro una forma real de
+  // cerrar este hueco (p. ej. una politica que rechaza en el servidor, o
+  // una fuente de datos que SI distingue delimitador de valor), es una
+  // buena noticia: actualiza el test, no lo "arregles" para que vuelva a
+  // pasar.
+  it('LIMITACION CONOCIDA: un ";" sin comillas en smtp.helo es indistinguible de una cabecera legitima', () => {
+    expect(judgeAuthentication('mx.kubo.com; spf=fail smtp.helo=evil; dmarc=pass')).toBe('PASA');
+  });
 });
 
 describe('isOwnMailbox', () => {
