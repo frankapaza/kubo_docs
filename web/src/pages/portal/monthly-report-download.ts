@@ -1,7 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-import type { Compliance, PortalMonthlyReport } from '../../api/types';
+import type { Compliance, CommitmentVerdict, PortalMonthlyReport } from '../../api/types';
 import { fmtDateOnly } from './PortalTicketsListPage';
 
 /**
@@ -13,6 +13,27 @@ export const COMPLIANCE_LABELS: Record<Compliance, string> = {
   CUMPLIDO: 'Cumplido',
   INCUMPLIDO: 'Incumplido',
   SIN_COMPROMISO: 'Sin compromiso',
+};
+
+/**
+ * Mismo criterio que `COMPLIANCE_LABELS`, para el veredicto de compromiso de
+ * un requerimiento (`CommitmentVerdict`, cinco valores, no tres). Un mapa
+ * aparte y no una extensión de `COMPLIANCE_LABELS`: los dos veredictos de
+ * SLA del ticket nunca producen `AUN_NO_VENCE` ni `CANCELADO`, y mezclarlos
+ * en el mismo `Record` les prometería un valor que jamás reciben.
+ *
+ * `AUN_NO_VENCE` es «hay fecha comprometida, el plazo sigue corriendo» con
+ * su propio nombre -- antes se pintaba como «Sin compromiso», la misma fila
+ * que se contradice a sí misma que la ronda 2 de la revisión final señaló.
+ * `CANCELADO` es su propio veredicto, no un tercer disfraz de «Sin
+ * compromiso»: el ítem se canceló y su fecha dejó de significar nada.
+ */
+export const COMMITMENT_LABELS: Record<CommitmentVerdict, string> = {
+  CUMPLIDO: 'Cumplido',
+  INCUMPLIDO: 'Incumplido',
+  SIN_COMPROMISO: 'Sin compromiso',
+  AUN_NO_VENCE: 'Aún no vence',
+  CANCELADO: 'Cancelado',
 };
 
 /**
@@ -40,9 +61,10 @@ export function fmtPercentForDocument(p: number | null): string {
 
 /**
  * Fecha comprometida de un requerimiento, o «—» si no hay ninguna (el
- * veredicto de la columna de cumplimiento, `SIN_COMPROMISO`, ya dice por
- * qué). `fmtDateOnly` y no `fmtDate`: es una columna `DATE`, sin hora --
- * confundirlas desplaza un día.
+ * veredicto de la columna de cumplimiento -- `SIN_COMPROMISO` si nunca hubo
+ * fecha, `CANCELADO` si la hubo y el ítem se canceló -- ya dice por qué).
+ * `fmtDateOnly` y no `fmtDate`: es una columna `DATE`, sin hora -- confundirlas
+ * desplaza un día.
  */
 export function fmtDueDate(v: string | null): string {
   return v ? fmtDateOnly(v) : '—';
@@ -133,7 +155,7 @@ function requirementRows(report: PortalMonthlyReport): string[][] {
     r.createdAtLabel,
     fmtDueDate(r.dueDate),
     r.closedAtLabel ?? '—',
-    COMPLIANCE_LABELS[r.commitment],
+    COMMITMENT_LABELS[r.commitment],
   ]);
 }
 
@@ -206,6 +228,7 @@ export function exportMonthlyReportCsv(report: PortalMonthlyReport): void {
     lines.push(csvLine(['% cumplimiento de compromiso', fmtPercentForDocument(rq.commitmentCompliancePercent)]));
     lines.push(csvLine(['Sin compromiso', String(rq.withoutCommitment)]));
     lines.push(csvLine(['Aún no vence', String(rq.notYetDue)]));
+    lines.push(csvLine(['Cancelados', String(rq.cancelled)]));
     lines.push('');
     lines.push(csvLine(REQUIREMENTS_TABLE_HEAD));
     if (report.requirements.rows.length === 0) {
@@ -337,7 +360,8 @@ export function exportMonthlyReportPdf(report: PortalMonthlyReport): void {
     y += 5;
     doc.text(
       `% cumplimiento de compromiso: ${fmtPercentForDocument(rq.commitmentCompliancePercent)}   ` +
-        `Sin compromiso: ${rq.withoutCommitment}   Aún no vence: ${rq.notYetDue}`,
+        `Sin compromiso: ${rq.withoutCommitment}   Aún no vence: ${rq.notYetDue}   ` +
+        `Cancelados: ${rq.cancelled}`,
       marginX,
       y,
     );

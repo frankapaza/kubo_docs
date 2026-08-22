@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { portalApi } from '../../api/portal.api';
 import type {
   Compliance,
+  CommitmentVerdict,
   MonthlyReportRequirementsBlock,
   MonthlyReportTicketsBlock,
   PortalMonthlyReport,
@@ -13,6 +14,7 @@ import { Card, CardBody, CardHeader } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { DownloadIcon, FileTextIcon, RefreshIcon } from '../../components/ui/Icon';
 import {
+  COMMITMENT_LABELS,
   COMPLIANCE_LABELS,
   exportMonthlyReportCsv,
   exportMonthlyReportPdf,
@@ -29,6 +31,22 @@ const COMPLIANCE_TONES: Record<Compliance, BadgeTone> = {
   CUMPLIDO: 'success',
   INCUMPLIDO: 'danger',
   SIN_COMPROMISO: 'neutral',
+};
+
+/**
+ * Mismo criterio que `COMPLIANCE_TONES`, para el veredicto de compromiso de
+ * un requerimiento (`CommitmentVerdict`, cinco valores). `AUN_NO_VENCE` no
+ * es ni éxito ni fracaso -- tono neutro/informativo, no `success`, para no
+ * leerse como "ya cumplió". `CANCELADO` es neutro, igual que la etiqueta de
+ * fecha gris del tablero para un ítem fuera de flujo (ver `dueDateStyle` en
+ * `work-items/workitem-ui.ts`).
+ */
+const COMMITMENT_TONES: Record<CommitmentVerdict, BadgeTone> = {
+  CUMPLIDO: 'success',
+  INCUMPLIDO: 'danger',
+  SIN_COMPROMISO: 'neutral',
+  AUN_NO_VENCE: 'info',
+  CANCELADO: 'neutral',
 };
 
 const SCOPE_OPTIONS: { value: ReportScope; label: string }[] = [
@@ -284,6 +302,11 @@ function ComplianceBadge({ value }: { value: Compliance }) {
   return <Badge tone={COMPLIANCE_TONES[value]}>{COMPLIANCE_LABELS[value]}</Badge>;
 }
 
+/** Mismo patrón que `ComplianceBadge`, para el veredicto de compromiso (cinco valores) de un requerimiento. */
+function CommitmentBadge({ value }: { value: CommitmentVerdict }) {
+  return <Badge tone={COMMITMENT_TONES[value]}>{COMMITMENT_LABELS[value]}</Badge>;
+}
+
 /** «sin compromisos que medir»: la nota que acompaña al «—» de un porcentaje `null`, nunca un 0 %. */
 function percentNote(p: number | null): string | undefined {
   return p === null ? 'sin compromisos que medir' : undefined;
@@ -412,6 +435,13 @@ function RequirementsBlockCard({ requirements }: { requirements: MonthlyReportRe
           */}
           <Kpi label="Sin compromiso" value={rq.withoutCommitment} />
           <Kpi label="Aún no vence" value={rq.notYetDue} />
+          {/*
+            Un cancelado no es "sin compromiso" ni "aún no vence": se
+            canceló, y su fecha comprometida dejó de significar nada. Su
+            propio contador, para que no se cuele en ninguno de los otros
+            dos (ver `CommitmentVerdict` en el backend).
+          */}
+          <Kpi label="Cancelados" value={rq.cancelled} />
         </div>
 
         {/*
@@ -454,7 +484,7 @@ function RequirementsBlockCard({ requirements }: { requirements: MonthlyReportRe
                     <td className="px-3 py-2 text-xs text-slate-500">{r.createdAtLabel}</td>
                     <td className="px-3 py-2 text-xs text-slate-500">{fmtDueDate(r.dueDate)}</td>
                     <td className="px-3 py-2">
-                      <ComplianceBadge value={r.commitment} />
+                      <CommitmentBadge value={r.commitment} />
                     </td>
                   </tr>
                 ))

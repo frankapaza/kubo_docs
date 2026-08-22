@@ -876,6 +876,22 @@ export type ReportScope = 'TICKETS' | 'REQUERIMIENTOS' | 'AMBOS';
 export type Compliance = 'CUMPLIDO' | 'INCUMPLIDO' | 'SIN_COMPROMISO';
 
 /**
+ * Veredicto de compromiso de un requerimiento. Cinco valores, no tres --
+ * `Compliance` de arriba sigue sirviendo para los dos veredictos de SLA del
+ * ticket, que no tienen este quinto caso. Mismo tipo, campo a campo, que
+ * `CommitmentVerdict` en `domain/monthly-report.ts` del backend.
+ *
+ * `AUN_NO_VENCE` y `SIN_COMPROMISO` son causas distintas del mismo «no
+ * corresponde juzgar todavía» -- colapsarlas hacía que un requerimiento con
+ * una fecha comprometida real, aún vigente, imprimiera «Cumplimiento: Sin
+ * compromiso» junto a esa misma fecha: una fila que se contradice a sí
+ * misma. Y `CANCELADO` es su propio veredicto, no un tercer disfraz de
+ * `SIN_COMPROMISO`: el ítem se canceló, y su fecha comprometida dejó de
+ * significar nada.
+ */
+export type CommitmentVerdict = 'CUMPLIDO' | 'INCUMPLIDO' | 'SIN_COMPROMISO' | 'AUN_NO_VENCE' | 'CANCELADO';
+
+/**
  * Fila de ticket del informe: fechas ya en ISO, estado ya traducido por el
  * backend.
  *
@@ -960,7 +976,7 @@ export interface MonthlyReportRequirementRow {
   dueDate: string | null;
   closedAt: string | null;
   closedAtLabel: string | null;
-  commitment: Compliance;
+  commitment: CommitmentVerdict;
 }
 
 export interface RequirementsTotals {
@@ -976,12 +992,18 @@ export interface RequirementsTotals {
   /** Requerimientos sin ninguna fecha comprometida: no hubo promesa que incumplir. */
   withoutCommitment: number;
   /**
-   * Requerimientos con fecha comprometida, sin entregar, cuyo veredicto es
-   * `SIN_COMPROMISO` porque el plazo aún no vencía al cerrar el periodo o
-   * porque el ítem se canceló (una fecha comprometida cancelada dejó de
-   * significar nada, igual que en el tablero de requerimientos).
+   * Requerimientos con fecha comprometida, sin entregar, cuyo plazo aún no
+   * vencía al cerrar el periodo: el compromiso sigue en pie (veredicto
+   * `AUN_NO_VENCE`), solo que todavía no corresponde juzgarlo.
    */
   notYetDue: number;
+  /**
+   * Requerimientos cancelados: ni cumplieron ni incumplieron, y no son «sin
+   * compromiso» ni «aún no vence» -- se cancelaron, y su fecha comprometida
+   * dejó de significar nada (mismo criterio que el tablero de
+   * requerimientos).
+   */
+  cancelled: number;
 }
 
 export interface MonthlyReportRequirementsBlock {

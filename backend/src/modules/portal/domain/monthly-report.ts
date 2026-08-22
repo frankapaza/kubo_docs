@@ -38,6 +38,30 @@ function peruCivilDate(instant: Date): string {
 }
 
 /**
+ * Veredicto de compromiso de un requerimiento. Cinco valores, no tres:
+ * `Compliance` (arriba) sigue sirviendo para los dos veredictos de SLA del
+ * ticket, que no tienen ni este problema ni este quinto caso — usar el mismo
+ * tipo aquí obligaría a esas dos superficies a manejar valores que nunca
+ * producen.
+ *
+ * La ronda 2 de la revisión final señaló que colapsar dos causas distintas
+ * en el mismo `SIN_COMPROMISO` imprime una fila que se contradice a sí
+ * misma: «Fecha comprometida: 15 oct 2026 | Cumplimiento: Sin compromiso» —
+ * si hay fecha, hay compromiso, solo que el plazo sigue corriendo.
+ * `AUN_NO_VENCE` es esa causa con su propio nombre; `SIN_COMPROMISO` queda
+ * reservado, aquí también, a «nunca hubo fecha comprometida».
+ *
+ * Y un `CANCELADO` no es ninguno de los otros cuatro: no cumplió ni
+ * incumplió (nunca correspondió exigírselo), no «no tuvo compromiso» (si lo
+ * tuvo, antes de cancelarse) y no está «aún no vence» (no hay plazo
+ * corriendo: se canceló). Tiene su propio valor — sin él, el contador de
+ * «aún no vence» (ver ronda 1) se quedaba con los cancelados de fecha ya
+ * pasada adentro, publicándolos bajo una etiqueta tan equivocada como la que
+ * esta ronda vino a corregir.
+ */
+export type CommitmentVerdict = 'CUMPLIDO' | 'INCUMPLIDO' | 'SIN_COMPROMISO' | 'AUN_NO_VENCE' | 'CANCELADO';
+
+/**
  * Veredicto sobre una fecha comprometida — la de un requerimiento.
  *
  * Se compara **por fecha civil y no por instante**, porque lo que se le
@@ -51,31 +75,43 @@ function peruCivilDate(instant: Date): string {
  * día del mes desaparecería del informe. `judgeDeadline` no sufre esto:
  * compara instantes, no fechas civiles.
  *
- * `status` existe por una sola razón: un `CANCELADO` nunca tiene
- * `deliveredAt` (`WorkItemBoardService` solo pone `closedAt` al pasar a
- * `CERRADO`), así que sin esta comprobación caería en la última rama y una
- * fecha comprometida ya pasada lo condenaría a `INCUMPLIDO`. `WorkItemsRepository.list`
- * ya documenta y hace cumplir la misma regla para el filtro «vencidos»: *«Un
- * ítem CERRADO o CANCELADO nunca está vencido […] su fecha límite dejó de
- * significar nada»*. Sin este caso, el informe publicaba como incumplimiento
- * del proveedor la misma fila que el tablero pinta en gris, sin marca de
- * vencido.
+ * `nuncaVencido` se calcula **por estado y antes de mirar ninguna fecha** —
+ * mismo criterio y mismo orden que `WorkItemsRepository.list` ya aplica para
+ * el filtro «vencidos»: *«Un ítem CERRADO o CANCELADO nunca está vencido […]
+ * su fecha límite dejó de significar nada»*. Cubre los dos estados, no solo
+ * `CANCELADO`: un `CERRADO` con `closedAt` nulo (dato anómalo — el tablero
+ * siempre lo fija al entrar a `CERRADO`, ver `WorkItemBoardService.move`,
+ * pero el tipo no lo impide) caería si no en la última rama y saldría
+ * `INCUMPLIDO` solo por la falta de ese dato, acusando de vencido a un ítem
+ * que la propia regla del sistema exime.
+ *
+ * `CANCELADO` se resuelve aparte y **antes** de mirar `deliveredAt`: un
+ * `closedAt` residual (la misma anomalía de dato, al revés — el tablero
+ * limpia esa columna al salir de `CERRADO`, pero nada en el tipo lo
+ * garantiza) no debe juzgarse como si el ítem hubiera sido entregado a
+ * tiempo o tarde. Se canceló, y tiene su propio veredicto (ver JSDoc de
+ * `CommitmentVerdict`).
  */
 export function judgeCommitment(
   committedDate: string | null,
   deliveredAt: Date | null,
   periodEnd: Date,
   status: string,
-): Compliance {
+): CommitmentVerdict {
+  const nuncaVencido = status === 'CERRADO' || status === 'CANCELADO';
+
+  if (status === 'CANCELADO') return 'CANCELADO';
+
   // Comprobación de presencia, no de veracidad: una cadena vacía es un valor
   // inválido, no una ausencia. Con `!committedDate` colapsaría al mismo bug
   // de los textos en blanco que ya mordió este proyecto.
   if (committedDate === null) return 'SIN_COMPROMISO';
+
   if (deliveredAt) {
     return peruCivilDate(deliveredAt) <= committedDate ? 'CUMPLIDO' : 'INCUMPLIDO';
   }
-  if (status === 'CANCELADO') return 'SIN_COMPROMISO';
-  return committedDate < peruCivilDate(periodEnd) ? 'INCUMPLIDO' : 'SIN_COMPROMISO';
+
+  return !nuncaVencido && committedDate < peruCivilDate(periodEnd) ? 'INCUMPLIDO' : 'AUN_NO_VENCE';
 }
 
 /**
@@ -198,7 +234,7 @@ export interface TicketsBlock {
 
 /** Una fila de requerimiento ya con su veredicto de compromiso calculado. */
 export interface ReportRequirementRowWithCompliance extends ReportRequirementRow {
-  commitment: Compliance;
+  commitment: CommitmentVerdict;
 }
 
 /** Totales del bloque de requerimientos. */
@@ -214,10 +250,11 @@ export interface RequirementsTotals {
   delivered: number;
   rejected: number;
   /**
-   * `null` cuando no hubo ningún compromiso medible (todo `SIN_COMPROMISO`).
-   * Mismo criterio que `TicketsTotals.resolutionCompliancePercent`: los
-   * `withoutCommitment`/`notYetDue` de abajo son las cifras equivalentes que
-   * dicen sobre cuántos se calculó.
+   * `null` cuando no hubo ningún compromiso medible (`SIN_COMPROMISO`,
+   * `AUN_NO_VENCE` o `CANCELADO`, ver `CommitmentVerdict`). Mismo criterio
+   * que `TicketsTotals.resolutionCompliancePercent`: `withoutCommitment`/
+   * `notYetDue`/`cancelled` de abajo son las cifras equivalentes que dicen
+   * sobre cuántos se calculó.
    */
   commitmentCompliancePercent: number | null;
   /**
@@ -226,13 +263,22 @@ export interface RequirementsTotals {
    */
   withoutCommitment: number;
   /**
-   * Requerimientos **con** fecha comprometida, sin entregar, cuyo veredicto
-   * es `SIN_COMPROMISO` porque el plazo aún no vencía al cerrar el periodo o
-   * porque el ítem se canceló (ver `judgeCommitment`, caso `CANCELADO`): en
-   * los dos casos no corresponde emitir un juicio de cumplimiento todavía o
-   * ya nunca. Mismo criterio que `TicketsTotals.notYetDue`.
+   * Requerimientos **con** fecha comprometida, sin entregar, cuyo plazo aún
+   * no vencía al cerrar el periodo: el compromiso sigue en pie, solo que
+   * todavía no corresponde juzgarlo. Mismo criterio que
+   * `TicketsTotals.notYetDue`, pero con su propio veredicto (`AUN_NO_VENCE`)
+   * y no colapsado en `SIN_COMPROMISO` — ver el JSDoc de `CommitmentVerdict`.
    */
   notYetDue: number;
+  /**
+   * Requerimientos **cancelados**: ni cumplieron ni incumplieron, y no son
+   * «sin compromiso» ni «aún no vence» — se cancelaron, y su fecha
+   * comprometida dejó de significar nada (misma regla que
+   * `WorkItemsRepository.list` aplica para «vencidos»). Sin este contador
+   * aparte, un cancelado de fecha ya pasada se contaba en `notYetDue`,
+   * publicándose bajo una etiqueta que miente.
+   */
+  cancelled: number;
 }
 
 export interface RequirementsBlock {
@@ -313,9 +359,15 @@ function buildRequirementsBlock(
     commitment: judgeCommitment(r.dueDate, r.closedAt, periodEnd, r.status),
   }));
 
-  // Mismo tratamiento que `buildTicketsBlock`: el SIN_COMPROMISO se separa
-  // mirando si hubo o no una fecha comprometida pactada.
-  const sinCompromisoMedible = rows.filter((r) => r.commitment === 'SIN_COMPROMISO');
+  // `compliancePercent` sigue siendo de tres valores (lo comparte con los
+  // dos veredictos de SLA del ticket, que no tienen este quinto caso): aquí
+  // se aplanan `AUN_NO_VENCE` y `CANCELADO` a `SIN_COMPROMISO` solo para el
+  // cálculo del porcentaje — las tres son "no corresponde juzgar, todavía o
+  // nunca" y se excluyen igual del denominador — sin tocar el veredicto real
+  // de la fila, que sí conserva su causa propia.
+  const percentable: Compliance[] = rows.map((r) =>
+    r.commitment === 'CUMPLIDO' || r.commitment === 'INCUMPLIDO' ? r.commitment : 'SIN_COMPROMISO',
+  );
 
   return {
     rows,
@@ -324,9 +376,10 @@ function buildRequirementsBlock(
       accepted: rows.filter((r) => REQ_ACEPTADO.has(r.status)).length,
       delivered: rows.filter((r) => r.status === 'CERRADO').length,
       rejected: rows.filter((r) => r.status === 'RECHAZADO').length,
-      commitmentCompliancePercent: compliancePercent(rows.map((r) => r.commitment)),
-      withoutCommitment: sinCompromisoMedible.filter((r) => r.dueDate === null).length,
-      notYetDue: sinCompromisoMedible.filter((r) => r.dueDate !== null).length,
+      commitmentCompliancePercent: compliancePercent(percentable),
+      withoutCommitment: rows.filter((r) => r.commitment === 'SIN_COMPROMISO').length,
+      notYetDue: rows.filter((r) => r.commitment === 'AUN_NO_VENCE').length,
+      cancelled: rows.filter((r) => r.commitment === 'CANCELADO').length,
     },
   };
 }

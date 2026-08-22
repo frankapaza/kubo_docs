@@ -1,7 +1,7 @@
 import { IsIn, IsInt, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 
-import { Compliance, RequirementsTotals, TicketsTotals } from '../domain/monthly-report';
+import { Compliance, CommitmentVerdict, RequirementsTotals, TicketsTotals } from '../domain/monthly-report';
 import { PortalRequirementStatusLabel } from './portal-requirement.dto';
 
 /**
@@ -86,6 +86,12 @@ export interface MonthlyReportTicketsBlock {
  * `judgeCommitment` decide `CUMPLIDO`/`INCUMPLIDO` (ver `domain/monthly-report.ts`):
  * un veredicto que no se puede verificar contra la hora impresa al lado no
  * prueba nada, y `fmtDate` en el navegador del cliente no pasa zona horaria.
+ *
+ * `commitment` es `CommitmentVerdict`, no `Compliance`: cinco valores, no
+ * tres — ver el JSDoc de `CommitmentVerdict` en `domain/monthly-report.ts`
+ * para por qué colapsar «sin fecha comprometida», «la fecha aún no vence» y
+ * «se canceló» en el mismo `SIN_COMPROMISO` imprime una fila que se
+ * contradice a sí misma.
  */
 export interface MonthlyReportRequirementRow {
   id: number;
@@ -97,7 +103,7 @@ export interface MonthlyReportRequirementRow {
   dueDate: string | null;
   closedAt: string | null;
   closedAtLabel: string | null;
-  commitment: Compliance;
+  commitment: CommitmentVerdict;
 }
 
 export interface MonthlyReportRequirementsBlock {

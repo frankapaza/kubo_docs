@@ -345,11 +345,13 @@ describe('PortalReportsService.monthly', () => {
     expect(v.requirements!.rows[0].closedAtLabel).toBeNull();
   });
 
-  // Correccion de la revision final (grupo A3): un CANCELADO con fecha
-  // comprometida ya pasada y sin `closedAt` no debe publicarse como
-  // INCUMPLIDO -- ver el JSDoc de `judgeCommitment`. Prueba de extremo a
-  // extremo, a traves del servicio completo, no solo de la funcion pura.
-  it('un requerimiento CANCELADO con fecha comprometida pasada sale como SIN_COMPROMISO, no INCUMPLIDO', async () => {
+  // Correccion de la revision final (grupo A3 + ronda 2): un CANCELADO con
+  // fecha comprometida ya pasada y sin `closedAt` no debe publicarse como
+  // INCUMPLIDO -- ni, como fijaba erroneamente la ronda 1, como
+  // SIN_COMPROMISO. Tiene su propio veredicto, CANCELADO (ver el JSDoc de
+  // `CommitmentVerdict`). Prueba de extremo a extremo, a traves del
+  // servicio completo, no solo de la funcion pura.
+  it('un requerimiento CANCELADO con fecha comprometida pasada sale como CANCELADO, no INCUMPLIDO ni SIN_COMPROMISO', async () => {
     const { service } = make({
       requirementRows: [
         {
@@ -359,7 +361,7 @@ describe('PortalReportsService.monthly', () => {
       ],
     });
     const v = await service.monthly(7, { year: 2026, month: 7, scope: 'REQUERIMIENTOS' });
-    expect(v.requirements!.rows[0].commitment).toBe('SIN_COMPROMISO');
+    expect(v.requirements!.rows[0].commitment).toBe('CANCELADO');
   });
 
   /**

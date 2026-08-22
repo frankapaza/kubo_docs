@@ -79,9 +79,11 @@ describe('judgeCommitment', () => {
   // `periodEnd` es exclusivo (ver JSDoc de `judgeCommitment`): el dia civil
   // de `periodEnd` en si mismo queda fuera del periodo. Si se comparara con
   // un periodEnd inclusivo, el incumplimiento del ultimo dia del mes
-  // desapareceria del informe -- justo lo que esta prueba fija.
-  it('la fecha comprometida igual al dia civil de periodEnd (exclusivo) es SIN_COMPROMISO', () => {
-    expect(judgeCommitment('2026-09-01', null, FIN, 'PENDIENTE')).toBe('SIN_COMPROMISO');
+  // desapareceria del informe -- justo lo que esta prueba fija. El veredicto
+  // es AUN_NO_VENCE (ronda 2 de la revision final) y no SIN_COMPROMISO: hay
+  // una fecha comprometida real, solo que el plazo sigue corriendo.
+  it('la fecha comprometida igual al dia civil de periodEnd (exclusivo) es AUN_NO_VENCE', () => {
+    expect(judgeCommitment('2026-09-01', null, FIN, 'PENDIENTE')).toBe('AUN_NO_VENCE');
   });
 
   // Cadena vacia no es ausencia: es un valor invalido, pero tratarlo como
@@ -91,23 +93,61 @@ describe('judgeCommitment', () => {
     expect(judgeCommitment('', null, FIN, 'PENDIENTE')).toBe('INCUMPLIDO');
   });
 
-  // El corazon de la correccion de la revision final: `WorkItemsRepository.list`
+  // Ronda 2 de la revision final, punto 1 (A2 seguia sin resolver): la
+  // pantalla, el PDF y el CSV pintaban "Fecha comprometida: 15 oct 2026 |
+  // Cumplimiento: Sin compromiso" para un requerimiento con una fecha
+  // comprometida real que todavia no llegaba -- una fila que se contradice
+  // a si misma, porque SIN_COMPROMISO en la ronda 1 seguia significando dos
+  // causas distintas. AUN_NO_VENCE es la causa "hay fecha, el plazo sigue
+  // corriendo" con su propio nombre; esta prueba fija que un compromiso
+  // vigente (fecha futura, sin entregar) ya no cae en SIN_COMPROMISO.
+  it('con fecha comprometida futura y sin entregar el veredicto es AUN_NO_VENCE, no SIN_COMPROMISO', () => {
+    expect(judgeCommitment('2026-09-15', null, FIN, 'PENDIENTE')).toBe('AUN_NO_VENCE');
+  });
+
+  // El corazon de la correccion de la revision final (ronda 1): `WorkItemsRepository.list`
   // ya documenta y hace cumplir que "un item CERRADO o CANCELADO nunca esta
-  // vencido [...] su fecha limite dejo de significar nada". Antes de esta
-  // prueba, un CANCELADO con fecha comprometida pasada y sin `closedAt`
-  // (CANCELADO nunca lo tiene -- solo `to === 'CERRADO'` lo fija, ver
-  // `WorkItemBoardService.move`) caia en la ultima rama y salia INCUMPLIDO:
-  // la misma fila que el tablero pinta en gris, sin marca de vencido, el
-  // informe la publicaba como incumplimiento del proveedor.
-  it('un CANCELADO con fecha comprometida ya pasada y sin entregar es SIN_COMPROMISO, no INCUMPLIDO', () => {
-    expect(judgeCommitment('2026-08-01', null, FIN, 'CANCELADO')).toBe('SIN_COMPROMISO');
+  // vencido [...] su fecha limite dejo de significar nada". Ronda 2: un
+  // CANCELADO no es tampoco "sin compromiso" ni "aun no vence" -- es su
+  // propio veredicto, CANCELADO. La ronda 1 dejo esto fijado como
+  // SIN_COMPROMISO, y la ronda 2 lo corrige aqui: fijar en una prueba un
+  // comportamiento a medias es exactamente el error que esta prueba, ahora,
+  // existe para no repetir.
+  it('un CANCELADO con fecha comprometida ya pasada y sin entregar es CANCELADO, no INCUMPLIDO ni SIN_COMPROMISO', () => {
+    expect(judgeCommitment('2026-08-01', null, FIN, 'CANCELADO')).toBe('CANCELADO');
   });
 
   // Un CANCELADO cuya fecha comprometida ni siquiera habia llegado tambien
-  // es SIN_COMPROMISO -- mismo resultado que sin el caso especial, pero por
-  // las dos vias a la vez, para que quede claro que no se solapan mal.
-  it('un CANCELADO con fecha comprometida futura tambien es SIN_COMPROMISO', () => {
-    expect(judgeCommitment('2026-09-15', null, FIN, 'CANCELADO')).toBe('SIN_COMPROMISO');
+  // es CANCELADO -- mismo resultado sea cual sea la fecha, porque el estado
+  // se resuelve antes de mirarla.
+  it('un CANCELADO con fecha comprometida futura tambien es CANCELADO', () => {
+    expect(judgeCommitment('2026-09-15', null, FIN, 'CANCELADO')).toBe('CANCELADO');
+  });
+
+  // Sin fecha comprometida, un CANCELADO sigue siendo CANCELADO, no
+  // SIN_COMPROMISO: el estado se comprueba antes que la presencia de la
+  // fecha (ver el orden de `judgeCommitment`).
+  it('un CANCELADO sin fecha comprometida tambien es CANCELADO', () => {
+    expect(judgeCommitment(null, null, FIN, 'CANCELADO')).toBe('CANCELADO');
+  });
+
+  // Punto 2 de la ronda 2: un CANCELADO con un `closedAt` residual (dato
+  // anomalo -- el tablero limpia esa columna al salir de CERRADO, pero nada
+  // en el tipo lo garantiza) no debe juzgarse como si hubiera sido
+  // entregado a tiempo o tarde. El estado se resuelve ANTES de mirar
+  // `deliveredAt`, asi que esto sigue siendo CANCELADO y no CUMPLIDO.
+  it('un CANCELADO con closedAt residual sigue siendo CANCELADO, no CUMPLIDO', () => {
+    expect(judgeCommitment('2026-08-20', new Date('2026-08-18T15:00:00Z'), FIN, 'CANCELADO')).toBe('CANCELADO');
+  });
+
+  // Punto 3 de la ronda 2: la regla "CERRADO o CANCELADO nunca esta vencido"
+  // cubre los dos estados, no solo CANCELADO. Un CERRADO con `closedAt` nulo
+  // es un dato anomalo (el tablero siempre lo fija al entrar a CERRADO), pero
+  // el tipo no lo impide, y sin esta guarda caeria en la ultima rama y
+  // saldria INCUMPLIDO solo por la falta de ese dato -- acusando de vencido a
+  // un item que la propia regla del sistema exime.
+  it('un CERRADO con closedAt nulo y fecha pasada es AUN_NO_VENCE, no INCUMPLIDO', () => {
+    expect(judgeCommitment('2026-08-01', null, FIN, 'CERRADO')).toBe('AUN_NO_VENCE');
   });
 });
 
@@ -292,20 +332,30 @@ describe('buildMonthlyReport', () => {
     expect(r.requirements!.totals.commitmentCompliancePercent).toBe(100); // solo el entregado mide
     // Los tres sin `dueDate` (1 SOLICITADO, 4 RECHAZADO, 5 ANULADO) son
     // "nunca hubo compromiso"; el 2 (PENDIENTE, comprometido para el 30 de
-    // setiembre, fuera del periodo de agosto) es "aun no vencia": la misma
-    // distincion que ya tenian los tickets, ahora con su propio contador
-    // para requerimientos. El 3 (CERRADO) ya tiene veredicto CUMPLIDO y no
-    // entra en ninguno de los dos.
+    // setiembre, fuera del periodo de agosto) es AUN_NO_VENCE: la misma
+    // distincion que ya tenian los tickets, ahora con su propio contador y su
+    // propio veredicto para requerimientos (ronda 2 de la revision final). El
+    // 3 (CERRADO) ya tiene veredicto CUMPLIDO y no entra en ninguno de los
+    // dos. Ninguno esta CANCELADO, asi que ese contador da cero.
     expect(r.requirements!.totals.withoutCommitment).toBe(3);
     expect(r.requirements!.totals.notYetDue).toBe(1);
+    expect(r.requirements!.totals.cancelled).toBe(0);
   });
 
-  // Integracion de la correccion de la revision final: un CANCELADO con
-  // fecha comprometida ya pasada no debe bajar el porcentaje de
-  // cumplimiento ni contar como "vencido" -- ver `judgeCommitment` y su
-  // JSDoc. Sigue contando en "Aceptados" porque paso por la aceptacion
-  // antes de cancelarse (ver JSDoc de `RequirementsTotals.accepted`).
-  it('un CANCELADO con fecha pasada no baja el porcentaje y sigue contando en Aceptados', () => {
+  /**
+   * Integracion de la correccion de la revision final (ronda 1 + ronda 2):
+   * un CANCELADO con fecha comprometida ya pasada no debe bajar el
+   * porcentaje de cumplimiento, ni contar como "vencido" (INCUMPLIDO), ni
+   * publicarse bajo "Aun no vence" -- ver `judgeCommitment` y el JSDoc de
+   * `CommitmentVerdict`.
+   *
+   * La ronda 1 dejo esto fijado con `commitment` en `SIN_COMPROMISO` y
+   * `notYetDue` en 1, es decir, publicando al cancelado bajo "Aun no vence":
+   * exactamente la etiqueta que miente que la ronda 2 vino a corregir.
+   * Fijar en una prueba un comportamiento a medias es el error que este
+   * comentario, y esta prueba corregida, existen para no repetir.
+   */
+  it('un CANCELADO con fecha pasada no baja el porcentaje, no cuenta como vencido y sigue contando en Aceptados', () => {
     const r = buildMonthlyReport({
       periodStart: INICIO, periodEnd: FIN, tickets: null, ticketsResolvedInPeriod: null,
       requirements: [
@@ -320,12 +370,15 @@ describe('buildMonthlyReport', () => {
         },
       ],
     });
-    expect(r.requirements!.rows[0].commitment).toBe('SIN_COMPROMISO');
+    expect(r.requirements!.rows[0].commitment).toBe('CANCELADO');
     expect(r.requirements!.totals.accepted).toBe(2);
     // Si el CANCELADO contara como INCUMPLIDO, este porcentaje seria 50, no
     // 100: la correccion existe para que el unico veredicto medible sea el
     // del entregado.
     expect(r.requirements!.totals.commitmentCompliancePercent).toBe(100);
-    expect(r.requirements!.totals.notYetDue).toBe(1);
+    // El cancelado no esta "aun no vence": esta cancelado, y tiene su propio
+    // contador.
+    expect(r.requirements!.totals.notYetDue).toBe(0);
+    expect(r.requirements!.totals.cancelled).toBe(1);
   });
 });
