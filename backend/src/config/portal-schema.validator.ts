@@ -83,6 +83,7 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
   private static readonly MIGRATION_018 = 'migrations/018_conversacion_adjuntos.sql';
   private static readonly MIGRATION_020 = 'migrations/020_requerimientos_portal.sql';
   private static readonly MIGRATION_021 = 'migrations/021_correo_entrante.sql';
+  private static readonly MIGRATION_023 = 'migrations/023_correo_entrante_imap.sql';
 
   /**
    * Lo que hace falta para que exista `workspace_settings.team_inbox_email`, en
@@ -223,6 +224,18 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
       table: 'ticket_events',
       column: 'sent_message_id',
       files: [PortalSchemaValidator.MIGRATION_021],
+    },
+    // 023: la configuración del buzón IMAP real (Task 8), junto a la de SMTP
+    // en la misma fila. `WorkspaceSetting` declara las siete columnas nuevas
+    // a la vez, así que basta una para detectar la migración entera -- mismo
+    // criterio que `notify_next_attempt_at` (016) y `team_inbox_email` (015):
+    // sin ella, cualquier lectura o escritura de `workspace_settings`
+    // (los ajustes del emisor, el envío de correo, el reloj de ingesta)
+    // responde ER_BAD_FIELD_ERROR, no solo la pantalla de correo entrante.
+    {
+      table: 'workspace_settings',
+      column: 'imap_enabled',
+      files: [PortalSchemaValidator.MIGRATION_023],
     },
   ];
 

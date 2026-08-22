@@ -50,6 +50,9 @@ services:
       # correo del personal sin ticket, o una respuesta que queda sin texto
       # tras recortar la cita, no son un ERROR.
       - ./backend/sql/migrations/022_correo_sin_contenido.sql:/docker-entrypoint-initdb.d/022_correo_sin_contenido.sql:ro
+      # La 023 anade la configuracion IMAP a workspace_settings (junto a la
+      # de SMTP) y su interruptor de encendido, apagado por defecto.
+      - ./backend/sql/migrations/023_correo_entrante_imap.sql:/docker-entrypoint-initdb.d/023_correo_entrante_imap.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s

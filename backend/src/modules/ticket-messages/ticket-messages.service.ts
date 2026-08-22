@@ -258,4 +258,18 @@ export class TicketMessagesService {
     const ticket = await loadVisibleTicketOrFail(this.tickets, ticketId, scope);
     return this.messages.listByTicket(ticket.id, { includeInternal: !scope.restricted });
   }
+
+  /**
+   * Enlaza un mensaje ya guardado con el correo entrante del que salió
+   * (Task 8, `InboundEmailService.safeAttachInboundEmail`). Pasa tal cual a
+   * `TicketMessagesRepository.attachInboundEmail` -- ver su comentario para el
+   * porqué del orden de escrituras --; esta capa existe solo porque
+   * `TicketMessagesRepository` **no se exporta** de este módulo a propósito
+   * ("la única puerta al hilo es el servicio", ver `TicketMessagesModule`), y
+   * la ingesta de correo es el único consumidor de fuera de este módulo que
+   * necesita este enlace informativo.
+   */
+  attachInboundEmail(messageId: Id, inboundEmailId: number): Promise<void> {
+    return this.messages.attachInboundEmail(messageId, inboundEmailId);
+  }
 }

@@ -77,6 +77,38 @@ export class WorkspaceSetting {
   @Column({ name: 'team_inbox_email', type: 'varchar', length: 180, nullable: true })
   teamInboxEmail!: string | null;
 
+  // ========== IMAP (correo entrante, Task 8) ==========
+  // Migración 023, junto a la de SMTP de arriba: mismo criterio, columnas
+  // nulas hasta que alguien configura el buzón, contraseña cifrada con la
+  // misma `aes-gcm.util.ts`.
+  @Column({ name: 'imap_host', type: 'varchar', length: 255, nullable: true })
+  imapHost!: string | null;
+
+  @Column({ name: 'imap_port', type: 'int', nullable: true })
+  imapPort!: number | null;
+
+  @Column({ name: 'imap_secure', type: 'tinyint', default: 1 })
+  imapSecure!: number;
+
+  @Column({ name: 'imap_user', type: 'varchar', length: 255, nullable: true })
+  imapUser!: string | null;
+
+  @Column({ name: 'imap_pass_encrypted', type: 'text', nullable: true })
+  imapPassEncrypted!: string | null;
+
+  @Column({ name: 'imap_folder', type: 'varchar', length: 255, nullable: true })
+  imapFolder!: string | null;
+
+  /**
+   * El interruptor de encendido de la ingesta. Nace apagado (`DEFAULT 0` en
+   * la 023): un correo mal recibido crea tickets o responde a desconocidos
+   * solo, así que hay que encenderlo a mano, y solo tras verificar la
+   * política SMTP de rechazo en el servidor real (ver el docblock de
+   * `judgeAuthentication`).
+   */
+  @Column({ name: 'imap_enabled', type: 'tinyint', default: 0 })
+  imapEnabled!: number;
+
   // ========== Retención de audio ==========
   @Column({
     name: 'audio_retention_policy',

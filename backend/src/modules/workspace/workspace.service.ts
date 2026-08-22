@@ -16,6 +16,23 @@ export interface ResolvedSmtpConfig {
 }
 
 /**
+ * Config IMAP resuelta (con el password descifrado en memoria), Task 8.
+ * `folder` siempre trae un valor -- ver `getImapConfig` para el porqué del
+ * valor por omisión y por qué no vive en la migración.
+ */
+export interface ResolvedImapConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+  folder: string;
+}
+
+/** Carpeta IMAP por omisión cuando se configuró el buzón pero no la carpeta. */
+const DEFAULT_IMAP_FOLDER = 'INBOX';
+
+/**
  * Singleton: siempre trabajamos con la fila id=1.
  */
 @Injectable()
@@ -57,6 +74,9 @@ export class WorkspaceService {
       'smtpUser',
       'smtpFrom',
       'teamInboxEmail',
+      'imapHost',
+      'imapUser',
+      'imapFolder',
     ];
     simpleKeys.forEach((key) => {
       const value = dto[key];
@@ -72,6 +92,9 @@ export class WorkspaceService {
     if (dto.smtpPort !== undefined) {
       patch.smtpPort = dto.smtpPort;
     }
+    if (dto.imapPort !== undefined) {
+      patch.imapPort = dto.imapPort;
+    }
     if (dto.audioRetentionPolicy !== undefined) {
       patch.audioRetentionPolicy = dto.audioRetentionPolicy;
     }
@@ -83,10 +106,19 @@ export class WorkspaceService {
     if (dto.smtpSecure !== undefined) {
       patch.smtpSecure = dto.smtpSecure ? 1 : 0;
     }
+    if (dto.imapSecure !== undefined) {
+      patch.imapSecure = dto.imapSecure ? 1 : 0;
+    }
+    if (dto.imapEnabled !== undefined) {
+      patch.imapEnabled = dto.imapEnabled ? 1 : 0;
+    }
 
     // Password SMTP: encriptar si viene un valor; vacío explícito → limpiar
     if (dto.smtpPass !== undefined) {
       patch.smtpPassEncrypted = dto.smtpPass === '' ? null : encryptSecret(dto.smtpPass);
+    }
+    if (dto.imapPass !== undefined) {
+      patch.imapPassEncrypted = dto.imapPass === '' ? null : encryptSecret(dto.imapPass);
     }
 
     await this.repo.update(current.id, patch);
@@ -114,6 +146,55 @@ export class WorkspaceService {
       this.logger.warn(`No se pudo descifrar SMTP pass: ${(e as Error).message}`);
       return null;
     }
+  }
+
+  /**
+   * Config IMAP lista para usar (con password descifrado), o `null` si no
+   * está completa -- mismo criterio que `getSmtpConfig`: host, usuario y
+   * contraseña son los tres datos sin los que no hay nada que intentar.
+   *
+   * A propósito **no mira `imap_enabled`**: esta función responde "¿hay
+   * suficiente para conectar?", no "¿debo conectar ahora?". Mezclar las dos
+   * preguntas escondería la diferencia entre "apagado a propósito" (nadie se
+   * queja, Task 8) y "encendido pero mal configurado" (sí hay que quejarse) --
+   * quien enciende el buzón consulta esto directamente y decide qué decir en
+   * cada caso.
+   *
+   * `folder` cae a `INBOX` cuando no se configuró ninguna: es el nombre que
+   * todo servidor IMAP reserva para la bandeja principal (RFC 3501 §5.1), así
+   * que es el valor que de verdad se usaría si nadie hubiera pensado en
+   * configurarlo -- no una adivinanza. Vive aquí, en el código, y no en la
+   * migración (columna `NULL` sin `DEFAULT`) para que `NULL` en la base siga
+   * significando "nadie lo configuró" y no se confunda con esta elección.
+   */
+  async getImapConfig(): Promise<ResolvedImapConfig | null> {
+    const s = await this.get().catch(() => null);
+    if (!s?.imapHost || !s.imapUser || !s.imapPassEncrypted) return null;
+    try {
+      const pass = decryptSecret(s.imapPassEncrypted);
+      return {
+        host: s.imapHost,
+        port: s.imapPort ?? 993,
+        secure: s.imapSecure === 1,
+        user: s.imapUser,
+        pass,
+        folder: s.imapFolder?.trim() || DEFAULT_IMAP_FOLDER,
+      };
+    } catch (e) {
+      this.logger.warn(`No se pudo descifrar IMAP pass: ${(e as Error).message}`);
+      return null;
+    }
+  }
+
+  /**
+   * El interruptor de la ingesta. `false` también si la fila de ajustes no
+   * se puede leer -- fallo cerrado, y en la misma dirección que el valor por
+   * omisión de la propia columna (`DEFAULT 0`): no saber si está encendida
+   * nunca debe tratarse como que lo está.
+   */
+  async isImapIngestionEnabled(): Promise<boolean> {
+    const s = await this.get().catch(() => null);
+    return s?.imapEnabled === 1;
   }
 
   /**

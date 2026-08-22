@@ -107,6 +107,45 @@ export class UpdateWorkspaceSettingsDto {
   @Length(0, 180)
   teamInboxEmail?: string;
 
+  // IMAP (correo entrante, Task 8) -- mismo criterio que SMTP arriba.
+  @IsOptional()
+  @IsString()
+  @Length(0, 255)
+  imapHost?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(65535)
+  imapPort?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  imapSecure?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @Length(0, 255)
+  imapUser?: string;
+
+  // Igual que smtpPass: texto plano de entrada, el service lo cifra.
+  @IsOptional()
+  @IsString()
+  @Length(0, 500)
+  imapPass?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(0, 255)
+  imapFolder?: string;
+
+  // El interruptor de encendido de la ingesta. Nace apagado (ver la entidad):
+  // este campo solo permite encenderlo o apagarlo, nunca decide el valor por
+  // sí mismo.
+  @IsOptional()
+  @IsBoolean()
+  imapEnabled?: boolean;
+
   // Retención de audio
   @IsOptional()
   @IsEnum(AUDIO_RETENTION_POLICIES)

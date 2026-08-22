@@ -45,6 +45,9 @@ const COLUMNAS_021 = [
   { tableName: 'ticket_events', columnName: 'sent_message_id' },
 ];
 
+/** La columna que añade la 023: el interruptor del buzón IMAP real (Task 8). */
+const COLUMNA_023 = { tableName: 'workspace_settings', columnName: 'imap_enabled' };
+
 const COLUMNAS_ESPERADAS = [
   ...COLUMNAS_013,
   COLUMNA_014,
@@ -52,6 +55,7 @@ const COLUMNAS_ESPERADAS = [
   COLUMNA_016,
   COLUMNA_020,
   ...COLUMNAS_021,
+  COLUMNA_023,
 ];
 
 /**

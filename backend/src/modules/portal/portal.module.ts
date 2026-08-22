@@ -67,6 +67,12 @@ import { WorkItemsModule } from '../work-items/work-items.module';
     PortalReportsService,
     ClientUsersService,
   ],
-  exports: [ClientUsersRepository],
+  // `ClientUsersService` se exporta desde la Task 8: `InboundEmailService`
+  // (`modules/inbound-email`) lo necesita para identificar al remitente de un
+  // correo por su dirección (`findByEmail`, ya pensado para este consumidor
+  // desde su propio comentario). Es la única puerta al portal que consume un
+  // módulo fuera de él, y va en un solo sentido: el portal no conoce el correo
+  // entrante.
+  exports: [ClientUsersRepository, ClientUsersService],
 })
 export class PortalModule {}

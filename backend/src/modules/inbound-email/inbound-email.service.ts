@@ -27,7 +27,6 @@ import { User } from '../users/entities/user.entity';
 import { UsersService } from '../users/users.service';
 import { CreateTicketDto } from '../tickets/dto/create-ticket.dto';
 import { EmailOrigin, TicketsService } from '../tickets/tickets.service';
-import { TicketMessagesRepository } from '../ticket-messages/ticket-messages.repository';
 import { PostMessageInput, TicketMessagesService } from '../ticket-messages/ticket-messages.service';
 
 /**
@@ -208,7 +207,6 @@ export class InboundEmailService {
     @Inject(MAILBOX) private readonly mailbox: Mailbox,
     @Inject(INBOUND_MAILBOX_ADDRESS) private readonly mailboxAddress: string,
     private readonly repo: InboundEmailsRepository,
-    private readonly ticketMessagesRepo: TicketMessagesRepository,
     private readonly tickets: TicketsService,
     private readonly ticketMessages: TicketMessagesService,
     private readonly clientUsers: ClientUsersService,
@@ -808,7 +806,7 @@ export class InboundEmailService {
    */
   private async safeAttachInboundEmail(messageId: number, inboundEmailId: number): Promise<void> {
     try {
-      await this.ticketMessagesRepo.attachInboundEmail(messageId, inboundEmailId);
+      await this.ticketMessages.attachInboundEmail(messageId, inboundEmailId);
     } catch (error) {
       this.logger.warn(
         `No se pudo enlazar el mensaje ${messageId} con el correo entrante ${inboundEmailId}: ` +

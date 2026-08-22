@@ -173,7 +173,6 @@ function montar(opciones: Opciones = {}) {
 
   const mailbox = mailboxDoble(mensajes);
   const repo = repoDoble();
-  const ticketMessagesRepo = { attachInboundEmail: jest.fn().mockResolvedValue(undefined) };
   const tickets = {
     create: crearTicketImpl
       ? jest.fn(crearTicketImpl)
@@ -183,6 +182,7 @@ function montar(opciones: Opciones = {}) {
     post: postMensajeImpl
       ? jest.fn(postMensajeImpl)
       : jest.fn().mockResolvedValue(unMensajePosteado()),
+    attachInboundEmail: jest.fn().mockResolvedValue(undefined),
   };
   const clientUsers = { findByEmail: jest.fn().mockResolvedValue(clientUser) };
   const users = { findByEmail: jest.fn().mockResolvedValue(staffUser) };
@@ -194,7 +194,6 @@ function montar(opciones: Opciones = {}) {
     mailbox as any,
     BUZON_PROPIO,
     repo as any,
-    ticketMessagesRepo as any,
     tickets as any,
     ticketMessages as any,
     clientUsers as any,
@@ -202,7 +201,7 @@ function montar(opciones: Opciones = {}) {
     email as any,
   );
 
-  return { service, mailbox, repo, ticketMessagesRepo, tickets, ticketMessages, clientUsers, users, email };
+  return { service, mailbox, repo, tickets, ticketMessages, clientUsers, users, email };
 }
 
 /** La fila final de `inbound_emails` para un `messageIdRaw` dado, o `undefined` si no hay ninguna. */
@@ -1003,17 +1002,17 @@ describe('InboundEmailService.drain', () => {
   // -------------------------------------------------------------------------
 
   it('enlaza el primer mensaje del ticket con la fila de inbound_emails que lo originó', async () => {
-    const { service, ticketMessagesRepo, repo } = montar({ clientUser: CLIENT_USER });
+    const { service, ticketMessages, repo } = montar({ clientUser: CLIENT_USER });
 
     await service.drain();
 
     const fila = filaDe(repo, '<msg-1@empresa.com>')!;
-    expect(ticketMessagesRepo.attachInboundEmail).toHaveBeenCalledWith(9001, fila.id);
+    expect(ticketMessages.attachInboundEmail).toHaveBeenCalledWith(9001, fila.id);
   });
 
   it('un fallo al enlazar el mensaje no tira el resto: el ticket ya está escrito', async () => {
-    const { service, ticketMessagesRepo, repo } = montar({ clientUser: CLIENT_USER });
-    ticketMessagesRepo.attachInboundEmail.mockRejectedValueOnce(new Error('fallo de red'));
+    const { service, ticketMessages, repo } = montar({ clientUser: CLIENT_USER });
+    ticketMessages.attachInboundEmail.mockRejectedValueOnce(new Error('fallo de red'));
 
     const resumen = await service.drain();
 
