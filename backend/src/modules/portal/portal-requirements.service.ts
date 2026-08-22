@@ -3,30 +3,12 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { WorkItemsRepository } from '../work-items/work-items.repository';
 import { WorkItem } from '../work-items/entities/work-item.entity';
 import { WorkItemEvent } from '../work-items/entities/work-item-event.entity';
-import { DEFAULT_PRIORITY, PRE_BOARD_STATUSES, WorkItemStatus } from '../work-items/domain/work-item-board';
+import { DEFAULT_PRIORITY, PRE_BOARD_STATUSES } from '../work-items/domain/work-item-board';
 
 import { assertSessionScope, toIso } from './session-scope';
 import { CreatePortalRequirementDto } from './dto/create-portal-requirement.dto';
-import { PortalRequirementStatusLabel, PortalRequirementView } from './dto/portal-requirement.dto';
-
-/**
- * Cómo se llama cada estado de cara al cliente.
- *
- * `PENDIENTE` significa para la casa «aceptado y en cola», pero un cliente que
- * lee «Pendiente» no lo distingue de «Solicitado» — que es justo la diferencia
- * entre «lo pediste» y «nos comprometimos». El `Record` completo obliga a
- * nombrar aquí cualquier estado nuevo, o deja de compilar.
- */
-const STATUS_LABELS: Record<WorkItemStatus, PortalRequirementStatusLabel> = {
-  SOLICITADO: 'Solicitado',
-  PENDIENTE: 'Aceptado, en cola',
-  EN_PROCESO: 'En desarrollo',
-  PRUEBAS: 'En pruebas',
-  CERRADO: 'Entregado',
-  BLOQUEADO: 'Bloqueado',
-  CANCELADO: 'Cancelado',
-  RECHAZADO: 'Rechazado',
-};
+import { PortalRequirementView } from './dto/portal-requirement.dto';
+import { REQUIREMENT_STATUS_LABELS } from './domain/requirement-status-labels';
 
 /**
  * Alta de un requerimiento desde el portal del cliente. Todo lo que sale de
@@ -162,7 +144,7 @@ export class PortalRequirementsService {
       code: w.code ?? null,
       title: w.title,
       descriptionMd: w.descriptionMd ?? null,
-      status: STATUS_LABELS[w.status],
+      status: REQUIREMENT_STATUS_LABELS[w.status],
       // Por el estado, no por si `dueDate` está vacío ni por si el valor es el
       // por defecto: un RECHAZADO tampoco pasó nunca por la aceptación, y su
       // columna `priority` conserva el DEFAULT_PRIORITY del alta porque no
