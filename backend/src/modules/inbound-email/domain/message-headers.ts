@@ -112,6 +112,36 @@ export function extractTicketCode(subject: string): string | null {
 }
 
 /**
+ * La direccion de correo desnuda de una cabecera `From`, sin el nombre para
+ * mostrar que RFC 5322 §3.4 permite delante (`mailbox = name-addr / addr-spec`,
+ * y `name-addr` es justo "un nombre y una direccion entre `<>`"). Asi es como
+ * llega la inmensa mayoria de las veces -- es la misma razon por la que
+ * `EmailService` ya trae su propio extractor para el remitente de nuestros
+ * propios envios (`extractEmail`, en `modules/email/email.service.ts`) -- y
+ * no una forma rara de cabecera.
+ *
+ * Sin desenvolverla, ninguna comparacion por direccion puede funcionar nunca:
+ * `isOwnMailbox('"Soporte Kuboti" <ticket@kuboti.com>', 'ticket@kuboti.com')`
+ * compararia un nombre completo contra una direccion y siempre daria `false`,
+ * y lo mismo le pasaria a cualquier busqueda de remitente por correo. Es
+ * exactamente el defecto general del proyecto en su forma de cabecera: decidir
+ * por una cadena que *contiene* el hecho en vez de por el hecho mismo.
+ *
+ * Se recorta y se pasa a minusculas: el dominio de un correo nunca distingue
+ * mayusculas, y la parte local tampoco lo hace en la inmensa mayoria de
+ * proveedores -- el mismo criterio que ya aplican `isOwnMailbox` y
+ * `ClientUsersRepository.findByEmail`.
+ *
+ * Si no hay ningun `<...>`, se asume que `from` ya es la direccion (el otro
+ * caso legitimo de la gramatica, `addr-spec` a secas) y solo se normaliza.
+ */
+export function extractSenderAddress(from: string): string {
+  const match = from.match(/<([^>]+)>/);
+  const address = match ? match[1] : from;
+  return address.trim().toLowerCase();
+}
+
+/**
  * Valores de `Precedence` que identifican correo generado por una maquina.
  * `normal` y `first-class` son, igual que `Auto-Submitted: no`, los valores
  * que la cabecera define para correo escrito por una persona -- decidir por

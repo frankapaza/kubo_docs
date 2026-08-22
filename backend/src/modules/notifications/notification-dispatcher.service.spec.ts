@@ -1243,7 +1243,16 @@ describe('el Message-ID del aviso al cliente', () => {
       rejected: [AUTOR_EMAIL] as string[],
     } as never);
 
-    await expect(dispatcher.dispatchForEvent(unEvento())).rejects.toThrow();
+    const error = await dispatcher.dispatchForEvent(unEvento()).catch((e) => e);
+
+    // No basta con que lance: un rechazo parcial también lanza y sí trae un
+    // Message-ID (ver el test de arriba). Lo que hay que comprobar aquí es
+    // el campo mismo: el envío rechazado nunca llegó a devolver un
+    // Message-ID utilizable, así que `sentMessageId` tiene que quedar en
+    // `null` y no en `'<no-cuenta@kuboti.com>'`, que es justo el valor que
+    // nodemailer sí generó para el intento fallido.
+    expect(error).toBeInstanceOf(NotificationDispatchError);
+    expect(error.sentMessageId).toBeNull();
   });
 
   /**

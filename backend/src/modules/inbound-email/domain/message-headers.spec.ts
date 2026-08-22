@@ -1,4 +1,37 @@
-import { extractTicketCode, isAutomaticMessage, parseMessageIds, stripSubjectPrefixes } from './message-headers';
+import {
+  extractSenderAddress,
+  extractTicketCode,
+  isAutomaticMessage,
+  parseMessageIds,
+  stripSubjectPrefixes,
+} from './message-headers';
+
+describe('extractSenderAddress', () => {
+  it('desenvuelve un From con nombre para mostrar', () => {
+    expect(extractSenderAddress('"Ana Quispe" <ana@empresa.com>')).toBe('ana@empresa.com');
+  });
+
+  it('desenvuelve un nombre sin comillas', () => {
+    expect(extractSenderAddress('Ana Quispe <ana@empresa.com>')).toBe('ana@empresa.com');
+  });
+
+  it('deja igual una direccion ya desnuda', () => {
+    expect(extractSenderAddress('ana@empresa.com')).toBe('ana@empresa.com');
+  });
+
+  it('normaliza mayusculas y espacios en los dos casos', () => {
+    expect(extractSenderAddress('  Ana Quispe <Ana@Empresa.COM>  ')).toBe('ana@empresa.com');
+    expect(extractSenderAddress('  Ana@Empresa.COM  ')).toBe('ana@empresa.com');
+  });
+
+  // Es la misma comparacion que ya usa `isOwnMailbox`: exacta y no "contiene",
+  // para que un dominio que solo se parezca no cuente como el mismo.
+  it('no se equivoca con un dominio parecido, solo desenvuelve el <>', () => {
+    expect(extractSenderAddress('Alguien <ticket@kuboti.com.atacante.net>')).toBe(
+      'ticket@kuboti.com.atacante.net',
+    );
+  });
+});
 
 describe('parseMessageIds', () => {
   it('extrae un identificador con corchetes', () => {

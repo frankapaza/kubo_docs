@@ -36,6 +36,25 @@ export class InboundEmailsRepository {
     return this.repo.save(this.repo.create(row));
   }
 
+  /**
+   * Corrige una fila ya insertada -- nunca un segundo `INSERT` para el mismo
+   * correo, que la clave única de `message_id` rechazaría.
+   *
+   * La usa `InboundEmailService` en dos momentos, los dos para cerrar la
+   * ventana de atomicidad entre escribir el ticket (o el mensaje) y dejar
+   * constancia de él: la fila se inserta **antes** de crear el ticket, con el
+   * resultado que se espera y `ticketId: null` si todavía no existe, y esta
+   * función la corrige después -- con el `ticketId` real si todo salió bien,
+   * o con `outcome: 'ERROR'` si no. Así, si el proceso muere entre medias, un
+   * reinicio encuentra la fila ya reclamada (`findByMessageId` no da `null`)
+   * y no repite el correo -- se pierde ese correo en vez de duplicar el
+   * ticket, que es el cambio que pide la ronda de correcciones 1: duplicar
+   * significa un segundo acuse al mismo cliente.
+   */
+  async updateOutcome(id: number, patch: Partial<InboundEmail>): Promise<void> {
+    await this.repo.update(id, patch);
+  }
+
   findTicketByCode(code: string): Promise<Ticket | null> {
     return this.ticketsRepo.findOne({ where: { code } });
   }

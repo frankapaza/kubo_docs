@@ -40,6 +40,22 @@ export interface IncomingMessage {
    * ticket repetido tras un reinicio a medias.
    */
   messageId: string;
+  /**
+   * El remitente, **tal cual trae la cabecera `From`**: puede llegar con un
+   * nombre para mostrar delante (`"Ana Quispe" <ana@empresa.com>`), que es
+   * como aparece la mayoría de las veces en la práctica, o como una dirección
+   * desnuda (`ana@empresa.com`) -- las dos formas son válidas por RFC 5322
+   * §3.4, y este contrato no elige entre ellas.
+   *
+   * **Nadie debe comparar este campo directamente contra una dirección.**
+   * `isOwnMailbox`, y cualquier búsqueda de usuario por correo, necesitan la
+   * dirección desnuda: hay que pasar este valor por
+   * `extractSenderAddress` (`./domain/message-headers.ts`) antes de
+   * comparar. Un adaptador (IMAP, la Task 8) que entregue el nombre completo
+   * aquí no es un caso raro que haya que blindar aparte -- es la forma normal
+   * de la cabecera, y por eso la responsabilidad de desenvolverla vive en un
+   * único sitio del recorrido y no en cada comparación por separado.
+   */
   from: string;
   subject: string | null;
   sentAt: Date | null;

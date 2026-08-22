@@ -7,12 +7,16 @@ import { IncomingMessage } from './mailbox.interface';
  * de que ese contrato sea tan pequeño, ver su comentario) y dobles de los
  * cuatro servicios de escritura.
  *
- * Los identificadores de empresa y de usuario van como **número** en los
- * dobles de este archivo a propósito -- salvo donde un test concreto necesita
- * lo contrario --, porque lo que hay que probar aquí es el recorrido de
- * negocio; la asimetría `number`/cadena que exige `sameId` ya está probada a
- * fondo en `correlation.spec.ts` y no hace falta repetirla en cada test de
- * este archivo.
+ * El doble de `InboundEmailsRepository` es **con estado** (una tabla en
+ * memoria) y no una colección de `jest.fn()` sueltos: desde la ronda de
+ * correcciones 1, el servicio reclama la fila antes de escribir el ticket o
+ * el mensaje (`claim`) y la corrige después (`updateOutcome`), así que
+ * `findByMessageId` tiene que ver de verdad lo que `record` insertó, y
+ * `findTicketsByEmailMessageIds` -- que ahora sirve a la vez para detectar un
+ * Message-ID envenenado y para correlacionar por cabecera -- tiene que
+ * responder según el identificador que se le pida, no según el orden de las
+ * llamadas: un `mockResolvedValueOnce` se habría consumido en la primera de
+ * las dos comprobaciones, no en la que cada test pretendía preparar.
  */
 
 const BUZON_PROPIO = 'ticket@kuboti.com';
@@ -70,16 +74,50 @@ function mailboxDoble(mensajes: IncomingMessage[]) {
   };
 }
 
-/** Doble de `InboundEmailsRepository`, con `record` devolviendo ids incrementales. */
+/**
+ * Doble con estado de `InboundEmailsRepository`.
+ *
+ * `findTicketsByEmailMessageIds` responde a partir de un mapa
+ * `Message-ID -> [{ticketId, clientId}]` que cada test rellena con
+ * `asociar(...)`, y no con `mockResolvedValueOnce`: el servicio llama a este
+ * método por dos motivos distintos dentro del mismo correo (la comprobación
+ * de envenenamiento, con el propio Message-ID; la correlación, con los de
+ * `In-Reply-To`/`References`), así que una respuesta "de una vez" ligada al
+ * orden de llamada se colaría en la comprobación equivocada.
+ */
 function repoDoble() {
+  const filas: Array<Record<string, unknown> & { id: number }> = [];
+  const asociaciones = new Map<string, Array<{ ticketId: number; clientId: number }>>();
   let siguienteId = 1;
+
   return {
-    findByMessageId: jest.fn().mockResolvedValue(null),
-    record: jest.fn((fila: Record<string, unknown>) =>
-      Promise.resolve({ id: siguienteId++, ...fila }),
-    ),
+    filas,
+    asociar(messageId: string, match: { ticketId: number; clientId: number }) {
+      const existentes = asociaciones.get(messageId) ?? [];
+      existentes.push(match);
+      asociaciones.set(messageId, existentes);
+    },
+    findByMessageId: jest.fn(async (messageId: string) => {
+      return filas.find((f) => f.messageId === messageId) ?? null;
+    }),
+    record: jest.fn(async (fila: Record<string, unknown>) => {
+      const nueva = { id: siguienteId++, ...fila };
+      filas.push(nueva);
+      return nueva;
+    }),
+    updateOutcome: jest.fn(async (id: number, patch: Record<string, unknown>) => {
+      const fila = filas.find((f) => f.id === id);
+      if (fila) Object.assign(fila, patch);
+    }),
     findTicketByCode: jest.fn().mockResolvedValue(null),
-    findTicketsByEmailMessageIds: jest.fn().mockResolvedValue([]),
+    findTicketsByEmailMessageIds: jest.fn(async (ids: string[]) => {
+      const encontrados: Array<{ ticketId: number; clientId: number }> = [];
+      for (const id of ids) {
+        const coincidencias = asociaciones.get(id);
+        if (coincidencias) encontrados.push(...coincidencias);
+      }
+      return encontrados;
+    }),
     countRepliesToUnknown: jest.fn(),
   };
 }
@@ -135,6 +173,11 @@ function montar(opciones: Opciones = {}) {
   return { service, mailbox, repo, ticketMessagesRepo, tickets, ticketMessages, clientUsers, users, email };
 }
 
+/** La fila final de `inbound_emails` para un `messageIdRaw` dado, o `undefined` si no hay ninguna. */
+function filaDe(repo: ReturnType<typeof repoDoble>, messageIdRaw: string) {
+  return repo.filas.find((f) => f.messageIdRaw === messageIdRaw);
+}
+
 describe('InboundEmailService.drain', () => {
   // -------------------------------------------------------------------------
   // Un cliente registrado, sin referencia: crea ticket.
@@ -156,9 +199,13 @@ describe('InboundEmailService.drain', () => {
         bodyFull: 'Hola, el reporte de ventas no carga desde ayer.',
       });
 
-      expect(repo.record).toHaveBeenCalledWith(
-        expect.objectContaining({ outcome: 'TICKET_CREADO', ticketId: 501, clientUserId: 11 }),
-      );
+      // La fila se reclama ANTES de crear el ticket (ticketId aún desconocido)
+      // y se corrige después: lo único observable desde fuera es el estado
+      // final, que es lo que se comprueba aquí.
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('TICKET_CREADO');
+      expect(fila.ticketId).toBe(501);
+      expect(fila.clientUserId).toBe(11);
       expect(resumen.ticketsCreated).toBe(1);
     });
 
@@ -188,6 +235,34 @@ describe('InboundEmailService.drain', () => {
 
       expect(mailbox.markProcessed).toHaveBeenCalledWith('uid-1');
     });
+
+    /**
+     * Si `TicketsService.create` revienta, la fila reclamada antes NO se
+     * queda con `outcome: 'TICKET_CREADO'` y `ticketId: null` para siempre
+     * -- eso mentiría en la tabla. `recordError` la encuentra por su
+     * Message-ID y la corrige a `ERROR`, en vez de intentar un segundo
+     * `INSERT` que la clave única rechazaría.
+     */
+    it('si la creación falla, la fila reclamada se corrige a ERROR, no queda a medias', async () => {
+      const { service, repo } = montar({
+        clientUser: CLIENT_USER,
+        crearTicketImpl: async () => {
+          throw new Error('la base de datos no responde');
+        },
+      });
+
+      const resumen = await service.drain();
+
+      expect(resumen.errors).toBe(1);
+      expect(resumen.ticketsCreated).toBe(0);
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('ERROR');
+      expect(fila.reason).toContain('la base de datos no responde');
+      expect(fila.ticketId).toBeNull();
+      // Una sola fila para este Message-ID: la corrección fue un UPDATE, no
+      // un segundo INSERT.
+      expect(repo.filas.filter((f) => f.messageIdRaw === '<msg-1@empresa.com>')).toHaveLength(1);
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -209,7 +284,7 @@ describe('InboundEmailService.drain', () => {
 
     it('añade el mensaje al hilo existente y no crea un ticket nuevo', async () => {
       const { service, repo, ticketMessages, tickets } = montarRespuesta();
-      repo.findTicketsByEmailMessageIds.mockResolvedValueOnce([{ ticketId: 501, clientId: 7 }]);
+      repo.asociar('<abrio-el-ticket@empresa.com>', { ticketId: 501, clientId: 7 });
 
       const resumen = await service.drain();
 
@@ -217,26 +292,25 @@ describe('InboundEmailService.drain', () => {
       expect(tickets.create).not.toHaveBeenCalled();
       expect(resumen.messagesAdded).toBe(1);
       expect(resumen.ticketsCreated).toBe(0);
-      expect(repo.record).toHaveBeenCalledWith(
-        expect.objectContaining({ outcome: 'MENSAJE_ANADIDO', ticketId: 501, clientUserId: 11 }),
-      );
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('MENSAJE_ANADIDO');
+      expect(fila.ticketId).toBe(501);
+      expect(fila.clientUserId).toBe(11);
     });
 
-    it('el mensaje añadido lleva el clientUserId del remitente, y ninguna visibilidad explícita', async () => {
+    it('el mensaje añadido lleva el clientUserId del remitente y visibilidad PUBLICA, forzada y no por omisión', async () => {
       const { service, repo, ticketMessages } = montarRespuesta();
-      repo.findTicketsByEmailMessageIds.mockResolvedValueOnce([{ ticketId: 501, clientId: 7 }]);
+      repo.asociar('<abrio-el-ticket@empresa.com>', { ticketId: 501, clientId: 7 });
 
       await service.drain();
 
       const [actor, ticketId, input] = ticketMessages.post.mock.calls[0];
       expect(actor).toEqual({ kind: 'CLIENT', clientUserId: 11, clientId: 7 });
       expect(ticketId).toBe(501);
-      // Nunca se pide una visibilidad concreta: `TicketMessagesService.post`
-      // es quien decide, y para un actor de cliente siempre es PUBLICA. Pasar
-      // aquí `visibility` sería abrir, por este canal, la puerta que la regla
-      // "un canal externo nunca escribe notas internas" tiene que mantener
-      // cerrada sin excepción y sin parámetro que la cambie.
-      expect(input.visibility).toBeUndefined();
+      // Afirmado, no ausente: si mañana se le pidiera 'INTERNA' por error, el
+      // valor forzado aquí es lo único que sostiene que un canal externo
+      // nunca escriba una nota interna.
+      expect(input.visibility).toBe('PUBLICA');
       expect(input.bodyMd).toContain('sigue igual');
     });
   });
@@ -246,7 +320,7 @@ describe('InboundEmailService.drain', () => {
   // -------------------------------------------------------------------------
 
   describe('un correo del personal', () => {
-    it('añade un mensaje público del equipo, con authorUserId', async () => {
+    it('añade un mensaje público del equipo, con authorUserId y visibilidad PUBLICA forzada', async () => {
       const { service, repo, ticketMessages, tickets } = montar({
         staffUser: STAFF_USER,
         mensajes: [unMensaje({ from: 'tecnico@kuboti.com', subject: 'Re: [KB-0501] No carga el reporte' })],
@@ -256,17 +330,28 @@ describe('InboundEmailService.drain', () => {
       const resumen = await service.drain();
 
       expect(ticketMessages.post).toHaveBeenCalledTimes(1);
-      const [actor, ticketId] = ticketMessages.post.mock.calls[0];
+      const [actor, ticketId, input] = ticketMessages.post.mock.calls[0];
       expect(actor).toEqual({ kind: 'STAFF', userId: 5 });
       expect(ticketId).toBe(501);
+      // El mismo test que para el cliente: `post` respeta `visibility` para
+      // un actor STAFF (`input.visibility ?? 'PUBLICA'`), así que sin forzarlo
+      // aquí explícitamente, un valor 'INTERNA' colado por error pasaría de
+      // largo sin que ninguna prueba lo detectara.
+      expect(input.visibility).toBe('PUBLICA');
       expect(tickets.create).not.toHaveBeenCalled();
       expect(resumen.messagesAdded).toBe(1);
-      expect(repo.record).toHaveBeenCalledWith(
-        expect.objectContaining({ outcome: 'MENSAJE_ANADIDO', clientUserId: null }),
-      );
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('MENSAJE_ANADIDO');
+      expect(fila.clientUserId).toBeNull();
     });
 
-    it('un correo del personal sin ningún ticket identificable se registra como ERROR, no se pierde en silencio', async () => {
+    /**
+     * No es un error: es un desenlace normal ("este correo no corresponde a
+     * ningún ticket"), y por eso no debe sumar al contador de errores ni
+     * quedar disponible para "reintentar" en la pantalla de la Task 9 --
+     * reintentarlo no cambiaría nada.
+     */
+    it('un correo del personal sin ningún ticket identificable se descarta como DESCARTADO_SIN_CONTENIDO, no como ERROR', async () => {
       const { service, repo, ticketMessages } = montar({
         staffUser: STAFF_USER,
         mensajes: [unMensaje({ from: 'tecnico@kuboti.com', subject: 'Consulta interna' })],
@@ -275,8 +360,84 @@ describe('InboundEmailService.drain', () => {
       const resumen = await service.drain();
 
       expect(ticketMessages.post).not.toHaveBeenCalled();
-      expect(resumen.errors).toBe(1);
-      expect(repo.record).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'ERROR' }));
+      expect(resumen.errors).toBe(0);
+      expect(resumen.discarded).toBe(1);
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('DESCARTADO_SIN_CONTENIDO');
+    });
+
+    it('un correo del personal sobre un ticket conocido pero sin texto (ni adjuntos) tampoco es un error', async () => {
+      const { service, repo, ticketMessages } = montar({
+        staffUser: STAFF_USER,
+        mensajes: [
+          unMensaje({
+            from: 'tecnico@kuboti.com',
+            subject: 'Re: [KB-0501] No carga el reporte',
+            textBody: '> todo esto es una cita\n> nada mas',
+          }),
+        ],
+      });
+      repo.findTicketByCode.mockResolvedValueOnce({ id: 501, clientId: 7 });
+
+      const resumen = await service.drain();
+
+      // OJO: `stripQuotedText` devuelve el original si el recorte lo dejara
+      // vacío (para no publicar una burbuja en blanco cuando SÍ se publica
+      // algo) -- así que este cuerpo, siendo puro `>`, no se vacía sola. Este
+      // test usa ese mismo cuerpo para comprobar la vía de "hay contenido" y
+      // deja la vía de "vacío de verdad" al siguiente test.
+      expect(ticketMessages.post).toHaveBeenCalledTimes(1);
+      expect(resumen.errors).toBe(0);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // El cuerpo vacío tras recortar: tampoco es un error.
+  // -------------------------------------------------------------------------
+
+  describe('una respuesta que queda vacía tras recortar la cita', () => {
+    it('sin texto y sin adjuntos, se descarta como DESCARTADO_SIN_CONTENIDO', async () => {
+      const { service, repo, ticketMessages } = montar({
+        clientUser: CLIENT_USER,
+        mensajes: [
+          unMensaje({
+            headers: { 'in-reply-to': '<abrio-el-ticket@empresa.com>' },
+            textBody: '   ',
+          }),
+        ],
+      });
+      repo.asociar('<abrio-el-ticket@empresa.com>', { ticketId: 501, clientId: 7 });
+
+      const resumen = await service.drain();
+
+      expect(ticketMessages.post).not.toHaveBeenCalled();
+      expect(resumen.errors).toBe(0);
+      expect(resumen.discarded).toBe(1);
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('DESCARTADO_SIN_CONTENIDO');
+      // El ticket con el que sí correlacionó queda anotado, aunque no se
+      // haya escrito nada en su hilo: es información útil para investigar.
+      expect(fila.ticketId).toBe(501);
+    });
+
+    it('con adjuntos, aunque el texto quede vacío, sí se publica (la nota de adjuntos cuenta como contenido)', async () => {
+      const { service, repo, ticketMessages } = montar({
+        clientUser: CLIENT_USER,
+        mensajes: [
+          unMensaje({
+            headers: { 'in-reply-to': '<abrio-el-ticket@empresa.com>' },
+            textBody: '   ',
+            attachmentNames: ['captura.png'],
+          }),
+        ],
+      });
+      repo.asociar('<abrio-el-ticket@empresa.com>', { ticketId: 501, clientId: 7 });
+
+      await service.drain();
+
+      expect(ticketMessages.post).toHaveBeenCalledTimes(1);
+      const [, , input] = ticketMessages.post.mock.calls[0];
+      expect(input.bodyMd).toContain('captura.png');
     });
   });
 
@@ -285,59 +446,126 @@ describe('InboundEmailService.drain', () => {
   // -------------------------------------------------------------------------
 
   describe('los descartes', () => {
+    /**
+     * Los cuatro montan con un remitente **registrado**: si la comprobación
+     * de turno desapareciera, `tickets.create` SÍ se llamaría, y solo así la
+     * aserción `not.toHaveBeenCalled()` puede fallar de verdad. Antes de esta
+     * ronda, ninguno de los cuatro tenía remitente registrado, así que la
+     * aserción pasaba con o sin la comprobación -- exactamente la forma del
+     * defecto que esta puerta ya se ha llevado cuatro agujeros por repetir.
+     */
     it('sin cabecera de autenticación: DESCARTADO_NO_AUTENTICADO y no se responde', async () => {
       const { service, repo, email, tickets, ticketMessages } = montar({
+        clientUser: CLIENT_USER,
         mensajes: [unMensaje({ authenticationResults: null })],
       });
 
       const resumen = await service.drain();
 
-      expect(repo.record).toHaveBeenCalledWith(
-        expect.objectContaining({ outcome: 'DESCARTADO_NO_AUTENTICADO' }),
-      );
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('DESCARTADO_NO_AUTENTICADO');
       expect(email.send).not.toHaveBeenCalled();
       expect(tickets.create).not.toHaveBeenCalled();
       expect(ticketMessages.post).not.toHaveBeenCalled();
       expect(resumen.discarded).toBe(1);
     });
 
-    it('con autenticación fallida: igual DESCARTADO_NO_AUTENTICADO y no se responde', async () => {
-      const { service, repo, email } = montar({
-        mensajes: [unMensaje({ authenticationResults: 'mx.kuboti.com; dmarc=fail' })],
+    it('con autenticación fallida (dmarc=fail): igual DESCARTADO_NO_AUTENTICADO, no se responde y no crea nada', async () => {
+      const { service, repo, email, tickets } = montar({
+        clientUser: CLIENT_USER,
+        mensajes: [unMensaje({ authenticationResults: 'mx.kuboti.com; spf=pass; dkim=pass; dmarc=fail' })],
       });
 
-      await service.drain();
+      const resumen = await service.drain();
 
-      expect(repo.record).toHaveBeenCalledWith(
-        expect.objectContaining({ outcome: 'DESCARTADO_NO_AUTENTICADO' }),
-      );
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('DESCARTADO_NO_AUTENTICADO');
       expect(email.send).not.toHaveBeenCalled();
+      expect(tickets.create).not.toHaveBeenCalled();
+      expect(resumen.discarded).toBe(1);
     });
 
-    it('un correo automático: DESCARTADO_AUTOMATICO y no se responde', async () => {
-      const { service, repo, email } = montar({
+    /**
+     * El agujero de puesta en marcha que `judgeAuthentication` documenta: si
+     * el proveedor añade `Authentication-Results` pero nunca corre DMARC, la
+     * cabecera SÍ llega (no es `SIN_CABECERA`) pero no trae ningún `dmarc=`.
+     * Tiene que rechazarse exactamente igual que un `dmarc=fail` explícito.
+     */
+    it('con la cabecera presente pero sin ningún dmarc= (SIN_DMARC): también se rechaza', async () => {
+      const { service, repo, email, tickets } = montar({
+        clientUser: CLIENT_USER,
+        mensajes: [unMensaje({ authenticationResults: 'mx.kuboti.com; spf=pass; dkim=pass' })],
+      });
+
+      const resumen = await service.drain();
+
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('DESCARTADO_NO_AUTENTICADO');
+      expect(email.send).not.toHaveBeenCalled();
+      expect(tickets.create).not.toHaveBeenCalled();
+      expect(resumen.discarded).toBe(1);
+    });
+
+    it('un correo automático: DESCARTADO_AUTOMATICO, no se responde y no crea nada', async () => {
+      const { service, repo, email, tickets } = montar({
+        clientUser: CLIENT_USER,
         mensajes: [unMensaje({ headers: { 'list-id': '<lista.empresa.com>' } })],
       });
 
-      await service.drain();
+      const resumen = await service.drain();
 
-      expect(repo.record).toHaveBeenCalledWith(
-        expect.objectContaining({ outcome: 'DESCARTADO_AUTOMATICO' }),
-      );
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('DESCARTADO_AUTOMATICO');
       expect(email.send).not.toHaveBeenCalled();
+      expect(tickets.create).not.toHaveBeenCalled();
+      expect(resumen.discarded).toBe(1);
     });
 
-    it('un correo del propio buzón: DESCARTADO_PROPIO', async () => {
-      const { service, repo, email } = montar({
+    it('un correo del propio buzón: DESCARTADO_PROPIO, no se responde y no crea nada', async () => {
+      const { service, repo, email, tickets } = montar({
+        clientUser: CLIENT_USER,
         mensajes: [unMensaje({ from: BUZON_PROPIO })],
+      });
+
+      const resumen = await service.drain();
+
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('DESCARTADO_PROPIO');
+      expect(email.send).not.toHaveBeenCalled();
+      expect(tickets.create).not.toHaveBeenCalled();
+      expect(resumen.discarded).toBe(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // El From con nombre para mostrar: se normaliza una vez, al principio.
+  // -------------------------------------------------------------------------
+
+  describe('el remitente con nombre para mostrar', () => {
+    it('isOwnMailbox reconoce el buzón propio aunque venga con un nombre delante', async () => {
+      const { service, repo, tickets } = montar({
+        clientUser: CLIENT_USER,
+        mensajes: [unMensaje({ from: '"Soporte Kuboti" <ticket@kuboti.com>' })],
       });
 
       await service.drain();
 
-      expect(repo.record).toHaveBeenCalledWith(
-        expect.objectContaining({ outcome: 'DESCARTADO_PROPIO' }),
-      );
-      expect(email.send).not.toHaveBeenCalled();
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('DESCARTADO_PROPIO');
+      expect(tickets.create).not.toHaveBeenCalled();
+    });
+
+    it('la búsqueda de cliente y la respuesta usan la dirección ya desenvuelta', async () => {
+      const { service, clientUsers, tickets } = montar({
+        clientUser: CLIENT_USER,
+        mensajes: [unMensaje({ from: '"Ana Quispe" <ana@empresa.com>' })],
+      });
+
+      await service.drain();
+
+      expect(clientUsers.findByEmail).toHaveBeenCalledWith('ana@empresa.com');
+      const [, dto] = tickets.create.mock.calls[0];
+      expect(dto.clientId).toBe(7);
     });
   });
 
@@ -346,14 +574,14 @@ describe('InboundEmailService.drain', () => {
   // -------------------------------------------------------------------------
 
   it('el mismo Message-ID dos veces se procesa una sola vez', async () => {
-    const { service, repo, tickets, mailbox } = montar({ clientUser: CLIENT_USER });
+    const { service, tickets, mailbox } = montar({ clientUser: CLIENT_USER });
 
     await service.drain();
     expect(tickets.create).toHaveBeenCalledTimes(1);
 
     // Segunda pasada: el correo sigue en el buzón (p. ej. `markProcessed`
-    // falló la vez anterior) y ahora `findByMessageId` sí lo encuentra.
-    repo.findByMessageId.mockResolvedValueOnce({ id: 1, messageId: '<msg-1@empresa.com>' } as never);
+    // falló la vez anterior), y ahora `findByMessageId` sí lo encuentra --
+    // porque de verdad quedó insertado la primera vez (doble con estado).
     const resumen = await service.drain();
 
     expect(tickets.create).toHaveBeenCalledTimes(1);
@@ -364,21 +592,77 @@ describe('InboundEmailService.drain', () => {
   });
 
   // -------------------------------------------------------------------------
+  // El espacio de Message-ID envenenado entre empresas.
+  // -------------------------------------------------------------------------
+
+  describe('un Message-ID que ya es nuestro (aviso o ticket propio de otra empresa)', () => {
+    it('se rechaza como DESCARTADO_DUPLICADO, sin crear ni tocar ningún ticket', async () => {
+      const { service, repo, tickets, ticketMessages } = montar({
+        clientUser: CLIENT_USER, // empresa 7
+        mensajes: [unMensaje({ messageId: '<aviso-de-la-empresa-99@kuboti.com>' })],
+      });
+      // El identificador que este correo usa como el SUYO PROPIO ya está
+      // en uso: es el aviso (o el ticket) de otra empresa.
+      repo.asociar('<aviso-de-la-empresa-99@kuboti.com>', { ticketId: 990, clientId: 99 });
+
+      const resumen = await service.drain();
+
+      expect(tickets.create).not.toHaveBeenCalled();
+      expect(ticketMessages.post).not.toHaveBeenCalled();
+      const fila = filaDe(repo, '<aviso-de-la-empresa-99@kuboti.com>')!;
+      expect(fila.outcome).toBe('DESCARTADO_DUPLICADO');
+      expect(resumen.discarded).toBe(1);
+    });
+
+    it('un Message-ID propio de verdad (no reutilizado) no dispara el rechazo', async () => {
+      const { service, tickets } = montar({ clientUser: CLIENT_USER });
+      // Ninguna asociación registrada para '<msg-1@empresa.com>': sigue
+      // siendo un Message-ID genuinamente nuevo.
+
+      const resumen = await service.drain();
+
+      expect(tickets.create).toHaveBeenCalledTimes(1);
+      expect(resumen.ticketsCreated).toBe(1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Remitente desconocido.
   // -------------------------------------------------------------------------
 
   describe('un remitente desconocido', () => {
-    it('se responde una vez y se registra REMITENTE_DESCONOCIDO', async () => {
+    it('un correo suyo se responde una vez y se registra REMITENTE_DESCONOCIDO', async () => {
       const { service, repo, email } = montar({ mensajes: [unMensaje({ from: 'nadie@fuera.com' })] });
 
       const resumen = await service.drain();
 
-      expect(repo.record).toHaveBeenCalledWith(
-        expect.objectContaining({ outcome: 'REMITENTE_DESCONOCIDO' }),
-      );
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('REMITENTE_DESCONOCIDO');
       expect(email.send).toHaveBeenCalledTimes(1);
       expect(email.send.mock.calls[0][0].to).toBe('nadie@fuera.com');
       expect(resumen.unknownSenders).toBe(1);
+    });
+
+    /**
+     * Deliberadamente **no** afirma "nunca más de una respuesta a la misma
+     * dirección": eso es el tope por dirección de la Task 7
+     * (`shouldReplyToUnknown`), que hoy no está cableado -- ver el docblock
+     * de la clase. Sin él, dos correos distintos del mismo desconocido
+     * producen, hoy, dos respuestas: este test deja esa frontera explícita en
+     * vez de dar a entender, con un nombre ambiguo, una garantía de tope que
+     * todavía no existe.
+     */
+    it('dos correos distintos del mismo desconocido producen hoy dos respuestas (el tope llega con la Task 7)', async () => {
+      const { service, email } = montar({
+        mensajes: [
+          unMensaje({ messageId: '<primero@fuera.com>', from: 'nadie@fuera.com' }),
+          unMensaje({ messageId: '<segundo@fuera.com>', from: 'nadie@fuera.com' }),
+        ],
+      });
+
+      await service.drain();
+
+      expect(email.send).toHaveBeenCalledTimes(2);
     });
 
     it('el registro se escribe antes de intentar la respuesta', async () => {
@@ -398,9 +682,8 @@ describe('InboundEmailService.drain', () => {
 
       await service.drain();
 
-      expect(repo.record).toHaveBeenCalledWith(
-        expect.objectContaining({ outcome: 'REMITENTE_DESCONOCIDO' }),
-      );
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.outcome).toBe('REMITENTE_DESCONOCIDO');
       expect(email.send).toHaveBeenCalledTimes(1);
     });
   });
@@ -436,16 +719,9 @@ describe('InboundEmailService.drain', () => {
 
     expect(resumen.errors).toBe(1);
     expect(resumen.ticketsCreated).toBe(1);
-    expect(repo.record).toHaveBeenCalledWith(
-      expect.objectContaining({
-        outcome: 'ERROR',
-        messageIdRaw: '<falla@empresa.com>',
-        reason: expect.stringContaining('la base de datos no responde'),
-      }),
-    );
-    expect(repo.record).toHaveBeenCalledWith(
-      expect.objectContaining({ outcome: 'TICKET_CREADO', messageIdRaw: '<bien@empresa.com>' }),
-    );
+    expect(filaDe(repo, '<falla@empresa.com>')!.outcome).toBe('ERROR');
+    expect(filaDe(repo, '<falla@empresa.com>')!.reason).toContain('la base de datos no responde');
+    expect(filaDe(repo, '<bien@empresa.com>')!.outcome).toBe('TICKET_CREADO');
     // Los dos correos se marcan procesados, reviente uno o no.
     expect(mailbox.markProcessed).toHaveBeenCalledWith('uid-1');
     expect(mailbox.markProcessed).toHaveBeenCalledWith('uid-2');
@@ -512,12 +788,9 @@ describe('InboundEmailService.drain', () => {
       // El cuerpo completo no lleva la nota: es el correo tal cual llegó.
       expect(emailOrigin.bodyFull).not.toContain('adjuntos');
 
-      expect(repo.record).toHaveBeenCalledWith(
-        expect.objectContaining({
-          attachmentCount: 2,
-          attachmentNames: ['factura.pdf', 'foto.png'],
-        }),
-      );
+      const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+      expect(fila.attachmentCount).toBe(2);
+      expect(fila.attachmentNames).toEqual(['factura.pdf', 'foto.png']);
     });
   });
 
@@ -526,11 +799,12 @@ describe('InboundEmailService.drain', () => {
   // -------------------------------------------------------------------------
 
   it('enlaza el primer mensaje del ticket con la fila de inbound_emails que lo originó', async () => {
-    const { service, ticketMessagesRepo } = montar({ clientUser: CLIENT_USER });
+    const { service, ticketMessagesRepo, repo } = montar({ clientUser: CLIENT_USER });
 
     await service.drain();
 
-    expect(ticketMessagesRepo.attachInboundEmail).toHaveBeenCalledWith(9001, 1);
+    const fila = filaDe(repo, '<msg-1@empresa.com>')!;
+    expect(ticketMessagesRepo.attachInboundEmail).toHaveBeenCalledWith(9001, fila.id);
   });
 
   it('un fallo al enlazar el mensaje no tira el resto: el ticket ya está escrito', async () => {
@@ -541,6 +815,6 @@ describe('InboundEmailService.drain', () => {
 
     expect(resumen.errors).toBe(0);
     expect(resumen.ticketsCreated).toBe(1);
-    expect(repo.record).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'TICKET_CREADO' }));
+    expect(filaDe(repo, '<msg-1@empresa.com>')!.outcome).toBe('TICKET_CREADO');
   });
 });

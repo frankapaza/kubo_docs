@@ -16,6 +16,17 @@ export type InboundEmailOutcome =
   | 'DESCARTADO_DUPLICADO'
   | 'REMITENTE_DESCONOCIDO'
   | 'DESCARTADO_POR_TOPE'
+  /**
+   * Migración 022. Un correo legítimo y autenticado que, simplemente, no deja
+   * nada que escribir: el personal referenciando un ticket que no existe (por
+   * cabecera ni por código en el asunto -- el personal no abre tickets por
+   * correo), o una respuesta cuyo cuerpo queda vacío tras recortar la cita del
+   * hilo anterior y que tampoco trae ningún adjunto del que dejar constancia.
+   * Deliberadamente distinto de `ERROR`: no es un fallo del sistema, y no debe
+   * sumar a ese contador ni ofrecerse para reintentar -- un reintento no
+   * cambia nada en un correo que seguirá sin ticket o sin texto.
+   */
+  | 'DESCARTADO_SIN_CONTENIDO'
   | 'ERROR';
 
 export const INBOUND_EMAIL_OUTCOMES: readonly InboundEmailOutcome[] = [
@@ -27,6 +38,7 @@ export const INBOUND_EMAIL_OUTCOMES: readonly InboundEmailOutcome[] = [
   'DESCARTADO_DUPLICADO',
   'REMITENTE_DESCONOCIDO',
   'DESCARTADO_POR_TOPE',
+  'DESCARTADO_SIN_CONTENIDO',
   'ERROR',
 ];
 

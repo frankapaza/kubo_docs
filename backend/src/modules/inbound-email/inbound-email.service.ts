@@ -5,6 +5,7 @@ import { IncomingMessage, Mailbox, MAILBOX } from './mailbox.interface';
 import { normalizeMessageId } from './message-id';
 import { correlate } from './domain/correlation';
 import {
+  extractSenderAddress,
   extractTicketCode,
   isAutomaticMessage,
   parseMessageIds,
@@ -33,7 +34,9 @@ import { PostMessageInput, TicketMessagesService } from '../ticket-messages/tick
  * No es un valor fijo en el código: `Mailbox` (este servicio, `./mailbox.interface.ts`)
  * es deliberadamente pequeño y no expone su propia dirección, así que quien
  * arme el módulo de verdad (Task 8, con el buzón IMAP y sus ajustes del
- * espacio de trabajo) la provee aquí, igual que provee `MAILBOX`.
+ * espacio de trabajo) la provee aquí, igual que provee `MAILBOX`. Se espera
+ * ya como dirección desnuda (sin nombre para mostrar): es un valor de
+ * configuración, no una cabecera de correo.
  */
 export const INBOUND_MAILBOX_ADDRESS = Symbol('INBOUND_MAILBOX_ADDRESS');
 
@@ -46,13 +49,13 @@ export interface DrainSummary {
   fetched: number;
   ticketsCreated: number;
   messagesAdded: number;
-  /** Descartados por venir del propio buzón, ser automáticos o no autenticar. */
+  /** Descartados por buzón propio, automático, sin autenticar, Message-ID envenenado o sin contenido. */
   discarded: number;
   /** Autenticados pero de una dirección que no es ni cliente ni personal. */
   unknownSenders: number;
   /** El mismo `Message-ID` ya se había procesado antes: no se repite nada. */
   duplicates: number;
-  /** Correos cuyo procesamiento reventó. Quedan anotados como `ERROR` para poder reintentarlos. */
+  /** Correos cuyo procesamiento reventó de verdad. Quedan anotados como `ERROR` para poder reintentarlos. */
   errors: number;
 }
 
@@ -67,10 +70,12 @@ function errorText(error: unknown): string {
  *
  * **Provisional**: la Task 7 (los topes y la respuesta al desconocido) es la
  * dueña de esta redacción y del freno de cuántas veces se manda -- una por
- * dirección cada varios días, un tope global por hora. Aquí solo se cierra el
- * hueco que dejaría "autenticado pero desconocido" sin ninguna respuesta, que
- * es peor que un texto genérico: la decisión 2 del diseño exige que no se
- * ignore en silencio.
+ * dirección cada varios días, un tope global por hora. Sin ese freno, hoy
+ * esto responde una vez **por correo que llega**, no una vez por dirección:
+ * un mismo desconocido que insista recibiría una respuesta por cada intento.
+ * Aquí solo se cierra el hueco que dejaría "autenticado pero desconocido"
+ * sin ninguna respuesta, que es peor que un texto genérico: la decisión 2 del
+ * diseño exige que no se ignore en silencio.
  */
 function unknownSenderReplyText(): string {
   return (
@@ -108,6 +113,21 @@ function headerMessageIds(message: IncomingMessage): string[] {
 }
 
 /**
+ * El mensaje tal y como llega, con `from` ya reducido a una dirección
+ * desnuda (ver el comentario de `IncomingMessage.from`). Se hace **una sola
+ * vez**, al principio del recorrido, y todo lo demás -- `isOwnMailbox`, las
+ * dos búsquedas de remitente, lo que se guarda en `inbound_emails.from_address`,
+ * a quién se le contesta -- lee de aquí. Si se comparara `message.from` sin
+ * pasar por esto en cada sitio, un adaptador que entregue
+ * `"Ana Quispe" <ana@empresa.com>` -- la forma normal de la cabecera, no un
+ * caso raro -- haría fallar abierto `isOwnMailbox` y fallar cerrado las dos
+ * búsquedas: todo correo pasaría a ser remitente desconocido.
+ */
+function withNormalizedFrom(message: IncomingMessage): IncomingMessage {
+  return { ...message, from: extractSenderAddress(message.from) };
+}
+
+/**
  * El recorrido completo de un correo, de la bandeja al hilo. Es el corazón
  * del proyecto: ejecuta, en orden, los ocho pasos de la especificación
  * (`docs/superpowers/specs/2026-08-22-tickets-por-correo-design.md`, sección
@@ -120,22 +140,8 @@ function headerMessageIds(message: IncomingMessage): string[] {
  * mensaje añadido, cualquier descarte, remitente desconocido -- y **antes**
  * de cualquier efecto hacia fuera. Para el remitente desconocido eso es
  * literal: se registra y solo entonces se manda la respuesta. Para un ticket
- * nuevo, el acuse con el número no lo manda este servicio -- ver más abajo --
- * así que aquí "antes de responder" es, sobre todo, la garantía de que nada
- * más se intenta con este correo hasta que su fila exista.
- *
- * La clave única de `inbound_emails.message_id` es lo que sostiene la
- * idempotencia real: si el proceso muere entre crear el ticket y llamar a
- * `record`, el reinicio reprocesará el mismo `Message-ID` y creará un
- * **segundo** ticket, porque `TicketsService.create` confirma su propia
- * transacción antes de que este servicio pueda escribir la fila que lo
- * impediría -- no hay manera de unir las dos escrituras sin que
- * `TicketsService`/`TicketMessagesService` dejen de manejar su propia
- * transacción, y ese cambio no es de esta tarea. Es una ventana estrecha (dos
- * sentencias seguidas, sin ningún `await` de red entre medias) y el mismo
- * compromiso que ya acepta `NotificationScheduler` en su propio "no hay
- * exactamente una vez" -- pero es real, y se deja escrito aquí para que quien
- * revise lo pueda evaluar y no lo confunda con un descuido.
+ * nuevo o un mensaje añadido, la fila se reclama **antes** de escribir el
+ * ticket o el mensaje -- ver `claim`, más abajo, para el porqué exacto.
  *
  * ## Por qué el acuse de un ticket nuevo no lo manda este servicio
  *
@@ -152,11 +158,17 @@ function headerMessageIds(message: IncomingMessage): string[] {
  *
  * ## Un correo roto no para a los demás
  *
- * Cada correo del lote se procesa en su propio `try`: un error se anota como
- * `ERROR` (con su motivo, para poder investigarlo y reintentarlo desde la
- * pantalla de la Task 9) y el siguiente correo se procesa igual. El buzón se
- * marca como procesado pase lo que pase -- éxito, descarte o error --, porque
- * ninguno de los tres debe dejar el correo atascado repitiéndose cada minuto.
+ * Cada correo del lote se procesa en su propio `try`: un error de verdad se
+ * anota como `ERROR` (con su motivo, para poder investigarlo y reintentarlo
+ * desde la pantalla de la Task 9) y el siguiente correo se procesa igual. Un
+ * correo del personal sin ticket al que corresponder, o una respuesta que
+ * queda vacía tras recortar la cita, **no** son un error -- son un desenlace
+ * normal, y se descartan como `DESCARTADO_SIN_CONTENIDO` sin lanzar nada:
+ * lanzarlos ensuciaría el contador que sirve para detectar problemas de
+ * verdad, y la pantalla de reintento los reintentaría para siempre sin que
+ * un reintento cambiara nada. El buzón se marca como procesado pase lo que
+ * pase -- éxito, descarte o error --, porque ninguno de los tres debe dejar
+ * el correo atascado repitiéndose cada minuto.
  *
  * ## A lo que no autentica no se le responde nunca
  *
@@ -193,7 +205,10 @@ export class InboundEmailService {
       errors: 0,
     };
 
-    for (const message of incoming) {
+    for (const raw of incoming) {
+      // Normalizado una sola vez, al principio: ver `withNormalizedFrom`.
+      const message = withNormalizedFrom(raw);
+
       try {
         await this.processOne(message, summary);
       } catch (error) {
@@ -238,6 +253,31 @@ export class InboundEmailService {
     const yaProcesado = await this.repo.findByMessageId(messageId);
     if (yaProcesado) {
       summary.duplicates += 1;
+      return;
+    }
+
+    // El espacio de Message-ID no es solo de correos entrantes: también lo
+    // usan nuestros propios envíos (`tickets.email_message_id`,
+    // `ticket_events.sent_message_id`). Un identificador que ya sostiene un
+    // aviso o un ticket propio no puede llegar aquí por casualidad -- los
+    // clientes de correo generan los suyos garantizando unicidad global--, así
+    // que solo llega si alguien lo reutilizó a propósito (reenviado, copiado
+    // de un aviso que vio) para que su correo colisione con un hilo ajeno. Si
+    // se aceptara, ese identificador tendría dos "dueños": la próxima
+    // respuesta legítima al aviso original resolvería a dos tickets a la vez,
+    // `correlate` la trataría como ambigua y abriría un ticket nuevo -- la
+    // correlación del hilo real quedaría rota para siempre, no solo para este
+    // correo.
+    const yaReclamado = await this.repo.findTicketsByEmailMessageIds([messageId]);
+    if (yaReclamado.length > 0) {
+      await this.discard(
+        message,
+        messageId,
+        'DESCARTADO_DUPLICADO',
+        'El Message-ID coincide con uno que ya usamos para un aviso o para abrir un ticket propio: ' +
+          'se rechaza para no envenenar la correlación de otro hilo.',
+      );
+      summary.discarded += 1;
       return;
     }
 
@@ -328,28 +368,57 @@ export class InboundEmailService {
       byCode,
       senderClientId,
     });
+    const correlatedTicketId = correlation.kind === 'HILO' ? correlation.ticketId : null;
 
     // El cuerpo recortado (sin la cita del hilo anterior) es lo que se
     // publica; el cuerpo completo se guarda aparte y sin tocar (decisión 7
-    // del diseño). La nota de adjuntos va solo en el recortado: es
-    // información nueva para quien atiende, no algo que el cliente escribió.
-    const bodyMd = withAttachmentNote(stripQuotedText(message.textBody), message.attachmentNames);
+    // del diseño).
+    const strippedBody = stripQuotedText(message.textBody).trim();
+
+    // Un correo normal puede no dejar ningún texto nuevo -- una respuesta que
+    // es solo la cita de siempre, o solo una imagen sin una palabra --, y eso
+    // no es un fallo del sistema: no hay nada que escribir en ningún lado.
+    // Se comprueba antes de intentar nada, no atrapando la excepción que
+    // `TicketsService.create`/`TicketMessagesService.post` lanzarían por un
+    // cuerpo vacío: eso los habría contado como `ERROR`, con el mismo defecto
+    // que el correo del personal sin ticket (ver `handleStaffSender`).
+    if (strippedBody.length === 0 && message.attachmentNames.length === 0) {
+      await this.discard(
+        message,
+        messageId,
+        'DESCARTADO_SIN_CONTENIDO',
+        'La respuesta queda vacía tras recortar la cita del hilo anterior, y no trae ningún adjunto.',
+        correlatedTicketId,
+        clientUserId,
+      );
+      summary.discarded += 1;
+      return;
+    }
+
+    const bodyMd = withAttachmentNote(strippedBody, message.attachmentNames);
 
     if (correlation.kind === 'HILO') {
-      const input: PostMessageInput = { bodyMd, bodyFull: message.textBody };
+      // El ticket ya se conoce: se reclama la fila con él antes de escribir
+      // el mensaje (ver `claim`).
+      const row = await this.claim(message, messageId, 'MENSAJE_ANADIDO', correlation.ticketId, clientUserId);
+
+      const input: PostMessageInput = {
+        bodyMd,
+        bodyFull: message.textBody,
+        // Forzado, nunca por omisión: un canal externo no escribe notas
+        // internas, y `TicketMessagesService.post` respeta este campo para
+        // un actor del equipo -- solo lo ignora, e impone PUBLICA, para un
+        // actor de cliente. Aquí el actor es de cliente, así que hoy este
+        // valor no cambiaría el resultado, pero la regla la sostiene esta
+        // afirmación explícita y no esa coincidencia.
+        visibility: 'PUBLICA',
+      };
       const posted = await this.ticketMessages.post(
         { kind: 'CLIENT', clientUserId, clientId: senderClientId },
         correlation.ticketId,
         input,
       );
 
-      const row = await this.recordSuccess(
-        message,
-        messageId,
-        'MENSAJE_ANADIDO',
-        Number(posted.ticket.id),
-        clientUserId,
-      );
       await this.safeAttachInboundEmail(posted.message.id, row.id);
       summary.messagesAdded += 1;
       return;
@@ -360,6 +429,12 @@ export class InboundEmailService {
     // remitente. Es la prueba que cierra el proyecto: un correo con el
     // código de un ticket ajeno en el asunto no toca ese ticket, abre uno
     // nuevo y propio.
+    //
+    // El `ticketId` de la fila reclamada todavía no se conoce -- depende del
+    // autoincremental que le va a tocar al ticket --, así que se reclama con
+    // `null` y se corrige después de crearlo (ver `claim`).
+    const row = await this.claim(message, messageId, 'TICKET_CREADO', null, clientUserId);
+
     const dto: CreateTicketDto = {
       rawText: bodyMd,
       subject: cleanSubject(message.subject),
@@ -370,13 +445,7 @@ export class InboundEmailService {
 
     const created = await this.tickets.create({ kind: 'CLIENT', clientUserId }, dto, emailOrigin);
 
-    const row = await this.recordSuccess(
-      message,
-      messageId,
-      'TICKET_CREADO',
-      Number(created.id),
-      clientUserId,
-    );
+    await this.repo.updateOutcome(row.id, { ticketId: Number(created.id) });
     await this.safeAttachInboundEmail(created.firstMessageId, row.id);
     summary.ticketsCreated += 1;
   }
@@ -387,9 +456,12 @@ export class InboundEmailService {
    * no escribe notas internas, sea cual sea quien lo mande.
    *
    * El personal no crea tickets por correo -- para eso está el panel --, así
-   * que si no hay ningún ticket al que corresponder, se deja subir el error:
-   * `drain` lo anota como `ERROR`, visible y reintentable, en vez de un
-   * descarte silencioso que escondería un correo del equipo que se perdió.
+   * que si no hay ningún ticket al que corresponder, o si tras recortar la
+   * cita no queda ningún texto (y tampoco hay adjuntos), se descarta como
+   * `DESCARTADO_SIN_CONTENIDO`: son desenlaces normales, no un fallo, y no
+   * deben pasar por `throw` -- eso los contaría como `ERROR` y la pantalla de
+   * reintento (Task 9) los reintentaría para siempre sin que un reintento
+   * cambiara nada en un correo que seguirá sin ticket o sin texto.
    *
    * La correlación aquí **no** pasa por `correlate`: esa función existe para
    * sostener la frontera entre empresas, y el personal no tiene una empresa
@@ -405,27 +477,49 @@ export class InboundEmailService {
   ): Promise<void> {
     const ticketId = await this.resolveStaffTicket(message);
     if (ticketId === null) {
-      throw new Error(
+      await this.discard(
+        message,
+        messageId,
+        'DESCARTADO_SIN_CONTENIDO',
         'Correo del personal sin ningún ticket al que corresponder ' +
           '(sin cabecera de referencia resuelta, y sin código de ticket propio en el asunto).',
       );
+      summary.discarded += 1;
+      return;
     }
 
-    const bodyMd = withAttachmentNote(stripQuotedText(message.textBody), message.attachmentNames);
-    const input: PostMessageInput = { bodyMd, bodyFull: message.textBody };
+    const strippedBody = stripQuotedText(message.textBody).trim();
+    if (strippedBody.length === 0 && message.attachmentNames.length === 0) {
+      await this.discard(
+        message,
+        messageId,
+        'DESCARTADO_SIN_CONTENIDO',
+        'El mensaje del personal queda vacío tras recortar la cita del hilo anterior, y no trae ningún adjunto.',
+        ticketId,
+      );
+      summary.discarded += 1;
+      return;
+    }
+
+    const bodyMd = withAttachmentNote(strippedBody, message.attachmentNames);
+    const row = await this.claim(message, messageId, 'MENSAJE_ANADIDO', ticketId, null);
+
+    const input: PostMessageInput = {
+      bodyMd,
+      bodyFull: message.textBody,
+      // Forzado también aquí: un actor STAFF sí respeta `visibility` cuando
+      // se le pasa (`input.visibility ?? 'PUBLICA'` en `TicketMessagesService.post`),
+      // así que dejarlo sin poner apoyaría la regla en ese valor por omisión
+      // en vez de en una afirmación. Este es justo el camino donde eso
+      // importa de verdad.
+      visibility: 'PUBLICA',
+    };
     const posted = await this.ticketMessages.post(
       { kind: 'STAFF', userId: Number(staffUser.id) },
       ticketId,
       input,
     );
 
-    const row = await this.recordSuccess(
-      message,
-      messageId,
-      'MENSAJE_ANADIDO',
-      Number(posted.ticket.id),
-      null,
-    );
     await this.safeAttachInboundEmail(posted.message.id, row.id);
     summary.messagesAdded += 1;
   }
@@ -474,8 +568,7 @@ export class InboundEmailService {
   }
 
   // ---------------------------------------------------------------------------
-  // El registro. Se llama siempre, y antes de cualquier otro efecto -- ver el
-  // docblock de la clase.
+  // El registro.
   // ---------------------------------------------------------------------------
 
   private baseRow(message: IncomingMessage, messageId: string): Partial<InboundEmail> {
@@ -491,26 +584,53 @@ export class InboundEmailService {
     };
   }
 
+  /** Un descarte de una sola escritura: se decide y se registra en el mismo paso, sin nada fallible entre medias. */
   private discard(
     message: IncomingMessage,
     messageId: string,
     outcome: InboundEmailOutcome,
     reason: string | null,
+    ticketId: number | null = null,
+    clientUserId: number | null = null,
   ): Promise<InboundEmail> {
     return this.repo.record({
       ...this.baseRow(message, messageId),
       outcome,
       reason,
-      ticketId: null,
-      clientUserId: null,
+      ticketId,
+      clientUserId,
     });
   }
 
-  private recordSuccess(
+  /**
+   * Reclama la fila **antes** de escribir el ticket o el mensaje que le
+   * corresponde. Es lo que cierra la ventana de atomicidad entre esas dos
+   * escrituras -- que viven en transacciones distintas y no se pueden unir
+   * sin que `TicketsService`/`TicketMessagesService` dejen de manejar la
+   * suya propia (fuera de alcance aquí).
+   *
+   * Antes de esto, el orden era el contrario -- crear primero, registrar
+   * después --, y una caída justo entre medias dejaba un ticket sin fila que
+   * lo recordara: al reiniciar, `findByMessageId` seguía dando `null` y el
+   * mismo correo creaba un **segundo** ticket. Con la fila reclamada primero,
+   * la misma caída deja, en cambio, una fila sin su ticket -- `findByMessageId`
+   * ya no da `null`, así que el reinicio no repite el correo -- y el
+   * compromiso cambia de signo: se pierde ese correo en vez de duplicar el
+   * ticket. Se prefiere perder: duplicar significa un segundo acuse al mismo
+   * cliente, y eso sí lo nota quien lo recibe.
+   *
+   * El `ticketId` puede no conocerse todavía (un ticket nuevo depende del
+   * autoincremental que le toque): se reclama con `null` y `handleClientSender`
+   * lo corrige con `InboundEmailsRepository.updateOutcome` en cuanto existe.
+   * Si la escritura que sigue revienta, `recordError` encuentra esta misma
+   * fila (por su `Message-ID`, ya único) y la corrige a `ERROR` -- nunca
+   * inserta una segunda, que la clave única rechazaría de todos modos.
+   */
+  private claim(
     message: IncomingMessage,
     messageId: string,
     outcome: 'TICKET_CREADO' | 'MENSAJE_ANADIDO',
-    ticketId: number,
+    ticketId: number | null,
     clientUserId: number | null,
   ): Promise<InboundEmail> {
     return this.repo.record({
@@ -522,9 +642,22 @@ export class InboundEmailService {
     });
   }
 
+  /**
+   * Dado un fallo de verdad (no un desenlace previsto -- ver `discard`),
+   * deja constancia como `ERROR`. Si la fila ya estaba reclamada (`claim`
+   * la insertó antes de la escritura que reventó), la corrige; si no había
+   * ninguna -- el fallo ocurrió antes de reclamar nada --, inserta una
+   * nueva. Nunca las dos cosas: la clave única de `message_id` rechazaría un
+   * segundo `INSERT` sobre una fila ya reclamada.
+   */
   private async recordError(message: IncomingMessage, error: unknown): Promise<void> {
     const messageId = normalizeMessageId(message.messageId);
     try {
+      const existing = await this.repo.findByMessageId(messageId);
+      if (existing) {
+        await this.repo.updateOutcome(existing.id, { outcome: 'ERROR', reason: errorText(error) });
+        return;
+      }
       await this.repo.record({
         ...this.baseRow(message, messageId),
         outcome: 'ERROR',

@@ -17,6 +17,7 @@ function montar() {
     create: jest.fn((row: unknown) => ({ ...(row as object), id: 'creado' })),
     save: jest.fn((row: unknown) => Promise.resolve(row)),
     count: jest.fn().mockResolvedValue(0),
+    update: jest.fn().mockResolvedValue({ affected: 1 }),
   };
   const ticketsRepo = {
     findOne: jest.fn().mockResolvedValue(null),
@@ -57,6 +58,18 @@ describe('InboundEmailsRepository', () => {
       // Lo que `create` devuelve es justo lo que `save` debe recibir: el
       // repositorio no debe reconstruir ni tocar la fila entre medias.
       expect(repo.save).toHaveBeenCalledWith({ ...fila, id: 'creado' });
+    });
+  });
+
+  describe('updateOutcome', () => {
+    it('actualiza la fila ya insertada, nunca inserta una segunda', async () => {
+      const { repository, repo } = montar();
+
+      await repository.updateOutcome(9, { ticketId: 501 });
+
+      expect(repo.update).toHaveBeenCalledWith(9, { ticketId: 501 });
+      expect(repo.create).not.toHaveBeenCalled();
+      expect(repo.save).not.toHaveBeenCalled();
     });
   });
 
