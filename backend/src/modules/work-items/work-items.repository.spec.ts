@@ -40,6 +40,21 @@ describe('WorkItemsRepository', () => {
     });
   });
 
+  describe('listPortalRequirementsInPeriod', () => {
+    it('lleva empresa, origen y rango, los tres en el mismo where', async () => {
+      const { repo, typeormRepo } = makeRepo();
+      await repo.listPortalRequirementsInPeriod(
+        7,
+        new Date('2026-08-01T05:00:00Z'),
+        new Date('2026-09-01T05:00:00Z'),
+      );
+      const arg = typeormRepo.find.mock.calls[0][0];
+      expect(arg.where.clientId).toBe(7);
+      expect(arg.where.origin).toBe('PORTAL');
+      expect(arg.where.createdAt).toBeDefined();
+    });
+  });
+
   describe('findPortalRequirement', () => {
     it('filtra por id, clientId y origin PORTAL a la vez, en el mismo where', async () => {
       const { repo, typeormRepo } = makeRepo();

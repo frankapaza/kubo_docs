@@ -1,6 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
+import {
+  And,
+  DataSource,
+  EntityManager,
+  In,
+  IsNull,
+  LessThan,
+  MoreThanOrEqual,
+  Repository,
+} from 'typeorm';
 
 import { Ticket, ServiceCategory } from './entities/ticket.entity';
 import { TicketStatus, OPEN_STATUSES } from './domain/ticket-state-machine';
@@ -121,6 +130,40 @@ export class TicketsRepository {
         pausedAt: IsNull(),
         slaAtRisk: 0,
       },
+    });
+  }
+
+  /**
+   * Los tickets que esa empresa abrió dentro del periodo, para el informe
+   * mensual del portal.
+   *
+   * Método propio y no `list(filters)`: aquel monta el filtro de empresa con
+   * `if (filters.clientId)`, así que un valor falsy haría desaparecer el
+   * WHERE y devolvería tickets de todas las empresas. Aquí el `where` es
+   * fijo, sin condicional.
+   *
+   * Intervalo `[from, to)`, abierto por arriba: con `Between` (inclusivo por
+   * los dos extremos) un ticket creado en el primer instante de septiembre
+   * saldría en el informe de agosto **y** en el de septiembre.
+   */
+  listForClientPeriod(clientId: number, from: Date, to: Date): Promise<Ticket[]> {
+    return this.repo.find({
+      where: { clientId, capturedAt: And(MoreThanOrEqual(from), LessThan(to)) },
+      order: { capturedAt: 'ASC', id: 'ASC' },
+    });
+  }
+
+  /**
+   * Cuántos tickets de esa empresa se resolvieron dentro del periodo.
+   *
+   * Cuenta por `resolvedAt`, no por `capturedAt`: son criterios distintos a
+   * propósito. Un ticket abierto en julio y resuelto en agosto cuenta en el
+   * informe de agosto, no en el de julio. Mismo `where` fijo y mismo
+   * intervalo `[from, to)` que `listForClientPeriod`.
+   */
+  countResolvedInPeriod(clientId: number, from: Date, to: Date): Promise<number> {
+    return this.repo.count({
+      where: { clientId, resolvedAt: And(MoreThanOrEqual(from), LessThan(to)) },
     });
   }
 }

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository } from 'typeorm';
+import { And, DataSource, EntityManager, LessThan, MoreThanOrEqual, Repository } from 'typeorm';
 
 import { WorkItem } from './entities/work-item.entity';
 import { WorkItemEvent } from './entities/work-item-event.entity';
@@ -114,6 +114,28 @@ export class WorkItemsRepository {
   /** Misma frontera que `listPortalRequirements`, para un único ítem. */
   findPortalRequirement(clientId: number, id: number): Promise<WorkItem | null> {
     return this.repo.findOne({ where: { id, clientId, origin: 'PORTAL' } });
+  }
+
+  /**
+   * Los requerimientos que esa empresa pidió desde el portal dentro del
+   * periodo, para el informe mensual. Misma frontera que
+   * `listPortalRequirements` (`clientId` + `origin: 'PORTAL'`, sin
+   * condicional: el trabajo interno de la casa no sale en el informe del
+   * cliente) más el rango.
+   *
+   * Intervalo `[from, to)`, abierto por arriba, por la misma razón que en
+   * `TicketsRepository.listForClientPeriod`: con `Between` un requerimiento
+   * creado en el primer instante de septiembre aparecería en dos informes.
+   */
+  listPortalRequirementsInPeriod(clientId: number, from: Date, to: Date): Promise<WorkItem[]> {
+    return this.repo.find({
+      where: {
+        clientId,
+        origin: 'PORTAL',
+        createdAt: And(MoreThanOrEqual(from), LessThan(to)),
+      },
+      order: { createdAt: 'ASC', id: 'ASC' },
+    });
   }
 
   /** El motivo del rechazo más reciente de ese ítem, si lo hubo. */
