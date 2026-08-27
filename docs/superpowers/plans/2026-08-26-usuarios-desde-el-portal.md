@@ -1136,12 +1136,14 @@ git commit -m "feat(portal): entidad y repositorio de invitaciones, con la huell
 
 Contexto: `ClientAdminGuard` hoy dice «Solo el administrador de la empresa puede crear requerimientos.» Ese texto deja de ser cierto en cuanto el guard cubre una segunda superficie. Se generaliza aquí, y hay que tocar también `portal-validation.integration.spec.ts:347`, que lo compara literalmente.
 
+`deactivate` lleva **dos** guardas de negocio, no una: nadie se desactiva a sí mismo (decisión 5 de la spec) y nadie desactiva a otro administrador (decisión 9 de la spec, nueva — es la misma frontera que ya impide nombrarlos). Van como dos `if` separados y cada una con su propia prueba: aunque hoy las dos solo puedan dispararlas administradores (por `ClientAdminGuard`), son comprobaciones independientes y las dos tienen que sobrevivir si el día de mañana alguien afloja la otra.
+
 - [ ] **Step 1: Escribir las pruebas que fallan**
 
 `backend/src/modules/portal/portal-users.service.spec.ts`:
 
 ```ts
-import { NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 
 import { PortalUsersService } from './portal-users.service';
 
@@ -1267,6 +1269,39 @@ describe('PortalUsersService.deactivate', () => {
     await expect(service.deactivate(7, 3, 3)).rejects.toThrow(/no puedes quitarte a ti/i);
     expect(repo.deactivate).not.toHaveBeenCalled();
   });
+
+  /**
+   * Decisión 9 de la spec: si el administrador de cliente no puede nombrar
+   * administradores (decisión 2), tampoco puede quitarles el acceso — solo a
+   * los usuarios normales que sí puede crear. El objetivo aquí NO es el
+   * propio actor (3 ≠ 5): esta guarda es distinta de "no te desactives a ti
+   * mismo", no una reformulación suya. LA PRUEBA QUE DEMUESTRA QUE SON DOS
+   * GUARDAS Y NO UNA: si alguien colapsara las dos comprobaciones en un único
+   * `if` del tipo "es administrador Y es el mismo id que el actor", esta
+   * prueba seguiría en verde por accidente salvo que de verdad se ejerza con
+   * un `targetId` distinto del actor — que es justo lo que hace.
+   */
+  it('un administrador no puede desactivar a OTRO administrador', async () => {
+    const { service, repo } = makeService([fila({ id: '5', clientId: '7', isAdmin: 1 })]);
+    await expect(service.deactivate(7, 3, 5)).rejects.toThrow(BadRequestException);
+    await expect(service.deactivate(7, 3, 5)).rejects.toThrow(/otro administrador/i);
+    expect(repo.deactivate).not.toHaveBeenCalled();
+  });
+
+  /**
+   * El complemento negativo de la prueba anterior: mismo actor, mismo
+   * objetivo ajeno, pero SIN ser administrador. Tiene que pasar. Sin esta
+   * prueba, alguien podría "arreglar" un fallo de tipos en `usuario.isAdmin`
+   * (por ejemplo, comparar contra la cadena `'1'` en vez de contra un valor
+   * truthy) haciendo que la guarda rechace a TODO el mundo, y la suite
+   * seguiría en verde si solo se comprobara el caso que sí debe fallar.
+   */
+  it('sí puede desactivar a un usuario normal de su empresa', async () => {
+    const { service, repo } = makeService([fila({ id: '5', clientId: '7', isAdmin: 0 })]);
+    const vista = await service.deactivate(7, 3, 5);
+    expect(repo.deactivate).toHaveBeenCalledWith(5);
+    expect(vista.isActive).toBe(false);
+  });
 });
 ```
 
@@ -1370,10 +1405,19 @@ export class PortalUsersService {
   /**
    * Le quita el acceso a alguien de su empresa.
    *
-   * Dos comprobaciones y en este orden: primero que el usuario sea de esta
-   * empresa (si no, 404), y solo después que no sea uno mismo. Al revés, un
-   * administrador podría averiguar por el mensaje de error que un id ajeno
-   * coincide con el suyo.
+   * Tres comprobaciones y en este orden:
+   *  1. que el usuario sea de esta empresa (si no, 404) — sin esto, un
+   *     administrador podría averiguar por el mensaje de error que un id
+   *     ajeno existe de verdad;
+   *  2. que no sea uno mismo (decisión 5 de la spec);
+   *  3. que no sea OTRO administrador (decisión 9 de la spec).
+   *
+   * Las dos últimas son guardas DISTINTAS, no una la reformulación de la
+   * otra: hoy coinciden siempre en que quien pide es administrador (lo exige
+   * `ClientAdminGuard`), pero cada una protege un caso distinto —"no te
+   * quedes tú sin acceso" frente a "no le quites el acceso a otro que
+   * tampoco creaste"— y las dos se quedan aunque el día de mañana alguien
+   * afloje una.
    */
   async deactivate(
     clientId: number,
@@ -1394,6 +1438,18 @@ export class PortalUsersService {
         code: 'VALIDATION_ERROR',
         message:
           'No puedes quitarte a ti mismo el acceso: la empresa se quedaría sin administrador.',
+      });
+    }
+
+    // Decisión 9 de la spec. Si el administrador de cliente no puede nombrar
+    // administradores (decisión 2), tampoco puede quitarles el acceso: solo
+    // a los usuarios normales que sí puede crear. `usuario.isAdmin` llega
+    // como `0`/`1` desde la fila cruda del repositorio, no como booleano —
+    // por eso la comprobación es de verdad (truthy), no `=== true`.
+    if (usuario.isAdmin) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'No puedes quitarle el acceso a otro administrador de tu empresa.',
       });
     }
 
@@ -2556,7 +2612,10 @@ git commit -m "feat(portal): la invitacion sale en el acto por SMTP y el reenvio
 - Create: `backend/src/modules/portal/dto/accept-invitation.dto.ts`
 - Create: `backend/src/modules/portal/portal-invitations.controller.ts`
 - Create: `backend/src/modules/portal/portal-invitations.accept.spec.ts`
+- Create: `backend/src/modules/portal/portal-invitations.preview.spec.ts`
 - Modify: `backend/src/modules/portal/portal-invitations.service.ts`
+- Modify: `backend/src/modules/portal/client-user-invitations.repository.ts`
+- Modify: `backend/src/modules/portal/client-user-invitations.repository.spec.ts`
 - Modify: `backend/src/config/throttler.config.ts`
 - Modify: `backend/src/modules/portal/portal.module.ts`
 
@@ -2564,19 +2623,24 @@ git commit -m "feat(portal): la invitacion sale en el acto por SMTP y el reenvio
 - Consume:
   - Task 2: `fingerprintInvitationSecret`, `isInvitationExpired`.
   - Task 3: `ClientUserInvitationsRepository.runInTransaction`, la entidad `ClientUserInvitation`, `normalizeEmailAddress`.
-  - Task 5/6: `PortalInvitationsService`, sus cinco dependencias de constructor.
+  - Task 5/6: `PortalInvitationsService`, sus cinco dependencias de constructor, `resolveClientRazonSocial`.
   - Existente: `ClientUser`, `Client` (`status: 'PROSPECT' | 'CLIENT' | 'FORMER_CLIENT'`), `THROTTLER_BURST`/`THROTTLER_SUSTAINED` de `config/throttler.config.ts`, `ApiThrottlerGuard`.
 - Produce:
   - `AcceptInvitationDto` desde `dto/accept-invitation.dto.ts`: `{ secret: string; password: string; passwordConfirmation: string }`.
+  - `InvitationPreviewView` desde `dto/accept-invitation.dto.ts`: `{ fullName: string; clientName: string | null }` — decisión 10 de la spec.
   - `INVITATION_INVALID_MESSAGE: string` exportado desde `portal-invitations.service.ts`.
   - `PortalInvitationsService.accept(dto: AcceptInvitationDto): Promise<{ email: string }>`.
-  - `PORTAL_INVITATION_THROTTLE` desde `config/throttler.config.ts`.
+  - `PortalInvitationsService.preview(secret: string): Promise<InvitationPreviewView>` — no escribe nada.
+  - `ClientUserInvitationsRepository.findByFingerprint(secretFingerprint: string): Promise<ClientUserInvitation | null>` — amplía el repositorio de la Task 3; a diferencia de `findLiveByEmail` no filtra por estado, porque `preview` necesita ver una invitación caducada/usada/revocada para decidir uniformemente que todas son «enlace no válido».
+  - `PORTAL_INVITATION_THROTTLE` desde `config/throttler.config.ts`, reutilizado también por la vista previa.
   - Ruta pública `POST /portal/invitaciones/aceptar`.
+  - Ruta pública `GET /portal/invitaciones/:secret` — decisión 10 de la spec: la página de aceptar saluda antes de pedir contraseña.
 
 Decisiones de forma que hay que respetar al pie de la letra:
 
-- **No hay ruta `GET` para consultar una invitación.** La página pide contraseña y su confirmación y ya está: no pide el correo (ya lo lleva la invitación, y pedirlo permitiría probar direcciones) y no hay ninguna superficie que responda «este enlace vale» sin consumirlo.
-- **Aceptar no inicia sesión.** Devuelve el correo con el que la persona tiene que entrar, y la pantalla la manda al login. Es el paso 6 del recorrido de la spec.
+- **Sí hay una ruta `GET`, pública y de solo lectura, y es nueva a propósito.** `GET /portal/invitaciones/:secret` devuelve el nombre de la persona invitada y el de su empresa, y nada más — ni correo, ni identificadores, ni quién invitó, ni fechas. **No consume la invitación ni la modifica de ninguna forma**: es una lectura simple por huella, sin transacción y sin bloqueo pesimista — a diferencia de `accept`, esta ruta nunca escribe, así que no compite por el mismo candado. Decisión 10 de la spec: la página de aceptar saluda antes de pedir nada, para que la persona sepa qué está creando y no ponga una contraseña en la cuenta equivocada.
+- **La vista previa responde exactamente igual que `accept` ante cualquiera de los seis motivos de invalidez** (no existe, caducada, ya usada, revocada, quien invitó está desactivado, la empresa dejó de ser cliente): reutiliza el mismo `enlaceNoValido()` para no arriesgar una redacción distinta que delate cuál de los seis ocurrió. Es la misma disciplina de uniformidad de la decisión 3, aplicada también aquí.
+- **Aceptar no inicia sesión.** Devuelve el correo con el que la persona tiene que entrar, y la pantalla la manda al login. Es el paso 6 del recorrido de la spec, y decisión 11 explícita: ninguna ruta pública de esta funcionalidad emite tokens.
 - **La confirmación de contraseña se comprueba ANTES que el enlace.** Al revés, mandar dos contraseñas distintas serviría de oráculo: un 400 de validación significaría «el enlace es bueno» y el cuerpo genérico significaría «no lo es».
 
 - [ ] **Step 1: Escribir las pruebas que fallan**
@@ -2912,6 +2976,20 @@ export class AcceptInvitationDto {
   @MinLength(8, { message: 'Repite la contraseña.' })
   passwordConfirmation!: string;
 }
+
+/**
+ * Lo único que ve la pantalla de aceptar ANTES de pedir contraseña: el
+ * nombre de la persona invitada y el de su empresa. Decisión 10 de la spec
+ * — la página saluda, no es un formulario a ciegas.
+ *
+ * Nada más. Ni correo, ni identificadores, ni quién invitó, ni fechas:
+ * cualquiera de esos datos en una ruta pública sin autenticar sería
+ * información de más para quien solo tiene un enlace, no una sesión.
+ */
+export interface InvitationPreviewView {
+  fullName: string;
+  clientName: string | null;
+}
 ```
 
 - [ ] **Step 4: Escribir `accept` en el servicio**
@@ -3004,8 +3082,11 @@ y el método:
         if (err instanceof NotFoundException) return null;
         throw err;
       });
-      // `FORMER_CLIENT` es lo que este producto llama "empresa desactivada":
-      // `clients` no tiene `is_active`, tiene `status` (ver `client.entity.ts`).
+      // `FORMER_CLIENT` es lo que este producto llama "empresa desactivada"
+      // (decisión 1 de la spec): `clients` no tiene `is_active`, tiene
+      // `status` (ver `client.entity.ts`). Un prospecto (`PROSPECT`) NO es
+      // una empresa desactivada: puede aceptar su invitación igual que un
+      // cliente activo.
       if (!empresa || empresa.status === 'FORMER_CLIENT') throw enlaceNoValido();
 
       const usuario = await userRepo.save(
@@ -3057,7 +3138,13 @@ En `backend/src/config/throttler.config.ts`, al final:
 
 ```ts
 /**
- * Override para `POST /portal/invitaciones/aceptar`.
+ * Override para `POST /portal/invitaciones/aceptar` y, más adelante en esta
+ * misma tarea, para `GET /portal/invitaciones/:secret` (la vista previa,
+ * decisión 10 de la spec): las dos cuelgan del mismo `PortalInvitationsController`
+ * y comparten el mismo tope a propósito — la vista previa no escribe nada,
+ * pero sigue siendo una superficie sin autenticar sobre el mismo secreto, y
+ * bajarle el tope solo porque no escribe abriría una vía más barata para
+ * probar enlaces que la de aceptar.
  *
  * Es la tercera superficie del producto abierta a internet y la primera sin
  * autenticar que entrega una credencial. El contador va **por dirección de
@@ -3136,21 +3223,316 @@ En `backend/src/modules/portal/portal.module.ts`, añade `PortalInvitationsContr
 Run: `cd backend && npx jest src/modules/portal/`
 Expected: PASS
 
-- [ ] **Step 9: Suite completa y compilador**
+- [ ] **Step 9: Escribir las pruebas que fallan, de la vista previa**
+
+Decisión 10 de la spec: la página de aceptar saluda antes de pedir contraseña. Necesita una ruta pública de solo lectura que devuelva el nombre de la persona y el de su empresa, sin consumir ni modificar la invitación.
+
+`backend/src/modules/portal/portal-invitations.preview.spec.ts`:
+
+```ts
+import { INVITATION_INVALID_MESSAGE, PortalInvitationsService } from './portal-invitations.service';
+import { fingerprintInvitationSecret } from './domain/invitation-secret';
+
+const SECRETO = 'secreto-de-pruebas-de-la-vista-previa';
+
+/** Invitación tal como la devuelve TypeORM: los `bigint` salen como CADENA. */
+function invitacion(over: Record<string, unknown> = {}) {
+  return {
+    id: '11',
+    clientId: '7',
+    email: 'nuevo@kuboti.com',
+    fullName: 'Nuevo Nombre',
+    secretFingerprint: fingerprintInvitationSecret(SECRETO),
+    invitedByClientUserId: '3',
+    expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+    usedAt: null,
+    acceptedClientUserId: null,
+    revokedAt: null,
+    lastSentAt: null,
+    sendError: null,
+    createdAt: new Date('2026-08-26T15:00:00.000Z'),
+    ...over,
+  } as any;
+}
+
+/**
+ * `preview` no abre transacción — es una lectura simple, nunca escribe —así
+ * que aquí no hace falta el doble del `EntityManager` que usa
+ * `portal-invitations.accept.spec.ts`: basta con el repositorio de
+ * invitaciones.
+ */
+function makeService(opciones: {
+  fila?: any;
+  invitador?: any;
+  empresa?: any;
+} = {}) {
+  const invitations = {
+    runInTransaction: jest.fn(),
+    create: jest.fn(),
+    findLiveByEmail: jest.fn(async () => null),
+    listPendingByClient: jest.fn(async () => []),
+    findPendingByIdForClient: jest.fn(async () => null),
+    findByFingerprint: jest.fn(async () => opciones.fila ?? null),
+    revokeLiveByEmail: jest.fn(async () => undefined),
+    markSent: jest.fn(async () => undefined),
+  };
+
+  const clientUsers = {
+    findByEmail: jest.fn(async () => null),
+    findById: jest.fn(async () => opciones.invitador ?? { id: '3', isActive: 1 }),
+  };
+  const email = { send: jest.fn(async () => ({ messageId: 'x', accepted: [], rejected: [] })) };
+  const clients = {
+    findByIdOrFail: jest.fn(async () =>
+      opciones.empresa ?? { id: 7, razonSocial: 'Acme S.A.C.', status: 'CLIENT' },
+    ),
+  };
+  const config = { get: (k: string, f?: string) => f };
+
+  const service = new PortalInvitationsService(
+    invitations as any, clientUsers as any, email as any, clients as any, config as any,
+  );
+  return { service, invitations, clientUsers, clients };
+}
+
+describe('PortalInvitationsService.preview', () => {
+  it('devuelve el nombre de la persona invitada y el de su empresa, y nada más', async () => {
+    const { service } = makeService({ fila: invitacion() });
+    const vista = await service.preview(SECRETO);
+    expect(vista).toEqual({ fullName: 'Nuevo Nombre', clientName: 'Acme S.A.C.' });
+  });
+
+  it('busca por huella, y el secreto en claro no llega a la consulta', async () => {
+    const { service, invitations } = makeService({ fila: invitacion() });
+    await service.preview(SECRETO);
+    expect(invitations.findByFingerprint).toHaveBeenCalledWith(
+      fingerprintInvitationSecret(SECRETO),
+    );
+  });
+
+  /**
+   * LA COMPROBACIÓN QUE SOSTIENE LA DECISIÓN 10 DE LA SPEC: consultar no deja
+   * ningún rastro. Si `preview` marcara algo, dos personas que compartieran
+   * el mismo enlace por error (o un lector automático de correo que
+   * precargue la página) inutilizarían la invitación sin que nadie la
+   * hubiera aceptado de verdad.
+   */
+  it('no escribe nada: ni abre transacción, ni marca usada, ni revoca', async () => {
+    const { service, invitations } = makeService({ fila: invitacion() });
+    await service.preview(SECRETO);
+    expect(invitations.runInTransaction).not.toHaveBeenCalled();
+    expect(invitations.markSent).not.toHaveBeenCalled();
+    expect(invitations.revokeLiveByEmail).not.toHaveBeenCalled();
+  });
+
+  it('el correo y los identificadores nunca aparecen en la vista', async () => {
+    const { service } = makeService({ fila: invitacion() });
+    const vista = await service.preview(SECRETO);
+    expect(JSON.stringify(vista)).not.toContain('nuevo@kuboti.com');
+    expect(vista).not.toHaveProperty('id');
+    expect(vista).not.toHaveProperty('email');
+    expect(vista).not.toHaveProperty('expiresAt');
+    expect(vista).not.toHaveProperty('invitedByClientUserId');
+  });
+});
+
+describe('la vista previa responde exactamente igual que aceptar ante cualquier fallo', () => {
+  const casos: Array<[string, Parameters<typeof makeService>[0]]> = [
+    ['no existe', { fila: null }],
+    ['caducada', { fila: invitacion({ expiresAt: new Date(Date.now() - 1000) }) }],
+    ['ya usada', { fila: invitacion({ usedAt: new Date() }) }],
+    ['revocada por otra posterior', { fila: invitacion({ revokedAt: new Date() }) }],
+    ['quien invitó está desactivado', { fila: invitacion(), invitador: { id: '3', isActive: 0 } }],
+    [
+      'la empresa ya no es cliente',
+      { fila: invitacion(), empresa: { id: 7, razonSocial: 'Acme', status: 'FORMER_CLIENT' } },
+    ],
+  ];
+
+  it.each(casos)('%s falla con el mismo cuerpo que aceptar', async (_nombre, opciones) => {
+    const { service } = makeService(opciones);
+    await expect(service.preview(SECRETO)).rejects.toMatchObject({
+      response: { code: 'INVITACION_NO_VALIDA', message: INVITATION_INVALID_MESSAGE },
+    });
+  });
+
+  it('los seis cuerpos son idénticos entre sí', async () => {
+    const cuerpos = [];
+    for (const [, opciones] of casos) {
+      const { service } = makeService(opciones);
+      cuerpos.push(await service.preview(SECRETO).catch((e) => JSON.stringify(e.getResponse())));
+    }
+    expect(new Set(cuerpos).size).toBe(1);
+  });
+
+  /**
+   * Decisión 1 de la spec: un prospecto (`status: 'PROSPECT'`) NO es una
+   * empresa desactivada — solo `FORMER_CLIENT` invalida el enlace. Sin esta
+   * prueba, alguien podría "arreglar" el `if` para rechazar cualquier cosa
+   * que no sea `'CLIENT'` y dejaría sin invitaciones a cualquier prospecto en
+   * proceso de alta.
+   */
+  it('un prospecto sí puede tener una invitación válida', async () => {
+    const { service } = makeService({
+      fila: invitacion(),
+      empresa: { id: 7, razonSocial: 'Acme', status: 'PROSPECT' },
+    });
+    await expect(service.preview(SECRETO)).resolves.toEqual({
+      fullName: 'Nuevo Nombre',
+      clientName: 'Acme',
+    });
+  });
+});
+```
+
+- [ ] **Step 10: Correr y ver fallar**
+
+Run: `cd backend && npx jest src/modules/portal/portal-invitations.preview.spec.ts`
+Expected: FAIL — `findByFingerprint` no existe en el doble del repositorio y `preview` no existe en el servicio.
+
+- [ ] **Step 11: Añadir `findByFingerprint` al repositorio**
+
+En `backend/src/modules/portal/client-user-invitations.repository.spec.ts`, añade junto a las demás pruebas:
+
+```ts
+  it('encuentra por huella sin filtrar por estado: una usada o caducada también aparece', async () => {
+    const { repo, orm } = makeRepo();
+    orm.findOne.mockResolvedValueOnce({ id: 9, usedAt: new Date() } as any);
+
+    const encontrada = await repo.findByFingerprint('f'.repeat(64));
+
+    expect(orm.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { secretFingerprint: 'f'.repeat(64) } }),
+    );
+    expect(encontrada).toEqual({ id: 9, usedAt: expect.any(Date) });
+  });
+```
+
+Y en `backend/src/modules/portal/client-user-invitations.repository.ts`, junto a `findLiveByEmail`:
+
+```ts
+  /**
+   * Cualquier invitación con esa huella, SIN filtrar por estado (a diferencia
+   * de `findLiveByEmail`, que solo devuelve las vivas). La usa `preview`, que
+   * necesita distinguir "no existe" de "caducada" de "ya usada" de
+   * "revocada" para decidir uniformemente que las cuatro son "enlace no
+   * válido" — si este método ya las descartara, esa decisión no se podría
+   * tomar en el servicio y el cuerpo de error correría el riesgo de divergir
+   * del de `accept`.
+   */
+  findByFingerprint(secretFingerprint: string): Promise<ClientUserInvitation | null> {
+    return this.repo.findOne({ where: { secretFingerprint } });
+  }
+```
+
+- [ ] **Step 12: Escribir `preview` en el servicio**
+
+En `backend/src/modules/portal/portal-invitations.service.ts`, amplía el `import` del DTO:
+
+```ts
+import { AcceptInvitationDto, InvitationPreviewView } from './dto/accept-invitation.dto';
+```
+
+y añade el método, junto a `accept`:
+
+```ts
+  /**
+   * Lo que ve la pantalla de aceptar ANTES de pedir contraseña. Decisión 10
+   * de la spec: la página saluda, no es un formulario a ciegas.
+   *
+   * **No consume la invitación ni la modifica de ninguna forma**: es una
+   * lectura simple por huella, sin transacción y sin bloqueo — a propósito,
+   * porque bloquear aquí competiría sin ninguna necesidad con la transacción
+   * de `accept`, dado que esta ruta nunca escribe.
+   *
+   * Los mismos seis motivos que invalidan el enlace al aceptar (no existe,
+   * caducada, ya usada, revocada, quien invitó está desactivado, la empresa
+   * dejó de ser cliente) dan aquí EXACTAMENTE el mismo cuerpo que `accept`:
+   * reutiliza `enlaceNoValido()` para no arriesgar una redacción distinta que
+   * delate cuál de los seis ocurrió.
+   */
+  async preview(secret: string): Promise<InvitationPreviewView> {
+    const huella = fingerprintInvitationSecret(secret);
+    const inv = await this.invitations.findByFingerprint(huella);
+
+    if (!inv) throw enlaceNoValido();
+    if (inv.usedAt || inv.revokedAt) throw enlaceNoValido();
+    if (isInvitationExpired(inv.expiresAt, new Date())) throw enlaceNoValido();
+
+    const invitador = await this.clientUsers.findById(Number(inv.invitedByClientUserId));
+    if (!invitador || !invitador.isActive) throw enlaceNoValido();
+
+    // `FORMER_CLIENT` es lo único que este producto llama "empresa
+    // desactivada" (decisión 1 de la spec): un prospecto (`PROSPECT`) puede
+    // tener una invitación válida igual que un cliente activo.
+    const empresa = await this.clients.findByIdOrFail(Number(inv.clientId)).catch((err) => {
+      if (err instanceof NotFoundException) return null;
+      throw err;
+    });
+    if (!empresa || empresa.status === 'FORMER_CLIENT') throw enlaceNoValido();
+
+    return {
+      fullName: inv.fullName,
+      clientName: await resolveClientRazonSocial(this.clients, Number(inv.clientId)),
+    };
+  }
+```
+
+- [ ] **Step 13: Añadir la ruta de vista previa al controlador**
+
+En `backend/src/modules/portal/portal-invitations.controller.ts`, amplía los `import`:
+
+```ts
+import { Body, Controller, Get, HttpCode, Param, Post, UseGuards } from '@nestjs/common';
+```
+
+```ts
+import { AcceptInvitationDto, InvitationPreviewView } from './dto/accept-invitation.dto';
+```
+
+y añade la ruta, **después** de `accept` en el fichero (aceptar es la operación principal; leer el fichero de arriba a abajo tiene que reflejarlo, aunque el orden no afecte al enrutado porque los verbos son distintos):
+
+```ts
+  /**
+   * Lo que ve la pantalla de aceptar antes de pedir contraseña: el nombre de
+   * la persona invitada y el de su empresa. Decisión 10 de la spec.
+   *
+   * No consume la invitación (ver `PortalInvitationsService.preview`), y
+   * lleva el MISMO tope de intentos que aceptar: el coste es aceptable
+   * porque el secreto son 32 bytes al azar —no se puede enumerar— y esta
+   * ruta no dice nada que quien ya tiene el enlace no fuera a ver un segundo
+   * después.
+   */
+  @Get(':secret')
+  @Throttle(PORTAL_INVITATION_THROTTLE)
+  preview(@Param('secret') secret: string): Promise<InvitationPreviewView> {
+    return this.service.preview(secret);
+  }
+```
+
+- [ ] **Step 14: Correr y ver pasar**
+
+Run: `cd backend && npx jest src/modules/portal/`
+Expected: PASS
+
+- [ ] **Step 15: Suite completa y compilador**
 
 Run: `cd backend && npx jest && npx tsc --noEmit`
 Expected: PASS
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 16: Commit**
 
 ```bash
 git add backend/src/modules/portal/dto/accept-invitation.dto.ts \
         backend/src/modules/portal/portal-invitations.controller.ts \
         backend/src/modules/portal/portal-invitations.accept.spec.ts \
+        backend/src/modules/portal/portal-invitations.preview.spec.ts \
         backend/src/modules/portal/portal-invitations.service.ts \
+        backend/src/modules/portal/client-user-invitations.repository.ts \
+        backend/src/modules/portal/client-user-invitations.repository.spec.ts \
         backend/src/config/throttler.config.ts \
         backend/src/modules/portal/portal.module.ts
-git commit -m "feat(portal): aceptar la invitacion es una sola transaccion y todos sus fallos responden igual"
+git commit -m "feat(portal): aceptar es una sola transaccion, y una vista previa publica saluda antes de pedir contrasena"
 ```
 
 ---
@@ -3161,7 +3543,7 @@ git commit -m "feat(portal): aceptar la invitacion es una sola transaccion y tod
 - Create: `backend/src/modules/portal/portal-users.integration.spec.ts`
 
 **Interfaces:**
-- Consume: los dos controladores (`PortalUsersController`, `PortalInvitationsController`), `ClientJwtStrategy`, `ClientAdminGuard`, `PortalUsersService`, `PortalInvitationsService`, `INVITE_REJECTED_MESSAGE`, `INVITATION_INVALID_MESSAGE`, `UNEXPECTED_PROPERTY_MESSAGE` de `common/validation/validation-pipe.factory`, `startTestHttpApp`/`TestHttpApp` de `test-utils/test-http-app`.
+- Consume: los dos controladores (`PortalUsersController`, `PortalInvitationsController`), `ClientJwtStrategy`, `ClientAdminGuard`, `PortalUsersService`, `PortalInvitationsService` (incluido `preview`, de la Task 7), `InvitationPreviewView`, `INVITE_REJECTED_MESSAGE`, `INVITATION_INVALID_MESSAGE`, `UNEXPECTED_PROPERTY_MESSAGE` de `common/validation/validation-pipe.factory`, `startTestHttpApp`/`TestHttpApp` de `test-utils/test-http-app`.
 - Produce: nada que consuman otras tareas. Es el gate que demuestra que la frontera existe **montada**, no solo escrita.
 
 Por qué esta tarea existe aparte: las pruebas de servicio de las tareas 4 a 7 comprueban las reglas, pero no que los guards estén puestos, que el orden guard → pipe → controlador sea el correcto, ni qué cuerpo sale de verdad tras pasar por el `HttpExceptionFilter`. Con solo aquellas, quitar `@UseGuards(ClientJwtGuard, ClientAdminGuard)` del controlador dejaría la suite entera en verde. Es exactamente el argumento que ya escribió `auth-boundary.integration.spec.ts`; esto lo extiende a la superficie nueva.
@@ -3223,12 +3605,14 @@ describe('Portal — gestión de usuarios (integración HTTP)', () => {
   let usersDeactivate: jest.Mock;
   let invite: jest.Mock;
   let accept: jest.Mock;
+  let preview: jest.Mock;
 
   beforeAll(async () => {
     usersList = jest.fn().mockResolvedValue([]);
     usersDeactivate = jest.fn().mockResolvedValue({ id: 5, isActive: false });
     invite = jest.fn().mockResolvedValue({ id: 11 });
     accept = jest.fn().mockResolvedValue({ email: 'nuevo@kuboti.com' });
+    preview = jest.fn().mockResolvedValue({ fullName: 'Nuevo Nombre', clientName: 'Acme S.A.C.' });
 
     const config = {
       get: (key: string, fallback?: string) =>
@@ -3254,6 +3638,7 @@ describe('Portal — gestión de usuarios (integración HTTP)', () => {
             listPending: jest.fn().mockResolvedValue([]),
             resend: jest.fn().mockResolvedValue({ id: 11 }),
             accept,
+            preview,
           },
         },
       ],
@@ -3389,9 +3774,23 @@ describe('Portal — gestión de usuarios (integración HTTP)', () => {
       expect(res.body).toEqual({ email: 'nuevo@kuboti.com' });
     });
 
-    it('no existe ninguna ruta GET que consulte una invitación por su secreto', async () => {
+    /**
+     * Decisión 10 de la spec: SÍ existe una ruta `GET` pública, y es de solo
+     * lectura. Antes de esta decisión, la ausencia de cualquier `GET` era la
+     * garantía de que aceptar era la única superficie que consumía la
+     * invitación; ahora la garantía la da `preview` no escribiendo nada
+     * (comprobado en `portal-invitations.preview.spec.ts`), no la ausencia
+     * de la ruta.
+     */
+    it('la vista previa es pública y devuelve el nombre y la empresa', async () => {
       const res = await app.get(`/portal/invitaciones/${'x'.repeat(43)}`);
-      expect(res.status).toBe(404);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ fullName: 'Nuevo Nombre', clientName: 'Acme S.A.C.' });
+    });
+
+    it('la vista previa no lleva ni correo, ni identificadores, ni fechas', async () => {
+      const res = await app.get(`/portal/invitaciones/${'x'.repeat(43)}`);
+      expect(Object.keys(res.body).sort()).toEqual(['clientName', 'fullName']);
     });
   });
 
@@ -3958,26 +4357,62 @@ git commit -m "feat(web): el administrador gestiona a su equipo desde el portal"
 
 **Files:**
 - Create: `web/src/pages/portal/PortalAcceptInvitationPage.tsx`
+- Modify: `web/src/api/types.ts`
 - Modify: `web/src/api/portal.api.ts`
 - Modify: `web/src/App.tsx`
 
 **Interfaces:**
-- Consume: `POST /portal/invitaciones/aceptar` con `{ secret, password, passwordConfirmation }` → `{ email: string }` (Task 7); `PORTAL_TOKEN_STORAGE_KEY` y compañía ya existentes en `portal.api.ts`.
+- Consume:
+  - `GET /portal/invitaciones/:secret` → `{ fullName: string; clientName: string | null }` (Task 7, decisión 10 de la spec: la página saluda antes de pedir contraseña).
+  - `POST /portal/invitaciones/aceptar` con `{ secret, password, passwordConfirmation }` → `{ email: string }` (Task 7).
+  - `PORTAL_TOKEN_STORAGE_KEY` y compañía ya existentes en `portal.api.ts`.
 - Produce:
+  - `PortalInvitationPreview` desde `web/src/api/types.ts`: `{ fullName: string; clientName: string | null }` — refleja `InvitationPreviewView` del backend campo a campo.
+  - `portalApi.previewInvitation(secret: string): Promise<PortalInvitationPreview>` — **no consume la invitación**; se puede llamar varias veces (por ejemplo, si React la repite en modo estricto) sin que el enlace deje de servir.
   - `portalApi.acceptInvitation(body: { secret: string; password: string; passwordConfirmation: string }): Promise<{ email: string }>`
   - Ruta **pública** `/portal/invitacion/:secret`.
 
-Tres cosas que es fácil hacer mal aquí, y son justo las que la spec señala:
+Cuatro cosas que es fácil hacer mal aquí, y son justo las que la spec señala:
 
 1. **La ruta no puede heredar ninguna guarda.** Va como hermana de `/portal/login`, dentro de `PortalRoot` pero **fuera** de `PortalProtectedRoute`. Si cae dentro del guard, quien abra el enlace sin sesión rebota al login y no puede aceptar nunca.
-2. **La llamada no debe pasar por el interceptor de refresco.** Un 400 no lo dispara, pero un `localStorage` con un refreshToken viejo sí puede meter ruido; se añade la ruta a `isPortalAuthRequest` para que ningún 401 de aquí intente refrescar una sesión que no existe.
-3. **Aceptar no inicia sesión.** El backend devuelve el correo y nada más. La pantalla lo enseña y manda al login.
+2. **Ninguna de las dos llamadas debe pasar por el interceptor de refresco.** Un 400 no lo dispara, pero un `localStorage` con un refreshToken viejo sí puede meter ruido; se amplía `isPortalAuthRequest` para que ningún 401 de aquí —ni del `GET` de la vista previa ni del `POST` de aceptar— intente refrescar una sesión que no existe.
+3. **La pantalla saluda antes de pedir nada.** Al entrar, consulta la vista previa y muestra el nombre de la persona y el de su empresa (decisión 10 de la spec). Si la vista previa falla, el enlace ya no vale y no tiene sentido mostrar el formulario: se enseña el mismo error genérico y no se intenta aceptar.
+4. **Aceptar no inicia sesión.** El backend devuelve el correo y nada más. La pantalla lo enseña y manda al login.
 
-- [ ] **Step 1: Añadir la llamada y excluirla del refresco**
+- [ ] **Step 1: Declarar el tipo de la vista previa**
 
-En `web/src/api/portal.api.ts`, dentro de `portalApi`:
+En `web/src/api/types.ts`, junto a `PortalInvitation`:
 
 ```ts
+/**
+ * Lo que ve la pantalla de aceptar antes de pedir contraseña: solo el nombre
+ * de la persona invitada y el de su empresa (decisión 10 de la spec). Refleja
+ * `InvitationPreviewView` del backend campo a campo — nada de correo,
+ * identificadores ni fechas: esta ruta es pública y sin sesión.
+ */
+export interface PortalInvitationPreview {
+  fullName: string;
+  clientName: string | null;
+}
+```
+
+- [ ] **Step 2: Añadir las dos llamadas y excluirlas del refresco**
+
+En `web/src/api/portal.api.ts`, dentro de `portalApi`, con `PortalInvitationPreview` importado arriba junto a los demás tipos:
+
+```ts
+  /**
+   * Lo que ve la pantalla ANTES de pedir contraseña: el nombre de la persona
+   * invitada y el de su empresa (decisión 10 de la spec — la página saluda,
+   * no es un formulario a ciegas). **No consume la invitación**: se puede
+   * llamar tantas veces como se recargue la página sin que el enlace deje de
+   * servir.
+   */
+  previewInvitation: (secret: string) =>
+    portalApiClient
+      .get<PortalInvitationPreview>(`/portal/invitaciones/${encodeURIComponent(secret)}`)
+      .then((r) => r.data),
+
   /**
    * Acepta una invitación. **No devuelve sesión**: el backend responde con el
    * correo con el que hay que entrar, y la pantalla manda al login. Así esta
@@ -3995,51 +4430,95 @@ En `web/src/api/portal.api.ts`, dentro de `portalApi`:
       .then((r) => r.data),
 ```
 
-y amplía el reconocedor de rutas que **nunca** deben disparar un refresco:
+y amplía el reconocedor de rutas que **nunca** deben disparar un refresco. Las dos rutas públicas cuelgan de `/portal/invitaciones/` (la vista previa y aceptar); ninguna otra llamada del portal usa ese prefijo —las de gestión de equipo cuelgan de `/portal/usuarios/invitaciones/...`—, así que basta con el prefijo entero y no hace falta enumerar los dos sufijos:
 
 ```ts
 /**
  * Rutas del portal que un 401 jamás debe convertir en un intento de refresco.
- * Las dos de autenticación, y la de aceptar una invitación: quien la usa no
- * tiene sesión por definición, así que refrescar allí sería intentar renovar
- * algo que no existe —y, si hubiera un refreshToken viejo en `localStorage`
- * de otra sesión del mismo navegador, gastaría cupo del limitador por nada.
+ * Las dos de autenticación, y las dos públicas de invitación —la vista previa
+ * y aceptar—: quien las usa no tiene sesión por definición, así que refrescar
+ * allí sería intentar renovar algo que no existe —y, si hubiera un
+ * refreshToken viejo en `localStorage` de otra sesión del mismo navegador,
+ * gastaría cupo del limitador por nada.
  */
 function isPortalAuthRequest(url: string | undefined): boolean {
-  return !!url && /\/portal\/(auth\/(login|refresh)|invitaciones\/aceptar)(\?|$)/.test(url);
+  return !!url && /\/portal\/(auth\/(login|refresh)(\?|$)|invitaciones\/)/.test(url);
 }
 ```
 
-- [ ] **Step 2: Escribir la pantalla**
+Nota: la rama de `auth` conserva el ancla `(\?|$)` que ya tenía —tiene que terminar justo ahí, o algo como `/portal/auth/loginx` colaría—. La de `invitaciones/` no la lleva a propósito: cualquier cosa que empiece por `/portal/invitaciones/` es una de las dos rutas públicas de este controlador (`aceptar` o un secreto), y las de gestión de equipo cuelgan de `/portal/usuarios/invitaciones/...`, un prefijo distinto que esta expresión no toca.
+
+- [ ] **Step 3: Escribir la pantalla**
 
 `web/src/pages/portal/PortalAcceptInvitationPage.tsx`:
 
 ```tsx
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 
 import { portalApi } from '../../api/portal.api';
+import type { PortalInvitationPreview } from '../../api/types';
 import { Button } from '../../components/ui/Button';
 
 /**
  * Página pública: **la única del portal que se abre sin sesión y da a cambio
- * una credencial**. No pide el correo —ya lo lleva la invitación, y pedirlo
- * permitiría probar direcciones— y no consulta nada al servidor hasta que la
- * persona envía el formulario: no existe ninguna ruta que responda «este
- * enlace vale» sin consumirlo.
+ * una credencial**. Antes de pedir nada saluda: consulta la ruta pública de
+ * solo lectura (decisión 10 de la spec) y muestra el nombre de la persona
+ * invitada y el de su empresa, para que sepa qué está creando y no termine
+ * poniendo una contraseña en la cuenta equivocada. Esa consulta **no consume
+ * la invitación**: se puede recargar la página sin que el enlace deje de
+ * servir.
  *
- * Aceptar no inicia sesión. El servidor devuelve el correo con el que entrar y
- * de aquí se va al login como cualquier otra persona.
+ * No pide el correo —ya lo lleva la invitación, y pedirlo permitiría probar
+ * direcciones— y la única escritura ocurre al enviar el formulario.
+ *
+ * Aceptar no inicia sesión (decisión 11 de la spec). El servidor devuelve el
+ * correo con el que entrar y de aquí se va al login como cualquier otra
+ * persona.
  */
 export default function PortalAcceptInvitationPage() {
   const { secret } = useParams<{ secret: string }>();
   const navigate = useNavigate();
+
+  const [preview, setPreview] = useState<PortalInvitationPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(true);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   const [password, setPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [doneEmail, setDoneEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    portalApi
+      .previewInvitation(secret ?? '')
+      .then((p) => {
+        if (!cancelled) setPreview(p);
+      })
+      .catch((err: any) => {
+        // Cualquier fallo al consultar —incluido uno transitorio de red— se
+        // trata igual que un enlace no válido: fallar cerrado es la misma
+        // disciplina que rige el resto de esta funcionalidad. Distinguir
+        // "el servidor no respondió" de "el enlace es malo" solo le
+        // serviría a quien está probando enlaces.
+        if (!cancelled) {
+          setPreviewError(
+            err?.response?.data?.message ??
+              'El enlace no es válido o ha caducado. Pide a quien te invitó que te mande uno nuevo.',
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [secret]);
 
   /**
    * Freno **síncrono** al doble envío, marcado antes de cualquier `await`.
@@ -4101,16 +4580,49 @@ export default function PortalAcceptInvitationPage() {
     );
   }
 
+  if (previewLoading) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
+        <p className="text-slate-500 text-sm">Comprobando tu invitación…</p>
+      </div>
+    );
+  }
+
+  /*
+   * El enlace no vale: no existe, caducó, ya se usó, se revocó, quien invitó
+   * está desactivado o su empresa dejó de ser cliente. No se distingue cuál
+   * de esas fue —mismo cuerpo genérico que `accept`, decisión 10 de la
+   * spec—, y sin formulario: no tiene sentido pedir una contraseña para una
+   * invitación que ya sabemos que no se va a poder aceptar.
+   */
+  if (!preview) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
+        <div className="bg-white rounded-xl shadow-md p-8 max-w-md w-full text-center space-y-4">
+          <h1 className="text-xl font-bold text-slate-800">Este enlace no funciona</h1>
+          <p className="text-slate-500 text-sm">{previewError}</p>
+          <Link className="text-sm underline" to="/portal/login">
+            Ir a iniciar sesión
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
       <form
         onSubmit={submit}
         className="bg-white rounded-xl shadow-md p-8 max-w-md w-full space-y-4"
       >
-        <h1 className="text-xl font-bold text-slate-800">Elige tu contraseña</h1>
-        <p className="text-slate-500 text-sm">
-          Es la que usarás para entrar al portal. Nadie más la conoce ni puede verla.
-        </p>
+        <div>
+          <h1 className="text-xl font-bold text-slate-800">Hola, {preview.fullName}</h1>
+          <p className="text-slate-500 text-sm mt-1">
+            {preview.clientName
+              ? `Te invitaron a unirte al portal de ${preview.clientName}. Elige tu contraseña para entrar.`
+              : 'Elige tu contraseña para entrar al portal.'}
+          </p>
+        </div>
 
         <label className="block">
           <span className="text-sm font-medium text-slate-700">Contraseña</span>
@@ -4141,7 +4653,7 @@ export default function PortalAcceptInvitationPage() {
         {/*
           El servidor responde exactamente lo mismo tanto si el enlace no
           existe como si caducó o si ya se usó. Aquí se pinta tal cual: no se
-          intenta adivinar cuál de las tres cosas pasó, porque esa distinción
+          intenta adivinar cuál de las cosas pasó, porque esa distinción
           solo le serviría a quien está probando enlaces.
         */}
         {error && <p className="text-sm text-red-600">{error}</p>}
@@ -4159,7 +4671,7 @@ export default function PortalAcceptInvitationPage() {
 }
 ```
 
-- [ ] **Step 3: Declarar la ruta pública**
+- [ ] **Step 4: Declarar la ruta pública**
 
 En `web/src/App.tsx`, **como hermana de `/portal/login`**, dentro de `<Route element={<PortalRoot />}>` y **fuera** de `<Route element={<PortalProtectedRoute />}>`:
 
@@ -4180,22 +4692,22 @@ En `web/src/App.tsx`, **como hermana de `/portal/login`**, dentro de `<Route ele
 
 con su `import PortalAcceptInvitationPage from './pages/portal/PortalAcceptInvitationPage';` arriba.
 
-- [ ] **Step 4: Comprobar a mano que la ruta no está protegida**
+- [ ] **Step 5: Comprobar a mano que la ruta no está protegida**
 
 Run: `cd web && npm run dev`, abre en una ventana privada (sin ninguna sesión de portal en `localStorage`) `http://localhost:5173/portal/invitacion/loquesea`.
-Expected: se ve el formulario de contraseña. **Si redirige a `/portal/login`, la ruta quedó dentro del guard** — es el fallo que esta tarea existe para evitar. Cierra el servidor al terminar.
+Expected: se ve brevemente «Comprobando tu invitación…» y después la pantalla de «Este enlace no funciona» — `loquesea` no es un secreto real, así que la vista previa falla, y eso es lo correcto. **Si en vez de eso redirige a `/portal/login`, la ruta quedó dentro del guard** — es el fallo que esta tarea existe para evitar: llegar al mensaje de «enlace no funciona» demuestra que la petición SÍ llegó al backend sin sesión, y no que el guard cortó antes. Cierra el servidor al terminar.
 
-- [ ] **Step 5: Compilar y construir**
+- [ ] **Step 6: Compilar y construir**
 
 Run: `cd web && npx tsc --noEmit && npm run build`
 Expected: PASS
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add web/src/pages/portal/PortalAcceptInvitationPage.tsx \
-        web/src/api/portal.api.ts web/src/App.tsx
-git commit -m "feat(web): pagina publica para aceptar la invitacion y elegir contrasena"
+        web/src/api/types.ts web/src/api/portal.api.ts web/src/App.tsx
+git commit -m "feat(web): pagina publica que saluda y acepta la invitacion eligiendo contrasena"
 ```
 
 ---
@@ -4206,30 +4718,35 @@ git commit -m "feat(web): pagina publica para aceptar la invitacion y elegir con
 
 | Requisito de la spec | Tarea |
 | --- | --- |
-| Decisión 1 — nadie teclea la contraseña de otro; solo nombre y correo | 5, 7, 9, 10 |
+| Decisión 1 — «empresa desactivada» es `clients.status === 'FORMER_CLIENT'`; un prospecto puede tener invitaciones válidas | 7 |
 | Decisión 2 — no se puede nombrar administradores desde el portal | 5 (el DTO no lo admite), 7 (`isAdmin: 0` literal), 8 (por HTTP) |
 | Decisión 3 — 32 bytes, solo la huella, caduca, un solo uso | 2, 3, 7 |
 | Decisión 4 — desactivar, no borrar | 1 (nada se borra), 4 (`deactivate` pone `is_active = 0`) |
 | Decisión 5 — nadie se desactiva a sí mismo, y se rechaza en el servidor | 4 (servicio), 9 (la pantalla solo esconde el botón) |
-| Decisión 6 — envío en el acto por SMTP, no por la cola; reenviar es el reintento | 6 |
+| Decisión 6 — envío en el acto por SMTP, no por la cola; reenviar emite un enlace nuevo y anula el anterior | 6 |
 | Decisión 7 — el error no dice si el correo existe | 5, 8 |
 | Decisión 8 — autoría honesta: `created_by` nulable + columna de cliente | 1, 7 |
-| Recorrido, pasos 1-6 | 5 (1-2), 6 (3), 10 (4), 7 (5), 10 (6) |
+| Decisión 9 — un administrador no puede desactivar a OTRO administrador | 4 |
+| Decisión 10 — la vista previa pública saluda con el nombre y la empresa, sin consumir la invitación | 7, 8, 10 |
+| Decisión 11 — aceptar no inicia sesión | 7, 10 |
+| Recorrido, pasos 1-6 | 5 (1-2), 6 (3), 10 (4, saludo y contraseña), 7 (5), 10 (6) |
 | Frontera: listar acotado | 4 |
 | Frontera: invitar fija la empresa desde la sesión | 5, 8 |
 | Frontera: desactivar responde 404 y no 403 | 4, 8 |
+| Frontera: consultar antes de aceptar toma la empresa de la invitación | 7 |
 | Frontera: aceptar toma la empresa de la invitación | 7 |
-| El enlace: no adivinable, huella, 7 días en UTC, un uso, se invalida si el invitador o la empresa caen, no acumula vivas, fallos idénticos, tope por origen | 2, 3, 5, 6, 7 |
+| El enlace: no adivinable, huella, 7 días en UTC, un uso, se invalida si el invitador o la empresa caen, no acumula vivas (ni las deja vivas en otra empresa), fallos idénticos, tope por origen compartido con el login | 2, 3, 5, 6, 7 |
 | La contraseña: mismas reglas del portal, doble y comparada en el servidor | 7 |
-| Cómo se prueba — frontera en las cuatro operaciones | 4, 5, 7, 8 |
+| Cómo se prueba — frontera en las cinco operaciones | 4, 5, 7, 8 |
 | Cómo se prueba — el enlace | 2, 3, 7 |
 | Cómo se prueba — la transacción de aceptar | 7 |
-| Cómo se prueba — las guardas | 4, 8 |
+| Cómo se prueba — las guardas (autoexclusión y exclusión de otros administradores, cada una con su propia prueba) | 4, 8 |
+| Cómo se prueba — la ruta de solo lectura de la vista previa | 7 |
 | Cómo se prueba — la empresa viene de la sesión, con petición manipulada | 5, 8 |
 | Riesgo 4 — la migración sobre tabla viva, idempotente, sin perder datos | 1 |
 
 Fuera de alcance de la spec y por tanto sin tarea, a propósito: recuperar contraseña, editar datos de otro, reactivar a un desactivado, invitar administradores.
 
-**2. Coherencia de tipos entre tareas.** `PortalClientUserView` y `PortalInvitationView` (backend, tareas 4 y 5) tienen exactamente los mismos campos que `PortalTeamMember` y `PortalInvitation` (frontend, tarea 9). `accept` devuelve `{ email: string }` en la Task 7 y eso mismo consume la Task 10. `inviteWithSecret` la declara la Task 5 y la consume la Task 6. `fingerprintInvitationSecret` / `isInvitationExpired` / `invitationExpiryFrom` se declaran en la Task 2 con la firma exacta que usan las tareas 3, 5, 6 y 7. `normalizeEmailAddress` se declara en la Task 3 y la usan los dos repositorios.
+**2. Coherencia de tipos entre tareas.** `PortalClientUserView` y `PortalInvitationView` (backend, tareas 4 y 5) tienen exactamente los mismos campos que `PortalTeamMember` y `PortalInvitation` (frontend, tarea 9). `InvitationPreviewView` (backend, Task 7) tiene exactamente los mismos campos que `PortalInvitationPreview` (frontend, Task 10). `accept` devuelve `{ email: string }` en la Task 7 y eso mismo consume la Task 10. `preview` la declara la Task 7 (junto con `findByFingerprint` en `ClientUserInvitationsRepository`, que amplía el repositorio de la Task 3) y la consumen las Tasks 8 y 10. `inviteWithSecret` la declara la Task 5 y la consume la Task 6. `fingerprintInvitationSecret` / `isInvitationExpired` / `invitationExpiryFrom` se declaran en la Task 2 con la firma exacta que usan las tareas 3, 5, 6 y 7. `normalizeEmailAddress` se declara en la Task 3 y la usan los dos repositorios. `resolveClientRazonSocial` la introduce como dependencia la Task 6 (para el correo) y la reutiliza la Task 7 (para `preview`), sin declararla de nuevo: sigue siendo la misma función existente de `client-name.ts`.
 
 **3. Orden.** Backend entero (tareas 1-8) antes del frontend (9-10). La pantalla pública va la última, cuando ya hay contra qué hablar.
