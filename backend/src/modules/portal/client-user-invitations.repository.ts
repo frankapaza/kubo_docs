@@ -103,4 +103,17 @@ export class ClientUserInvitationsRepository {
   async markSent(id: number, sentAt: Date, sendError: string | null): Promise<void> {
     await this.repo.update(id, { lastSentAt: sentAt, sendError });
   }
+
+  /**
+   * Cualquier invitación con esa huella, SIN filtrar por estado (a diferencia
+   * de `findLiveByEmail`, que solo devuelve las vivas). La usa `preview`, que
+   * necesita distinguir "no existe" de "caducada" de "ya usada" de
+   * "revocada" para decidir uniformemente que las cuatro son "enlace no
+   * válido" — si este método ya las descartara, esa decisión no se podría
+   * tomar en el servicio y el cuerpo de error correría el riesgo de divergir
+   * del de `accept`.
+   */
+  findByFingerprint(secretFingerprint: string): Promise<ClientUserInvitation | null> {
+    return this.repo.findOne({ where: { secretFingerprint } });
+  }
 }

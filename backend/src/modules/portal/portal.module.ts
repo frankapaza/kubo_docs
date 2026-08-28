@@ -24,6 +24,7 @@ import { ClientUsersController } from './client-users.controller';
 import { PortalUsersService } from './portal-users.service';
 import { PortalUsersController } from './portal-users.controller';
 import { PortalInvitationsService } from './portal-invitations.service';
+import { PortalInvitationsController } from './portal-invitations.controller';
 import { TicketsModule } from '../tickets/tickets.module';
 import { ClientsModule } from '../clients/clients.module';
 import { WorkItemsModule } from '../work-items/work-items.module';
@@ -66,6 +67,7 @@ import { EmailModule } from '../email/email.module';
     PortalReportsController,
     ClientUsersController,
     PortalUsersController,
+    PortalInvitationsController,
   ],
   // `JwtModule`/`PassportModule` ya no se exportan: PortalAuthService y
   // ClientJwtStrategy los consumen dentro de este mismo módulo y ningún otro

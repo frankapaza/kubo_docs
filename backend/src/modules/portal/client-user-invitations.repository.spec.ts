@@ -239,4 +239,16 @@ describe('ClientUserInvitationsRepository', () => {
     await repo.markSent(9, cuando, null);
     expect(orm.actualizado[0]).toEqual([9, { lastSentAt: cuando, sendError: null }]);
   });
+
+  it('encuentra por huella sin filtrar por estado: una usada o caducada también aparece', async () => {
+    const { repo, orm } = makeRepo();
+    orm.findOne.mockResolvedValueOnce({ id: 9, usedAt: new Date() } as any);
+
+    const encontrada = await repo.findByFingerprint('f'.repeat(64));
+
+    expect(orm.findOne).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { secretFingerprint: 'f'.repeat(64) } }),
+    );
+    expect(encontrada).toEqual({ id: 9, usedAt: expect.any(Date) });
+  });
 });

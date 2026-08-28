@@ -92,3 +92,34 @@ export const NOTIFICATION_TEST_THROTTLE = {
   [THROTTLER_BURST]: { ttl: ONE_MINUTE_MS, limit: 3 },
   [THROTTLER_SUSTAINED]: { ttl: FIFTEEN_MINUTES_MS, limit: 10 },
 };
+
+/**
+ * Override para `POST /portal/invitaciones/aceptar` y, más adelante en esta
+ * misma tarea, para `GET /portal/invitaciones/:secret` (la vista previa,
+ * decisión 10 de la spec): las dos cuelgan del mismo `PortalInvitationsController`
+ * y comparten el mismo tope a propósito — la vista previa no escribe nada,
+ * pero sigue siendo una superficie sin autenticar sobre el mismo secreto, y
+ * bajarle el tope solo porque no escribe abriría una vía más barata para
+ * probar enlaces que la de aceptar.
+ *
+ * Es la tercera superficie del producto abierta a internet y la primera sin
+ * autenticar que entrega una credencial. El contador va **por dirección de
+ * origen** (`ThrottlerGuard.getTracker` usa `req.ip`), nunca por el secreto:
+ * contar por secreto permitiría distinguir un enlace que existe de uno que no
+ * según cuál empezara a devolver 429 antes, deshaciendo justo el trabajo de
+ * que todos los fallos respondan lo mismo.
+ *
+ * Falla cerrado por construcción: el guard corre ANTES del pipe y ANTES del
+ * servicio, así que cuenta todas las peticiones por igual —válidas, inválidas
+ * y malformadas—, y si su almacén de contadores revienta, la excepción sube y
+ * la petición no se atiende. Misma disciplina que los topes del correo
+ * entrante: un tope que falla abierto no es un tope.
+ *
+ * Los límites son los del login, no los del refresco: aceptar una invitación
+ * es algo que una persona hace una vez, y adivinar un secreto de 32 bytes no
+ * es el escenario —el escenario es el ruido y el abuso.
+ */
+export const PORTAL_INVITATION_THROTTLE = {
+  [THROTTLER_BURST]: { ttl: ONE_MINUTE_MS, limit: 5 },
+  [THROTTLER_SUSTAINED]: { ttl: FIFTEEN_MINUTES_MS, limit: 20 },
+};

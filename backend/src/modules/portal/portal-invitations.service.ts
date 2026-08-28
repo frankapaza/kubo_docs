@@ -1,14 +1,19 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as bcrypt from 'bcrypt';
+import { IsNull } from 'typeorm';
 
 import { ClientUsersRepository } from './client-users.repository';
 import { ClientUserInvitationsRepository } from './client-user-invitations.repository';
 import { ClientUserInvitation } from './entities/client-user-invitation.entity';
+import { ClientUser } from './entities/client-user.entity';
 import { InvitePortalUserDto, PortalInvitationView } from './dto/portal-user.dto';
+import { AcceptInvitationDto, InvitationPreviewView } from './dto/accept-invitation.dto';
 import {
   fingerprintInvitationSecret,
   generateInvitationSecret,
   invitationExpiryFrom,
+  isInvitationExpired,
 } from './domain/invitation-secret';
 import { assertSessionScope, toIso } from './session-scope';
 import { sameId } from '../../common/ids';
@@ -16,6 +21,24 @@ import { ClientsService } from '../clients/clients.service';
 import { EmailService } from '../email/email.service';
 import { resolveClientRazonSocial } from './client-name';
 import { buildInvitationEmail, buildInvitationUrl, resolveFrontendUrl } from './invitation-email';
+
+/**
+ * Mismo coste que el resto del portal (`ClientUsersService.BCRYPT_ROUNDS` y el
+ * hash señuelo de `PortalAuthService`). No se inventa uno nuevo: un alta con
+ * otro coste reabriría el canal de tiempos que ese señuelo existe para cerrar.
+ */
+const BCRYPT_ROUNDS = 10;
+
+/**
+ * Único cuerpo para CUALQUIER fallo al aceptar: no existe, caducada, ya usada,
+ * revocada, quien invitó está desactivado, o la empresa dejó de ser cliente.
+ *
+ * No se distinguen porque la diferencia solo le sirve a quien está probando
+ * enlaces. Es la superficie más expuesta del producto —abierta a internet y sin
+ * autenticar— y lo que da a cambio es una credencial.
+ */
+export const INVITATION_INVALID_MESSAGE =
+  'El enlace no es válido o ha caducado. Pide a quien te invitó que te mande uno nuevo.';
 
 /**
  * Único texto para cualquier motivo por el que no se puede invitar a una
@@ -154,6 +177,141 @@ export class PortalInvitationsService {
   }
 
   /**
+   * Convierte una invitación en un usuario. **Una sola transacción**: o quedan
+   * el usuario creado y la invitación consumida, o no queda nada.
+   *
+   * No inicia sesión: devuelve el correo con el que la persona tiene que
+   * entrar, y la pantalla la manda al login. Es el paso 6 del recorrido de la
+   * spec, y evita que esta ruta pública emita tokens.
+   */
+  async accept(dto: AcceptInvitationDto): Promise<{ email: string }> {
+    // ANTES de tocar nada: si las dos contraseñas no coinciden, eso se dice y
+    // punto. Comprobarlo después del enlace convertiría el par
+    // "error de validación" / "cuerpo genérico" en un oráculo de si el enlace
+    // vale.
+    if (dto.password !== dto.passwordConfirmation) {
+      throw new BadRequestException({
+        code: 'VALIDATION_ERROR',
+        message: 'Las dos contraseñas no coinciden.',
+      });
+    }
+
+    const huella = fingerprintInvitationSecret(dto.secret);
+    const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
+    const ahora = new Date();
+
+    return this.invitations.runInTransaction(async (manager) => {
+      const invRepo = manager.getRepository(ClientUserInvitation);
+      const userRepo = manager.getRepository(ClientUser);
+
+      // Se busca POR HUELLA, nunca por el secreto: el secreto no está en la
+      // base y no puede estarlo. El bloqueo de escritura es lo que cierra la
+      // carrera de dos aceptaciones simultáneas del mismo enlace.
+      const inv = await invRepo.findOne({
+        where: { secretFingerprint: huella },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!inv) throw enlaceNoValido();
+      if (inv.usedAt || inv.revokedAt) throw enlaceNoValido();
+      // Contra un instante absoluto, nunca contra una fecha civil derivada de
+      // la zona del proceso: producción corre en UTC y el desarrollo en Lima.
+      if (isInvitationExpired(inv.expiresAt, ahora)) throw enlaceNoValido();
+
+      // Se invalida sola si quien invitó quedó desactivado, o si la empresa
+      // dejó de ser cliente. Se comprueba AQUÍ, al aceptar, no por un proceso
+      // aparte que podría no haber corrido todavía.
+      const invitador = await this.clientUsers.findById(Number(inv.invitedByClientUserId));
+      if (!invitador || !invitador.isActive) throw enlaceNoValido();
+
+      // Solo el "no existe" degrada a enlace no válido. Cualquier otro fallo
+      // —la base caída, por ejemplo— sigue subiendo: silenciarlo lo disfrazaría
+      // de "invitación mala" y perdería el 500 que de verdad es. Mismo criterio
+      // que `resolveClientRazonSocial` en `client-name.ts`.
+      const empresa = await this.clients.findByIdOrFail(Number(inv.clientId)).catch((err) => {
+        if (err instanceof NotFoundException) return null;
+        throw err;
+      });
+      // `FORMER_CLIENT` es lo que este producto llama "empresa desactivada"
+      // (decisión 1 de la spec): `clients` no tiene `is_active`, tiene
+      // `status` (ver `client.entity.ts`). Un prospecto (`PROSPECT`) NO es
+      // una empresa desactivada: puede aceptar su invitación igual que un
+      // cliente activo.
+      if (!empresa || empresa.status === 'FORMER_CLIENT') throw enlaceNoValido();
+
+      const usuario = await userRepo.save(
+        userRepo.create({
+          // Todo sale de la invitación. Nada del cuerpo.
+          clientId: Number(inv.clientId),
+          email: inv.email,
+          passwordHash,
+          fullName: inv.fullName,
+          // Literal, no un valor calculado ni leído de ningún sitio: desde el
+          // portal no se puede nombrar a un administrador, y este `0` es el
+          // sitio donde eso se hace verdad.
+          isAdmin: 0,
+          isActive: 1,
+          // Autoría honesta: no hubo personal, hubo un administrador de cliente.
+          createdBy: null,
+          createdByClientUserId: Number(inv.invitedByClientUserId),
+        }),
+      );
+
+      // El `usedAt: IsNull()` del WHERE es la otra mitad del uso único: si otra
+      // petición se adelantó, este UPDATE no afecta a ninguna fila y hay que
+      // reventar para que el usuario recién creado no sobreviva al commit.
+      const marcado = await invRepo.update(
+        { id: inv.id, usedAt: IsNull() },
+        { usedAt: ahora, acceptedClientUserId: Number(usuario.id) },
+      );
+      if (marcado.affected !== 1) throw enlaceNoValido();
+
+      return { email: inv.email };
+    });
+  }
+
+  /**
+   * Lo que ve la pantalla de aceptar ANTES de pedir contraseña. Decisión 10
+   * de la spec: la página saluda, no es un formulario a ciegas.
+   *
+   * **No consume la invitación ni la modifica de ninguna forma**: es una
+   * lectura simple por huella, sin transacción y sin bloqueo — a propósito,
+   * porque bloquear aquí competiría sin ninguna necesidad con la transacción
+   * de `accept`, dado que esta ruta nunca escribe.
+   *
+   * Los mismos seis motivos que invalidan el enlace al aceptar (no existe,
+   * caducada, ya usada, revocada, quien invitó está desactivado, la empresa
+   * dejó de ser cliente) dan aquí EXACTAMENTE el mismo cuerpo que `accept`:
+   * reutiliza `enlaceNoValido()` para no arriesgar una redacción distinta que
+   * delate cuál de los seis ocurrió.
+   */
+  async preview(secret: string): Promise<InvitationPreviewView> {
+    const huella = fingerprintInvitationSecret(secret);
+    const inv = await this.invitations.findByFingerprint(huella);
+
+    if (!inv) throw enlaceNoValido();
+    if (inv.usedAt || inv.revokedAt) throw enlaceNoValido();
+    if (isInvitationExpired(inv.expiresAt, new Date())) throw enlaceNoValido();
+
+    const invitador = await this.clientUsers.findById(Number(inv.invitedByClientUserId));
+    if (!invitador || !invitador.isActive) throw enlaceNoValido();
+
+    // `FORMER_CLIENT` es lo único que este producto llama "empresa
+    // desactivada" (decisión 1 de la spec): un prospecto (`PROSPECT`) puede
+    // tener una invitación válida igual que un cliente activo.
+    const empresa = await this.clients.findByIdOrFail(Number(inv.clientId)).catch((err) => {
+      if (err instanceof NotFoundException) return null;
+      throw err;
+    });
+    if (!empresa || empresa.status === 'FORMER_CLIENT') throw enlaceNoValido();
+
+    return {
+      fullName: inv.fullName,
+      clientName: await resolveClientRazonSocial(this.clients, Number(inv.clientId)),
+    };
+  }
+
+  /**
    * Manda el correo y deja constancia del intento.
    *
    * **El fallo del envío no tumba la petición.** Decisión 6 de la spec: la
@@ -197,6 +355,13 @@ function invitacionRechazada(): BadRequestException {
   return new BadRequestException({
     code: 'INVITACION_RECHAZADA',
     message: INVITE_REJECTED_MESSAGE,
+  });
+}
+
+function enlaceNoValido(): BadRequestException {
+  return new BadRequestException({
+    code: 'INVITACION_NO_VALIDA',
+    message: INVITATION_INVALID_MESSAGE,
   });
 }
 
