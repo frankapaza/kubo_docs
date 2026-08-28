@@ -72,6 +72,21 @@ export class PortalUsersController {
   }
 
   /**
+   * Reintento visible del correo de invitación (decisión 6 de la spec): sin
+   * cola no hay reintento automático, así que esta ruta es el reintento. Emite
+   * un secreto nuevo y revoca el anterior — nunca reenvía el mismo enlace,
+   * porque del viejo solo se guarda su huella.
+   */
+  @Post('invitaciones/:id/reenviar')
+  @HttpCode(200)
+  resend(
+    @CurrentClientUser() user: AuthClientUser,
+    @Param('id', userIdPipe) id: number,
+  ): Promise<PortalInvitationView> {
+    return this.invitations.resend(user.clientId, id);
+  }
+
+  /**
    * `POST` y no `DELETE`: no se borra nada. El usuario sigue existiendo con
    * todo su rastro; lo que se quita es el acceso (decisión 4 de la spec).
    */

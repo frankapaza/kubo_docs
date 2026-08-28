@@ -1,4 +1,5 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 import { ClientUsersRepository } from './client-users.repository';
 import { ClientUserInvitationsRepository } from './client-user-invitations.repository';
@@ -11,6 +12,10 @@ import {
 } from './domain/invitation-secret';
 import { assertSessionScope, toIso } from './session-scope';
 import { sameId } from '../../common/ids';
+import { ClientsService } from '../clients/clients.service';
+import { EmailService } from '../email/email.service';
+import { resolveClientRazonSocial } from './client-name';
+import { buildInvitationEmail, buildInvitationUrl, resolveFrontendUrl } from './invitation-email';
 
 /**
  * Único texto para cualquier motivo por el que no se puede invitar a una
@@ -28,22 +33,29 @@ export const INVITE_REJECTED_MESSAGE =
 
 @Injectable()
 export class PortalInvitationsService {
+  private readonly logger = new Logger(PortalInvitationsService.name);
+
   constructor(
     private readonly invitations: ClientUserInvitationsRepository,
     private readonly clientUsers: ClientUsersRepository,
+    private readonly email: EmailService,
+    private readonly clients: ClientsService,
+    private readonly config: ConfigService,
   ) {}
 
   /**
-   * Crea la invitación y devuelve la vista. **El secreto no sale por aquí**:
-   * quien necesita mandarlo por correo usa `inviteWithSecret`.
+   * Crea la invitación y manda el correo. **El secreto no sale de aquí ni de
+   * `deliver`**: nace en `inviteWithSecret`, viaja a `deliver` por argumento y
+   * muere en el cuerpo del correo. No se guarda, no se registra en ningún log
+   * y no se devuelve por HTTP.
    */
   async invite(
     clientId: number,
     invitedByClientUserId: number,
     dto: InvitePortalUserDto,
   ): Promise<PortalInvitationView> {
-    const { view } = await this.inviteWithSecret(clientId, invitedByClientUserId, dto);
-    return view;
+    const { invitation, secret } = await this.inviteWithSecret(clientId, invitedByClientUserId, dto);
+    return this.deliver(invitation, secret);
   }
 
   /**
@@ -103,6 +115,81 @@ export class PortalInvitationsService {
     assertSessionScope(clientId, 'clientId', PortalInvitationsService.name);
     const filas = await this.invitations.listPendingByClient(clientId, new Date());
     return filas.map(toInvitationView);
+  }
+
+  /**
+   * Vuelve a mandar una invitación pendiente, **con un secreto nuevo**.
+   *
+   * No se puede reenviar el anterior: solo tenemos su huella, y ese es
+   * exactamente el punto de guardar solo la huella. Emitir uno nuevo y revocar
+   * el viejo tiene además la propiedad correcta — un enlace que se filtró por
+   * el camino deja de servir en cuanto alguien reenvía.
+   */
+  async resend(clientId: number, invitationId: number): Promise<PortalInvitationView> {
+    assertSessionScope(clientId, 'clientId', PortalInvitationsService.name);
+
+    const previa = await this.invitations.findPendingByIdForClient(invitationId, clientId);
+    // Una invitación de otra empresa y una que no existe dan esta misma
+    // respuesta: 404 y nunca 403.
+    if (!previa) {
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Invitación no encontrada' });
+    }
+
+    const ahora = new Date();
+    await this.invitations.revokeLiveByEmail(previa.email, clientId, ahora);
+
+    const secret = generateInvitationSecret();
+    const invitation = await this.invitations.create({
+      clientId,
+      email: previa.email,
+      fullName: previa.fullName,
+      secretFingerprint: fingerprintInvitationSecret(secret),
+      // Se conserva quién invitó originalmente. Atribuírselo a quien pulsa
+      // «reenviar» sería reescribir un hecho pasado.
+      invitedByClientUserId: Number(previa.invitedByClientUserId),
+      expiresAt: invitationExpiryFrom(ahora),
+    });
+
+    return this.deliver(invitation, secret);
+  }
+
+  /**
+   * Manda el correo y deja constancia del intento.
+   *
+   * **El fallo del envío no tumba la petición.** Decisión 6 de la spec: la
+   * invitación queda creada aunque el correo falle, y la pantalla ofrece
+   * reenviar. Propagar aquí el error dejaría al administrador creyendo que no
+   * se creó nada cuando sí se creó, y le haría invitar otra vez —revocando la
+   * que sí existía— en un bucle sin salida.
+   */
+  private async deliver(
+    invitation: ClientUserInvitation,
+    secret: string,
+  ): Promise<PortalInvitationView> {
+    const acceptUrl = buildInvitationUrl(resolveFrontendUrl(this.config), secret);
+    const clientName = await resolveClientRazonSocial(this.clients, Number(invitation.clientId));
+    const { subject, html, text } = buildInvitationEmail({
+      fullName: invitation.fullName,
+      clientName,
+      acceptUrl,
+      expiresAt: invitation.expiresAt,
+    });
+
+    const ahora = new Date();
+    try {
+      await this.email.send({ to: invitation.email, subject, html, text });
+      await this.invitations.markSent(Number(invitation.id), ahora, null);
+      return toInvitationView({ ...invitation, lastSentAt: ahora, sendError: null });
+    } catch (err) {
+      const motivo = (err as Error).message.slice(0, 500);
+      // Al log entero, a la base recortado, y a la respuesta NUNCA: el detalle
+      // de por qué rechazó el servidor SMTP es diagnóstico interno.
+      this.logger.error(
+        `No se pudo enviar la invitación ${String(invitation.id)}: ${(err as Error).message}`,
+      );
+      await this.invitations.markSent(Number(invitation.id), ahora, motivo);
+      return toInvitationView({ ...invitation, lastSentAt: ahora, sendError: motivo });
+    }
   }
 }
 

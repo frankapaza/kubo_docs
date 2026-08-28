@@ -27,6 +27,7 @@ import { PortalInvitationsService } from './portal-invitations.service';
 import { TicketsModule } from '../tickets/tickets.module';
 import { ClientsModule } from '../clients/clients.module';
 import { WorkItemsModule } from '../work-items/work-items.module';
+import { EmailModule } from '../email/email.module';
 
 @Module({
   imports: [
@@ -52,6 +53,11 @@ import { WorkItemsModule } from '../work-items/work-items.module';
     // Importarlo entero es seguro: solo arrastra ClientsModule (que el portal
     // ya usa) y ProjectsModule, sin colas ni dependencias pesadas.
     WorkItemsModule,
+    // Solo se consume `EmailService`, ya exportado por `EmailModule`. La
+    // invitación NO va por la cola de avisos (que recorre `ticket_events`):
+    // una invitación no es un evento de ticket, y meterla ahí obligaría a
+    // inventar un evento falso. Mismo camino que el envío de firmas.
+    EmailModule,
   ],
   controllers: [
     PortalAuthController,

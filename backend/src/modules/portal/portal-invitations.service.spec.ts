@@ -1,4 +1,4 @@
-import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 
 import { INVITE_REJECTED_MESSAGE, PortalInvitationsService } from './portal-invitations.service';
 import { fingerprintInvitationSecret } from './domain/invitation-secret';
@@ -6,13 +6,15 @@ import { fingerprintInvitationSecret } from './domain/invitation-secret';
 function makeService(opciones: {
   usuarioExistente?: any;
   invitacionViva?: any;
+  pendiente?: any;
+  envioFalla?: Error;
 } = {}) {
   const escritas: any[] = [];
-  const revocadas: any[] = [];
+  const enviados: any[] = [];
+  const marcados: any[] = [];
 
   const invitations = {
-    escritas,
-    revocadas,
+    escritas, marcados,
     create: jest.fn(async (d: any) => {
       escritas.push(d);
       return { id: 11, usedAt: null, revokedAt: null, lastSentAt: null, sendError: null,
@@ -20,17 +22,31 @@ function makeService(opciones: {
     }),
     findLiveByEmail: jest.fn(async () => opciones.invitacionViva ?? null),
     listPendingByClient: jest.fn(async () => []),
-    revokeLiveByEmail: jest.fn(async (...args: any[]) => {
-      revocadas.push(args);
+    findPendingByIdForClient: jest.fn(async () => opciones.pendiente ?? null),
+    revokeLiveByEmail: jest.fn(async () => undefined),
+    markSent: jest.fn(async (...args: any[]) => {
+      marcados.push(args);
     }),
   };
 
-  const clientUsers = {
-    findByEmail: jest.fn(async () => opciones.usuarioExistente ?? null),
+  const clientUsers = { findByEmail: jest.fn(async () => opciones.usuarioExistente ?? null) };
+
+  const email = {
+    enviados,
+    send: jest.fn(async (input: any) => {
+      if (opciones.envioFalla) throw opciones.envioFalla;
+      enviados.push(input);
+      return { messageId: 'x', accepted: [input.to], rejected: [] };
+    }),
   };
 
-  const service = new PortalInvitationsService(invitations as any, clientUsers as any);
-  return { service, invitations, clientUsers };
+  const clients = { findByIdOrFail: jest.fn(async () => ({ id: 7, razonSocial: 'Acme S.A.C.' })) };
+  const config = { get: (k: string, f?: string) => (k === 'FRONTEND_URL' ? 'https://kuboti.com' : f) };
+
+  const service = new PortalInvitationsService(
+    invitations as any, clientUsers as any, email as any, clients as any, config as any,
+  );
+  return { service, invitations, clientUsers, email, clients };
 }
 
 const DTO = { email: 'Nuevo@Kuboti.com', fullName: 'Nuevo Nombre' };
@@ -173,5 +189,94 @@ describe('PortalInvitationsService.listPending', () => {
     const { service, invitations } = makeService();
     await service.listPending(7);
     expect(invitations.listPendingByClient).toHaveBeenCalledWith(7, expect.any(Date));
+  });
+});
+
+describe('el envío de la invitación', () => {
+  it('sale en el acto, a la dirección invitada, con el enlace dentro', async () => {
+    const { service, email } = makeService();
+    await service.invite(7, 3, DTO);
+
+    expect(email.send).toHaveBeenCalledTimes(1);
+    const enviado = email.enviados[0];
+    expect(enviado.to).toBe('Nuevo@Kuboti.com');
+    expect(enviado.html).toMatch(/https:\/\/kuboti\.com\/portal\/invitacion\/[A-Za-z0-9_-]{43}/);
+  });
+
+  it('el enlace del correo lleva el secreto que corresponde a la huella guardada', async () => {
+    const { service, email, invitations } = makeService();
+    await service.invite(7, 3, DTO);
+
+    const secreto = email.enviados[0].html.match(/\/portal\/invitacion\/([A-Za-z0-9_-]{43})/)[1];
+    expect(invitations.escritas[0].secretFingerprint).toBe(fingerprintInvitationSecret(secreto));
+  });
+
+  /**
+   * Decisión 6 de la spec: sin cola no hay reintento automático, así que la
+   * invitación NO puede perderse porque el SMTP esté caído. Queda creada, se
+   * anota el fallo, y el administrador la ve pendiente con opción de reenviar.
+   */
+  it('si el correo falla, la invitación queda creada igual y se anota el fallo', async () => {
+    const { service, invitations } = makeService({ envioFalla: new Error('SMTP dijo que no') });
+
+    const vista = await service.invite(7, 3, DTO);
+
+    expect(invitations.create).toHaveBeenCalledTimes(1);
+    expect(vista.deliveryFailed).toBe(true);
+    expect(invitations.marcados[0][2]).toContain('SMTP dijo que no');
+  });
+
+  it('un envío correcto deja el registro sin error', async () => {
+    const { service, invitations } = makeService();
+    const vista = await service.invite(7, 3, DTO);
+    expect(invitations.marcados[0][2]).toBeNull();
+    expect(vista.deliveryFailed).toBe(false);
+  });
+
+  it('el secreto no aparece en la vista que devuelve la petición', async () => {
+    const { service, email } = makeService();
+    const vista = await service.invite(7, 3, DTO);
+    const secreto = email.enviados[0].html.match(/\/portal\/invitacion\/([A-Za-z0-9_-]{43})/)[1];
+    expect(JSON.stringify(vista)).not.toContain(secreto);
+  });
+});
+
+describe('PortalInvitationsService.resend', () => {
+  const pendiente = {
+    id: '11', clientId: '7', email: 'nuevo@kuboti.com', fullName: 'Nuevo Nombre',
+    secretFingerprint: 'a'.repeat(64), invitedByClientUserId: '3',
+    expiresAt: new Date('2026-09-02T15:00:00.000Z'),
+    usedAt: null, revokedAt: null, lastSentAt: null, sendError: 'fallo viejo',
+    acceptedClientUserId: null, createdAt: new Date('2026-08-26T15:00:00.000Z'),
+  };
+
+  /**
+   * El reenvío emite un secreto NUEVO y revoca el anterior. No se puede
+   * reenviar el viejo: no lo tenemos —solo su huella— y ese es justo el punto
+   * de guardar solo la huella.
+   */
+  it('emite un secreto nuevo y deja de servir el anterior', async () => {
+    const { service, invitations, email } = makeService({ pendiente });
+    await service.resend(7, 11);
+
+    expect(invitations.revokeLiveByEmail).toHaveBeenCalledWith(
+      'nuevo@kuboti.com', 7, expect.any(Date),
+    );
+    const secreto = email.enviados[0].html.match(/\/portal\/invitacion\/([A-Za-z0-9_-]{43})/)[1];
+    expect(invitations.escritas[0].secretFingerprint).toBe(fingerprintInvitationSecret(secreto));
+  });
+
+  it('conserva el nombre, el correo y quién invitó de la invitación original', async () => {
+    const { service, invitations } = makeService({ pendiente });
+    await service.resend(7, 11);
+    expect(invitations.escritas[0]).toMatchObject({
+      clientId: 7, email: 'nuevo@kuboti.com', fullName: 'Nuevo Nombre', invitedByClientUserId: 3,
+    });
+  });
+
+  it('una invitación de otra empresa responde 404, no 403, y no manda nada', async () => {
+    const { service, email } = makeService({ pendiente: null });
+    await expect(service.resend(7, 11)).rejects.toThrow(NotFoundException);
+    expect(email.send).not.toHaveBeenCalled();
   });
 });
