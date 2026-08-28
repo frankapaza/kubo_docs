@@ -25,8 +25,13 @@ const MYSQL_DUPLICATE_ENTRY = 'ER_DUP_ENTRY';
  * no es un contrato estable. `QueryFailedError` copia las propiedades del
  * error del driver sobre sí mismo (ver `driverError` más abajo), así que se
  * lee de ahí y no de `err.message`.
+ *
+ * Exportada porque `PortalInvitationsService.accept` choca contra esa misma
+ * clave única (`uq_client_users_email`) cuando el personal da de alta la
+ * dirección desde el panel mientras la invitación sigue viva. Una segunda
+ * copia de esta detección serían dos reglas para un solo código de driver.
  */
-function isDuplicateEntryError(err: unknown): boolean {
+export function isDuplicateEntryError(err: unknown): boolean {
   if (!(err instanceof QueryFailedError)) return false;
   const driverError = err.driverError as { code?: string } | undefined;
   return driverError?.code === MYSQL_DUPLICATE_ENTRY;

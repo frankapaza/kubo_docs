@@ -142,7 +142,15 @@ export function sampleValuesFor(audience: NotificationAudience): Record<string, 
 /** Valores a sustituir, indexados por nombre de variable (sin llaves ni espacios). */
 export type TemplateValues = Record<string, string | number | null | undefined>;
 
-function escapeHtml(value: string): string {
+/**
+ * Escapa lo que teclea un tercero antes de meterlo en el HTML de un correo.
+ *
+ * Exportada porque también la usa el correo de invitación del portal
+ * (`invitation-email.ts`): el nombre de la persona invitada y la razón social
+ * de su empresa los escribe alguien, y una segunda copia de este escapado
+ * sería una segunda regla que alguien puede olvidar actualizar.
+ */
+export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

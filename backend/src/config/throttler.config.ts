@@ -94,13 +94,24 @@ export const NOTIFICATION_TEST_THROTTLE = {
 };
 
 /**
- * Override para `POST /portal/invitaciones/aceptar` y, más adelante en esta
- * misma tarea, para `GET /portal/invitaciones/:secret` (la vista previa,
- * decisión 10 de la spec): las dos cuelgan del mismo `PortalInvitationsController`
- * y comparten el mismo tope a propósito — la vista previa no escribe nada,
- * pero sigue siendo una superficie sin autenticar sobre el mismo secreto, y
- * bajarle el tope solo porque no escribe abriría una vía más barata para
- * probar enlaces que la de aceptar.
+ * Override para `POST /portal/invitaciones/aceptar` y para
+ * `GET /portal/invitaciones/:secret` (la vista previa, decisión 10 de la
+ * spec): las dos cuelgan del mismo `PortalInvitationsController` y llevan los
+ * MISMOS LÍMITES a propósito — la vista previa no escribe nada, pero sigue
+ * siendo una superficie sin autenticar sobre el mismo secreto, y bajarle el
+ * tope solo porque no escribe abriría una vía más barata para probar enlaces
+ * que la de aceptar.
+ *
+ * **Mismos límites no es el mismo contador.** `ThrottlerGuard.generateKey`
+ * mete el nombre del controlador Y el del manejador en la clave, así que cada
+ * ruta lleva su cuenta aparte: desde una misma IP salen 5 aceptaciones por
+ * minuto MÁS 5 vistas previas, no 5 entre las dos. Es la misma propiedad que
+ * ya tiene el par login/refresco del portal —y que su prueba fija por escrito
+ * («lleva su propio contador»)— y se deja así en vez de forzar un contador
+ * compartido: unificarlo obligaría a sobreescribir `generateKey` solo para
+ * este par, y 10/minuto desde una IP sigue siendo un techo irrelevante frente
+ * a un secreto de 32 bytes al azar. Lo que no se deja es la promesa a medias:
+ * si mañana el número importa, el número es 10, no 5.
  *
  * Es la tercera superficie del producto abierta a internet y la primera sin
  * autenticar que entrega una credencial. El contador va **por dirección de

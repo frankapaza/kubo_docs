@@ -4,6 +4,7 @@ import * as bcrypt from 'bcrypt';
 import { IsNull } from 'typeorm';
 
 import { ClientUsersRepository } from './client-users.repository';
+import { isDuplicateEntryError } from './client-users.service';
 import { ClientUserInvitationsRepository } from './client-user-invitations.repository';
 import { ClientUserInvitation } from './entities/client-user-invitation.entity';
 import { ClientUser } from './entities/client-user.entity';
@@ -32,7 +33,10 @@ const BCRYPT_ROUNDS = 10;
 
 /**
  * Único cuerpo para CUALQUIER fallo al aceptar: no existe, caducada, ya usada,
- * revocada, quien invitó está desactivado, o la empresa dejó de ser cliente.
+ * revocada, quien invitó está desactivado, la empresa dejó de ser cliente, o
+ * esa dirección ya es de un usuario (el personal la dio de alta desde el panel
+ * mientras la invitación seguía viva — el alta del panel no revoca
+ * invitaciones).
  *
  * No se distinguen porque la diferencia solo le sirve a quien está probando
  * enlaces. Es la superficie más expuesta del producto —abierta a internet y sin
@@ -292,23 +296,36 @@ export class PortalInvitationsService {
       // cliente activo.
       if (!empresa || empresa.status === 'FORMER_CLIENT') throw enlaceNoValido();
 
-      const usuario = await userRepo.save(
-        userRepo.create({
-          // Todo sale de la invitación. Nada del cuerpo.
-          clientId: Number(inv.clientId),
-          email: inv.email,
-          passwordHash,
-          fullName: inv.fullName,
-          // Literal, no un valor calculado ni leído de ningún sitio: desde el
-          // portal no se puede nombrar a un administrador, y este `0` es el
-          // sitio donde eso se hace verdad.
-          isAdmin: 0,
-          isActive: 1,
-          // Autoría honesta: no hubo personal, hubo un administrador de cliente.
-          createdBy: null,
-          createdByClientUserId: Number(inv.invitedByClientUserId),
-        }),
-      );
+      // SÉPTIMO motivo de invalidez. El alta de un usuario de cliente desde
+      // el panel (`ClientUsersService.create`) NO revoca las invitaciones
+      // vivas de esa dirección, así que la invitación sobrevive a que el
+      // correo ya tenga dueño. Sin esta comprobación, aceptar chocaba contra
+      // `uq_client_users_email` y salía un 500 distinguible del 400 uniforme
+      // —un oráculo—, además de dejar esa invitación inaceptable para siempre,
+      // porque el choque se repite en cada intento.
+      const yaEsUsuario = await this.clientUsers.findByEmail(inv.email);
+      if (yaEsUsuario) throw enlaceNoValido();
+
+      // La comprobación de arriba cubre el caso normal; esta es la red de la
+      // carrera, igual que en `ClientUsersService.create`: dos altas de la
+      // misma dirección —una por el panel, otra por aquí— pueden pasar las dos
+      // por la lectura antes de que cualquiera escriba.
+      const nuevo = userRepo.create({
+        // Todo sale de la invitación. Nada del cuerpo.
+        clientId: Number(inv.clientId),
+        email: inv.email,
+        passwordHash,
+        fullName: inv.fullName,
+        // Literal, no un valor calculado ni leído de ningún sitio: desde el
+        // portal no se puede nombrar a un administrador, y este `0` es el
+        // sitio donde eso se hace verdad.
+        isAdmin: 0,
+        isActive: 1,
+        // Autoría honesta: no hubo personal, hubo un administrador de cliente.
+        createdBy: null,
+        createdByClientUserId: Number(inv.invitedByClientUserId),
+      });
+      const usuario = await saveOrInvalid(() => userRepo.save(nuevo));
 
       // El `usedAt: IsNull()` del WHERE es la otra mitad del uso único: si otra
       // petición se adelantó, este UPDATE no afecta a ninguna fila y hay que
@@ -332,11 +349,16 @@ export class PortalInvitationsService {
    * porque bloquear aquí competiría sin ninguna necesidad con la transacción
    * de `accept`, dado que esta ruta nunca escribe.
    *
-   * Los mismos seis motivos que invalidan el enlace al aceptar (no existe,
+   * Los mismos SIETE motivos que invalidan el enlace al aceptar (no existe,
    * caducada, ya usada, revocada, quien invitó está desactivado, la empresa
-   * dejó de ser cliente) dan aquí EXACTAMENTE el mismo cuerpo que `accept`:
-   * reutiliza `enlaceNoValido()` para no arriesgar una redacción distinta que
-   * delate cuál de los seis ocurrió.
+   * dejó de ser cliente, la dirección ya es de un usuario) dan aquí
+   * EXACTAMENTE el mismo cuerpo que `accept`: reutiliza `enlaceNoValido()`
+   * para no arriesgar una redacción distinta que delate cuál de los siete
+   * ocurrió.
+   *
+   * Los siete, y no seis: si esta ruta saludara ante un motivo que `accept`
+   * rechaza, la diferencia entre las dos respuestas delataría ese motivo
+   * igual de bien que un texto distinto.
    */
   async preview(secret: string): Promise<InvitationPreviewView> {
     const huella = fingerprintInvitationSecret(secret);
@@ -358,9 +380,20 @@ export class PortalInvitationsService {
     });
     if (!empresa || empresa.status === 'FORMER_CLIENT') throw enlaceNoValido();
 
+    // El séptimo, el mismo que `accept`: la dirección ya tiene dueño porque
+    // el personal la dio de alta desde el panel mientras la invitación seguía
+    // viva. Saludar aquí y fallar al aceptar sería justo la divergencia que el
+    // cuerpo único existe para negar.
+    const yaEsUsuario = await this.clientUsers.findByEmail(inv.email);
+    if (yaEsUsuario) throw enlaceNoValido();
+
     return {
       fullName: inv.fullName,
-      clientName: await resolveClientRazonSocial(this.clients, Number(inv.clientId)),
+      // La razón social sale de la empresa que ya se leyó unas líneas arriba,
+      // no de una segunda consulta con `resolveClientRazonSocial`: el dato ya
+      // está en la mano, y volver a pedirlo solo añadía un viaje a la base en
+      // una ruta pública sin autenticar.
+      clientName: empresa.razonSocial,
     };
   }
 
@@ -392,16 +425,55 @@ export class PortalInvitationsService {
       await this.invitations.markSent(Number(invitation.id), ahora, null);
       return toInvitationView({ ...invitation, lastSentAt: ahora, sendError: null });
     } catch (err) {
-      const motivo = (err as Error).message.slice(0, 500);
+      // `describeSendError` y no `(err as Error).message`: un transporte que
+      // rechazara con algo que no es un `Error` —una cadena, un `undefined`—
+      // haría reventar el propio catch al leer `.message` de eso, y ese fallo
+      // no lo recoge nadie: la petición saldría con un 500, que es lo
+      // contrario exacto de lo que promete el comentario de arriba. Hoy
+      // nodemailer siempre rechaza con `Error`, pero nada en este código lo
+      // fija, y lo que sostiene la promesa tiene que ser el código.
+      const detalle = describeSendError(err);
+      const motivo = detalle.slice(0, 500);
       // Al log entero, a la base recortado, y a la respuesta NUNCA: el detalle
-      // de por qué rechazó el servidor SMTP es diagnóstico interno.
-      this.logger.error(
-        `No se pudo enviar la invitación ${String(invitation.id)}: ${(err as Error).message}`,
-      );
+      // de por qué rechazó el servidor SMTP es diagnóstico interno. El secreto
+      // tampoco entra aquí: `motivo` sale del error del transporte, jamás de
+      // `acceptUrl`.
+      this.logger.error(`No se pudo enviar la invitación ${String(invitation.id)}: ${detalle}`);
       await this.invitations.markSent(Number(invitation.id), ahora, motivo);
       return toInvitationView({ ...invitation, lastSentAt: ahora, sendError: motivo });
     }
   }
+}
+
+/**
+ * Ejecuta la escritura del usuario y traduce SOLO el choque contra
+ * `uq_client_users_email` al cuerpo uniforme de enlace no válido.
+ *
+ * Cualquier otro fallo de escritura —la base caída, una columna que no
+ * encaja— sigue subiendo tal cual: degradarlo lo disfrazaría de "invitación
+ * mala" y perdería el 500 que de verdad es. Mismo criterio que
+ * `ClientUsersService.create`, y se reutiliza su `isDuplicateEntryError` en
+ * vez de escribir una segunda detección del mismo código de driver.
+ */
+async function saveOrInvalid<T>(write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (err) {
+    if (isDuplicateEntryError(err)) throw enlaceNoValido();
+    throw err;
+  }
+}
+
+/**
+ * El motivo del fallo de envío, en texto, venga lo que venga del transporte.
+ *
+ * No se asume que sea un `Error`: este valor se lee DENTRO del catch que
+ * existe para que el fallo del correo no tumbe la petición, y una excepción
+ * ahí no la recoge nadie.
+ */
+function describeSendError(err: unknown): string {
+  if (err instanceof Error && typeof err.message === 'string') return err.message;
+  return String(err);
 }
 
 function invitacionRechazada(): BadRequestException {

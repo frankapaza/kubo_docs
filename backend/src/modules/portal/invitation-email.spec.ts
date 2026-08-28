@@ -80,6 +80,68 @@ describe('el correo de invitación', () => {
     expect(subject).not.toBe(subject.toUpperCase());
   });
 
+  /**
+   * El nombre de la persona invitada y la razón social los TECLEA alguien: el
+   * primero lo escribe un administrador de cliente en el formulario de
+   * invitar, la segunda el personal al dar de alta la empresa. Sin escapar,
+   * un `<script>` sale como etiqueta viva dentro del correo del invitado.
+   *
+   * Se usa el mismo `escapeHtml` del renderizador de plantillas de avisos que
+   * ya cierra esto en los correos de tickets.
+   *
+   * Lo que NO es: esto no escala a inyección de cabeceras del sobre. Los
+   * saltos de línea de estos valores no llegan a ninguna cabecera —van al
+   * cuerpo, y nodemailer pliega los saltos de `subject` en vez de dejar
+   * abrir una cabecera nueva—. El riesgo se queda en el cuerpo, y ahí es
+   * donde se cierra. El `From:` incrustado del caso de abajo comprueba
+   * justamente que se queda en texto inofensivo.
+   */
+  describe('lo que teclea una persona no se interpreta como marcado', () => {
+    const hostiles: Array<[string, string]> = [
+      ['una etiqueta', 'Ana<script>alert(1)</script>'],
+      ['un salto de línea', 'Ana\nBcc: espia@ejemplo.pe'],
+      ['una cabecera From: incrustada', 'Ana\r\nFrom: suplantador@ejemplo.pe'],
+      ['un atributo con comillas', 'Ana" onmouseover="alert(1)'],
+    ];
+
+    it.each(hostiles)('el nombre de la persona con %s sale escapado', (_d, nombre) => {
+      const { html } = buildInvitationEmail({ ...base, fullName: nombre });
+      expect(html).not.toContain('<script>');
+      expect(html).toContain(
+        nombre
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;'),
+      );
+    });
+
+    it.each(hostiles)('la razón social con %s sale escapada', (_d, razon) => {
+      const { html } = buildInvitationEmail({ ...base, clientName: razon });
+      expect(html).not.toContain('<script>');
+      expect(html).not.toMatch(/<[a-z]+ [^>]*onmouseover/i);
+      expect(html).toContain(razon.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'));
+    });
+
+    /**
+     * Ni el asunto ni la versión de texto se escapan: ahí no hay marcado que
+     * interpretar y un `&amp;` literal sería una errata visible para quien
+     * lee. La regla vive en el HTML, que es donde está el riesgo.
+     */
+    it('el asunto y la versión de texto no llevan entidades HTML', () => {
+      const { subject, text } = buildInvitationEmail({
+        ...base,
+        fullName: 'Ana & Luis',
+        clientName: 'Peña & Hijos S.A.C.',
+      });
+      expect(subject).toContain('Peña & Hijos S.A.C.');
+      expect(subject).not.toContain('&amp;');
+      expect(text).toContain('Ana & Luis');
+      expect(text).not.toContain('&amp;');
+    });
+  });
+
   it('dice hasta cuándo sirve el enlace, en hora de Lima', () => {
     // 15:00 UTC del 2 de septiembre son las 10:00 del mismo día en Lima.
     //

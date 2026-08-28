@@ -7,7 +7,9 @@ function makeService(opciones: {
   usuarioExistente?: any;
   invitacionViva?: any;
   pendiente?: any;
-  envioFalla?: Error;
+  envioFalla?: unknown;
+  /** Fuerza el fallo del envío aunque `envioFalla` sea `undefined`. */
+  envioRechaza?: boolean;
   /** Simula un fallo a mitad de la transacción de revocar+crear (finding B). */
   fallaEn?: 'revocar' | 'crear';
 } = {}) {
@@ -88,8 +90,12 @@ function makeService(opciones: {
   const email = {
     enviados,
     send: jest.fn(async (input: any) => {
-      if (opciones.envioFalla) throw opciones.envioFalla;
+      // Se apunta ANTES de fallar, a propósito: las pruebas del camino del
+      // fallo necesitan el secreto que se acaba de emitir para comprobar que
+      // NO se filtró a la anotación del error, y ese secreto solo existe en
+      // el correo que se intentó mandar.
       enviados.push(input);
+      if (opciones.envioRechaza || opciones.envioFalla !== undefined) throw opciones.envioFalla;
       return { messageId: 'x', accepted: [input.to], rejected: [] };
     }),
   };
@@ -369,7 +375,67 @@ describe('el envío de la invitación', () => {
 
     expect(invitations.escritas).toHaveLength(1);
     expect(vista.deliveryFailed).toBe(true);
-    expect(invitations.marcados[0][2]).toContain('SMTP dijo que no');
+    // Valor EXACTO, no `toContain`: con la comparación parcial, un motivo
+    // que además metiera el enlace completo pasaba en verde.
+    expect(invitations.marcados[0][2]).toBe('SMTP dijo que no');
+  });
+
+  /**
+   * EL CAMINO DEL FALLO, que es el único donde hay algo que escribir sobre el
+   * envío. El motivo se compone del error del transporte y se guarda en base;
+   * si alguien construyera ahí un texto «más útil» pegándole el `acceptUrl`
+   * —o el correo entero— el secreto quedaría en una columna, en un log y en
+   * la respuesta HTTP, que es exactamente lo que el resto del módulo trabaja
+   * para impedir. La prueba de arriba solo miraba el camino de éxito.
+   */
+  it('si el correo falla, el secreto no llega ni a la base, ni a la vista, ni al log', async () => {
+    const niveles = ['log', 'warn', 'error', 'debug', 'verbose'] as const;
+    const espias = niveles.map((nivel) =>
+      jest.spyOn(Logger.prototype, nivel).mockImplementation(() => undefined as never),
+    );
+
+    try {
+      const { service, invitations, email } = makeService({
+        envioFalla: new Error('SMTP dijo que no'),
+      });
+      const vista = await service.invite(7, 3, DTO);
+
+      const secreto = email.enviados[0].html.match(/\/portal\/invitacion\/([A-Za-z0-9_-]{43})/)[1];
+      expect(secreto).toHaveLength(43);
+
+      expect(JSON.stringify(invitations.marcados)).not.toContain(secreto);
+      expect(JSON.stringify(invitations.escritas)).not.toContain(secreto);
+      expect(JSON.stringify(vista)).not.toContain(secreto);
+      expect(JSON.stringify(espias.flatMap((e) => e.mock.calls))).not.toContain(secreto);
+      // Y tampoco la dirección completa, que es el secreto con adorno.
+      expect(JSON.stringify(invitations.marcados)).not.toContain('/portal/invitacion/');
+    } finally {
+      espias.forEach((espia) => espia.mockRestore());
+    }
+  });
+
+  /**
+   * El comentario de `deliver` promete que el fallo del envío NO tumba la
+   * petición. Si el transporte rechazara con algo que no es un `Error`, leer
+   * `.message` de eso reventaría DENTRO del propio catch —donde no hay nada
+   * que lo recoja— y la petición saldría con un 500: lo contrario exacto de
+   * lo que promete. Hoy nodemailer siempre rechaza con `Error`, pero nada en
+   * el código lo fijaba.
+   */
+  it.each<[string, Parameters<typeof makeService>[0]]>([
+    ['una cadena', { envioFalla: 'ECONNREFUSED' }],
+    ['un undefined', { envioRechaza: true }],
+    ['un null', { envioFalla: null }],
+    ['un objeto pelado', { envioFalla: { code: 'EENVELOPE' } }],
+  ])('un rechazo que no es un Error (%s) se anota igual, sin tumbar la petición', async (_d, opciones) => {
+    const { service, invitations } = makeService(opciones);
+
+    const vista = await service.invite(7, 3, DTO);
+
+    expect(vista.deliveryFailed).toBe(true);
+    expect(invitations.escritas).toHaveLength(1);
+    expect(typeof invitations.marcados[0][2]).toBe('string');
+    expect(invitations.marcados[0][2].length).toBeGreaterThan(0);
   });
 
   it('un envío correcto deja el registro sin error', async () => {

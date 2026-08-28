@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 
 import { PERU_TIME_ZONE } from '../../common/time-zone';
+import { escapeHtml } from '../notifications/domain/template-renderer';
 
 /** URL base del frontend cuando no hay `FRONTEND_URL`. La misma que el envío de firmas. */
 const DEFAULT_FRONTEND_URL = 'http://localhost:5173';
@@ -74,6 +75,16 @@ export function buildInvitationEmail(input: InvitationEmailInput): {
   // neutro en vez de dejar un hueco en la frase.
   const empresa = (input.clientName || '').trim() || null;
   const deLaEmpresa = empresa ? ` de ${empresa}` : '';
+  // La versión HTML lleva su propia copia, escapada. El nombre de la persona
+  // invitada y la razón social los teclea alguien —un administrador de cliente
+  // al invitar, el personal al dar de alta la empresa— y sin escapar, un
+  // `Ana<script>…` sale como etiqueta viva en el mensaje. Se reutiliza el
+  // `escapeHtml` del renderizador de plantillas, que ya cierra exactamente
+  // esto en los correos de tickets, en vez de escribir un segundo escapado.
+  //
+  // Solo en el HTML: escapar el asunto o la versión de texto metería
+  // `&amp;` literales donde no hay ningún marcado que interpretar.
+  const deLaEmpresaHtml = empresa ? ` de ${escapeHtml(empresa)}` : '';
   const caduca = fechaLegible(input.expiresAt);
 
   const subject = empresa
@@ -93,8 +104,8 @@ export function buildInvitationEmail(input: InvitationEmailInput): {
   ].join('\n');
 
   const html = `
-    <p>Hola ${input.fullName}:</p>
-    <p>Te damos acceso al portal de clientes${deLaEmpresa}. Para entrar, primero
+    <p>Hola ${escapeHtml(input.fullName)}:</p>
+    <p>Te damos acceso al portal de clientes${deLaEmpresaHtml}. Para entrar, primero
        elige tu contraseña:</p>
     <p><a href="${input.acceptUrl}">Elegir mi contraseña</a></p>
     <p>Si el enlace no funciona, copia esta dirección en tu navegador:<br>
