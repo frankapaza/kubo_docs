@@ -7,7 +7,9 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { PORTAL_AUTH_THROTTLERS } from '../../config/throttler.config';
 import { ClientUser } from './entities/client-user.entity';
+import { ClientUserInvitation } from './entities/client-user-invitation.entity';
 import { ClientUsersRepository } from './client-users.repository';
+import { ClientUserInvitationsRepository } from './client-user-invitations.repository';
 import { ClientJwtStrategy } from './strategies/client-jwt.strategy';
 import { PortalAuthService } from './portal-auth.service';
 import { PortalAuthController } from './portal-auth.controller';
@@ -34,7 +36,7 @@ import { WorkItemsModule } from '../work-items/work-items.module';
     // y el panel interno sigue sin límite a propósito. `ThrottlerModule` está
     // marcado @Global, así que sus providers quedan disponibles igualmente.
     ThrottlerModule.forRoot({ throttlers: PORTAL_AUTH_THROTTLERS }),
-    TypeOrmModule.forFeature([ClientUser]),
+    TypeOrmModule.forFeature([ClientUser, ClientUserInvitation]),
     // De TicketsModule solo se consumen TicketsRepository, TicketEventsService,
     // TicketsService y ClientSystemsRepository, todos ya exportados por él.
     // La dependencia es en un solo sentido: TicketsModule no conoce el portal.
@@ -60,6 +62,7 @@ import { WorkItemsModule } from '../work-items/work-items.module';
   // módulo del proyecto importa PortalModule para reutilizarlos.
   providers: [
     ClientUsersRepository,
+    ClientUserInvitationsRepository,
     ClientJwtStrategy,
     PortalAuthService,
     PortalTicketsService,
