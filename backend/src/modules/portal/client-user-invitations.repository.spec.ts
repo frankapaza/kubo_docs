@@ -1,4 +1,4 @@
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, IsNull, MoreThan, Repository } from 'typeorm';
 
 import { ClientUserInvitationsRepository } from './client-user-invitations.repository';
 import { ClientUserInvitation } from './entities/client-user-invitation.entity';
@@ -105,6 +105,110 @@ describe('ClientUserInvitationsRepository', () => {
     expect(orm.findOne).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ email: 'ana@kuboti.com' }) }),
     );
+  });
+
+  /**
+   * LOS TRES FILTROS QUE IMPIDEN DEVOLVER UNA INVITACIÓN GASTADA, y que hasta
+   * ahora no sostenía ninguna prueba: quitarlos de la consulta no mataba nada.
+   *
+   * Van en el `WHERE` a propósito, no en un `if` posterior, así que la prueba
+   * tiene que mirar el `WHERE`. Se compara el objeto ENTERO y no con
+   * `objectContaining`: así muere igual quien borre un filtro y quien afloje
+   * uno —cambiar `MoreThan(now)` por `MoreThan(new Date(0))` devolvería
+   * invitaciones caducadas y pasaría cualquier comprobación parcial—.
+   */
+  it('buscar una invitación viva filtra sin usar, sin revocar y sin caducar, en el WHERE', async () => {
+    const { repo, orm } = makeRepo();
+    const ahora = new Date('2026-08-26T15:00:00.000Z');
+
+    await repo.findLiveByEmail('ana@kuboti.com', ahora);
+
+    expect(orm.findOne).toHaveBeenCalledWith({
+      where: {
+        email: 'ana@kuboti.com',
+        usedAt: IsNull(),
+        revokedAt: IsNull(),
+        expiresAt: MoreThan(ahora),
+      },
+    });
+  });
+
+  it('buscar una invitación viva devuelve lo que responde la consulta, sin filtrar después', async () => {
+    const { repo, orm } = makeRepo();
+    const fila = { id: 4, email: 'ana@kuboti.com' } as ClientUserInvitation;
+    orm.findOne.mockResolvedValueOnce(fila as never);
+
+    await expect(
+      repo.findLiveByEmail('ana@kuboti.com', new Date('2026-08-26T15:00:00.000Z')),
+    ).resolves.toBe(fila);
+  });
+
+  /**
+   * `listPendingByClient` no tenía NI UNA prueba. Dos cosas que fijar aquí, y
+   * la primera es de seguridad: el `clientId` va en el `WHERE`. Sin él, la
+   * pantalla de invitaciones pendientes de una empresa listaría las de todas
+   * —correos y nombres completos de los clientes de la competencia—, que es la
+   * fuga entre empresas por la puerta de atrás. La segunda son los tres
+   * filtros de vida, los mismos de arriba.
+   */
+  it('listar las pendientes va acotado a la empresa y a las que siguen vivas', async () => {
+    const { repo, orm } = makeRepo();
+    const ahora = new Date('2026-08-26T15:00:00.000Z');
+
+    await repo.listPendingByClient(7, ahora);
+
+    expect(orm.find).toHaveBeenCalledWith({
+      where: {
+        clientId: 7,
+        usedAt: IsNull(),
+        revokedAt: IsNull(),
+        expiresAt: MoreThan(ahora),
+      },
+      order: { createdAt: 'DESC' },
+    });
+  });
+
+  it('listar las pendientes las da de la más reciente a la más antigua', async () => {
+    const { repo, orm } = makeRepo();
+    const filas = [{ id: 2 }, { id: 1 }] as ClientUserInvitation[];
+    orm.find.mockResolvedValueOnce(filas as never);
+
+    await expect(
+      repo.listPendingByClient(7, new Date('2026-08-26T15:00:00.000Z')),
+    ).resolves.toBe(filas);
+    expect(orm.find).toHaveBeenCalledWith(
+      expect.objectContaining({ order: { createdAt: 'DESC' } }),
+    );
+  });
+
+  /**
+   * `findPendingByIdForClient` tampoco tenía ninguna, y es la peor de las dos
+   * para quedarse sin red: el `id` viene de la URL, así que sin el `clientId`
+   * en el `WHERE` cualquier administrador de cualquier empresa lee —y luego
+   * revoca o reenvía— la invitación de otra empresa probando números. Que la
+   * comprobación no esté en un `if` posterior es justo lo que hace que el
+   * `null` se convierta en 404 y no en un 403 que confirmaría que ese id
+   * existe en otra empresa.
+   */
+  it('buscar una pendiente por id va acotado a la empresa, no solo al id', async () => {
+    const { repo, orm } = makeRepo();
+
+    await repo.findPendingByIdForClient(42, 7);
+
+    expect(orm.findOne).toHaveBeenCalledWith({
+      where: { id: 42, clientId: 7, usedAt: IsNull(), revokedAt: IsNull() },
+    });
+  });
+
+  it('buscar una pendiente por id de otra empresa no devuelve nada, y no lo distingue de no existir', async () => {
+    const { repo, orm } = makeRepo();
+    // La consulta acotada no encuentra fila: el doble responde `null`, igual
+    // que MySQL con un id que existe pero es de otra empresa.
+    await expect(repo.findPendingByIdForClient(42, 7)).resolves.toBeNull();
+    const [{ where }] = orm.findOne.mock.calls[0] as unknown as [
+      { where: Record<string, unknown> },
+    ];
+    expect(where.clientId).toBe(7);
   });
 
   /**
