@@ -23,6 +23,7 @@ import { ClientUsersService } from './client-users.service';
 import { ClientUsersController } from './client-users.controller';
 import { PortalUsersService } from './portal-users.service';
 import { PortalUsersController } from './portal-users.controller';
+import { PortalInvitationsService } from './portal-invitations.service';
 import { TicketsModule } from '../tickets/tickets.module';
 import { ClientsModule } from '../clients/clients.module';
 import { WorkItemsModule } from '../work-items/work-items.module';
@@ -73,6 +74,7 @@ import { WorkItemsModule } from '../work-items/work-items.module';
     PortalReportsService,
     ClientUsersService,
     PortalUsersService,
+    PortalInvitationsService,
   ],
   // `ClientUsersService` se exporta desde la Task 8: `InboundEmailService`
   // (`modules/inbound-email`) lo necesita para identificar al remitente de un

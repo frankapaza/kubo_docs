@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  Body,
   Controller,
   Get,
   HttpCode,
@@ -14,7 +15,8 @@ import { ClientAdminGuard } from './guards/client-admin.guard';
 import { CurrentClientUser } from './decorators/current-client-user.decorator';
 import { AuthClientUser } from './strategies/client-jwt.strategy';
 import { PortalUsersService } from './portal-users.service';
-import { PortalClientUserView } from './dto/portal-user.dto';
+import { PortalInvitationsService } from './portal-invitations.service';
+import { InvitePortalUserDto, PortalClientUserView, PortalInvitationView } from './dto/portal-user.dto';
 
 const userIdPipe = new ParseIntPipe({
   exceptionFactory: () =>
@@ -38,11 +40,35 @@ const userIdPipe = new ParseIntPipe({
 @Controller('portal/usuarios')
 @UseGuards(ClientJwtGuard, ClientAdminGuard)
 export class PortalUsersController {
-  constructor(private readonly service: PortalUsersService) {}
+  constructor(
+    private readonly service: PortalUsersService,
+    private readonly invitations: PortalInvitationsService,
+  ) {}
 
   @Get()
   list(@CurrentClientUser() user: AuthClientUser): Promise<PortalClientUserView[]> {
     return this.service.list(user.clientId);
+  }
+
+  /**
+   * Las invitaciones pendientes de esta empresa. Van en este controlador y no
+   * en uno propio porque son la otra mitad de la misma pantalla: una persona
+   * invitada todavía no es un usuario, pero el administrador la ve en la misma
+   * lista y necesita saber que sigue pendiente.
+   */
+  @Get('invitaciones')
+  listInvitations(@CurrentClientUser() user: AuthClientUser): Promise<PortalInvitationView[]> {
+    return this.invitations.listPending(user.clientId);
+  }
+
+  @Post('invitaciones')
+  invite(
+    @CurrentClientUser() user: AuthClientUser,
+    @Body() dto: InvitePortalUserDto,
+  ): Promise<PortalInvitationView> {
+    // Los dos identificadores salen del token que `ClientJwtGuard` acaba de
+    // verificar. El cuerpo solo aporta nombre y correo.
+    return this.invitations.invite(user.clientId, user.clientUserId, dto);
   }
 
   /**

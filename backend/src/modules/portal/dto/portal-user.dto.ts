@@ -39,3 +39,24 @@ export class InvitePortalUserDto {
   @Length(1, 180, { message: 'El nombre es obligatorio y no puede pasar de 180 caracteres.' })
   fullName!: string;
 }
+
+/**
+ * Lo que el administrador ve de una invitación pendiente.
+ *
+ * **Ni el secreto ni la huella.** El secreto solo existe en el correo; la
+ * huella no le sirve de nada a nadie fuera de la base y publicarla sería
+ * regalar la mitad del trabajo a quien quisiera atacar el índice.
+ *
+ * `deliveryFailed` es un booleano derivado y no el texto del error: por qué
+ * exactamente rechazó el servidor SMTP es información de diagnóstico interno,
+ * y el administrador solo necesita saber que tiene que reenviar.
+ */
+export interface PortalInvitationView {
+  id: number;
+  fullName: string;
+  email: string;
+  expiresAt: string;
+  lastSentAt: string | null;
+  deliveryFailed: boolean;
+  createdAt: string;
+}
