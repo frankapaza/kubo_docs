@@ -21,6 +21,8 @@ import { PortalReportsService } from './portal-reports.service';
 import { PortalReportsController } from './portal-reports.controller';
 import { ClientUsersService } from './client-users.service';
 import { ClientUsersController } from './client-users.controller';
+import { PortalUsersService } from './portal-users.service';
+import { PortalUsersController } from './portal-users.controller';
 import { TicketsModule } from '../tickets/tickets.module';
 import { ClientsModule } from '../clients/clients.module';
 import { WorkItemsModule } from '../work-items/work-items.module';
@@ -56,6 +58,7 @@ import { WorkItemsModule } from '../work-items/work-items.module';
     PortalRequirementsController,
     PortalReportsController,
     ClientUsersController,
+    PortalUsersController,
   ],
   // `JwtModule`/`PassportModule` ya no se exportan: PortalAuthService y
   // ClientJwtStrategy los consumen dentro de este mismo módulo y ningún otro
@@ -69,6 +72,7 @@ import { WorkItemsModule } from '../work-items/work-items.module';
     PortalRequirementsService,
     PortalReportsService,
     ClientUsersService,
+    PortalUsersService,
   ],
   // `ClientUsersService` se exporta desde la Task 8: `InboundEmailService`
   // (`modules/inbound-email`) lo necesita para identificar al remitente de un

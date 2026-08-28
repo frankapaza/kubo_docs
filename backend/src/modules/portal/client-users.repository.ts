@@ -66,4 +66,14 @@ export class ClientUsersRepository {
   async touchLastLogin(id: number): Promise<void> {
     await this.repo.update(id, { lastLoginAt: new Date() });
   }
+
+  /**
+   * Le quita el acceso, no borra la fila. Sus tickets, sus mensajes y su
+   * rastro en los informes tienen que seguir siendo legibles (decisión 4 de
+   * la spec): un usuario desactivado no puede entrar y no aparece en los
+   * desplegables, pero su historia queda.
+   */
+  async deactivate(id: number): Promise<void> {
+    await this.repo.update(id, { isActive: 0 });
+  }
 }

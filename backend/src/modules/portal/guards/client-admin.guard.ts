@@ -23,7 +23,7 @@ export class ClientAdminGuard implements CanActivate {
     if (user?.isClientAdmin !== true) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
-        message: 'Solo el administrador de la empresa puede crear requerimientos.',
+        message: 'Solo el administrador de la empresa puede hacer esto.',
       });
     }
 

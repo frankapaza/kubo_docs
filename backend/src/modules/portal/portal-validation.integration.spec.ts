@@ -344,7 +344,7 @@ describe('Portal — errores de validación (integración HTTP)', () => {
       expect(res.status).toBe(403);
       expect(res.body).toMatchObject({
         code: 'FORBIDDEN',
-        message: 'Solo el administrador de la empresa puede crear requerimientos.',
+        message: 'Solo el administrador de la empresa puede hacer esto.',
       });
       expect(requirementsCreate).not.toHaveBeenCalled();
     });
