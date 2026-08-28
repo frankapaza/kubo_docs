@@ -63,6 +63,11 @@ services:
       # inicio de sesion de esas filas no encontraria coincidencia contra la
       # busqueda, que si normaliza.
       - ./backend/sql/migrations/025_normalizar_email_existente.sql:/docker-entrypoint-initdb.d/025_normalizar_email_existente.sql:ro
+      # La 026 anade las invitaciones del portal (client_user_invitations) y
+      # ablanda client_users.created_by a nulable, con su columna hermana para
+      # el administrador de cliente que invito. Ninguna de las dos cosas pierde
+      # informacion: el MODIFY solo relaja la nulabilidad.
+      - ./backend/sql/migrations/026_invitaciones_portal.sql:/docker-entrypoint-initdb.d/026_invitaciones_portal.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s

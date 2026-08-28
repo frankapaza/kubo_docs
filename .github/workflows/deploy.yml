@@ -178,7 +178,8 @@ jobs:
                      020_requerimientos_portal 021_correo_entrante \
                      022_correo_sin_contenido 023_correo_entrante_imap \
                      024_correo_entrante_identificador_servidor \
-                     025_normalizar_email_existente; do
+                     025_normalizar_email_existente \
+                     026_invitaciones_portal; do
               echo "--- $m"
               sql_file "backend/sql/migrations/$m.sql"
             done

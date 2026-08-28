@@ -48,6 +48,18 @@ const COLUMNAS_021 = [
 /** La columna que añade la 023: el interruptor del buzón IMAP real (Task 8). */
 const COLUMNA_023 = { tableName: 'workspace_settings', columnName: 'imap_enabled' };
 
+/** La tabla que añade la 026: las invitaciones a usuarios de cliente. */
+const TABLA_026 = 'client_user_invitations';
+
+/**
+ * La columna que añade la 026. `created_by` pasando a nulable NO se comprueba
+ * aquí: este validador mira presencia de tablas y columnas en
+ * `information_schema`, y "la columna existe pero admite nulo" no es ninguna
+ * de las dos cosas. La hermana sí, y como la 026 hace las dos cosas en el
+ * mismo fichero, exigir la hermana ya exige haber pasado la migración.
+ */
+const COLUMNA_026 = { tableName: 'client_users', columnName: 'created_by_client_user_id' };
+
 const COLUMNAS_ESPERADAS = [
   ...COLUMNAS_013,
   COLUMNA_014,
@@ -56,6 +68,7 @@ const COLUMNAS_ESPERADAS = [
   COLUMNA_020,
   ...COLUMNAS_021,
   COLUMNA_023,
+  COLUMNA_026,
 ];
 
 /**
@@ -67,6 +80,7 @@ const TABLAS_ESPERADAS = [
   'notification_templates',
   'ticket_messages',
   'ticket_attachments',
+  TABLA_026,
 ];
 
 /**
@@ -279,6 +293,21 @@ describe('PortalSchemaValidator', () => {
       const message = await mensaje();
       expect(message).toMatch(/no llevan guardas|no son idempotentes/i);
     });
+  });
+
+  it('atribuye a la 026 la tabla de invitaciones y la autoría de cliente', async () => {
+    const validator = new PortalSchemaValidator(
+      dataSourceWith(
+        TABLAS_ESPERADAS.filter((t) => t !== TABLA_026),
+        COLUMNAS_ESPERADAS.filter(
+          (c) => !(c.tableName === 'client_users' && c.columnName === 'created_by_client_user_id'),
+        ),
+      ),
+    );
+
+    await expect(validator.onApplicationBootstrap()).rejects.toThrow(
+      /026_invitaciones_portal\.sql/,
+    );
   });
 
   it('nombra a la vez las tablas y todas las columnas ausentes, no solo la primera', async () => {

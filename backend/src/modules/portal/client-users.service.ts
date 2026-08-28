@@ -104,6 +104,10 @@ export class ClientUsersService {
         fullName: dto.fullName,
         isAdmin: dto.isAdmin ? 1 : 0,
         createdBy: staffUserId,
+        // Explícito, no por omisión: este alta la hace el personal, así que la
+        // columna del administrador de cliente tiene que quedar vacía y tiene
+        // que verse que se quiere vacía.
+        createdByClientUserId: null,
       });
       return toView(created);
     } catch (err) {

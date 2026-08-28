@@ -84,6 +84,7 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
   private static readonly MIGRATION_020 = 'migrations/020_requerimientos_portal.sql';
   private static readonly MIGRATION_021 = 'migrations/021_correo_entrante.sql';
   private static readonly MIGRATION_023 = 'migrations/023_correo_entrante_imap.sql';
+  private static readonly MIGRATION_026 = 'migrations/026_invitaciones_portal.sql';
 
   /**
    * Lo que hace falta para que exista `workspace_settings.team_inbox_email`, en
@@ -131,6 +132,11 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
     // fichero, así que exigir las tablas ya exige haber pasado la migración.
     { table: 'ticket_messages', files: [PortalSchemaValidator.MIGRATION_018] },
     { table: 'ticket_attachments', files: [PortalSchemaValidator.MIGRATION_018] },
+    // 026: las invitaciones del portal. `ClientUserInvitation` la declara como
+    // entidad, así que sin ella TypeORM revienta en cuanto un administrador de
+    // cliente abre la pantalla de su gente — y el alta desde el portal deja de
+    // existir sin que nadie sepa por qué.
+    { table: 'client_user_invitations', files: [PortalSchemaValidator.MIGRATION_026] },
     // La 019 tampoco está aquí, y por el mismo motivo que el enum de arriba
     // más uno propio: no crea ninguna tabla ni ninguna columna --solo corrige
     // el `COMMENT` de `ticket_attachments.message_id`--, así que no hay nada
@@ -236,6 +242,19 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
       table: 'workspace_settings',
       column: 'imap_enabled',
       files: [PortalSchemaValidator.MIGRATION_023],
+    },
+    // 026: la autoría honesta. `client-user.entity.ts` ya declara esta columna,
+    // así que TypeORM la emite en TODO SELECT e INSERT sobre `client_users`:
+    // sin ella el login del portal responde 500 (ER_BAD_FIELD_ERROR), no solo
+    // el alta nueva.
+    //
+    // `created_by` pasando a nulable no se exige aquí: este validador mira
+    // presencia, no nulabilidad. Va en el mismo fichero que esta columna, así
+    // que exigir la columna ya exige haber pasado la migración entera.
+    {
+      table: 'client_users',
+      column: 'created_by_client_user_id',
+      files: [PortalSchemaValidator.MIGRATION_026],
     },
   ];
 

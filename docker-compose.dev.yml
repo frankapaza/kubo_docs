@@ -56,9 +56,10 @@ services:
       - ./backend/sql/migrations/023_correo_entrante_imap.sql:/docker-entrypoint-initdb.d/032_mig_023.sql:ro
       - ./backend/sql/migrations/024_correo_entrante_identificador_servidor.sql:/docker-entrypoint-initdb.d/033_mig_024.sql:ro
       - ./backend/sql/migrations/025_normalizar_email_existente.sql:/docker-entrypoint-initdb.d/034_mig_025.sql:ro
+      - ./backend/sql/migrations/026_invitaciones_portal.sql:/docker-entrypoint-initdb.d/035_mig_026.sql:ro
       # Seeds — van detrás de todas las migraciones, así que el seed se
       # renumera cada vez que entra una migración nueva.
-      - ./backend/sql/seed_document_templates.sql:/docker-entrypoint-initdb.d/035_seed_templates.sql:ro
+      - ./backend/sql/seed_document_templates.sql:/docker-entrypoint-initdb.d/036_seed_templates.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s
