@@ -10,6 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 
+import { ApiThrottlerGuard } from '../../common/guards/api-throttler.guard';
 import { ClientJwtGuard } from './guards/client-jwt.guard';
 import { ClientAdminGuard } from './guards/client-admin.guard';
 import { CurrentClientUser } from './decorators/current-client-user.decorator';
@@ -61,7 +62,17 @@ export class PortalUsersController {
     return this.invitations.listPending(user.clientId);
   }
 
+  /**
+   * Con tope de intentos, igual que el login del portal (`PortalAuthController`):
+   * los tres motivos de rechazo son indistinguibles entre sí (decisión 7 de la
+   * spec), pero un 201 contra un 400 sigue diciendo si una dirección está
+   * libre. El riesgo es de alguien ya autenticado como administrador de
+   * cliente —no de un desconocido—, pero cerrarlo es barato y el mecanismo ya
+   * existe: reutilizarlo evita mantener dos disciplinas de conteo distintas
+   * para el mismo problema.
+   */
   @Post('invitaciones')
+  @UseGuards(ApiThrottlerGuard)
   invite(
     @CurrentClientUser() user: AuthClientUser,
     @Body() dto: InvitePortalUserDto,

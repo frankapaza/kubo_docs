@@ -16,6 +16,7 @@ import {
   isInvitationExpired,
 } from './domain/invitation-secret';
 import { assertSessionScope, toIso } from './session-scope';
+import { normalizeEmailAddress } from './email-address';
 import { sameId } from '../../common/ids';
 import { ClientsService } from '../clients/clients.service';
 import { EmailService } from '../email/email.service';
@@ -111,22 +112,22 @@ export class PortalInvitationsService {
       // sería un efecto cruzado entre empresas, aunque no revele nada.
       throw invitacionRechazada();
     }
-    if (viva) {
-      // Viva en la propia: se reemplaza. Primero revocar y después crear —al
-      // revés, durante un instante habría dos vivas y la revocación se
-      // llevaría por delante la recién creada.
-      await this.invitations.revokeLiveByEmail(dto.email, clientId, ahora);
-    }
 
     const secret = generateInvitationSecret();
-    const invitation = await this.invitations.create({
+    // Viva en la propia: se reemplaza. Primero revocar y después crear —al
+    // revés, durante un instante habría dos vivas y la revocación se llevaría
+    // por delante la recién creada— y las dos EN LA MISMA TRANSACCIÓN: sin
+    // ella, un fallo al crear después de revocar dejaría al invitado sin
+    // ningún enlace vivo aunque la petición devolvió error. Ver
+    // `replaceInvitation`.
+    const invitation = await this.replaceInvitation({
       clientId,
       email: dto.email,
       fullName: dto.fullName.trim(),
-      // La huella, jamás el secreto.
       secretFingerprint: fingerprintInvitationSecret(secret),
       invitedByClientUserId,
       expiresAt: invitationExpiryFrom(ahora),
+      revokeVivaAt: viva ? ahora : undefined,
     });
 
     // Campo a campo, y sin ningún campo de rol: no hay por dónde colar un
@@ -159,10 +160,10 @@ export class PortalInvitationsService {
     }
 
     const ahora = new Date();
-    await this.invitations.revokeLiveByEmail(previa.email, clientId, ahora);
-
     const secret = generateInvitationSecret();
-    const invitation = await this.invitations.create({
+    // Misma disciplina de atomicidad que `inviteWithSecret`: revocar y crear
+    // en una única transacción.
+    const invitation = await this.replaceInvitation({
       clientId,
       email: previa.email,
       fullName: previa.fullName,
@@ -171,9 +172,61 @@ export class PortalInvitationsService {
       // «reenviar» sería reescribir un hecho pasado.
       invitedByClientUserId: Number(previa.invitedByClientUserId),
       expiresAt: invitationExpiryFrom(ahora),
+      revokeVivaAt: ahora,
     });
 
     return this.deliver(invitation, secret);
+  }
+
+  /**
+   * Revoca la invitación viva de esa dirección **dentro de esta empresa** (si
+   * `revokeVivaAt` viene informado) y crea la nueva, **en una única
+   * transacción**: o quedan las dos escrituras, o ninguna.
+   *
+   * Sin esto eran dos escrituras sueltas con el repositorio inyectado. Si la
+   * creación fallaba después de revocar, el invitado se quedaba sin ningún
+   * enlace vivo aunque la petición hubiera devuelto error — y no hay ninguna
+   * restricción en base que impida dos invitaciones vivas al mismo correo: la
+   * invariante «un correo, una invitación viva» descansa entera en este
+   * leer-y-escribir.
+   *
+   * `manager.getRepository(...)`, **jamás el repositorio inyectado**: fuera de
+   * la transacción se ejecutaría igual, pero sin ninguna posibilidad de
+   * deshacerse si el paso siguiente falla. Mismo criterio que `accept`.
+   */
+  private async replaceInvitation(params: {
+    clientId: number;
+    email: string;
+    fullName: string;
+    secretFingerprint: string;
+    invitedByClientUserId: number;
+    expiresAt: Date;
+    /** Presente si hay que revocar la viva de esta empresa antes de crear. */
+    revokeVivaAt?: Date;
+  }): Promise<ClientUserInvitation> {
+    return this.invitations.runInTransaction(async (manager) => {
+      const invRepo = manager.getRepository(ClientUserInvitation);
+      const email = normalizeEmailAddress(params.email);
+
+      if (params.revokeVivaAt) {
+        await invRepo.update(
+          { email, clientId: params.clientId, usedAt: IsNull(), revokedAt: IsNull() },
+          { revokedAt: params.revokeVivaAt },
+        );
+      }
+
+      return invRepo.save(
+        invRepo.create({
+          clientId: params.clientId,
+          email,
+          fullName: params.fullName,
+          // La huella, jamás el secreto.
+          secretFingerprint: params.secretFingerprint,
+          invitedByClientUserId: params.invitedByClientUserId,
+          expiresAt: params.expiresAt,
+        }),
+      );
+    });
   }
 
   /**

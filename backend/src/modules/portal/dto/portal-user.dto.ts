@@ -1,3 +1,4 @@
+import { Transform } from 'class-transformer';
 import { IsEmail, IsString, Length } from 'class-validator';
 
 /**
@@ -35,6 +36,10 @@ export class InvitePortalUserDto {
   @Length(1, 180, { message: 'El correo no puede pasar de 180 caracteres.' })
   email!: string;
 
+  // `trim` antes de validar: un nombre de solo espacios pasaría Length(1, 180)
+  // y crearía una invitación con el nombre en blanco. Ya pasó con los
+  // tickets y con el alta de requerimientos (`create-portal-requirement.dto.ts`).
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString({ message: 'El nombre es obligatorio.' })
   @Length(1, 180, { message: 'El nombre es obligatorio y no puede pasar de 180 caracteres.' })
   fullName!: string;
