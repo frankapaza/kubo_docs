@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { portalApi } from '../../api/portal.api';
 import type { PortalInvitation, PortalTeamMember } from '../../api/types';
@@ -25,6 +25,21 @@ function canDeactivate(member: PortalTeamMember, selfId: number | undefined): bo
   return member.isActive && member.id !== selfId && !member.isAdmin;
 }
 
+/**
+ * De qué tabla es el identificador de una acción en vuelo.
+ *
+ * Los ids de `client_users` y los de `client_user_invitations` son DOS
+ * secuencias independientes, así que se repiten constantemente: la invitación
+ * número 3 y el usuario número 3 existen a la vez sin ninguna relación. El
+ * freno anterior los metía en el mismo conjunto con un comentario que afirmaba
+ * que «nunca coinciden», y era falso — reenviar la invitación 3 deshabilitaba
+ * el botón del usuario 3.
+ */
+type Espacio = 'invitacion' | 'usuario';
+
+/** La clave de una acción en vuelo: la tabla y el id, nunca el id a secas. */
+const claveDe = (espacio: Espacio, id: number): string => `${espacio}:${id}`;
+
 export default function PortalUsersPage() {
   const { clientUser } = usePortalAuth();
   const [team, setTeam] = useState<PortalTeamMember[]>([]);
@@ -32,11 +47,27 @@ export default function PortalUsersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
-  // Ids de fila con una acción en curso (reenviar o desactivar). Freno contra
-  // el doble clic sobre la misma fila mientras la petición sigue en vuelo:
-  // un segundo "Reenviar" antes de que vuelva el primero emitiría un segundo
-  // enlace que anula al que el primer clic acababa de pedir.
-  const [busyIds, setBusyIds] = useState<Set<number>>(new Set());
+  /**
+   * Freno **síncrono** al doble clic, marcado antes de cualquier `await`.
+   *
+   * Antes esto era un conjunto DEL ESTADO, y eso no frena nada: dos clics en
+   * el mismo instante pasan los dos, porque el `set…` del estado no se ha
+   * comprometido todavía ni el botón se ha repintado. En «Reenviar» eso son **dos
+   * invitaciones**: la segunda revoca a la primera y la persona recibe dos
+   * correos, uno ya muerto. Con la referencia, entre la lectura y la marca no
+   * se puede colar nada.
+   *
+   * Es la misma disciplina que ya usan `InvitePortalUserDialog` —el diálogo
+   * hermano de esta misma pantalla— y `PortalAcceptInvitationPage`. Dos
+   * ficheros de la misma tarea no pueden tener dos criterios para el mismo
+   * problema.
+   */
+  const enVuelo = useRef<Set<string>>(new Set());
+  /**
+   * Copia en estado, y **solo para pintar**: deshabilitar el botón es cortesía
+   * visual, no la defensa. La decisión de dejar pasar o no la toma `enVuelo`.
+   */
+  const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set());
 
   const load = useCallback(() => {
     let cancelled = false;
@@ -63,28 +94,37 @@ export default function PortalUsersPage() {
 
   useEffect(() => load(), [load]);
 
-  const withBusy = (id: number, run: () => Promise<unknown>) => {
-    if (busyIds.has(id)) return;
+  const withBusy = (espacio: Espacio, id: number, run: () => Promise<unknown>) => {
+    const clave = claveDe(espacio, id);
+    // La guarda, antes que nada y sin ningún `await` por delante: entre esta
+    // línea y la siguiente no puede colarse otro clic.
+    if (enVuelo.current.has(clave)) return;
+    enVuelo.current.add(clave);
+
     setError(null);
-    setBusyIds((prev) => new Set(prev).add(id));
+    setBusyKeys((prev) => new Set(prev).add(clave));
     run()
       .then(() => load())
       .catch((e) => setError(e?.response?.data?.message ?? 'No se pudo completar la acción. Inténtalo de nuevo.'))
       .finally(() => {
-        setBusyIds((prev) => {
+        // En el `finally` para que un fallo no deje la fila bloqueada para
+        // siempre: hay que poder reintentar.
+        enVuelo.current.delete(clave);
+        setBusyKeys((prev) => {
           const next = new Set(prev);
-          next.delete(id);
+          next.delete(clave);
           return next;
         });
       });
   };
 
-  const deactivate = (m: PortalTeamMember) => withBusy(m.id, () => portalApi.deactivateTeamMember(m.id));
+  const deactivate = (m: PortalTeamMember) =>
+    withBusy('usuario', m.id, () => portalApi.deactivateTeamMember(m.id));
 
-  // Ids de invitación en un espacio distinto al de `team`, pero ambos son
-  // identificadores de fila numéricos de esta misma pantalla -- se comparten
-  // el mismo `Set` de "en vuelo" porque nunca coinciden en la misma tabla.
-  const resend = (i: PortalInvitation) => withBusy(i.id, () => portalApi.resendInvitation(i.id));
+  // En su propio espacio, no compartiendo numeración con `team`: los ids de
+  // las dos tablas son secuencias independientes y se repiten. Ver `Espacio`.
+  const resend = (i: PortalInvitation) =>
+    withBusy('invitacion', i.id, () => portalApi.resendInvitation(i.id));
 
   return (
     <div className="space-y-6">
@@ -145,7 +185,7 @@ export default function PortalUsersPage() {
                     variant="secondary"
                     size="sm"
                     onClick={() => resend(i)}
-                    disabled={busyIds.has(i.id)}
+                    disabled={busyKeys.has(claveDe('invitacion', i.id))}
                   >
                     Reenviar
                   </Button>
@@ -197,7 +237,7 @@ export default function PortalUsersPage() {
                       variant="secondary"
                       size="sm"
                       onClick={() => deactivate(m)}
-                      disabled={busyIds.has(m.id)}
+                      disabled={busyKeys.has(claveDe('usuario', m.id))}
                     >
                       Quitar acceso
                     </Button>

@@ -43,6 +43,37 @@ export function generateInvitationSecret(): string {
 }
 
 /**
+ * Los 43 caracteres exactos que ocupan 32 bytes en `base64url`, y solo el
+ * alfabeto de esa codificación (`A-Z`, `a-z`, `0-9`, `-`, `_`).
+ *
+ * Sin `=` de relleno: `base64url` no lo pone, y aceptarlo daría dos cadenas
+ * distintas —con y sin relleno— para el mismo secreto, cada una con su huella.
+ */
+const FORMA_DEL_SECRETO = /^[A-Za-z0-9_-]{43}$/;
+
+/**
+ * Si esa cadena tiene siquiera la FORMA de un secreto de invitación.
+ *
+ * Es la misma disciplina para el mismo valor en las dos rutas que lo reciben:
+ * aceptar lo validaba (en su DTO) y la vista previa no lo miraba en absoluto,
+ * porque le llega por la ruta y no por un cuerpo. Dos criterios para un solo
+ * valor terminan divergiendo; este es el único.
+ *
+ * No es una defensa por sí sola —lo que de verdad separa a un desconocido de
+ * una credencial son los 32 bytes al azar, y una cadena con la forma correcta
+ * pero inventada no encuentra ninguna huella—, así que quien la use tiene que
+ * responder EXACTAMENTE el mismo cuerpo genérico que ante cualquier otro
+ * motivo de invalidez: una forma mala que respondiera distinto sería un
+ * oráculo más, no una protección.
+ *
+ * Lo que sí hace es ahorrar el viaje a la base y el `bcrypt` de una petición
+ * que no puede casar con nada, y hacer explícito el contrato de la ruta.
+ */
+export function isWellFormedInvitationSecret(secret: unknown): boolean {
+  return typeof secret === 'string' && FORMA_DEL_SECRETO.test(secret);
+}
+
+/**
  * La huella del secreto: lo ÚNICO que se guarda en la base.
  *
  * SHA-256 a secas y no bcrypt, a diferencia de una contraseña. La razón no es

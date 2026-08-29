@@ -8,6 +8,7 @@ import {
   invitationExpiryFrom,
   invitationFingerprintsMatch,
   isInvitationExpired,
+  isWellFormedInvitationSecret,
 } from './invitation-secret';
 
 /**
@@ -461,4 +462,45 @@ describe('la caducidad', () => {
     // `NaN` sin guarda dejaría pasar sin que se notara nunca.
     expect(isInvitationExpired(new Date('2099-01-01T00:00:00.000Z'), new Date(NaN))).toBe(true);
   });
+});
+
+/**
+ * LA FORMA DEL SECRETO. Una regla, no dos: aceptar la comprobaba en su DTO y
+ * la vista previa no comprobaba nada, porque a ella el secreto le llega por la
+ * ruta. Quien la use tiene que responder el mismo cuerpo generico que ante
+ * cualquier otro motivo de invalidez -- esto no es una defensa por si sola.
+ */
+describe('isWellFormedInvitationSecret', () => {
+  it('acepta lo que genera el propio modulo, siempre', () => {
+    for (let i = 0; i < 50; i += 1) {
+      expect(isWellFormedInvitationSecret(generateInvitationSecret())).toBe(true);
+    }
+  });
+
+  it('los 43 caracteres son exactos: ni 42 ni 44', () => {
+    expect(isWellFormedInvitationSecret('x'.repeat(42))).toBe(false);
+    expect(isWellFormedInvitationSecret('x'.repeat(43))).toBe(true);
+    expect(isWellFormedInvitationSecret('x'.repeat(44))).toBe(false);
+  });
+
+  /**
+   * El alfabeto es el de `base64url`, no el de `base64`. `+` y `/` obligarian
+   * a escapar el enlace, y el `=` de relleno daria DOS cadenas distintas --con
+   * y sin relleno-- para el mismo secreto, cada una con su huella.
+   */
+  it.each(['+', '/', '=', ' ', '.', '%', '\n'])('rechaza el caracter %j', (c) => {
+    expect(isWellFormedInvitationSecret(`${'x'.repeat(42)}${c}`)).toBe(false);
+  });
+
+  it('acepta el guion y el subrayado, que si son de base64url', () => {
+    expect(isWellFormedInvitationSecret(`${'x'.repeat(41)}-_`)).toBe(true);
+  });
+
+  /** Lo que no es cadena no tiene forma: nada de `String(...)` por el camino. */
+  it.each([[''], [null], [undefined], [42], [{}], [['x'.repeat(43)]]])(
+    'rechaza %p, que no es una cadena con forma de secreto',
+    (valor) => {
+      expect(isWellFormedInvitationSecret(valor)).toBe(false);
+    },
+  );
 });

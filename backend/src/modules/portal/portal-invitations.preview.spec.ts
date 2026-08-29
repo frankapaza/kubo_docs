@@ -1,7 +1,12 @@
 import { INVITATION_INVALID_MESSAGE, PortalInvitationsService } from './portal-invitations.service';
 import { fingerprintInvitationSecret } from './domain/invitation-secret';
 
-const SECRETO = 'secreto-de-pruebas-de-la-vista-previa';
+/**
+ * Con la FORMA de un secreto de verdad —43 caracteres de `base64url`—, que es
+ * lo que `isWellFormedInvitationSecret` exige ahora también aquí: la vista
+ * previa era la única de las dos rutas que no miraba nada de la forma.
+ */
+const SECRETO = 'secreto-de-pruebas-de-la-vista-previaxxxxxx';
 
 /** Invitación tal como la devuelve TypeORM: los `bigint` salen como CADENA. */
 function invitacion(over: Record<string, unknown> = {}) {

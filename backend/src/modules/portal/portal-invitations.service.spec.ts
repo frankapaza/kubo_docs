@@ -111,6 +111,25 @@ function makeService(opciones: {
 
 const DTO = { email: 'Nuevo@Kuboti.com', fullName: 'Nuevo Nombre' };
 
+/**
+ * Un usuario de cliente que ya tiene esa dirección: **con acceso** y sin ser
+ * administrador, que es como nace un alta del panel.
+ *
+ * Los dos campos son deliberados desde la decisión 12: un usuario
+ * DESACTIVADO, no administrador y de la propia empresa ya no rechaza la
+ * invitación —se le reinvita, ver el bloque del final—, así que dejar
+ * `isActive` sin poner convertiría estas pruebas de rechazo en pruebas de
+ * reinvitación sin que se notara.
+ */
+const usuarioConAcceso = (over: Record<string, unknown> = {}) => ({
+  id: '5',
+  clientId: '7',
+  email: 'nuevo@kuboti.com',
+  isActive: 1,
+  isAdmin: 0,
+  ...over,
+});
+
 describe('PortalInvitationsService.invite', () => {
   it('fija la empresa desde el argumento de sesión', async () => {
     const { service, invitations } = makeService();
@@ -180,7 +199,7 @@ describe('PortalInvitationsService.invite', () => {
    */
   it('un correo que ya es de un usuario de la propia empresa se rechaza con el texto genérico', async () => {
     const { service, invitations } = makeService({
-      usuarioExistente: { id: '5', clientId: '7', email: 'nuevo@kuboti.com' },
+      usuarioExistente: usuarioConAcceso(),
     });
     await expect(service.invite(7, 3, DTO)).rejects.toMatchObject({
       response: { message: INVITE_REJECTED_MESSAGE },
@@ -189,8 +208,10 @@ describe('PortalInvitationsService.invite', () => {
   });
 
   it('un correo que ya es de OTRA empresa se rechaza con exactamente el mismo cuerpo', async () => {
-    const propio = makeService({ usuarioExistente: { id: '5', clientId: '7' } });
-    const ajeno = makeService({ usuarioExistente: { id: '8', clientId: '99' } });
+    const propio = makeService({ usuarioExistente: usuarioConAcceso() });
+    const ajeno = makeService({
+      usuarioExistente: usuarioConAcceso({ id: '8', clientId: '99' }),
+    });
 
     const cuerpoPropio = await propio.service.invite(7, 3, DTO).catch((e) => e.getResponse());
     const cuerpoAjeno = await ajeno.service.invite(7, 3, DTO).catch((e) => e.getResponse());
@@ -209,8 +230,11 @@ describe('PortalInvitationsService.invite', () => {
    */
   describe('los tres caminos de rechazo son indistinguibles entre sí', () => {
     const casos: Array<[string, Parameters<typeof makeService>[0]]> = [
-      ['ya es un usuario de la propia empresa', { usuarioExistente: { id: '5', clientId: '7' } }],
-      ['ya es un usuario de OTRA empresa', { usuarioExistente: { id: '8', clientId: '99' } }],
+      ['ya es un usuario de la propia empresa', { usuarioExistente: usuarioConAcceso() }],
+      [
+        'ya es un usuario de OTRA empresa',
+        { usuarioExistente: usuarioConAcceso({ id: '8', clientId: '99' }) },
+      ],
       [
         'tiene una invitación viva en OTRA empresa',
         { invitacionViva: { id: 4, clientId: '99', email: 'nuevo@kuboti.com' } },
@@ -316,6 +340,103 @@ describe('la atomicidad de revocar y crear al invitar (finding B)', () => {
 
     expect(invitations.revocadas).toHaveLength(0);
     expect(invitations.escritas).toHaveLength(0);
+  });
+});
+
+/**
+ * DECISIÓN 12: SE PUEDE REINVITAR A UN USUARIO DESACTIVADO.
+ *
+ * La spec prometía en «Fuera de alcance» que a quien vuelve «se le invita otra
+ * vez», y el código lo impedía: invitar rechazaba cualquier correo ya
+ * existente sin mirar si estaba desactivado. El administrador recibía el
+ * mensaje genérico y no sabía por qué — justo el trabajo manual que esta
+ * funcionalidad existe para eliminar.
+ *
+ * Se admite exactamente un caso: **desactivado, no administrador y de la
+ * propia empresa**. Los otros tres siguen rechazándose, y con el MISMO cuerpo
+ * genérico de siempre: si el rechazo del administrador desactivado se
+ * distinguiera del de un correo de otra empresa, el portal volvería a ser un
+ * comprobador de quién es quién (decisión 7).
+ */
+describe('reinvitar a un usuario desactivado (decisión 12)', () => {
+  const desactivado = usuarioConAcceso({ isActive: 0 });
+
+  it('un desactivado de la propia empresa SÍ se puede reinvitar: se crea y se manda', async () => {
+    const { service, invitations, email } = makeService({ usuarioExistente: desactivado });
+
+    const vista = await service.invite(7, 3, DTO);
+
+    expect(invitations.escritas).toHaveLength(1);
+    expect(invitations.escritas[0]).toMatchObject({ clientId: 7, email: 'nuevo@kuboti.com' });
+    expect(email.send).toHaveBeenCalledTimes(1);
+    expect(vista.email).toBe('nuevo@kuboti.com');
+  });
+
+  /**
+   * Los tres casos que siguen cerrados, y el porqué de cada uno:
+   *
+   *  - **activo**: ya entra; reinvitarlo sería dejar que un compañero le
+   *    reescriba la contraseña.
+   *  - **administrador desactivado**: sigue necesitando a la casa, por
+   *    coherencia con las decisiones 2 y 9 —si el administrador de cliente no
+   *    puede nombrar administradores ni quitarles el acceso, tampoco puede
+   *    devolvérselo por la puerta de la invitación—.
+   *  - **desactivado de OTRA empresa**: la frontera de siempre. El correo es
+   *    único para todo el sistema, así que sin esta condición una empresa
+   *    reactivaría —y pondría contraseña a— gente de otra.
+   */
+  const cerrados: Array<[string, any]> = [
+    ['un usuario con acceso', usuarioConAcceso()],
+    ['un administrador desactivado', usuarioConAcceso({ isActive: 0, isAdmin: 1 })],
+    ['un administrador con acceso', usuarioConAcceso({ isAdmin: 1 })],
+    ['un desactivado de OTRA empresa', usuarioConAcceso({ isActive: 0, clientId: '99' })],
+  ];
+
+  it.each(cerrados)('%s se sigue rechazando, y sin escribir nada', async (_n, usuario) => {
+    const { service, invitations, email } = makeService({ usuarioExistente: usuario });
+
+    await expect(service.invite(7, 3, DTO)).rejects.toThrow(BadRequestException);
+
+    expect(invitations.runInTransaction).not.toHaveBeenCalled();
+    expect(email.send).not.toHaveBeenCalled();
+  });
+
+  /**
+   * NINGÚN ORÁCULO NUEVO. Los cuatro rechazos —y el de la invitación viva
+   * ajena, que ya existía— tienen que seguir dando el mismo par estado+cuerpo.
+   * Si «es administrador» respondiera distinto de «es de otra empresa», el
+   * administrador que prueba direcciones aprendería el rol y la pertenencia de
+   * cada correo que teclee.
+   */
+  it('los cuatro rechazos son indistinguibles entre sí y del rechazo de siempre', async () => {
+    const respuestas: string[] = [];
+    for (const [, usuario] of cerrados) {
+      const { service } = makeService({ usuarioExistente: usuario });
+      const err = await service.invite(7, 3, DTO).catch((e) => e);
+      respuestas.push(JSON.stringify({ status: err.getStatus(), body: err.getResponse() }));
+    }
+    const viva = makeService({
+      invitacionViva: { id: 4, clientId: '99', email: 'nuevo@kuboti.com' },
+    });
+    const errViva = await viva.service.invite(7, 3, DTO).catch((e) => e);
+    respuestas.push(JSON.stringify({ status: errViva.getStatus(), body: errViva.getResponse() }));
+
+    expect(respuestas).toHaveLength(5);
+    expect(new Set(respuestas).size).toBe(1);
+  });
+
+  /**
+   * `isActive`/`isAdmin`/`clientId` llegan de la fila cruda: `0`/`1` y el
+   * `client_id` como CADENA. Con `===` contra `7`, el dueño legítimo de la
+   * reinvitación se comería el rechazo genérico y el defecto volvería a ser
+   * invisible.
+   */
+  it('la empresa se compara con sameId: un clientId en cadena sigue siendo la propia', async () => {
+    const { service, invitations } = makeService({
+      usuarioExistente: usuarioConAcceso({ isActive: 0, clientId: '7' }),
+    });
+    await service.invite(7, 3, DTO);
+    expect(invitations.escritas).toHaveLength(1);
   });
 });
 

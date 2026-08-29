@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
-import { IsNull } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 
 import { ClientUsersRepository } from './client-users.repository';
 import { isDuplicateEntryError } from './client-users.service';
@@ -15,6 +15,7 @@ import {
   generateInvitationSecret,
   invitationExpiryFrom,
   isInvitationExpired,
+  isWellFormedInvitationSecret,
 } from './domain/invitation-secret';
 import { assertSessionScope, toIso } from './session-scope';
 import { normalizeEmailAddress } from './email-address';
@@ -34,9 +35,10 @@ const BCRYPT_ROUNDS = 10;
 /**
  * Único cuerpo para CUALQUIER fallo al aceptar: no existe, caducada, ya usada,
  * revocada, quien invitó está desactivado, la empresa dejó de ser cliente, o
- * esa dirección ya es de un usuario (el personal la dio de alta desde el panel
- * mientras la invitación seguía viva — el alta del panel no revoca
- * invitaciones).
+ * esa dirección ya es de un usuario que NO admite reinvitación (ver
+ * `admiteReinvitacion`: el personal la dio de alta desde el panel mientras la
+ * invitación seguía viva —el alta del panel no revoca invitaciones—, o es un
+ * usuario activo, o es un administrador, o es de otra empresa).
  *
  * No se distinguen porque la diferencia solo le sirve a quien está probando
  * enlaces. Es la superficie más expuesta del producto —abierta a internet y sin
@@ -58,6 +60,37 @@ export const INVITATION_INVALID_MESSAGE =
 export const INVITE_REJECTED_MESSAGE =
   'No se puede invitar a esa dirección. Revisa que esté bien escrita, ' +
   'o escríbenos si crees que debería poder entrar.';
+
+/**
+ * Si a esa dirección —que YA es de un usuario de cliente— se le puede volver a
+ * invitar. Decisión 12 de la spec.
+ *
+ * Tres condiciones, y las tres:
+ *
+ *  1. **Desactivado.** A quien tiene acceso no se le reinvita: ya entra. Y una
+ *     invitación aceptada por alguien activo le reescribiría la contraseña,
+ *     que es justo lo que un compañero no debe poder hacerle.
+ *  2. **No administrador.** Un administrador desactivado sigue necesitando a
+ *     la casa, por coherencia con las decisiones 2 y 9 —el administrador de
+ *     cliente no nombra administradores ni les quita el acceso—: si no puede
+ *     quitárselo, tampoco puede devolvérselo por la puerta de la invitación.
+ *  3. **De la propia empresa.** La frontera de siempre. El correo es único
+ *     para TODO el sistema (`uq_client_users_email`), así que sin esta
+ *     condición una empresa podría reactivar —y ponerle contraseña— a un
+ *     usuario de otra.
+ *
+ * Quien la usa NO puede dejar que la respuesta delate cuál de las tres falló:
+ * todos los caminos de rechazo salen por el cuerpo genérico de siempre
+ * (`INVITE_REJECTED_MESSAGE` al invitar, `INVITATION_INVALID_MESSAGE` al
+ * aceptar y en la vista previa).
+ *
+ * `isActive`/`isAdmin` llegan como `0`/`1` desde la fila cruda, no como
+ * booleanos: por eso se leen como verdad y no con `=== false`. Y `sameId`, no
+ * `===`, porque TypeORM devuelve `client_id` como cadena.
+ */
+export function admiteReinvitacion(usuario: ClientUser, clientId: number): boolean {
+  return !usuario.isActive && !usuario.isAdmin && sameId(usuario.clientId, clientId);
+}
 
 @Injectable()
 export class PortalInvitationsService {
@@ -107,8 +140,14 @@ export class PortalInvitationsService {
     // El correo es único en `client_users` para TODO el sistema (ver la clave
     // `uq_client_users_email` de la 013), así que esta comprobación es global
     // a propósito: si la dirección ya es de alguien, da igual de qué empresa.
+    //
+    // La ÚNICA excepción es la reinvitación de la decisión 12: un usuario
+    // desactivado, no administrador y de esta misma empresa se puede volver a
+    // invitar, y aceptar lo reactiva en vez de crear otra fila. Todo lo demás
+    // —activo, administrador, o de otra empresa— sale por el mismo cuerpo
+    // genérico de siempre, sin decir cuál de los tres fue.
     const yaEsUsuario = await this.clientUsers.findByEmail(dto.email);
-    if (yaEsUsuario) throw invitacionRechazada();
+    if (yaEsUsuario && !admiteReinvitacion(yaEsUsuario, clientId)) throw invitacionRechazada();
 
     const viva = await this.invitations.findLiveByEmail(dto.email, ahora);
     if (viva && !sameId(viva.clientId, clientId)) {
@@ -253,6 +292,14 @@ export class PortalInvitationsService {
       });
     }
 
+    // La forma del secreto, con la MISMA regla que la vista previa (ver
+    // `isWellFormedInvitationSecret`) y con el cuerpo genérico de siempre: una
+    // cadena que ni siquiera tiene la forma de un secreto no puede casar con
+    // ninguna huella, así que responder distinto solo abriría otro oráculo.
+    // Va DESPUÉS de la confirmación de contraseña, para no alterar el orden
+    // que impide usar ese par de respuestas como oráculo del enlace.
+    if (!isWellFormedInvitationSecret(dto.secret)) throw enlaceNoValido();
+
     const huella = fingerprintInvitationSecret(dto.secret);
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
     const ahora = new Date();
@@ -303,13 +350,21 @@ export class PortalInvitationsService {
       // `uq_client_users_email` y salía un 500 distinguible del 400 uniforme
       // —un oráculo—, además de dejar esa invitación inaceptable para siempre,
       // porque el choque se repite en cada intento.
+      //
+      // La excepción es la reinvitación de la decisión 12, y se decide con la
+      // MISMA función que la usó al invitar: un desactivado, no administrador
+      // y de la empresa de la invitación no invalida el enlace — se reactiva
+      // más abajo. Cualquier otro caso sigue siendo el séptimo motivo, con el
+      // cuerpo único de siempre.
       const yaEsUsuario = await this.clientUsers.findByEmail(inv.email);
-      if (yaEsUsuario) throw enlaceNoValido();
+      const reactivable = yaEsUsuario && admiteReinvitacion(yaEsUsuario, Number(inv.clientId));
+      if (yaEsUsuario && !reactivable) throw enlaceNoValido();
 
-      // La comprobación de arriba cubre el caso normal; esta es la red de la
-      // carrera, igual que en `ClientUsersService.create`: dos altas de la
-      // misma dirección —una por el panel, otra por aquí— pueden pasar las dos
-      // por la lectura antes de que cualquiera escriba.
+      // La comprobación de arriba cubre el caso normal; el `saveOrInvalid` de
+      // más abajo es la red de la carrera, igual que en
+      // `ClientUsersService.create`: dos altas de la misma dirección —una por
+      // el panel, otra por aquí— pueden pasar las dos por la lectura antes de
+      // que cualquiera escriba.
       const nuevo = userRepo.create({
         // Todo sale de la invitación. Nada del cuerpo.
         clientId: Number(inv.clientId),
@@ -325,7 +380,36 @@ export class PortalInvitationsService {
         createdBy: null,
         createdByClientUserId: Number(inv.invitedByClientUserId),
       });
-      const usuario = await saveOrInvalid(() => userRepo.save(nuevo));
+
+      /*
+       * Decisión 12 de la spec: reactivar, NO crear otra fila. Crear chocaría
+       * contra `uq_client_users_email` —el correo es único para todo el
+       * sistema— y, aunque no chocara, partiría en dos la historia de esa
+       * persona: sus tickets y sus mensajes cuelgan de la fila que ya existe,
+       * que es exactamente lo que la decisión 4 («desactivar, no borrar»)
+       * existe para conservar.
+       *
+       * Se escribe con el `userRepo` de la transacción, nunca con el
+       * repositorio inyectado: si el marcado de la invitación fallara después,
+       * la reactivación tiene que deshacerse con él. Mismo criterio que el
+       * alta.
+       *
+       * Qué se toca y qué no:
+       *  - contraseña y nombre, los de esta invitación: la persona vuelve con
+       *    la contraseña que acaba de elegir y con el nombre con el que la han
+       *    invitado ahora (puede haberse casado, o estar mal escrito el de
+       *    entonces).
+       *  - `isActive` a 1, que es el sentido entero de la operación.
+       *  - `isAdmin` NO se toca, y no hace falta: `admiteReinvitacion` ya ha
+       *    exigido que sea 0. Escribirlo aquí sería un segundo sitio donde
+       *    decidir el rol desde el portal.
+       *  - la autoría —`createdBy` / `createdByClientUserId`— tampoco: quién
+       *    creó a esta persona es un hecho pasado, y reactivar no es crear.
+       *    Reescribirlo sería la misma mentira que la decisión 8 prohíbe.
+       */
+      const usuario = reactivable
+        ? await reactivar(userRepo, yaEsUsuario, { passwordHash, fullName: inv.fullName })
+        : await saveOrInvalid(() => userRepo.save(nuevo));
 
       // El `usedAt: IsNull()` del WHERE es la otra mitad del uso único: si otra
       // petición se adelantó, este UPDATE no afecta a ninguna fila y hay que
@@ -361,6 +445,12 @@ export class PortalInvitationsService {
    * igual de bien que un texto distinto.
    */
   async preview(secret: string): Promise<InvitationPreviewView> {
+    // La misma disciplina que aceptar para el mismo valor, y con el mismo
+    // cuerpo. Aquí el secreto llega por la RUTA, así que no hay DTO ni
+    // `ValidationPipe` que lo mire: sin esta línea, la vista previa era la
+    // única de las dos que no comprobaba nada de la forma del secreto.
+    if (!isWellFormedInvitationSecret(secret)) throw enlaceNoValido();
+
     const huella = fingerprintInvitationSecret(secret);
     const inv = await this.invitations.findByFingerprint(huella);
 
@@ -380,12 +470,17 @@ export class PortalInvitationsService {
     });
     if (!empresa || empresa.status === 'FORMER_CLIENT') throw enlaceNoValido();
 
-    // El séptimo, el mismo que `accept`: la dirección ya tiene dueño porque
-    // el personal la dio de alta desde el panel mientras la invitación seguía
-    // viva. Saludar aquí y fallar al aceptar sería justo la divergencia que el
-    // cuerpo único existe para negar.
+    // El séptimo, el mismo que `accept` y con la MISMA excepción: la dirección
+    // ya tiene dueño porque el personal la dio de alta desde el panel mientras
+    // la invitación seguía viva —salvo que sea una reinvitación válida
+    // (decisión 12), que aceptar sí admite—. Saludar aquí y fallar al aceptar,
+    // o al revés, sería justo la divergencia que el cuerpo único existe para
+    // negar: por eso la condición se decide con `admiteReinvitacion`, la misma
+    // función que usa aceptar, y no con una copia de sus tres reglas.
     const yaEsUsuario = await this.clientUsers.findByEmail(inv.email);
-    if (yaEsUsuario) throw enlaceNoValido();
+    if (yaEsUsuario && !admiteReinvitacion(yaEsUsuario, Number(inv.clientId))) {
+      throw enlaceNoValido();
+    }
 
     return {
       fullName: inv.fullName,
@@ -455,6 +550,34 @@ export class PortalInvitationsService {
  * `ClientUsersService.create`, y se reutiliza su `isDuplicateEntryError` en
  * vez de escribir una segunda detección del mismo código de driver.
  */
+/**
+ * Devuelve el acceso a un usuario desactivado con la contraseña y el nombre de
+ * esta invitación. Decisión 12 de la spec.
+ *
+ * `update` por id y no `save` de la entidad entera: `save` con la fila leída
+ * reescribiría de paso todas las demás columnas tal como estaban al leerlas
+ * —incluida `isAdmin`—, y ese es justo el sitio por donde se cuela un rol
+ * decidido desde el portal. Aquí se nombran las tres columnas que cambian y
+ * ninguna más.
+ *
+ * Devuelve el id de la fila que ya existía: es el que se anota como
+ * `accepted_client_user_id` en la invitación, para que quede escrito quién
+ * consumió el enlace.
+ */
+async function reactivar(
+  userRepo: Repository<ClientUser>,
+  usuario: ClientUser,
+  datos: { passwordHash: string; fullName: string },
+): Promise<{ id: number }> {
+  const id = Number(usuario.id);
+  await userRepo.update(id, {
+    passwordHash: datos.passwordHash,
+    fullName: datos.fullName,
+    isActive: 1,
+  });
+  return { id };
+}
+
 async function saveOrInvalid<T>(write: () => Promise<T>): Promise<T> {
   try {
     return await write();

@@ -35,6 +35,23 @@ export default function PortalAcceptInvitationPage() {
   const [error, setError] = useState<string | null>(null);
   const [doneEmail, setDoneEmail] = useState<string | null>(null);
 
+  /**
+   * Corta el camino tardío tras desmontar. Su propio efecto de vista previa ya
+   * lo hacía —con la variable `cancelled` de la limpieza— y el diálogo hermano
+   * de esta misma tarea (`InvitePortalUserDialog`) también, pero el envío del
+   * formulario de aquí no: entre `acceptInvitation` y su respuesta la persona
+   * puede haber pulsado «Inicia sesión» y haberse ido. Escribir en el estado
+   * de un componente desmontado es la misma asimetría de disciplina que este
+   * proyecto ya cerró en los otros dos sitios.
+   */
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     setPreviewLoading(true);
@@ -96,15 +113,20 @@ export default function PortalAcceptInvitationPage() {
         password,
         passwordConfirmation: confirmation,
       });
-      setDoneEmail(email);
+      if (alive.current) setDoneEmail(email);
     } catch (err: any) {
-      setError(
-        err?.response?.data?.message ??
-          'No se pudo completar el alta. Inténtalo de nuevo en unos minutos.',
-      );
+      if (alive.current) {
+        setError(
+          err?.response?.data?.message ??
+            'No se pudo completar el alta. Inténtalo de nuevo en unos minutos.',
+        );
+      }
     } finally {
+      // La referencia SÍ se libera siempre, esté montado o no: es una marca
+      // propia, no estado de React, y dejarla puesta bloquearía un reintento
+      // si el componente sigue vivo.
       inFlight.current = false;
-      setBusy(false);
+      if (alive.current) setBusy(false);
     }
   };
 

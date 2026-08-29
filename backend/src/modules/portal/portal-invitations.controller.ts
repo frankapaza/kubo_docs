@@ -55,21 +55,33 @@ export class PortalInvitationsController {
    * nada que quien ya tiene el enlace no fuera a ver un segundo después.
    *
    * **El secreto viaja en la ruta, y eso tiene una consecuencia asumida que
-   * conviene dejar por escrito.** Va en el path y no en la query porque los
-   * intermediarios registran la query con más alegría (ver
-   * `buildInvitationUrl`), pero `HttpExceptionFilter` copia `req.url` en
-   * TODO cuerpo de error (campo `path`) y, además, escribe una traza con esa
-   * misma URL cuando el estado es 5xx. O sea:
+   * conviene dejar por escrito ENTERA.** Va en el path y no en la query porque
+   * los intermediarios registran la query con más alegría (ver
+   * `buildInvitationUrl`), pero el path tampoco es invisible. Tres sitios,
+   * no uno:
    *
-   *  - En cualquier error de esta ruta el secreto vuelve dentro de la
-   *    respuesta. Inofensivo: quien la recibe es quien acaba de mandarlo.
-   *  - Ante un 500 —solo ahí; los siete motivos de invalidez son 400— el
-   *    secreto acaba también en el log del servidor.
+   *  - `HttpExceptionFilter` copia `req.url` en TODO cuerpo de error (campo
+   *    `path`), así que en cualquier error de esta ruta el secreto vuelve
+   *    dentro de la respuesta. Inofensivo: quien la recibe es quien acaba de
+   *    mandarlo.
+   *  - Ese mismo filtro escribe una traza con la URL cuando el estado es 5xx.
+   *    Ahí el secreto acaba en el log **del backend**, y solo ahí: los siete
+   *    motivos de invalidez son 400.
+   *  - Y —esto es lo que faltaba— **el registro de acceso del servidor web
+   *    apunta la URL en CADA apertura del enlace, con éxito o sin él**. No
+   *    hace falta ningún error: la página que la persona abre es la propia
+   *    dirección `/portal/invitacion/<secreto>`, y esta ruta se pide desde
+   *    ella. Quien tenga esos registros tiene enlaces vivos durante siete
+   *    días. Decir que el secreto solo llega al log «ante un 500» es cierto
+   *    para el backend e incompleto para el conjunto.
    *
-   * Se acepta a cambio del saludo de la decisión 10, y porque el log del
-   * servidor es el mismo sitio donde ya viven los datos de la petición. Lo
-   * que no se acepta es que aparezca por sorpresa: si mañana el secreto no
-   * puede tocar el log, lo que hay que mover es la ruta, no el filtro.
+   * Se acepta a cambio del saludo de la decisión 10, y porque esos registros
+   * son el mismo sitio donde ya viven los datos de la petición; la caducidad
+   * de siete días y el uso único son lo que lo acota. Lo que no se acepta es
+   * que aparezca por sorpresa: está escrito también en el diseño, como
+   * consecuencia conocida de la decisión 10. Si mañana el secreto no puede
+   * tocar ningún registro, lo que hay que mover es la ruta —el secreto al
+   * cuerpo de un POST—, no el filtro.
    */
   @Get(':secret')
   @Throttle(PORTAL_INVITATION_THROTTLE)

@@ -84,6 +84,25 @@ const TABLAS_ESPERADAS = [
 ];
 
 /**
+ * Todos los ficheros SQL que este validador exige, escritos aparte y a mano
+ * a propósito: si se derivaran del propio validador, la prueba del mensaje de
+ * arranque se movería con él y dejaría de detectar nada.
+ */
+const FICHEROS_EXIGIDOS = [
+  'add_workspace_settings.sql',
+  'add_workspace_smtp_and_session.sql',
+  'migrations/013_portal_clientes.sql',
+  'migrations/014_audit_client_user.sql',
+  'migrations/015_notificaciones.sql',
+  'migrations/016_notify_next_attempt.sql',
+  'migrations/018_conversacion_adjuntos.sql',
+  'migrations/020_requerimientos_portal.sql',
+  'migrations/021_correo_entrante.sql',
+  'migrations/023_correo_entrante_imap.sql',
+  'migrations/026_invitaciones_portal.sql',
+];
+
+/**
  * DataSource de mentira: responde a la consulta de tablas y a la de columnas
  * segun el catalogo que se le pase, igual que haria information_schema.
  */
@@ -120,6 +139,48 @@ describe('PortalSchemaValidator', () => {
       build(TABLAS_ESPERADAS, COLUMNAS_ESPERADAS).onApplicationBootstrap(),
     ).resolves.toBeUndefined();
     expect(log).toHaveBeenCalled();
+  });
+
+  /**
+   * EL MENSAJE DE ARRANQUE TIENE QUE DESCRIBIR LO QUE DE VERDAD SE COMPRUEBA.
+   *
+   * Enumeraba cinco migraciones (013, 014, 015, 016 y 018) cuando ya se
+   * exigian nueve, y el desfase crecia con cada tarea: el operador leia
+   * «verificado» junto a una lista que ya no describia lo comprobado. La lista
+   * se deriva ahora de los requisitos, y esta prueba es lo que impide que
+   * vuelvan a separarse -- si manana alguien anade un requisito con un fichero
+   * nuevo y el mensaje no lo nombra, esto falla.
+   */
+  it('el mensaje de arranque nombra TODOS los ficheros que se exigen, no una lista vieja', async () => {
+    await build(TABLAS_ESPERADAS, COLUMNAS_ESPERADAS).onApplicationBootstrap();
+
+    const mensaje = String(log.mock.calls[0][0]);
+    for (const fichero of FICHEROS_EXIGIDOS) {
+      expect(mensaje).toContain(fichero);
+    }
+    // Las nueve migraciones numeradas y los dos add_*.sql de la cadena del
+    // buzon del equipo: once ficheros, y ninguno de menos.
+    expect(FICHEROS_EXIGIDOS).toHaveLength(11);
+  });
+
+  /**
+   * Y las nueve numeradas, una por una: la lista vieja nombraba justo las
+   * cinco primeras, asi que comprobar solo "alguna" no habria distinguido el
+   * mensaje corregido del roto.
+   */
+  it.each([
+    '013_portal_clientes.sql',
+    '014_audit_client_user.sql',
+    '015_notificaciones.sql',
+    '016_notify_next_attempt.sql',
+    '018_conversacion_adjuntos.sql',
+    '020_requerimientos_portal.sql',
+    '021_correo_entrante.sql',
+    '023_correo_entrante_imap.sql',
+    '026_invitaciones_portal.sql',
+  ])('el mensaje de arranque nombra la migracion %s', async (migracion) => {
+    await build(TABLAS_ESPERADAS, COLUMNAS_ESPERADAS).onApplicationBootstrap();
+    expect(String(log.mock.calls[0][0])).toContain(migracion);
   });
 
   it.each(TABLAS_ESPERADAS)('aborta si falta la tabla %s', async (ausente) => {

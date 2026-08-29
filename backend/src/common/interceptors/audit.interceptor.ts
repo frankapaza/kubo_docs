@@ -99,14 +99,85 @@ export class AuditInterceptor implements NestInterceptor {
   }
 
   private safePayload(body: unknown, response: unknown): Record<string, unknown> {
-    const scrub = (o: unknown): unknown => {
-      if (!o || typeof o !== 'object') return o;
-      const clone: Record<string, unknown> = { ...(o as Record<string, unknown>) };
-      for (const k of ['password', 'passwordHash', 'accessToken', 'refreshToken']) {
-        if (k in clone) clone[k] = '***';
-      }
-      return clone;
-    };
-    return { request: scrub(body), response: scrub(response) };
+    return { request: scrubSecrets(body), response: scrubSecrets(response) };
+  }
+}
+
+/**
+ * Cualquier clave que **contenga** `password`, `secret` o `token`, sin
+ * distinguir mayúsculas.
+ *
+ * Por patrón y no por lista exacta, y ahí está toda la diferencia. La lista
+ * anterior nombraba cuatro claves (`password`, `passwordHash`, `accessToken`,
+ * `refreshToken`), así que dejaba pasar EN CLARO las dos del cuerpo de aceptar
+ * una invitación: `secret` —el enlace vivo, que el resto de ese módulo trabaja
+ * para que no exista escrito en ningún sitio salvo el correo— y
+ * `passwordConfirmation`, que ES la contraseña, porque el servicio exige que
+ * las dos sean idénticas antes de tocar nada. El asiento quedaba en
+ * `audit_log`, que se lee desde el panel y viaja en cada respaldo de la base:
+ * el secreto al menos se consume al usarse, la contraseña no caduca nunca. Y
+ * era invisible —no falla nada— porque el tachado no tenía ninguna prueba.
+ *
+ * El defecto se repetiría con el próximo campo que estrene un nombre
+ * (`newPassword`, `apiToken`, `webhookSecret`…); el patrón lo cierra de raíz.
+ *
+ * Lo que NO se hace es convertirlo en lista blanca —tachar todo salvo lo
+ * permitido—: este interceptor es global y una lista blanca se comería la
+ * auditoría útil de todo el sistema.
+ */
+const CLAVE_SENSIBLE = /password|secret|token/i;
+
+/** Lo que se guarda en lugar del valor sensible. */
+const TACHADO = '***';
+
+/**
+ * Hasta dónde se baja. Ni los cuerpos ni las respuestas de este producto
+ * anidan tanto; el tope está para que una estructura inesperada no convierta
+ * el tachado en un recorrido caro dentro de una petición.
+ */
+const PROFUNDIDAD_MAXIMA = 8;
+
+/**
+ * Tacha en TODOS los niveles, no solo en el primero.
+ *
+ * El tachado anterior era un `{ ...o }` de un nivel: una contraseña a un solo
+ * salto de profundidad —`{ usuario: { password } }`, o cualquier cuerpo
+ * anidado que llegue mañana— se escribía tal cual. Aquí se recorre el árbol
+ * entero.
+ *
+ * Tres cuidados:
+ *
+ *  - `Date` y `Buffer` se devuelven tal cual: recorrerlos los convertiría en
+ *    `{}` y el asiento perdería el dato.
+ *  - `ancestros` es el CAMINO, no todo lo ya visto: se borra al salir. Así un
+ *    mismo objeto repetido en dos ramas —una entidad compartida— se serializa
+ *    las dos veces, y solo un ciclo de verdad se corta.
+ *  - lo que no es objeto vuelve tal cual: el tachado se decide por la CLAVE,
+ *    nunca por el valor. Una contraseña no se reconoce mirándola.
+ */
+function scrubSecrets(
+  value: unknown,
+  depth = 0,
+  ancestros: WeakSet<object> = new WeakSet(),
+): unknown {
+  if (!value || typeof value !== 'object') return value;
+  if (value instanceof Date || Buffer.isBuffer(value)) return value;
+  if (depth >= PROFUNDIDAD_MAXIMA) return '[...]';
+  if (ancestros.has(value)) return '[circular]';
+
+  ancestros.add(value);
+  try {
+    if (Array.isArray(value)) {
+      return value.map((item) => scrubSecrets(item, depth + 1, ancestros));
+    }
+    const salida: Record<string, unknown> = {};
+    for (const [clave, valor] of Object.entries(value as Record<string, unknown>)) {
+      salida[clave] = CLAVE_SENSIBLE.test(clave)
+        ? TACHADO
+        : scrubSecrets(valor, depth + 1, ancestros);
+    }
+    return salida;
+  } finally {
+    ancestros.delete(value);
   }
 }

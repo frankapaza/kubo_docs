@@ -268,13 +268,35 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
     }
 
     this.logger.log(
-      'Esquema del portal de clientes verificado: las migraciones ' +
-        `${PortalSchemaValidator.MIGRATION_013}, ${PortalSchemaValidator.MIGRATION_014}, ` +
-        `${PortalSchemaValidator.MIGRATION_015}, ${PortalSchemaValidator.MIGRATION_016} ` +
-        `y ${PortalSchemaValidator.MIGRATION_018} ` +
-        'están aplicadas (client_users, notification_templates, ticket_messages, ' +
-        'ticket_attachments y las columnas del actor y de notificación existen).',
+      'Esquema del portal de clientes verificado: están aplicados los ' +
+        `${PortalSchemaValidator.requiredFiles().length} ficheros que exige este validador ` +
+        `(${PortalSchemaValidator.requiredFiles().join(', ')}), con sus ` +
+        `${PortalSchemaValidator.REQUIRED_TABLES.length} tablas y sus ` +
+        `${PortalSchemaValidator.REQUIRED_COLUMNS.length} columnas.`,
     );
+  }
+
+  /**
+   * Todos los ficheros que este validador exige de verdad, sin repetir y en
+   * orden.
+   *
+   * **Derivado de las dos listas, nunca escrito a mano.** El mensaje de
+   * arranque enumeraba cinco migraciones (013, 014, 015, 016 y 018) cuando ya
+   * se exigían nueve —faltaban la 020, la 021, la 023 y la 026, además de los
+   * dos `add_workspace_*.sql` de la cadena del buzón—, y el desfase crecía con
+   * cada tarea: el operador leía «verificado» junto a una lista que ya no
+   * describía lo comprobado. Calcularlo cierra el defecto de raíz en vez de
+   * corregir la lista una vez más — el próximo requisito aparece solo.
+   *
+   * El `sort` deja los `add_*.sql` delante de `migrations/*`, que es además el
+   * orden en que hay que aplicarlos; mismo criterio que `buildMessage`.
+   */
+  private static requiredFiles(): string[] {
+    const todos = [
+      ...PortalSchemaValidator.REQUIRED_TABLES.flatMap((t) => t.files),
+      ...PortalSchemaValidator.REQUIRED_COLUMNS.flatMap((c) => c.files),
+    ];
+    return [...new Set(todos)].sort();
   }
 
   private async findMissingTables(): Promise<MissingItem[]> {

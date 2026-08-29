@@ -23,10 +23,12 @@ const duplicadoDeCorreo = () =>
 
 /**
  * Un secreto cualquiera de pruebas. No hace falta que salga de
- * `generateInvitationSecret`: lo que se ejerce aquí es que la búsqueda vaya
- * por su huella, y la huella se calcula igual venga de donde venga.
+ * `generateInvitationSecret` —lo que se ejerce aquí es que la búsqueda vaya
+ * por su huella, y la huella se calcula igual venga de donde venga— pero sí
+ * que tenga la FORMA de uno: 43 caracteres del alfabeto `base64url`, que es
+ * lo que `isWellFormedInvitationSecret` exige ahora en las dos rutas.
  */
-const SECRETO = 'secreto-de-pruebas-de-la-invitacion';
+const SECRETO = 'secreto-de-pruebas-de-la-invitacionxxxxxxxx';
 
 /** Invitación tal como la devuelve TypeORM: los `bigint` salen como CADENA. */
 function invitacion(over: Record<string, unknown> = {}) {
@@ -66,8 +68,8 @@ function makeService(opciones: {
   /** El INSERT del usuario choca contra la clave única: la carrera de ese séptimo motivo. */
   chocaLaClaveUnica?: boolean;
 } = {}) {
-  const pendientes = { usuarios: [] as any[], marcados: [] as any[] };
-  const confirmadas = { usuarios: [] as any[], marcados: [] as any[] };
+  const pendientes = { usuarios: [] as any[], marcados: [] as any[], reactivados: [] as any[] };
+  const confirmadas = { usuarios: [] as any[], marcados: [] as any[], reactivados: [] as any[] };
   /** Toda consulta que llega al repositorio de invitaciones, para inspeccionarla. */
   const consultas: any[] = [];
 
@@ -82,6 +84,15 @@ function makeService(opciones: {
             if (opciones.chocaLaClaveUnica) throw duplicadoDeCorreo();
             pendientes.usuarios.push(d);
             return { id: '55', ...d };
+          },
+          // Por aquí pasa la reactivación de la decisión 12. Se acumula en
+          // `pendientes` igual que el alta: si el callback lanza después, no
+          // se vuelca nada — es lo que comprueba que la reactivación también
+          // vive DENTRO de la transacción y no sobrevive a un ROLLBACK.
+          update: async (id: any, patch: any) => {
+            if (opciones.fallaEn === 'usuario') throw new Error('fallo al reactivar el usuario');
+            pendientes.reactivados.push([id, patch]);
+            return { affected: 1 };
           },
         };
       }
@@ -104,6 +115,7 @@ function makeService(opciones: {
       const r = await work(manager);
       confirmadas.usuarios.push(...pendientes.usuarios);
       confirmadas.marcados.push(...pendientes.marcados);
+      confirmadas.reactivados.push(...pendientes.reactivados);
       return r;
     }),
     create: jest.fn(),
@@ -282,10 +294,19 @@ describe('los siete motivos de invalidez responden lo mismo, en las dos rutas', 
     // uniforme— y la invitación quedaba inaceptable para siempre, porque el
     // choque contra la clave única se repite en cada intento.
     [
-      'la dirección ya es de un usuario',
+      // ACTIVO, que es como nace un alta del panel: un usuario DESACTIVADO de
+      // esta misma empresa y sin ser administrador ya no invalida el enlace,
+      // lo reactiva (decisión 12; ver el bloque de la reinvitación más abajo).
+      'la dirección ya es de un usuario con acceso',
       {
         fila: invitacion(),
-        usuarioExistente: { id: '5', clientId: '7', email: 'nuevo@kuboti.com' },
+        usuarioExistente: {
+          id: '5',
+          clientId: '7',
+          email: 'nuevo@kuboti.com',
+          isActive: 1,
+          isAdmin: 0,
+        },
       },
     ],
   ];
@@ -470,5 +491,264 @@ describe('la contraseña', () => {
       .catch((e) => e.getResponse());
     expect(cuerpo.message).toMatch(/no coinciden/i);
     expect(cuerpo.message).not.toMatch(/enlace|invitaci/i);
+  });
+});
+
+/**
+ * DECISION 12: ACEPTAR REACTIVA A QUIEN VUELVE, NO CREA OTRA FILA.
+ *
+ * La spec prometia en «Fuera de alcance» que a quien vuelve «se le invita otra
+ * vez» y el codigo lo impedia en los dos extremos: invitar rechazaba el correo
+ * existente, y aceptar lo repetia. Ahora un usuario DESACTIVADO, no
+ * administrador y de la empresa de la invitacion se reactiva con su nueva
+ * contrasena y su nombre nuevo.
+ *
+ * Crear una segunda fila no era alternativa: `uq_client_users_email` hace el
+ * correo unico para todo el sistema, y ademas partiria en dos la historia de
+ * esa persona --sus tickets y sus mensajes cuelgan de la fila que ya existe--,
+ * que es justo lo que la decision 4 («desactivar, no borrar») conserva.
+ */
+describe('aceptar reactiva a un usuario desactivado (decision 12)', () => {
+  /** El desactivado que SI admite reinvitacion: no administrador y de la 7. */
+  const vuelve = {
+    id: '5',
+    clientId: '7',
+    email: 'nuevo@kuboti.com',
+    fullName: 'Nombre De Antes',
+    isActive: 0,
+    isAdmin: 0,
+  };
+
+  it('actualiza la fila que ya existe y NO crea ninguna nueva', async () => {
+    const { service, confirmadas } = makeService({
+      fila: invitacion(),
+      usuarioExistente: vuelve,
+    });
+
+    await service.accept(BUENO);
+
+    expect(confirmadas.usuarios).toHaveLength(0);
+    expect(confirmadas.reactivados).toHaveLength(1);
+    const [id] = confirmadas.reactivados[0];
+    expect(id).toBe(5);
+  });
+
+  it('le devuelve el acceso con la contrasena nueva y el nombre de esta invitacion', async () => {
+    const { service, confirmadas } = makeService({
+      fila: invitacion(),
+      usuarioExistente: vuelve,
+    });
+
+    await service.accept(BUENO);
+
+    const [, patch] = confirmadas.reactivados[0];
+    expect(patch.isActive).toBe(1);
+    // El nombre, el de la invitacion de ahora --no el de la fila vieja--: la
+    // persona puede volver con otro apellido, o el de entonces estar mal
+    // escrito.
+    expect(patch.fullName).toBe('Nuevo Nombre');
+    expect(patch.passwordHash).not.toBe(BUENO.password);
+    expect(await bcrypt.compare(BUENO.password, patch.passwordHash)).toBe(true);
+    // Mismo coste que el alta: otro coste en esta rama seria una segunda regla
+    // para la misma contrasena, y ademas medible desde fuera.
+    expect(patch.passwordHash.split('$')[2]).toBe('10');
+  });
+
+  /**
+   * Lo que la reactivacion NO puede tocar. `isAdmin`, porque desde el portal
+   * no se nombran administradores (decision 2) y este seria el sitio por donde
+   * colarlo; la autoria, porque quien creo a esa persona es un hecho pasado y
+   * reactivar no es crear (decision 8).
+   */
+  it('no reescribe el rol ni la autoria: solo acceso, contrasena y nombre', async () => {
+    const { service, confirmadas } = makeService({
+      fila: invitacion(),
+      usuarioExistente: vuelve,
+    });
+
+    await service.accept(BUENO);
+
+    const [, patch] = confirmadas.reactivados[0];
+    expect(Object.keys(patch).sort()).toEqual(['fullName', 'isActive', 'passwordHash']);
+  });
+
+  it('la invitacion queda consumida y anota a la persona que ya existia', async () => {
+    const { service, confirmadas } = makeService({
+      fila: invitacion(),
+      usuarioExistente: vuelve,
+    });
+
+    await service.accept(BUENO);
+
+    const [, patch] = confirmadas.marcados[0];
+    expect(patch.usedAt).toBeInstanceOf(Date);
+    // El id de la fila reactivada, no un 55 recien creado.
+    expect(patch.acceptedClientUserId).toBe(5);
+  });
+
+  /**
+   * La reactivacion vive DENTRO de la transaccion. Escrita con el repositorio
+   * inyectado, un fallo posterior dejaria a la persona con la contrasena nueva
+   * y la invitacion sin consumir --o al reves--, que es exactamente lo que
+   * «una sola transaccion» promete que no pasa.
+   */
+  it('si el marcado no afecta a ninguna fila, la reactivacion tampoco queda', async () => {
+    const { service, confirmadas } = makeService({
+      fila: invitacion(),
+      usuarioExistente: vuelve,
+      filasAfectadasAlMarcar: 0,
+    });
+
+    await expect(service.accept(BUENO)).rejects.toMatchObject({
+      response: { message: INVITATION_INVALID_MESSAGE },
+    });
+    expect(confirmadas.reactivados).toHaveLength(0);
+  });
+
+  /**
+   * NO SE DISTINGUE POR EL CUERPO. Reactivar y crear devuelven exactamente la
+   * misma respuesta: si la reactivacion se notara desde fuera, quien tiene un
+   * enlace sabria que esa direccion ya existia desactivada.
+   */
+  it('responde exactamente lo mismo que un alta nueva', async () => {
+    const nueva = await makeService({ fila: invitacion() }).service.accept(BUENO);
+    const reactivada = await makeService({
+      fila: invitacion(),
+      usuarioExistente: vuelve,
+    }).service.accept(BUENO);
+
+    expect(reactivada).toEqual(nueva);
+  });
+
+  /**
+   * Y LA VISTA PREVIA SALUDA IGUAL. Si `preview` rechazara este caso y
+   * `accept` lo admitiera, la diferencia entre las dos respuestas delataria
+   * que esa direccion pertenece a un usuario desactivado de esa empresa: el
+   * mismo oraculo que el cuerpo unico existe para negar.
+   */
+  it('la vista previa saluda a quien vuelve, igual que aceptar le deja pasar', async () => {
+    const { service } = makeService({ fila: invitacion(), usuarioExistente: vuelve });
+    await expect(service.preview(SECRETO)).resolves.toEqual({
+      fullName: 'Nuevo Nombre',
+      clientName: 'Acme',
+    });
+  });
+
+  /**
+   * Los casos que NO admiten reinvitacion siguen siendo el septimo motivo de
+   * invalidez, con el cuerpo unico y EN LAS DOS RUTAS. Un administrador
+   * desactivado sigue necesitando a la casa (decisiones 2 y 9), y un
+   * desactivado de otra empresa es la frontera de siempre.
+   */
+  const cerrados: Array<[string, any]> = [
+    ['con acceso', { ...vuelve, isActive: 1 }],
+    ['administrador desactivado', { ...vuelve, isAdmin: 1 }],
+    ['administrador con acceso', { ...vuelve, isActive: 1, isAdmin: 1 }],
+    ['desactivado de OTRA empresa', { ...vuelve, clientId: '99' }],
+  ];
+
+  it.each(cerrados)('un usuario %s invalida el enlace en las dos rutas', async (_n, usuario) => {
+    const opciones = { fila: invitacion(), usuarioExistente: usuario };
+
+    for (const ruta of [
+      (s: PortalInvitationsService) => s.accept(BUENO),
+      (s: PortalInvitationsService) => s.preview(SECRETO),
+    ]) {
+      const { service } = makeService(opciones);
+      const err = await ruta(service).catch((e) => e);
+      expect(err.getStatus()).toBe(400);
+      expect(err.getResponse()).toEqual({
+        code: 'INVITACION_NO_VALIDA',
+        message: INVITATION_INVALID_MESSAGE,
+      });
+    }
+  });
+
+  it('y ninguno de esos casos deja nada escrito', async () => {
+    for (const [, usuario] of cerrados) {
+      const { service, confirmadas } = makeService({
+        fila: invitacion(),
+        usuarioExistente: usuario,
+      });
+      await service.accept(BUENO).catch(() => undefined);
+      expect(confirmadas.usuarios).toHaveLength(0);
+      expect(confirmadas.reactivados).toHaveLength(0);
+      expect(confirmadas.marcados).toHaveLength(0);
+    }
+  });
+
+  /**
+   * La empresa se compara con `sameId`: TypeORM devuelve `client_id` como
+   * CADENA. Con `===` contra el numero, la reinvitacion legitima caeria en el
+   * cuerpo generico y el defecto volveria a ser invisible.
+   */
+  it('la empresa se compara sin exigir el mismo tipo', async () => {
+    const { service, confirmadas } = makeService({
+      fila: invitacion({ clientId: 7 }),
+      usuarioExistente: { ...vuelve, clientId: '7' },
+    });
+    await service.accept(BUENO);
+    expect(confirmadas.reactivados).toHaveLength(1);
+  });
+});
+
+/**
+ * LA FORMA DEL SECRETO, LA MISMA EN LAS DOS RUTAS.
+ *
+ * Aceptar la validaba y la vista previa no miraba nada --le llega por la ruta,
+ * donde no hay `ValidationPipe`--: dos disciplinas para el mismo valor. Ahora
+ * las dos usan `isWellFormedInvitationSecret`, y las dos responden el cuerpo
+ * generico de siempre: una forma mala que respondiera distinto seria un
+ * oraculo mas, no una proteccion.
+ */
+describe('la forma del secreto se comprueba igual al aceptar y en la vista previa', () => {
+  const malos: Array<[string, string]> = [
+    ['vacio', ''],
+    ['demasiado corto', 'x'.repeat(42)],
+    ['demasiado largo', 'x'.repeat(44)],
+    ['con relleno de base64', `${'x'.repeat(42)}=`],
+    ['con un caracter fuera del alfabeto', `${'x'.repeat(42)}+`],
+    ['con una barra', `${'x'.repeat(42)}/`],
+    ['con un espacio', `${'x'.repeat(42)} `],
+  ];
+
+  it.each(malos)('%s: las dos rutas dan el mismo cuerpo unico', async (_n, secreto) => {
+    for (const ruta of [
+      (s: PortalInvitationsService) => s.accept({ ...BUENO, secret: secreto }),
+      (s: PortalInvitationsService) => s.preview(secreto),
+    ]) {
+      const { service } = makeService({ fila: invitacion() });
+      const err = await ruta(service).catch((e) => e);
+      expect(err.getStatus()).toBe(400);
+      expect(err.getResponse()).toEqual({
+        code: 'INVITACION_NO_VALIDA',
+        message: INVITATION_INVALID_MESSAGE,
+      });
+    }
+  });
+
+  it('una forma imposible no llega siquiera a consultar la base', async () => {
+    const { service, invitations } = makeService({ fila: invitacion() });
+    await service.accept({ ...BUENO, secret: 'no-tiene-forma' }).catch(() => undefined);
+    await service.preview('no-tiene-forma').catch(() => undefined);
+    expect(invitations.runInTransaction).not.toHaveBeenCalled();
+    expect(invitations.findByFingerprint).not.toHaveBeenCalled();
+  });
+
+  /**
+   * La confirmacion de contrasena se sigue mirando ANTES que la forma del
+   * enlace. Al reves, dos contrasenas distintas con un enlace mal formado
+   * darian el cuerpo generico y con uno bien formado el error de validacion:
+   * ese par volveria a ser el oraculo que el orden actual cierra.
+   */
+  it('la confirmacion de contrasena se sigue mirando antes que la forma del enlace', async () => {
+    const { service } = makeService({ fila: invitacion() });
+    await expect(
+      service.accept({
+        secret: 'no-tiene-forma',
+        password: 'a'.repeat(9),
+        passwordConfirmation: 'b'.repeat(9),
+      }),
+    ).rejects.toMatchObject({ response: { code: 'VALIDATION_ERROR' } });
   });
 });
