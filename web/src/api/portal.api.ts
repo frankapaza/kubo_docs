@@ -2,9 +2,11 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import type {
   PortalClientSystem,
   PortalCreatedTicket,
+  PortalInvitation,
   PortalMonthlyReport,
   PortalRequirement,
   PortalSession,
+  PortalTeamMember,
   PortalTicket,
   PortalTicketDetail,
   ReportScope,
@@ -189,8 +191,37 @@ export const portalApi = {
     portalApiClient
       .get<PortalMonthlyReport>('/portal/informes/mensual', { params: { year, month, scope } })
       .then((r) => r.data),
+
+  /**
+   * La gente de mi empresa. El backend acota por el `clientId` del token: esta
+   * llamada no manda ninguna empresa, y el `ValidationPipe` global rechazaría
+   * con 400 cualquier propiedad de más si alguien la añadiera.
+   */
+  listTeam: () => portalApiClient.get<PortalTeamMember[]>('/portal/usuarios').then((r) => r.data),
+
+  listInvitations: () =>
+    portalApiClient.get<PortalInvitation[]>('/portal/usuarios/invitaciones').then((r) => r.data),
+
+  invite: (body: { email: string; fullName: string }) =>
+    portalApiClient
+      .post<PortalInvitation>('/portal/usuarios/invitaciones', body)
+      .then((r) => r.data),
+
+  /** Emite un enlace nuevo y anula el anterior. Es el reintento del envío. */
+  resendInvitation: (id: number) =>
+    portalApiClient
+      .post<PortalInvitation>(`/portal/usuarios/invitaciones/${id}/reenviar`)
+      .then((r) => r.data),
+
+  /** Le quita el acceso; no borra nada. El servidor rechaza que uno se quite a sí mismo. */
+  deactivateTeamMember: (id: number) =>
+    portalApiClient.post<PortalTeamMember>(`/portal/usuarios/${id}/desactivar`).then((r) => r.data),
 };
 
 /** Límites de `CreatePortalRequirementDto` en el backend: deben coincidir siempre con él. */
 export const PORTAL_REQUIREMENT_TITLE_MAX_LENGTH = 240;
 export const PORTAL_REQUIREMENT_DESCRIPTION_MAX_LENGTH = 16383;
+
+/** Límites de `InvitePortalUserDto` en el backend: deben coincidir siempre con él. */
+export const PORTAL_INVITE_NAME_MAX_LENGTH = 180;
+export const PORTAL_INVITE_EMAIL_MAX_LENGTH = 180;

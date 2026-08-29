@@ -77,6 +77,24 @@ export default function PortalLayout() {
             >
               Informes
             </NavLink>
+            {/*
+              Solo para quien administra su empresa. `isAdmin` viene del
+              backend (`portal-auth.service.ts`, `!!user.isAdmin`), no de una
+              suposición del navegador. Esconder el enlace NO es la defensa: la
+              defensa es `ClientAdminGuard`.
+            */}
+            {clientUser?.isAdmin && (
+              <NavLink
+                to="/portal/equipo"
+                className={({ isActive }) =>
+                  `text-sm font-medium transition ${
+                    isActive ? 'text-kubo-primary' : 'text-slate-600 hover:text-slate-900'
+                  }`
+                }
+              >
+                Mi equipo
+              </NavLink>
+            )}
             <NavLink
               to="/portal/help"
               className={({ isActive }) =>

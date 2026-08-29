@@ -35,6 +35,7 @@ import PortalRequirementsListPage from './pages/portal/PortalRequirementsListPag
 import PortalRequirementDetailPage from './pages/portal/PortalRequirementDetailPage';
 import PortalMonthlyReportPage from './pages/portal/PortalMonthlyReportPage';
 import PortalHelpPage from './pages/portal/PortalHelpPage';
+import PortalUsersPage from './pages/portal/PortalUsersPage';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { PortalProtectedRoute } from './auth/PortalProtectedRoute';
 import { PortalAuthProvider } from './auth/PortalAuthContext';
@@ -76,6 +77,15 @@ export default function App() {
             <Route path="/portal/requerimientos" element={<PortalRequirementsListPage />} />
             <Route path="/portal/requerimientos/:requirementId" element={<PortalRequirementDetailPage />} />
             <Route path="/portal/informes" element={<PortalMonthlyReportPage />} />
+            {/*
+              Gestión de la propia gente. Va dentro de `PortalProtectedRoute`
+              (hace falta sesión) y ANTES del catch-all de abajo, que se traga
+              cualquier subruta no enumerada y mandaría aquí a /portal/tickets
+              sin ningún error visible. El guard de administrador vive en el
+              backend: esta ruta es alcanzable por cualquier usuario del portal
+              y lo que hace es enseñar el error que responde el servidor.
+            */}
+            <Route path="/portal/equipo" element={<PortalUsersPage />} />
             {/*
               Manual del cliente. Va aquí dentro, y no como ruta suelta, por
               dos motivos: comparte la cabecera del portal (que es desde donde

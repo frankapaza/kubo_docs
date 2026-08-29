@@ -1041,3 +1041,37 @@ export interface PortalMonthlyReport {
   tickets: MonthlyReportTicketsBlock | null;
   requirements: MonthlyReportRequirementsBlock | null;
 }
+
+// ---------------------------------------------------------------------------
+// Gestión de la propia gente desde el portal. Reflejan exactamente la
+// proyección de `PortalUsersController`, no las entidades: `clientId` no está
+// (la empresa es la de la sesión) y `passwordHash` no puede estar.
+// ---------------------------------------------------------------------------
+
+export interface PortalTeamMember {
+  id: number;
+  fullName: string;
+  email: string;
+  isAdmin: boolean;
+  isActive: boolean;
+  lastLoginAt: string | null;
+  createdAt: string;
+}
+
+/**
+ * Una invitación pendiente. **Sin el secreto y sin su huella**: el secreto solo
+ * existe en el correo que se mandó.
+ *
+ * `deliveryFailed` es un booleano y no el texto del error del SMTP a
+ * propósito: por qué exactamente lo rechazó el servidor es diagnóstico interno
+ * y el administrador solo necesita saber que tiene que reenviar.
+ */
+export interface PortalInvitation {
+  id: number;
+  fullName: string;
+  email: string;
+  expiresAt: string;
+  lastSentAt: string | null;
+  deliveryFailed: boolean;
+  createdAt: string;
+}
