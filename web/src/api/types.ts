@@ -1075,3 +1075,14 @@ export interface PortalInvitation {
   deliveryFailed: boolean;
   createdAt: string;
 }
+
+/**
+ * Lo que ve la pantalla de aceptar antes de pedir contraseña: solo el nombre
+ * de la persona invitada y el de su empresa (decisión 10 de la spec). Refleja
+ * `InvitationPreviewView` del backend campo a campo -- nada de correo,
+ * identificadores ni fechas: esta ruta es pública y sin sesión.
+ */
+export interface PortalInvitationPreview {
+  fullName: string;
+  clientName: string | null;
+}

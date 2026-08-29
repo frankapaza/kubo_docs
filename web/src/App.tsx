@@ -36,6 +36,7 @@ import PortalRequirementDetailPage from './pages/portal/PortalRequirementDetailP
 import PortalMonthlyReportPage from './pages/portal/PortalMonthlyReportPage';
 import PortalHelpPage from './pages/portal/PortalHelpPage';
 import PortalUsersPage from './pages/portal/PortalUsersPage';
+import PortalAcceptInvitationPage from './pages/portal/PortalAcceptInvitationPage';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { PortalProtectedRoute } from './auth/PortalProtectedRoute';
 import { PortalAuthProvider } from './auth/PortalAuthContext';
@@ -69,6 +70,15 @@ export default function App() {
       */}
       <Route element={<PortalRoot />}>
         <Route path="/portal/login" element={<PortalLoginPage />} />
+        {/*
+          PÚBLICA, y aquí y no en cualquier otro sitio. Quien abre este enlace
+          no tiene ni puede tener sesión: si la ruta cayera dentro de
+          `PortalProtectedRoute`, el guard lo mandaría a /portal/login y no
+          podría aceptar nunca. Y tiene que estar dentro de `PortalRoot` para
+          quedar fuera del guard de la sesión INTERNA, que la trataría como una
+          ruta del panel y la mandaría al otro login.
+        */}
+        <Route path="/portal/invitacion/:secret" element={<PortalAcceptInvitationPage />} />
         <Route element={<PortalProtectedRoute />}>
           <Route element={<PortalLayout />}>
             <Route path="/portal" element={<Navigate to="/portal/tickets" replace />} />

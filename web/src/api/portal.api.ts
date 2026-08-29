@@ -3,6 +3,7 @@ import type {
   PortalClientSystem,
   PortalCreatedTicket,
   PortalInvitation,
+  PortalInvitationPreview,
   PortalMonthlyReport,
   PortalRequirement,
   PortalSession,
@@ -49,19 +50,37 @@ portalApiClient.interceptors.request.use((config) => {
 let refreshPromise: Promise<string> | null = null;
 
 /**
- * Rutas de autenticación del portal: un 401 en cualquiera de estas nunca debe
- * disparar un intento de refresco. Para `/portal/auth/login` es el caso real
- * — una contraseña equivocada con un refreshToken viejo en `localStorage`
- * gastaba una petición de login MÁS una de refresh, dos peticiones contra el
- * mismo endpoint que ahora tiene limitación de intentos (5/min por IP, ver
- * `ApiThrottlerGuard` en el backend): cada error de tecleo se cobraba doble
- * contra ese cupo. `/portal/auth/refresh` se incluye por completitud —hoy no
- * pasa por aquí porque usa `axios` directo, no `portalApiClient`, según el
- * comentario de `refreshPromise` más abajo— para que si alguna vez cambia de
- * cliente no reabra el mismo problema en silencio.
+ * Rutas del portal que un 401 jamás debe convertir en un intento de refresco.
+ * Las dos de autenticación, y las dos públicas de invitación —la vista previa
+ * y aceptar—: quien las usa no tiene sesión por definición, así que refrescar
+ * allí sería intentar renovar algo que no existe —y, si hubiera un
+ * refreshToken viejo en `localStorage` de otra sesión del mismo navegador,
+ * gastaría cupo del limitador por nada.
+ *
+ * Para `/portal/auth/login` es el caso real de siempre — una contraseña
+ * equivocada con un refreshToken viejo en `localStorage` gastaba una petición
+ * de login MÁS una de refresh, dos peticiones contra el mismo endpoint que
+ * ahora tiene limitación de intentos (5/min por IP, ver `ApiThrottlerGuard`
+ * en el backend): cada error de tecleo se cobraba doble contra ese cupo.
+ * `/portal/auth/refresh` se incluye por completitud —hoy no pasa por aquí
+ * porque usa `axios` directo, no `portalApiClient`, según el comentario de
+ * `refreshPromise` más abajo— para que si alguna vez cambia de cliente no
+ * reabra el mismo problema en silencio.
+ *
+ * Las dos rutas públicas cuelgan de `/portal/invitaciones/` (la vista previa
+ * y aceptar); ninguna otra llamada del portal usa ese prefijo —las de
+ * gestión de equipo cuelgan de `/portal/usuarios/invitaciones/...`—, así que
+ * basta con el prefijo entero y no hace falta enumerar los dos sufijos. Nota:
+ * la rama de `auth` conserva el ancla `(\?|$)` que ya tenía —tiene que
+ * terminar justo ahí, o algo como `/portal/auth/loginx` colaría—. La de
+ * `invitaciones/` no la lleva a propósito: cualquier cosa que empiece por
+ * `/portal/invitaciones/` es una de las dos rutas públicas de este
+ * controlador (`aceptar` o un secreto), y las de gestión de equipo cuelgan de
+ * `/portal/usuarios/invitaciones/...`, un prefijo distinto que esta
+ * expresión no toca.
  */
 function isPortalAuthRequest(url: string | undefined): boolean {
-  return !!url && /\/portal\/auth\/(login|refresh)(\?|$)/.test(url);
+  return !!url && /\/portal\/(auth\/(login|refresh)(\?|$)|invitaciones\/)/.test(url);
 }
 
 function doPortalLogout() {
@@ -216,6 +235,34 @@ export const portalApi = {
   /** Le quita el acceso; no borra nada. El servidor rechaza que uno se quite a sí mismo. */
   deactivateTeamMember: (id: number) =>
     portalApiClient.post<PortalTeamMember>(`/portal/usuarios/${id}/desactivar`).then((r) => r.data),
+
+  /**
+   * Lo que ve la pantalla ANTES de pedir contraseña: el nombre de la persona
+   * invitada y el de su empresa (decisión 10 de la spec — la página saluda,
+   * no es un formulario a ciegas). **No consume la invitación**: se puede
+   * llamar tantas veces como se recargue la página sin que el enlace deje de
+   * servir.
+   */
+  previewInvitation: (secret: string) =>
+    portalApiClient
+      .get<PortalInvitationPreview>(`/portal/invitaciones/${encodeURIComponent(secret)}`)
+      .then((r) => r.data),
+
+  /**
+   * Acepta una invitación. **No devuelve sesión**: el backend responde con el
+   * correo con el que hay que entrar, y la pantalla manda al login. Así esta
+   * ruta pública nunca es una vía para obtener un token sin pasar por el
+   * inicio de sesión normal.
+   *
+   * El secreto viaja en el cuerpo, no en la query, por lo mismo que viaja en
+   * la ruta del enlace y no en su query: es una credencial, y las cadenas de
+   * consulta acaban en registros de servidores intermedios con demasiada
+   * facilidad.
+   */
+  acceptInvitation: (body: { secret: string; password: string; passwordConfirmation: string }) =>
+    portalApiClient
+      .post<{ email: string }>('/portal/invitaciones/aceptar', body)
+      .then((r) => r.data),
 };
 
 /** Límites de `CreatePortalRequirementDto` en el backend: deben coincidir siempre con él. */
