@@ -113,6 +113,10 @@ Aplicando la misma regla a dos superficies distintas salen dos respuestas distin
 
 **La valla que lo sostiene:** los textos de motivo de esta funcionalidad viven **solo** en el servicio de carga masiva y solo salen por las rutas del panel. No se reutilizan, no se exportan hacia el portal, y `INVITE_REJECTED_MESSAGE` sigue siendo el único cuerpo de rechazo de `PortalUsersController`. Si algún día alguien quiere una carga masiva **desde el portal**, esa funcionalidad no puede reutilizar estos textos: tendría que volver a la genérica, porque quien la usa vuelve a estar fuera de la casa.
 
+**Una excepción dentro de la misma regla, y por qué no la contradice:** cuando el motivo es que el correo ya es de **otra empresa**, el texto dice que es de otra empresa y **no dice cuál**. No es que aquí el operador sepa menos —sigue pudiendo pedir `GET /clients` y cruzarlo él mismo—; es que **este informe en concreto no se queda donde la regla lo da por sentado**. La regla de fondo vale para lo que un `ADMIN` lee dentro del panel; este texto, en cambio, es justo el que se copia y se pega en un correo al cliente para que corrija su hoja, y ese correo lo lee alguien de fuera, al que la lista de clientes sí le está vedada. Nombrar ahí a la otra empresa la filtraría por un camino que nadie vigila, y no hace falta abrirlo: quien necesite saber cuál es la busca en el panel, que es donde esa consulta queda dentro de lo que se audita. El resto de motivos —administrador de esta empresa, invitación viva en otra, repetido dentro del archivo— no nombra a ninguna empresa y no cambia.
+
+Esto deja sin sentido, y se retira con él, el mapa de razones sociales que la implementación guardaba en memoria por si varias filas caían en la misma empresa ajena: existía solo para rellenar el nombre en este mensaje, y un mensaje que ya no lleva el nombre no necesita memorizarlo. Si el día de mañana algo más necesita ese mapa, se queda; mientras nada más lo use, no hay razón para que exista.
+
 ### 11. Quién puede: las tres rutas exigen rol `ADMIN`
 
 `ClientUsersController` ya lleva `@UseGuards(JwtAuthGuard, StaffOnlyGuard, RolesGuard)` a nivel de clase, y reparte el rol por ruta: `list` (lectura) va sin `@Roles`, y **`create` y `update` —las dos mutaciones— llevan `@Roles('ADMIN')`**. Se sigue ese criterio, sin inventar uno.
@@ -134,7 +138,13 @@ Pero **sí hay un tope**, por el motivo que gobierna `NOTIFICATION_TEST_THROTTLE
 Así que:
 
 - **`GET …/plantilla` y `POST …/revision`: sin tope.** No mandan nada. Limitar la revisión sería molestar justo en el paso que existe para que el operador corrija y vuelva a intentarlo —y el paso que queremos que repita cuantas veces necesite antes de mandar nada.
-- **`POST …/envio`: con tope propio**, `BULK_INVITE_THROTTLE`, con los mismos dos escalones que el resto (ráfaga de un minuto, sostenido de quince) y valores estrechos: **2 por minuto y 6 cada quince minutos**. El caso real es una carga de 22 una vez. El techo teórico —6 × 200 = 1200 correos cada quince minutos desde una dirección— se anota tal cual: no es un número cómodo, pero está tres órdenes de magnitud por debajo del sin-tope y el actor está autenticado y auditado. El comentario de `throttler.config.ts` que hoy dice «la única excepción» pasa a nombrar las **dos**.
+- **`POST …/envio`: con tope propio**, `BULK_INVITE_THROTTLE`, con los mismos dos escalones que el resto (ráfaga de un minuto, sostenido de quince) y valores acordes al uso real: **1 por minuto y 3 cada quince minutos**.
+
+  La ráfaga de 1 no le estorba a nadie: entre revisar 22 filas y confirmar pasa siempre más de un minuto, así que ningún uso legítimo llega a rozarla. Lo único que corta es un doble clic o una pestaña duplicada.
+
+  El escalón sostenido es el que hay que razonar, porque es el que fija el techo teórico. Se elige mirando lo que de verdad puede pasar en una sesión de trabajo, que no es «un cliente» sino **«un cliente, y a veces dos seguidos»**: dos altas de personal la misma tarde, cada una con su plantilla, su revisión y su confirmación. Con 3 caben esa pareja **y** un reintento —volver a subir el archivo entero porque una fila quedó `INVITADA_SIN_CORREO` (decisión 13)— sin que el operador tenga que esperar entre medias. Con 2 cabría justo la pareja y nada más: el primer reintento del día chocaría con el tope, y un reintento no es un caso raro, es la forma normal de recuperar un correo que no salió.
+
+  El techo teórico que deja esto —3 × 200 = 600 correos cada quince minutos desde una dirección— sigue sin ser un número pequeño, porque no toca el tope de filas por archivo (se queda en 200, sin cambios) y con un solo archivo grande ya se va la mitad del escalón. Pero es la **mitad** del que dejaban los valores anteriores (2 y 6, con un techo de 1200), y llegar a él exige de todos modos que alguien con sesión, rol `ADMIN` y asiento en `audit_log` haya subido tres archivos de 200 filas en el mismo cuarto de hora — no es el patrón de un cliente cargándose, es el patrón de alguien intentando algo raro. Apretarlo más, a 1 por quince minutos, sí llegaría a estorbar el uso legítimo que se quiere seguir permitiendo: dejaría sin sitio al segundo cliente del día, o a cualquier reintento del primero. El comentario de `throttler.config.ts` que hoy dice «la única excepción» pasa a nombrar las **dos**.
 
 Se cuenta por dirección de origen, como todo lo demás, porque `ThrottlerGuard.getTracker` usa `req.ip` y no hay ninguna razón para cambiarlo aquí.
 
@@ -227,7 +237,7 @@ Motivos de rechazo, todos en español y todos explícitos (decisión 10):
 - El correo no tiene un formato válido / el nombre está vacío / alguno de los dos pasa de 180 caracteres — los mismos límites que `InvitePortalUserDto`, no unos nuevos.
 - **Repetido dentro del mismo archivo** (se queda la primera aparición; la segunda dice en qué fila estaba la primera). Se compara con el correo **ya normalizado** —minúsculas, recortado, dominio codificado, con `normalizeEmailAddress`—, porque `Ana@X.com` y `ana@x.com` son la misma persona y dos filas para la misma persona son un error del archivo, no dos invitaciones.
 - Ya es usuario **activo** de esta empresa.
-- Ya es usuario de **otra empresa** — y se dice cuál. Decisión 10: el operador puede leer esa lista igualmente.
+- Ya es usuario de **otra empresa** — sin decir cuál. Es la excepción de la decisión 10: este texto concreto sale del panel hacia un correo al cliente, y ahí no vigila nadie a quién se nombra. Quien necesite saber cuál empresa lo busca en el panel.
 - Es **administrador** de esta empresa (activo o desactivado): la carga no toca administradores.
 - Tiene una **invitación viva en otra empresa**: no se puede invitar hasta que caduque, y la ajena no se toca.
 
@@ -267,6 +277,7 @@ Ha habido **siete** fallos de zona en esta serie de proyectos. En esta funcional
 - **Las guardas**: que `RolesGuard` deje pasar a un `ADMIN` por las tres rutas y **no deje pasar** a un `DEVELOPER` por ninguna, y que el tope de frecuencia esté **solo** en la de envío. La sesión (`JwtAuthGuard`) y la frontera personal/cliente (`StaffOnlyGuard`) van a nivel de clase y ya las cubre lo que hay: lo que estas rutas estrenan es el `@Roles`, y es lo que se prueba.
 - **El tachado de la auditoría**, con la prueba de forma descrita arriba.
 - **La zona horaria**, con las dos formas de prueba descritas arriba.
+- **Que ningún motivo de rechazo nombre a la otra empresa**: el caso de «ya es de otra empresa» se prueba con dos empresas de nombres reales en el mundo de la prueba, comprobando que el motivo dice «otra empresa» y que la razón social de la ajena **no aparece** en el texto — la excepción de la decisión 10, fijada como prueba y no solo como frase.
 
 ## Fuera de alcance
 

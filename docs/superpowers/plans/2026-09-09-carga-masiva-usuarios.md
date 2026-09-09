@@ -2308,7 +2308,11 @@ describe('review — veredictos, uno por fila', () => {
     expect(r.rows[0].reason).toMatch(/administrador/i);
   });
 
-  it('quien ya es de otra empresa se rechaza, y se dice cuál — decisión 10 de la spec', async () => {
+  it('quien ya es de otra empresa se rechaza SIN nombrarla — excepción de la decisión 10', async () => {
+    // El nombre de la empresa 9 ('OTRA S.A.') está en el mundo para comprobar
+    // justo lo contrario de lo que comprobaba esta prueba antes: que NO
+    // aparece en el motivo. Este informe sale del panel hacia un correo al
+    // cliente, y ese correo no lo lee ningún ADMIN.
     const m = mundo({
       usuarios: [{ id: 1, clientId: 9, email: 'ana@x.com', isActive: 1, isAdmin: 0 }],
       clientes: [
@@ -2319,7 +2323,8 @@ describe('review — veredictos, uno por fila', () => {
     const r = await crearServicio(m).review(7, csv([['Ana', 'ana@x.com']]));
 
     expect(r.rows[0].verdict).toBe('RECHAZADA');
-    expect(r.rows[0].reason).toContain('OTRA S.A.');
+    expect(r.rows[0].reason).toMatch(/otra empresa/i);
+    expect(r.rows[0].reason).not.toContain('OTRA S.A.');
   });
 
   it('quien ya tiene invitación viva en esta empresa se REINVITA, y se avisa de que el enlace anterior muere', async () => {
@@ -2427,6 +2432,13 @@ import {
  * entera de empresas y de sus usuarios. La valla que lo sostiene es que estos
  * textos **viven solo aquí** y no se exportan hacia ninguna superficie del
  * portal. Ver la decisión 10 de la spec.
+ *
+ * **Una excepción dentro de esa misma regla:** cuando el motivo es que el
+ * correo ya es de otra empresa, el texto lo dice **sin nombrarla**. Este
+ * informe concreto sale del panel —se copia y se manda por correo al cliente
+ * para que corrija su hoja— y ese correo lo lee alguien de fuera, al que la
+ * lista de empresas sí le está vedada. Quien necesite saber cuál es la busca
+ * en el panel.
  */
 
 /** Los mismos límites que `InvitePortalUserDto`, no unos nuevos. */
@@ -2600,10 +2612,11 @@ export class ClientUsersBulkService {
     const yaEsUsuario = await this.clientUsers.findByEmail(email);
     if (yaEsUsuario) {
       if (!sameId(yaEsUsuario.clientId, clientId)) {
-        // Se dice de qué empresa. Decisión 10 de la spec: quien mira esto ya
-        // puede leerse esa lista entera, y ocultárselo solo le haría ir a
-        // buscarla a mano.
-        return rechazo(`Ese correo ya es de un usuario de ${await this.nombreDe(yaEsUsuario.clientId)}.`);
+        // Se dice QUE es de otra empresa, nunca CUÁL. Es la excepción de la
+        // decisión 10: este informe sale del panel hacia un correo al cliente,
+        // y ese correo no lo lee ningún ADMIN. Quien necesite el nombre lo
+        // busca en el panel, que es donde esa consulta queda auditada.
+        return rechazo('Ese correo ya es de un usuario de otra empresa.');
       }
       if (yaEsUsuario.isAdmin) {
         return rechazo(
@@ -2650,28 +2663,10 @@ export class ClientUsersBulkService {
 
     return { ...base, verdict: 'SE_INVITARA', reason: null };
   }
-
-  /** La razón social de una empresa, memorizada por si varias filas caen en la misma. */
-  private readonly nombres = new Map<number, string>();
-
-  private async nombreDe(clientId: unknown): Promise<string> {
-    const id = Number(clientId);
-    const cacheado = this.nombres.get(id);
-    if (cacheado !== undefined) return cacheado;
-
-    // Un fallo de lectura aquí no puede tumbar la revisión entera por un
-    // adorno del mensaje: lo que importa de esa fila es que se rechaza.
-    const nombre = await this.clients
-      .findByIdOrFail(id)
-      .then((c) => c.razonSocial)
-      .catch(() => 'otra empresa');
-    this.nombres.set(id, nombre);
-    return nombre;
-  }
 }
 ```
 
-> **Ojo con `this.nombres`:** el servicio es singleton, así que ese mapa vive todo lo que viva el proceso. Es aceptable porque una razón social cambia poco y el peor caso es un nombre viejo dentro de un mensaje de rechazo — nunca una decisión. Si algún día hace falta que sea exacto, el mapa se pasa por argumento a `evaluar` y muere con la petición.
+**No hay ningún mapa de razones sociales cacheado en esta clase, y es a propósito.** Una versión anterior de este plan memorizaba la razón social de la otra empresa en un `Map<number, string>` de por vida del proceso, para poder nombrarla en el mensaje de rechazo — con el riesgo de que ese nombre quedara viejo dentro de un mensaje ya mandado. La decisión 10 de la spec ahora dice que ese mensaje **no nombra a la otra empresa**, así que no hay nada que memorizar: el `Map` desaparece con el motivo que lo justificaba, no se deja «por si acaso». Si algún día otra cosa necesita el nombre de una empresa por su id dentro de este servicio, se pide a `ClientsService` en el momento, sin cachear nada.
 
 - [ ] **Step 4: Registrar el servicio en el módulo**
 
@@ -3209,9 +3204,9 @@ describe('las tres rutas de carga masiva', () => {
     expect(guardasDe('bulkTemplate')).not.toContain(ApiThrottlerGuard);
   });
 
-  it('el tope de envío es estrecho: una carga de 22 se hace una vez', () => {
-    expect(BULK_INVITE_THROTTLE[THROTTLER_BURST].limit).toBe(2);
-    expect(BULK_INVITE_THROTTLE[THROTTLER_SUSTAINED].limit).toBe(6);
+  it('el tope de envío es estrecho: una carga de 22 se hace una vez, y dos clientes seguidos también caben', () => {
+    expect(BULK_INVITE_THROTTLE[THROTTLER_BURST].limit).toBe(1);
+    expect(BULK_INVITE_THROTTLE[THROTTLER_SUSTAINED].limit).toBe(3);
   });
 
   it('el tope de tamaño llega de verdad a multer, y es un solo archivo', () => {
@@ -3313,14 +3308,32 @@ En `backend/src/config/throttler.config.ts`, **corrige el comentario de `NOTIFIC
  * tope: no mandan nada, y limitar la revisión molestaría justo en el paso que
  * existe para que el operador corrija y vuelva a intentarlo.
  *
- * Los números son estrechos porque el caso real es una carga de 22 una vez. El
- * techo teórico queda anotado tal cual: 6 × 200 = 1200 correos cada quince
- * minutos desde una dirección. No es cómodo, pero está tres órdenes de
- * magnitud por debajo del sin-tope y el actor está autenticado y auditado.
+ * **Los números, y por qué estos y no otros (decisión 2 de esta revisión del
+ * diseño):** el caso real es una carga de 22 una vez, pero el tope no se
+ * calibra contra ese caso suelto sino contra la sesión de trabajo completa,
+ * que puede traer **dos clientes seguidos** el mismo rato.
+ *
+ * - **Ráfaga: 1 por minuto.** Entre revisar 22 filas y confirmar pasa siempre
+ *   más de un minuto, así que ningún uso legítimo la roza; lo único que corta
+ *   es un doble clic.
+ * - **Sostenido: 3 cada quince minutos.** Caben los dos clientes seguidos
+ *   **y** un reintento —volver a subir el archivo entero porque una fila
+ *   quedó `INVITADA_SIN_CORREO` (decisión 13 de la spec)— sin esperar entre
+ *   medias. Con 2 cabría la pareja y nada más: el primer reintento del día
+ *   chocaría con el tope, y reintentar no es un caso raro.
+ *
+ * El techo teórico queda anotado tal cual: 3 × 200 = 600 correos cada quince
+ * minutos desde una dirección. Es la mitad del que dejaban los valores
+ * anteriores de este mismo diseño (2 y 6, con un techo de 1200), y llegar a él
+ * exige de todos modos tres archivos de 200 filas en el mismo cuarto de hora
+ * desde una sesión con rol ADMIN y asiento en `audit_log` — no es el patrón de
+ * un cliente cargándose, es el patrón de alguien intentando algo raro. Bajarlo
+ * más (a 1) sí estorbaría el uso legítimo: dejaría sin sitio al segundo
+ * cliente del día o a cualquier reintento del primero.
  */
 export const BULK_INVITE_THROTTLE = {
-  [THROTTLER_BURST]: { ttl: ONE_MINUTE_MS, limit: 2 },
-  [THROTTLER_SUSTAINED]: { ttl: FIFTEEN_MINUTES_MS, limit: 6 },
+  [THROTTLER_BURST]: { ttl: ONE_MINUTE_MS, limit: 1 },
+  [THROTTLER_SUSTAINED]: { ttl: FIFTEEN_MINUTES_MS, limit: 3 },
 };
 ```
 
