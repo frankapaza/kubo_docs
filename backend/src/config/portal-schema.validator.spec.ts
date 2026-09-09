@@ -60,6 +60,19 @@ const TABLA_026 = 'client_user_invitations';
  */
 const COLUMNA_026 = { tableName: 'client_users', columnName: 'created_by_client_user_id' };
 
+/**
+ * La columna que añade la 027: el miembro del personal que lanzó una carga
+ * masiva. `invited_by_client_user_id` pasando a nulable NO se comprueba aquí
+ * —este validador mira presencia de tablas y columnas en `information_schema`,
+ * y "existe pero admite nulo" no es ninguna de las dos cosas—, pero como la
+ * 027 hace las dos cosas en el mismo fichero, exigir la columna nueva ya exige
+ * haber pasado la migración entera.
+ */
+const COLUMNA_027 = {
+  tableName: 'client_user_invitations',
+  columnName: 'invited_by_user_id',
+};
+
 const COLUMNAS_ESPERADAS = [
   ...COLUMNAS_013,
   COLUMNA_014,
@@ -69,6 +82,7 @@ const COLUMNAS_ESPERADAS = [
   ...COLUMNAS_021,
   COLUMNA_023,
   COLUMNA_026,
+  COLUMNA_027,
 ];
 
 /**
@@ -368,6 +382,22 @@ describe('PortalSchemaValidator', () => {
 
     await expect(validator.onApplicationBootstrap()).rejects.toThrow(
       /026_invitaciones_portal\.sql/,
+    );
+  });
+
+  it('atribuye a la 027 el autor de personal de una invitación', async () => {
+    const validator = new PortalSchemaValidator(
+      dataSourceWith(
+        TABLAS_ESPERADAS,
+        COLUMNAS_ESPERADAS.filter(
+          (c) =>
+            !(c.tableName === 'client_user_invitations' && c.columnName === 'invited_by_user_id'),
+        ),
+      ),
+    );
+
+    await expect(validator.onApplicationBootstrap()).rejects.toThrow(
+      /027_carga_masiva_usuarios\.sql/,
     );
   });
 

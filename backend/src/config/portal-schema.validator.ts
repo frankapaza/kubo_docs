@@ -85,6 +85,7 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
   private static readonly MIGRATION_021 = 'migrations/021_correo_entrante.sql';
   private static readonly MIGRATION_023 = 'migrations/023_correo_entrante_imap.sql';
   private static readonly MIGRATION_026 = 'migrations/026_invitaciones_portal.sql';
+  private static readonly MIGRATION_027 = 'migrations/027_carga_masiva_usuarios.sql';
 
   /**
    * Lo que hace falta para que exista `workspace_settings.team_inbox_email`, en
@@ -255,6 +256,19 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
       table: 'client_users',
       column: 'created_by_client_user_id',
       files: [PortalSchemaValidator.MIGRATION_026],
+    },
+    // 027: el segundo tipo de autor de una invitación. `client-user-invitation
+    // .entity.ts` ya declara esta columna, así que TypeORM la emite en TODO
+    // SELECT e INSERT sobre `client_user_invitations`: sin ella, el alta desde
+    // el portal responde 500, no solo la carga masiva que la trajo.
+    //
+    // `invited_by_client_user_id` pasando a nulable no se exige aquí, por el
+    // mismo motivo que `created_by` en la 026: este validador mira presencia,
+    // no nulabilidad, y las dos cosas van en el mismo fichero.
+    {
+      table: 'client_user_invitations',
+      column: 'invited_by_user_id',
+      files: [PortalSchemaValidator.MIGRATION_027],
     },
   ];
 

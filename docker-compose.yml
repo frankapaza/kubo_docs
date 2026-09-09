@@ -68,6 +68,11 @@ services:
       # el administrador de cliente que invito. Ninguna de las dos cosas pierde
       # informacion: el MODIFY solo relaja la nulabilidad.
       - ./backend/sql/migrations/026_invitaciones_portal.sql:/docker-entrypoint-initdb.d/026_invitaciones_portal.sql:ro
+      # La 027 da a una invitacion un segundo tipo de autor: el personal de la
+      # casa que lanza una carga masiva. Anade invited_by_user_id, ablanda
+      # invited_by_client_user_id a nulable y exige por CHECK que este
+      # informado exactamente uno de los dos.
+      - ./backend/sql/migrations/027_carga_masiva_usuarios.sql:/docker-entrypoint-initdb.d/027_carga_masiva_usuarios.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s

@@ -31,8 +31,25 @@ export class ClientUserInvitation {
   @Column({ name: 'secret_fingerprint', type: 'varchar', length: 64 })
   secretFingerprint!: string;
 
-  @Column({ name: 'invited_by_client_user_id', type: 'bigint', unsigned: true })
-  invitedByClientUserId!: number;
+  /**
+   * El administrador de cliente que invitó, si la invitación nació en el
+   * portal. **Nulable desde la 027**: cuando la lanza una carga masiva del
+   * panel no hay ningún usuario de cliente al que apuntar —la empresa puede
+   * no tener ninguno todavía, que es el problema que esa funcionalidad
+   * resuelve—, y rellenarlo con uno inventado es el defecto recurrente de
+   * este proyecto: decidir por la ausencia de un valor en vez de por el hecho
+   * que lo determina.
+   *
+   * **Exactamente una de las dos columnas de autor está informada**, nunca
+   * las dos y nunca ninguna. Lo sostiene `chk_cui_un_solo_autor` en la base;
+   * el código no se apoya en eso y trata «ninguna» como enlace no válido.
+   */
+  @Column({ name: 'invited_by_client_user_id', type: 'bigint', unsigned: true, nullable: true })
+  invitedByClientUserId!: number | null;
+
+  /** El miembro del personal que lanzó la carga masiva. Ver la columna hermana. */
+  @Column({ name: 'invited_by_user_id', type: 'bigint', unsigned: true, nullable: true })
+  invitedByUserId!: number | null;
 
   /**
    * Instante absoluto. Se compara con `isInvitationExpired` contra el reloj,
