@@ -252,7 +252,18 @@ export default function AppLayout() {
       </aside>
 
       <main className="flex-1 min-w-0">
-        <div className="max-w-6xl mx-auto px-8 py-8">
+        {/*
+         * Sin tope de ancho: este panel es de tablas -- la mesa de servicio
+         * tiene ocho columnas, y la ficha de cliente, pestanas con listados.
+         * Con `max-w-6xl` (1152px) el contenido se quedaba en una columna
+         * estrecha y el resto de una pantalla ancha era espacio muerto.
+         *
+         * El portal del cliente SI conserva su tope (`max-w-5xl`), y es a
+         * proposito: alli lo que manda es texto -- la conversacion de un
+         * ticket -- y una linea de texto demasiado larga se lee peor, porque
+         * el ojo pierde el salto de renglon.
+         */}
+        <div className="px-8 py-8">
           <Outlet />
         </div>
       </main>
