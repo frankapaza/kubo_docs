@@ -79,7 +79,11 @@ export class PortalUsersController {
   ): Promise<PortalInvitationView> {
     // Los dos identificadores salen del token que `ClientJwtGuard` acaba de
     // verificar. El cuerpo solo aporta nombre y correo.
-    return this.invitations.invite(user.clientId, user.clientUserId, dto);
+    return this.invitations.invite(
+      user.clientId,
+      { kind: 'CLIENT_ADMIN', clientUserId: user.clientUserId },
+      dto,
+    );
   }
 
   /**

@@ -63,7 +63,7 @@ function makeService(opciones: {
   const config = { get: (k: string, f?: string) => f };
 
   const service = new PortalInvitationsService(
-    invitations as any, clientUsers as any, email as any, clients as any, config as any,
+    invitations as any, clientUsers as any, email as any, clients as any, config as any, {} as any,
   );
   return { service, invitations, clientUsers, clients };
 }

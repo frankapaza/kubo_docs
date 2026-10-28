@@ -35,7 +35,7 @@ import { Logger, UnauthorizedException } from '@nestjs/common';
  */
 export function assertSessionScope(
   value: number,
-  campo: 'clientId' | 'clientUserId',
+  campo: 'clientId' | 'clientUserId' | 'userId',
   servicio: string,
 ): void {
   if (Number.isInteger(value) && value > 0) return;
