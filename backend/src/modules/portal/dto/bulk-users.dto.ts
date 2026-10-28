@@ -1,5 +1,7 @@
 import { IsString, Length, Matches } from 'class-validator';
 
+import { MAX_REVISION_LENGTH } from '../domain/bulk-users-review';
+
 /**
  * La confirmación de una carga masiva.
  *
@@ -16,8 +18,15 @@ import { IsString, Length, Matches } from 'class-validator';
  * propiedad que se quiere.
  */
 export class ConfirmBulkInviteDto {
+  /**
+   * El tope de longitud **sale del contrato del archivo**
+   * (`MAX_REVISION_LENGTH`), no de un redondeo: es exactamente lo que ocupa un
+   * bloque con las 200 filas que el lector admite, con nombres y correos del
+   * largo máximo. El número anterior estaba escrito a ojo y se quedaba corto
+   * para ese caso, que es el que la pantalla ofrece.
+   */
   @IsString({ message: 'Falta la revisión que se está confirmando.' })
-  @Length(1, 200_000, { message: 'La revisión no tiene un tamaño admisible.' })
+  @Length(1, MAX_REVISION_LENGTH, { message: 'La revisión no tiene un tamaño admisible.' })
   revision!: string;
 
   /**

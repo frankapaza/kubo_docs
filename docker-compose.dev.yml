@@ -1,6 +1,12 @@
 # Stack de desarrollo local: solo MySQL + Redis expuestos al host.
 # El backend y el frontend corren en modo dev fuera de Docker.
 #
+# Por eso aqui NO hay limite de memoria del backend: no hay contenedor del
+# backend que limitar. El de produccion esta en docker-compose.yml
+# (`backend.mem_limit`), con el numero razonado en su comentario. En
+# desarrollo el techo lo pone la maquina, y el hilo que abre el libro subido
+# lleva su propio tope de 64 MB en el codigo, que si corre aqui.
+#
 # Uso:
 #   docker compose -f docker-compose.dev.yml up -d
 #   cd backend && npm run start:dev

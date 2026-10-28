@@ -24,7 +24,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { ApiThrottlerGuard } from '../../common/guards/api-throttler.guard';
-import { BULK_INVITE_THROTTLE } from '../../config/throttler.config';
+import { BULK_INVITE_THROTTLE, BULK_REVIEW_THROTTLE } from '../../config/throttler.config';
 import { ClientUsersService } from './client-users.service';
 import { BulkReviewResult, BulkSendResult, ClientUsersBulkService } from './client-users-bulk.service';
 import { BULK_TEMPLATE_FILENAME, BULK_TEMPLATE_MIME } from './bulk-users-workbook';
@@ -92,10 +92,18 @@ export class ClientUsersController {
    * Efecto lateral bueno: `req.body` queda vacío, así que los nombres y
    * correos del archivo **no se copian a `audit_log` en el paso que no hace
    * nada**. Se copian en el envío, que es donde el asiento tiene sentido.
+   *
+   * **Lleva tope de frecuencia, y no por el correo:** no manda ninguno. Cada
+   * revisión arranca un hilo con 64 MB de tope para abrir el libro, y ese hilo
+   * acota lo que puede hacer UNA bomba de descompresión pero no el agregado.
+   * El tope es mucho más laxo que el del envío —corregir y volver a subir es
+   * justo lo que este paso existe para permitir—. Ver `BULK_REVIEW_THROTTLE`.
    */
   @Post('carga-masiva/revision')
   @Roles('ADMIN')
   @HttpCode(200)
+  @UseGuards(ApiThrottlerGuard)
+  @Throttle(BULK_REVIEW_THROTTLE)
   // El orden importa: el traductor va POR DELANTE, porque es su `next.handle()`
   // el que envuelve a `FileInterceptor` y el único sitio desde el que se ve el
   // error que produce la propia subida.

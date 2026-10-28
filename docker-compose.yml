@@ -94,6 +94,25 @@ services:
     build:
       context: ./backend
     restart: unless-stopped
+    # Techo de memoria del contenedor. Hasta ahora no habia ninguno: el backend
+    # es UN SOLO proceso —el mismo que manda los avisos y lee el correo
+    # entrante—, asi que un pico suyo no se lo come el, se lo come la maquina
+    # entera, y con ella MySQL, Redis y Caddy. Con el limite, lo que muere es
+    # el contenedor y Docker lo levanta (`restart: unless-stopped`).
+    #
+    # 1 GB, y de donde sale:
+    #   - ~300 MB del proceso en reposo con todo cargado (TypeORM, BullMQ,
+    #     IMAP, los trabajos programados).
+    #   - ~384 MB en el peor caso de la carga masiva: cada revision abre el
+    #     libro subido en un hilo propio con 64 MB de tope
+    #     (WORKBOOK_THREAD_MEMORY_MB) y el tope de frecuencia de esa ruta deja
+    #     6 por minuto (BULK_REVIEW_THROTTLE), asi que seis lecturas solapadas
+    #     es el techo que el codigo permite.
+    #   - El resto, margen para los picos del recolector de basura, que
+    #     necesita sitio libre JUSTO cuando mas memoria hay en uso.
+    # Subir el tope de frecuencia de la revision o el del hilo obliga a volver
+    # a hacer esta cuenta.
+    mem_limit: 1g
     depends_on:
       mysql:
         condition: service_healthy

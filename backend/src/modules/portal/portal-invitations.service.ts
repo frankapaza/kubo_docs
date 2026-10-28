@@ -606,14 +606,14 @@ export class PortalInvitationsService {
       await this.invitations.markSent(Number(invitation.id), ahora, null);
       return toInvitationView({ ...invitation, lastSentAt: ahora, sendError: null });
     } catch (err) {
-      // `describeSendError` y no `(err as Error).message`: un transporte que
+      // `describeThrown` y no `(err as Error).message`: un transporte que
       // rechazara con algo que no es un `Error` —una cadena, un `undefined`—
       // haría reventar el propio catch al leer `.message` de eso, y ese fallo
       // no lo recoge nadie: la petición saldría con un 500, que es lo
       // contrario exacto de lo que promete el comentario de arriba. Hoy
       // nodemailer siempre rechaza con `Error`, pero nada en este código lo
       // fija, y lo que sostiene la promesa tiene que ser el código.
-      const detalle = describeSendError(err);
+      const detalle = describeThrown(err);
       const motivo = detalle.slice(0, 500);
       // Al log entero, a la base recortado, y a la respuesta NUNCA: el detalle
       // de por qué rechazó el servidor SMTP es diagnóstico interno. El secreto
@@ -674,13 +674,18 @@ async function saveOrInvalid<T>(write: () => Promise<T>): Promise<T> {
 }
 
 /**
- * El motivo del fallo de envío, en texto, venga lo que venga del transporte.
+ * El motivo de un fallo, en texto, venga lo que venga de donde reventó.
  *
- * No se asume que sea un `Error`: este valor se lee DENTRO del catch que
- * existe para que el fallo del correo no tumbe la petición, y una excepción
- * ahí no la recoge nadie.
+ * No se asume que sea un `Error`: esto se lee DENTRO de un catch que existe
+ * para que ese fallo no tumbe algo más grande —la petición de la invitación
+ * aquí, la tanda entera de la carga masiva en `ClientUsersBulkService`—, y una
+ * excepción ahí no la recoge nadie.
+ *
+ * Se exporta porque los dos sitios la necesitan y una regla que vale en los dos
+ * no puede estar escrita dos veces: la segunda copia es la que se olvida de
+ * actualizar. El nombre ya no dice «send» por lo mismo.
  */
-function describeSendError(err: unknown): string {
+export function describeThrown(err: unknown): string {
   if (err instanceof Error && typeof err.message === 'string') return err.message;
   return String(err);
 }

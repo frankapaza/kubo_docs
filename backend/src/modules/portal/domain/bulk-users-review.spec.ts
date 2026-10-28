@@ -200,6 +200,35 @@ describe('reviewExpiryLabel', () => {
     expect(reviewExpiryLabel(emitida)).toContain('00:10');
   });
 
+  /**
+   * A las 23:50, «vale hasta las 00:20» a secas se lee como una hora que ya
+   * pasó —la de esta misma mañana— y empuja a volver a subir el archivo sin
+   * ninguna necesidad. El día solo aparece cuando la media hora cruza la
+   * medianoche: el resto del tiempo sería ruido.
+   */
+  it('cuando la media hora cruza la medianoche de Lima, la etiqueta lleva el día', () => {
+    // 04:50Z del 11 de septiembre son las 23:50 del 10 en Lima: caduca a las
+    // 00:20 del 11, que es una hora que SIN la fecha se lee como ya pasada.
+    expect(reviewExpiryLabel(Date.UTC(2026, 8, 11, 4, 50, 0))).toBe('00:20 del 11/09');
+  });
+
+  it('y NO lo lleva cuando no lo cruza: la fecha sobraría', () => {
+    // 15:15 de Lima, caduca a las 15:45 del mismo día.
+    const emitida = Date.UTC(2026, 8, 9, 20, 15, 0);
+    expect(reviewExpiryLabel(emitida)).toBe('15:45');
+  });
+
+  /**
+   * El día se compara EN HORA DE LIMA, no en la del proceso. Con la del
+   * proceso (UTC en producción, y `TZ=UTC` aquí) la medianoche se cruzaría
+   * cinco horas antes de tiempo y la fecha aparecería a media tarde.
+   */
+  it('el cambio de día es el de Lima, no el de UTC', () => {
+    // 18:50 de Lima = 23:50Z: cruza la medianoche de UTC, no la de Lima.
+    const emitida = Date.UTC(2026, 8, 9, 23, 50, 0);
+    expect(reviewExpiryLabel(emitida)).toBe('19:20');
+  });
+
   it('un instante ilegible no imprime Invalid Date: dice algo en español', () => {
     const etiqueta = reviewExpiryLabel(Number.NaN);
     expect(etiqueta).not.toMatch(/Invalid/i);

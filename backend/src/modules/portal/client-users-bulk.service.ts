@@ -14,8 +14,11 @@ import { normalizeEmailAddress } from "./email-address";
 import { sameId } from "../../common/ids";
 import { ConfirmBulkInviteDto } from "./dto/bulk-users.dto";
 import { invitationFingerprintsMatch as reviewMacMatches } from "./domain/invitation-secret";
+import { describeThrown } from "./portal-invitations.service";
 import { buildBulkTemplate, readUploadedGrid } from "./bulk-users-workbook";
 import {
+  MAX_EMAIL_LENGTH,
+  MAX_FULL_NAME_LENGTH,
   RawBulkRow,
   archivoRechazado,
   gridToRows,
@@ -54,9 +57,13 @@ import {
  * en el panel.
  */
 
-/** Los mismos límites que `InvitePortalUserDto`, no unos nuevos. */
-export const MAX_FULL_NAME_LENGTH = 180;
-export const MAX_EMAIL_LENGTH = 180;
+/**
+ * Los mismos límites que `InvitePortalUserDto`, no unos nuevos. Viven en
+ * `domain/bulk-user-file.ts` porque de ellos sale también el tamaño máximo del
+ * bloque firmado; se reexportan aquí para no romper a quien ya los importaba
+ * de este módulo.
+ */
+export { MAX_FULL_NAME_LENGTH, MAX_EMAIL_LENGTH };
 
 /**
  * Comprobación de forma de correo, deliberadamente laxa: algo, una arroba,
@@ -89,7 +96,23 @@ function truncarEco(texto: string): string {
 
 const FORMA_DE_CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export type BulkRowVerdict = "SE_INVITARA" | "SE_REINVITARA" | "RECHAZADA";
+/**
+ * Los veredictos posibles de una fila, **en una lista y no solo en un tipo**.
+ *
+ * El tipo solo existe al compilar; la lista existe al ejecutar, y es lo que
+ * permite que una prueba cotejé esta enumeración con la copia del navegador
+ * (`web/src/api/client-users-bulk.api.ts`). Sin ese cotejo, añadir aquí un
+ * veredicto dejaba la pantalla pintando una etiqueta vacía y una clase de
+ * estilo literalmente «undefined», en silencio por las dos puntas. Ver
+ * `bulk-users-contrato-web.spec.ts`.
+ */
+export const BULK_ROW_VERDICTS = [
+  "SE_INVITARA",
+  "SE_REINVITARA",
+  "RECHAZADA",
+] as const;
+
+export type BulkRowVerdict = (typeof BULK_ROW_VERDICTS)[number];
 
 export interface BulkReviewRow {
   /** Fila del archivo, contando la cabecera. Es lo que hace accionable el informe. */
@@ -114,11 +137,15 @@ export interface BulkReviewResult {
   expiresAtLabel: string;
 }
 
-export type BulkSendOutcome =
-  | "INVITADA"
-  | "INVITADA_SIN_CORREO"
-  | "OMITIDA"
-  | "FALLO";
+/** Los finales posibles de una fila en el envío. Mismo motivo que `BULK_ROW_VERDICTS`. */
+export const BULK_SEND_OUTCOMES = [
+  "INVITADA",
+  "INVITADA_SIN_CORREO",
+  "OMITIDA",
+  "FALLO",
+] as const;
+
+export type BulkSendOutcome = (typeof BULK_SEND_OUTCOMES)[number];
 
 export interface BulkSendRow {
   line: number;
@@ -157,15 +184,44 @@ export const YA_SE_ESTA_ENVIANDO_MESSAGE =
 /** Holgura al comparar con `createdAt`: la columna puede venir truncada al segundo. */
 const HOLGURA_DE_CREACION_MS = 1000;
 
+/**
+ * El aviso de la fila de quien vuelve, en los dos pasos: la revisión lo dice en
+ * futuro («se le enviará»), el envío en pasado. **El mismo hecho, escrito una
+ * vez cada uno**, porque el informe del envío también se le manda a la empresa
+ * y sin él esa fila sale sin explicación ninguna.
+ */
+const RECUPERA_SU_ACCESO_AL_ACEPTAR =
+  "Su acceso a esta empresa estaba desactivado: al aceptar la invitación recuperará su acceso y su historial.";
+
+/** Lo que `evaluar` sabe de una fila, y que no todo cabe en la fila del informe. */
+interface Evaluacion {
+  row: BulkReviewRow;
+  /**
+   * Cierto cuando la fila es la reactivación de un acceso desactivado
+   * (decisión 12 de R4). **No se deduce del veredicto**: una reactivación sale
+   * como `SE_INVITARA`, igual que una persona nueva, así que quien necesite
+   * distinguirlas tiene que preguntarlo aquí y no adivinarlo por el texto del
+   * motivo.
+   */
+  reactivacion: boolean;
+}
+
 @Injectable()
 export class ClientUsersBulkService {
   private readonly logger = new Logger(ClientUsersBulkService.name);
 
   /**
-   * Las revisiones que se están enviando ahora mismo en ESTE proceso, por su
-   * firma. Corta la doble pulsación. No cubre dos procesos a la vez: ahí la
-   * defensa es la comprobación contra la base de `enviarUna`, que solo deja
-   * una ventana de milisegundos entre leer y escribir.
+   * Las revisiones que se están enviando ahora mismo en ESTE proceso,
+   * **indexadas por su firma**.
+   *
+   * Lo que corta es, exactamente, dos confirmaciones **del mismo bloque** a la
+   * vez: el doble clic, y la segunda pestaña que reenvía la misma revisión. NO
+   * corta dos pestañas confirmando bloques DISTINTOS —son dos entradas
+   * distintas del conjunto— ni dos procesos a la vez. Contra esos dos la
+   * defensa es la comprobación contra la base de `enviarUna`, que deja una
+   * ventana de milisegundos entre leer y escribir; el caso secuencial, que es
+   * el que de verdad pasa (reintentar tras una caída a medias), lo cubre
+   * entera.
    */
   private readonly enCurso = new Set<string>();
 
@@ -196,7 +252,7 @@ export class ClientUsersBulkService {
     const rows: BulkReviewRow[] = [];
 
     for (const cruda of crudas) {
-      rows.push(await this.evaluar(cruda, clientId, vistos));
+      rows.push((await this.evaluar(cruda, clientId, vistos)).row);
     }
 
     const aprobadas: ReviewRow[] = rows
@@ -255,12 +311,18 @@ export class ClientUsersBulkService {
    *  3. **Cada fila es su propio try/catch.** Una que revienta no deshace las
    *     anteriores ni impide las siguientes, y la invitación queda creada
    *     aunque el correo falle (reenviar es el reintento).
-   *  4. **Repetir la confirmación no duplica.** Contra la doble pulsación en el
-   *     mismo proceso, `enCurso`; contra el reintento posterior, `enviarUna`
-   *     omite a quien ya tiene una invitación viva nacida después de la
-   *     revisión. Que el bloque caduque a los 30 minutos acota el problema
-   *     pero no lo resuelve: dentro de esa media hora se puede confirmar dos
-   *     veces.
+   *  4. **Repetir la confirmación no duplica.** Contra dos confirmaciones
+   *     simultáneas del mismo bloque en el mismo proceso, `enCurso`; contra el
+   *     reintento posterior, `enviarUna` omite a **cualquier fila que fuera a
+   *     invitarse** y ya tenga una invitación viva nacida después de la
+   *     revisión. Esa comprobación vale para todas y no solo para las que la
+   *     revisión marcó como reinvitación: una persona desactivada sale
+   *     evaluada como «se invitará», y dejarla fuera de la guarda era
+   *     justamente el agujero por el que un reintento le mandaba un segundo
+   *     enlace y mataba el primero. Que el bloque caduque a los 30 minutos
+   *     acota el problema pero no lo resuelve: dentro de esa media hora se
+   *     puede confirmar dos veces, y con 22 correos en serie pasarse del
+   *     tiempo de una petición y reintentar es el caso real, no el raro.
    *
    * Los envíos van en serie: muchas conexiones SMTP simultáneas es la forma
    * más rápida de que el proveedor nos marque.
@@ -348,7 +410,11 @@ export class ClientUsersBulkService {
     const base = { line: fila.line, fullName: fila.fullName, email: fila.email };
 
     try {
-      const ahora = await this.evaluar(fila, clientId, vistos);
+      const { row: ahora, reactivacion } = await this.evaluar(
+        fila,
+        clientId,
+        vistos,
+      );
       if (ahora.verdict === "RECHAZADA") {
         return { ...base, outcome: "OMITIDA", reason: ahora.reason };
       }
@@ -357,24 +423,34 @@ export class ClientUsersBulkService {
       // revisión vio: es de esta misma confirmación repetida (o de alguien
       // que se adelantó), y reemplazarla mandaría un segundo correo y mataría
       // el enlace del primero.
-      if (ahora.verdict === "SE_REINVITARA") {
-        const viva = await this.invitations.findLiveByEmail(
-          ahora.email,
-          new Date(),
-        );
-        const nacida = viva?.createdAt ? new Date(viva.createdAt).getTime() : NaN;
-        if (
-          Number.isFinite(nacida) &&
-          nacida >= issuedAt - HOLGURA_DE_CREACION_MS
-        ) {
-          return {
-            ...base,
-            outcome: "OMITIDA",
-            reason:
-              "Ya se le mandó una invitación después de revisar el archivo (puede que esta " +
-              "confirmación ya se hubiera hecho), así que no se le manda otra.",
-          };
-        }
+      //
+      // Se consulta para CUALQUIER fila que vaya a invitarse, no solo para la
+      // que la revisión marcó como reinvitación. Una reactivación —persona que
+      // ya existe, desactivada, no administradora, de esta empresa— se resuelve
+      // antes de mirar las invitaciones, así que sale como «se invitará»: con
+      // la guarda metida dentro de aquel `if`, a esa fila no se le consultaba
+      // nunca y cada confirmación repetida le mandaba un enlace nuevo.
+      const viva = await this.invitations.findLiveByEmail(
+        ahora.email,
+        new Date(),
+      );
+      const nacida = viva?.createdAt ? new Date(viva.createdAt).getTime() : NaN;
+      if (
+        Number.isFinite(nacida) &&
+        nacida >= issuedAt - HOLGURA_DE_CREACION_MS
+      ) {
+        return {
+          ...base,
+          outcome: "OMITIDA",
+          // Lo que es cierto y nada más: que hay una invitación suya posterior
+          // a la revisión. POR QUÉ la hay no se sabe desde aquí —pudo mandarla
+          // otra persona, que es el caso frecuente— y adivinarlo en un informe
+          // que se le manda a la propia empresa sería contarle algo que no
+          // consta.
+          reason:
+            "Ya se le había mandado una invitación después de revisarse el archivo, así que " +
+            "no se le ha mandado otra: sigue valiendo el enlace que recibió.",
+        };
       }
 
       const view = await this.portalInvitations.invite(
@@ -384,25 +460,38 @@ export class ClientUsersBulkService {
       );
 
       // `deliver` ya se traga el fallo de envío y deja la invitación creada:
-      // aquí solo se traduce a algo que el operador pueda accionar.
-      return view.deliveryFailed
-        ? {
-            ...base,
-            outcome: "INVITADA_SIN_CORREO",
-            reason:
-              "La invitación quedó creada pero el correo no salió. Vuelve a subir esta fila " +
-              "para mandarle un enlace nuevo.",
-          }
-        : { ...base, outcome: "INVITADA", reason: null };
+      // aquí solo se traduce a algo que se pueda leer.
+      if (view.deliveryFailed) {
+        return {
+          ...base,
+          outcome: "INVITADA_SIN_CORREO",
+          reason:
+            "Su invitación quedó creada, pero el correo no llegó a salir: todavía no ha " +
+            "recibido ningún enlace.",
+        };
+      }
+
+      // La fila de quien vuelve se lleva su aviso: es lo único que explica qué
+      // pasa cuando acepte, y la revisión sí lo daba.
+      return {
+        ...base,
+        outcome: "INVITADA",
+        reason: reactivacion ? RECUPERA_SU_ACCESO_AL_ACEPTAR : null,
+      };
     } catch (err) {
-      // Al log, a la respuesta nunca: el motivo técnico es diagnóstico interno.
+      // `describeThrown` y no `(err as Error).message`: este `catch` existe
+      // para que una fila mala no tumbe la tanda, y leerle `.message` a algo
+      // que no es un `Error` lo haría reventar a él mismo —perdiendo el informe
+      // de las filas ya invitadas—, que es lo contrario de lo que promete. Es
+      // la misma función del servicio de invitaciones, no una segunda copia.
       this.logger.error(
-        `Carga masiva: falló la fila ${fila.line} (${fila.email}): ${(err as Error)?.message}`,
+        `Carga masiva: falló la fila ${fila.line} (${fila.email}): ${describeThrown(err)}`,
       );
+      // Al log el detalle técnico; aquí, lo que le consta a quien lo lee.
       return {
         ...base,
         outcome: "FALLO",
-        reason: "No se pudo crear su invitación. Vuelve a subir esta fila.",
+        reason: "No se pudo crear su invitación, así que no ha recibido ningún enlace.",
       };
     }
   }
@@ -454,7 +543,7 @@ export class ClientUsersBulkService {
     cruda: RawBulkRow,
     clientId: number,
     vistos: Map<string, number>,
-  ): Promise<BulkReviewRow> {
+  ): Promise<Evaluacion> {
     // Colapsar espacio en blanco (saltos de línea y tabuladores incluidos) no
     // esconde información; tragarse un carácter de control sí, así que ese se
     // rechaza en vez de limpiarse.
@@ -473,13 +562,16 @@ export class ClientUsersBulkService {
       .trim();
     const email = cruda.email === "" ? "" : normalizeEmailAddress(cruda.email);
     const base = { line: cruda.line, fullName, email };
-    const rechazo = (reason: string): BulkReviewRow => ({
-      ...base,
-      // El eco de lo rechazado se trunca: un archivo roto puede traer celdas enormes.
-      fullName: truncarEco(fullName),
-      email: truncarEco(email),
-      verdict: "RECHAZADA",
-      reason,
+    const rechazo = (reason: string): Evaluacion => ({
+      row: {
+        ...base,
+        // El eco de lo rechazado se trunca: un archivo roto puede traer celdas enormes.
+        fullName: truncarEco(fullName),
+        email: truncarEco(email),
+        verdict: "RECHAZADA",
+        reason,
+      },
+      reactivacion: false,
     });
 
     // El lector marca así la fila con celdas de más y la conserva: se explica con
@@ -541,10 +633,13 @@ export class ClientUsersBulkService {
       // comprobación que nunca puede fallar. Si esa regla cambia en el servicio
       // de invitaciones, hay que cambiarla aquí también.
       return {
-        ...base,
-        verdict: "SE_INVITARA",
-        reason:
-          "Su acceso a esta empresa está desactivado: se le enviará una invitación y, al aceptarla, recuperará su acceso y su historial.",
+        row: {
+          ...base,
+          verdict: "SE_INVITARA",
+          reason:
+            "Su acceso a esta empresa está desactivado: se le enviará una invitación y, al aceptarla, recuperará su acceso y su historial.",
+        },
+        reactivacion: true,
       };
     }
 
@@ -559,15 +654,21 @@ export class ClientUsersBulkService {
         );
       }
       return {
-        ...base,
-        verdict: "SE_REINVITARA",
-        reason:
-          "Ya tiene una invitación pendiente: se le mandará un enlace nuevo y el anterior " +
-          "dejará de funcionar.",
+        row: {
+          ...base,
+          verdict: "SE_REINVITARA",
+          reason:
+            "Ya tiene una invitación pendiente: se le mandará un enlace nuevo y el anterior " +
+            "dejará de funcionar.",
+        },
+        reactivacion: false,
       };
     }
 
-    return { ...base, verdict: "SE_INVITARA", reason: null };
+    return {
+      row: { ...base, verdict: "SE_INVITARA", reason: null },
+      reactivacion: false,
+    };
   }
 }
 

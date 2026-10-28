@@ -51,6 +51,51 @@ const OUTCOME_CLASS: Record<BulkSendOutcome, string> = {
   FALLO: 'text-red-700',
 };
 
+/** Lo que se pinta cuando llega un valor que estas tablas no conocen. */
+const CLASE_NEUTRA = 'text-slate-700';
+
+/**
+ * La etiqueta y la clase de un veredicto o de un resultado, **sin agujeros**.
+ *
+ * Las tablas de arriba están tipadas contra las uniones, así que un valor
+ * nuevo rompe la compilación en cuanto entra en la lista de
+ * `client-users-bulk.api.ts`, y una prueba del backend vigila que esa lista no
+ * se quede atrás. Esto es la tercera red, para la única rendija que queda: un
+ * backend ya desplegado contra un panel todavía en caché. Entonces se pinta el
+ * código tal cual —feo pero cierto— en vez de una celda vacía con una clase
+ * que dice literalmente «undefined».
+ */
+function etiqueta<T extends string>(tabla: Record<T, string>, valor: T): string {
+  return tabla[valor] ?? valor;
+}
+
+function clase<T extends string>(tabla: Record<T, string>, valor: T): string {
+  return tabla[valor] ?? CLASE_NEUTRA;
+}
+
+/**
+ * Lo que se añade al error cuando el envío se corta **sin respuesta del
+ * servidor**: la petición pudo llegar entera y mandar los correos, o no haber
+ * salido siquiera, y desde aquí no hay forma de saberlo. Callarlo empujaría a
+ * repetir, que es lo que manda correos de más.
+ */
+const NO_SE_SABE_SI_SALIERON =
+  'No se sabe si los correos llegaron a salir. Antes de repetir, mira el listado de usuarios.';
+
+/**
+ * Y lo que se añade cuando corta el tope de frecuencia.
+ *
+ * El 429 trae respuesta del servidor, así que el aviso de arriba no se
+ * disparaba — y es justo el error que sale al reintentar después de una caída
+ * de red, o sea exactamente cuando hace falta. Su mensaje genérico («demasiadas
+ * peticiones») no dice ni una palabra sobre los correos, que es lo único que
+ * importa aquí.
+ */
+const EL_TOPE_CORTO_ESTA =
+  'Por esta petición no ha salido ningún correo: el tope la ha cortado antes de llegar al ' +
+  'envío. Pero si vienes de un intento anterior que se quedó sin respuesta, de aquel no se ' +
+  'sabe si salieron: míralo en el listado de usuarios antes de volver a intentarlo.';
+
 /**
  * Una fila del informe copiable. Los motivos son los del servidor, **tal cual**:
  * están redactados para poder mandarse al cliente y corregir su hoja. Aquí solo
@@ -72,7 +117,9 @@ function reviewReport(clientName: string, r: BulkReviewResult): string {
     `Revisión de la carga masiva — ${clientName}`,
     `Se invitará a ${r.totals.willInvite + r.totals.willReinvite}; quedan fuera ${r.totals.rejected}.`,
     '',
-    ...r.rows.map((f) => reportLine(f.line, f.fullName, f.email, VERDICT_LABEL[f.verdict], f.reason)),
+    ...r.rows.map((f) =>
+      reportLine(f.line, f.fullName, f.email, etiqueta(VERDICT_LABEL, f.verdict), f.reason),
+    ),
   ].join('\n');
 }
 
@@ -81,7 +128,9 @@ function sendReport(clientName: string, r: BulkSendResult): string {
     `Resultado de la carga masiva — ${clientName}`,
     `Invitadas ${r.totals.invited}; sin correo ${r.totals.invitedWithoutEmail}; omitidas ${r.totals.skipped}; fallidas ${r.totals.failed}.`,
     '',
-    ...r.rows.map((f) => reportLine(f.line, f.fullName, f.email, OUTCOME_LABEL[f.outcome], f.reason)),
+    ...r.rows.map((f) =>
+      reportLine(f.line, f.fullName, f.email, etiqueta(OUTCOME_LABEL, f.outcome), f.reason),
+    ),
   ].join('\n');
 }
 
@@ -201,13 +250,12 @@ export default function BulkInviteDialog({ open, clientId, clientName, onCancel,
     } catch (e: any) {
       if (!alive.current) return;
       const list = toErrorList(e);
-      // Sin respuesta del servidor no se sabe si salieron o no: no se deja al
-      // operador creer que no, porque reintentar mandaría correos de más.
-      if (!e?.response) {
-        list.push(
-          'No se sabe si los correos llegaron a salir. Antes de repetir, mira el listado de usuarios.',
-        );
-      }
+      // Los dos casos en los que el error, por sí solo, no dice lo único que
+      // importa: si salieron los correos. Sin respuesta del servidor, porque
+      // no se sabe; con un 429, porque el mensaje del tope habla de peticiones
+      // y quien llega ahí suele venir de un intento anterior que se cortó.
+      if (!e?.response) list.push(NO_SE_SABE_SI_SALIERON);
+      else if (e.response.status === 429) list.push(EL_TOPE_CORTO_ESTA);
       setErrors(list);
     } finally {
       sending.current = false;
@@ -351,8 +399,8 @@ export default function BulkInviteDialog({ open, clientId, clientName, onCancel,
                         <td className="py-2 pr-3 text-slate-400">{f.line}</td>
                         <td className="py-2 pr-3 break-words">{f.fullName || '—'}</td>
                         <td className="py-2 pr-3 text-slate-600 break-all">{f.email || '—'}</td>
-                        <td className={`py-2 ${VERDICT_CLASS[f.verdict]}`}>
-                          {VERDICT_LABEL[f.verdict]}
+                        <td className={`py-2 ${clase(VERDICT_CLASS, f.verdict)}`}>
+                          {etiqueta(VERDICT_LABEL, f.verdict)}
                           {f.reason && (
                             <span className="block text-xs text-slate-500 break-words">{f.reason}</span>
                           )}
@@ -405,8 +453,8 @@ export default function BulkInviteDialog({ open, clientId, clientName, onCancel,
                         <td className="py-2 pr-3 text-slate-400">{f.line}</td>
                         <td className="py-2 pr-3 break-words">{f.fullName || '—'}</td>
                         <td className="py-2 pr-3 text-slate-600 break-all">{f.email || '—'}</td>
-                        <td className={`py-2 ${OUTCOME_CLASS[f.outcome]}`}>
-                          {OUTCOME_LABEL[f.outcome]}
+                        <td className={`py-2 ${clase(OUTCOME_CLASS, f.outcome)}`}>
+                          {etiqueta(OUTCOME_LABEL, f.outcome)}
                           {f.reason && (
                             <span className="block text-xs text-slate-500 break-words">{f.reason}</span>
                           )}

@@ -15,6 +15,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { AuditInterceptor } from '../../common/interceptors/audit.interceptor';
 import {
   BULK_INVITE_THROTTLE,
+  BULK_REVIEW_THROTTLE,
   PORTAL_AUTH_THROTTLERS,
   THROTTLER_BURST,
   THROTTLER_SUSTAINED,
@@ -26,8 +27,16 @@ import { BULK_TEMPLATE_FILENAME, BULK_TEMPLATE_MIME } from './bulk-users-workboo
 import { ClientUsersBulkService } from './client-users-bulk.service';
 import { ClientUsersController } from './client-users.controller';
 import { ClientUsersService } from './client-users.service';
-import { BULK_UPLOAD_LIMITS, MAX_BULK_FILE_BYTES } from './domain/bulk-user-file';
 import {
+  BULK_UPLOAD_LIMITS,
+  MAX_BULK_FILE_BYTES,
+  MAX_BULK_ROWS,
+  MAX_EMAIL_LENGTH,
+  MAX_FULL_NAME_LENGTH,
+} from './domain/bulk-user-file';
+import {
+  BULK_SEND_JSON_LIMIT_BYTES,
+  MAX_REVISION_LENGTH,
   REVIEW_VERSION,
   deriveReviewKey,
   encodeReview,
@@ -59,15 +68,27 @@ describe('las tres rutas de carga masiva: metadatos', () => {
     expect(interceptoresDe('bulkReview')).toHaveLength(2);
   });
 
-  it('SOLO la ruta de envío lleva tope de frecuencia', () => {
+  it('el envío y la revisión llevan tope; la plantilla no, que no cuesta nada', () => {
     expect(guardasDe('bulkSend')).toContain(ApiThrottlerGuard);
-    expect(guardasDe('bulkReview')).not.toContain(ApiThrottlerGuard);
+    expect(guardasDe('bulkReview')).toContain(ApiThrottlerGuard);
     expect(guardasDe('bulkTemplate')).not.toContain(ApiThrottlerGuard);
   });
 
   it('el tope de envío es estrecho: una carga se hace una vez, y dos clientes seguidos caben', () => {
     expect(BULK_INVITE_THROTTLE[THROTTLER_BURST].limit).toBe(1);
     expect(BULK_INVITE_THROTTLE[THROTTLER_SUSTAINED].limit).toBe(3);
+  });
+
+  it('el de la revisión es mucho más laxo: corregir y volver a subir es su razón de ser', () => {
+    expect(BULK_REVIEW_THROTTLE[THROTTLER_BURST].limit).toBeGreaterThan(
+      BULK_INVITE_THROTTLE[THROTTLER_BURST].limit,
+    );
+    expect(BULK_REVIEW_THROTTLE[THROTTLER_SUSTAINED].limit).toBeGreaterThan(
+      BULK_INVITE_THROTTLE[THROTTLER_SUSTAINED].limit,
+    );
+    // Y acotado: cada revisión arranca un hilo de 64 MB, así que el techo del
+    // agregado es este número por esos megas. Ver `BULK_REVIEW_THROTTLE`.
+    expect(BULK_REVIEW_THROTTLE[THROTTLER_BURST].limit).toBe(6);
   });
 
   it('el tope de tamaño del archivo es el del dominio, y es un solo archivo', () => {
@@ -330,10 +351,14 @@ describe('las tres rutas por HTTP, con las guardas de verdad', () => {
       expect((await subir(ADMIN(), conCampo)).status).toBe(400);
     });
 
-    it('la revisión NO lleva tope de frecuencia: se puede corregir y volver a subir', async () => {
-      for (let i = 0; i < 8; i++) {
+    it('se puede corregir y volver a subir varias veces seguidas, pero no sin fin', async () => {
+      const permitidas = BULK_REVIEW_THROTTLE[THROTTLER_BURST].limit;
+      for (let i = 0; i < permitidas; i++) {
         expect((await subir(ADMIN(), multipart(CSV))).status).toBe(200);
       }
+      // La siguiente ya no: cada revisión arranca un hilo con 64 MB de tope, y
+      // sin techo varias a la vez son varias veces 64 MB.
+      expect((await subir(ADMIN(), multipart(CSV))).status).toBe(429);
     });
   });
 
@@ -378,50 +403,141 @@ describe('las tres rutas por HTTP, con las guardas de verdad', () => {
       expect((await enviar(ADMIN(), bloque(), '?clientId=7abc')).status).toBe(400);
       expect(mundo.invitadas).toEqual([]);
     });
+
+    /**
+     * **El tope que se anuncia tiene que caber por su propio tubo.** El
+     * analizador de JSON de express trae 100 KB y rechaza antes de cualquier
+     * guarda, pipe o controlador: una revisión legítima de 200 filas con
+     * nombres y correos largos los pasa, así que la pantalla ofrecía un tope
+     * que moría en su extremo. Esta prueba manda exactamente ese caso.
+     */
+    it('una revisión de 200 filas con nombres y correos largos pasa entera', async () => {
+      const filas = Array.from({ length: MAX_BULK_ROWS }, (_, i) => ({
+        line: i + 2,
+        fullName: `Añá ${'ñ'.repeat(MAX_FULL_NAME_LENGTH - 10)}`,
+        email: `${'a'.repeat(MAX_EMAIL_LENGTH - 30)}${i}@correo-largo.com`,
+      }));
+      const cuerpo = bloque(7, filas);
+
+      // Que el caso es el que dice: por encima de los 100 KB de serie.
+      expect(JSON.stringify(cuerpo).length).toBeGreaterThan(100 * 1024);
+
+      const res = await enviar(ADMIN(), cuerpo);
+      expect(res.status).toBe(200);
+      expect((await res.json()).totals.invited).toBe(MAX_BULK_ROWS);
+    });
+
+    it('un cuerpo que se pasa del tope es 413 con el cuerpo de la casa, nunca 500', async () => {
+      const res = await enviar(ADMIN(), {
+        revision: 'x'.repeat(BULK_SEND_JSON_LIMIT_BYTES + 1024),
+        mac: 'a'.repeat(64),
+      });
+      expect(res.status).toBe(413);
+      expect((await res.json()).code).toBe('PAYLOAD_TOO_LARGE');
+      expect(mundo.invitadas).toEqual([]);
+    });
   });
 });
 
+describe('el tope de JSON de la ruta de envío', () => {
+  it('admite el peor cuerpo posible con holgura, y lo calcula en vez de adivinarlo', () => {
+    // El cuerpo más grande que esta ruta puede recibir de buena fe: el bloque
+    // de 200 filas largas, su firma y las comillas de los dos.
+    const PEOR_CUERPO = MAX_REVISION_LENGTH + 64 + 40;
+    expect(BULK_SEND_JSON_LIMIT_BYTES).toBeGreaterThan(PEOR_CUERPO);
+    // Y el tope de la validación es el mismo número derivado, no un redondeo
+    // a ojo que se quede corto como el anterior (200 000).
+    expect(MAX_REVISION_LENGTH).toBeGreaterThan(200_000);
+  });
+});
+
+/**
+ * El tope de envío cuenta TODA petición que llega al guard, válida o no (corre
+ * antes que el pipe). Para ver el 400 de forma sin que el 429 lo tape, cada
+ * intento va con su propia aplicación.
+ *
+ * **Y cada intento espía el servicio**, que es lo que hace que estas pruebas
+ * prueben algo. Antes todos los cuerpos malos llevaban una revisión que el
+ * servicio habría rechazado igual —`revision: 'x'`—, así que daban 400 con los
+ * decoradores del DTO puestos y sin ellos: las mutaciones del DTO y la del
+ * pipe estricto sobrevivían enteras. Lo que distingue un orden del otro no es
+ * el código de estado: es si el servicio llega a enterarse.
+ */
+async function conAplicacionPropia(
+  prueba: (app: TestHttpApp, espia: jest.SpyInstance, mundo: Mundo) => Promise<void>,
+): Promise<void> {
+  const mundo: Mundo = { invitadas: [], clientes: [7] };
+  const servicio = servicioReal(mundo);
+  const espia = jest.spyOn(servicio, 'send');
+  const moduleRef = await Test.createTestingModule({
+    imports: [PassportModule, ThrottlerModule.forRoot({ throttlers: PORTAL_AUTH_THROTTLERS })],
+    controllers: [ClientUsersController],
+    providers: [
+      {
+        provide: ConfigService,
+        useValue: { get: (k: string, d?: string) => (k === 'JWT_ACCESS_SECRET' ? SECRETO_PERSONAL : d) },
+      },
+      JwtStrategy,
+      { provide: ClientUsersService, useValue: {} },
+      { provide: ClientUsersBulkService, useValue: servicio },
+    ],
+  }).compile();
+  const app = await startTestHttpApp(moduleRef);
+  try {
+    await prueba(app, espia, mundo);
+  } finally {
+    await app.close();
+  }
+}
+
+const enviarCrudo = (app: TestHttpApp, cuerpo: unknown) =>
+  app.raw('/client-users/carga-masiva/envio?clientId=7', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${ADMIN()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(cuerpo),
+  });
+
+describe('la validación del cuerpo corta ANTES del servicio', () => {
+  // Un bloque de verdad: firma buena y empresa buena. Si el DTO no lo parara,
+  // el servicio lo aceptaría — y eso es justo lo que mide la prueba.
+  const BUENO = bloque();
+
+  const casos: [string, unknown][] = [
+    ['un bloque firmado válido más un campo de más', { ...BUENO, clientId: 9 }],
+    ['una firma de 64 caracteres que no es hexadecimal', { ...BUENO, mac: 'G'.repeat(64) }],
+    ['una firma hexadecimal en MAYÚSCULAS', { ...BUENO, mac: 'A'.repeat(64) }],
+    ['una revisión vacía', { revision: '', mac: BUENO.mac }],
+    ['una revisión que se pasa del tope derivado', {
+      revision: 'x'.repeat(MAX_REVISION_LENGTH + 1),
+      mac: BUENO.mac,
+    }],
+    ['sin cuerpo', {}],
+  ];
+
+  it.each(casos)('%s: 400, el servicio ni se entera y nada se invita', (_n, cuerpo) =>
+    conAplicacionPropia(async (app, espia, mundo) => {
+      const res = await enviarCrudo(app, cuerpo);
+      expect(res.status).toBe(400);
+      expect(espia).not.toHaveBeenCalled();
+      expect(mundo.invitadas).toEqual([]);
+    }),
+  );
+});
+
 describe('las formas malas llegan al 400 de forma, no al tope', () => {
-  // El tope de envío cuenta TODA petición que llega al guard, válida o no
-  // (corre antes que el pipe). Para ver el 400 de forma sin que el 429 lo
-  // tape, cada intento va con su propia aplicación.
   const casos: [string, unknown][] = [
     ['firma numérica', { revision: 'x', mac: 123 }],
     ['firma en lista', { revision: 'x', mac: ['a'.repeat(64)] }],
     ['firma en objeto', { revision: 'x', mac: { a: 'b' } }],
     ['revisión numérica', { revision: 5, mac: 'a'.repeat(64) }],
-    ['campo de más', { revision: 'x', mac: 'a'.repeat(64), clientId: 9 }],
-    ['sin cuerpo', {}],
   ];
 
-  it.each(casos)('%s: 400 y nada se invita', async (_nombre, cuerpo) => {
-    const mundo: Mundo = { invitadas: [], clientes: [7] };
-    const moduleRef = await Test.createTestingModule({
-      imports: [PassportModule, ThrottlerModule.forRoot({ throttlers: PORTAL_AUTH_THROTTLERS })],
-      controllers: [ClientUsersController],
-      providers: [
-        {
-          provide: ConfigService,
-          useValue: { get: (k: string, d?: string) => (k === 'JWT_ACCESS_SECRET' ? SECRETO_PERSONAL : d) },
-        },
-        JwtStrategy,
-        { provide: ClientUsersService, useValue: {} },
-        { provide: ClientUsersBulkService, useValue: servicioReal(mundo) },
-      ],
-    }).compile();
-    const app = await startTestHttpApp(moduleRef);
-    try {
-      const res = await app.raw('/client-users/carga-masiva/envio?clientId=7', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${ADMIN()}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(cuerpo),
-      });
-      expect(res.status).toBe(400);
+  it.each(casos)('%s: 400 y nada se invita', (_n, cuerpo) =>
+    conAplicacionPropia(async (app, _espia, mundo) => {
+      expect((await enviarCrudo(app, cuerpo)).status).toBe(400);
       expect(mundo.invitadas).toEqual([]);
-    } finally {
-      await app.close();
-    }
-  });
+    }),
+  );
 });
 
 // ---------------------------------------------------------------------------

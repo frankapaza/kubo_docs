@@ -1,6 +1,9 @@
 import { ConfigService } from '@nestjs/config';
 
 import { ClientUsersBulkService } from './client-users-bulk.service';
+// El módulo entero, además de sus nombres sueltos: es lo que permite espiar
+// `decodeReview` y ver si el envío llega a llamarlo.
+import * as revisionModule from './domain/bulk-users-review';
 import {
   REVIEW_TTL_MS,
   REVIEW_VERSION,
@@ -24,6 +27,13 @@ interface Mundo {
   correosQueFallan: Set<string>;
   /** Correos cuya escritura revienta, para probar que una fila mala no tumba las buenas. */
   escriturasQueRevientan: Set<string>;
+  /**
+   * Correos cuya escritura lanza algo que NO es un `Error` y cuyo `.message`
+   * revienta al leerlo. Nada en el código de arriba obliga a que lo lanzado sea
+   * un `Error`, y el `catch` de cada fila existe para que una mala no tumbe la
+   * tanda: si ese mismo `catch` revienta, se pierde el informe entero.
+   */
+  escriturasQueLanzanBasura: Set<string>;
 }
 
 function mundo(parcial: Partial<Mundo> = {}): Mundo {
@@ -34,6 +44,7 @@ function mundo(parcial: Partial<Mundo> = {}): Mundo {
     invitadas: [],
     correosQueFallan: new Set(),
     escriturasQueRevientan: new Set(),
+    escriturasQueLanzanBasura: new Set(),
     ...parcial,
   };
 }
@@ -56,6 +67,13 @@ function crearServicio(m: Mundo) {
   const portalInvitations = {
     invite: async (clientId: number, author: unknown, dto: { email: string; fullName: string }) => {
       if (m.escriturasQueRevientan.has(dto.email)) throw new Error('la base se cayó');
+      if (m.escriturasQueLanzanBasura.has(dto.email)) {
+        throw {
+          get message(): string {
+            throw new Error('y hasta leerte el motivo revienta');
+          },
+        };
+      }
       if (m.pausa) await m.pausa;
       m.invitadas.push({ clientId, author, email: dto.email });
       // Como la real: revoca la viva anterior y deja una nueva, creada ahora.
@@ -145,7 +163,7 @@ describe('send — invitar', () => {
     const r = await crearServicio(m).send(40, 7, bloque([ANA, BEA]));
 
     expect(r.rows.map((f) => f.outcome)).toEqual(['INVITADA', 'INVITADA_SIN_CORREO']);
-    expect(r.rows[1].reason).toMatch(/vuelve a subir/i);
+    expect(r.rows[1].reason).toMatch(/no llegó a salir/i);
     expect(r.totals).toEqual({ invited: 1, invitedWithoutEmail: 1, skipped: 0, failed: 0 });
   });
 
@@ -158,6 +176,18 @@ describe('send — invitar', () => {
     expect(r.totals).toEqual({ invited: 2, invitedWithoutEmail: 0, skipped: 0, failed: 1 });
     // Y el motivo técnico NO sale en la respuesta: es diagnóstico interno.
     expect(r.rows[1].reason).not.toMatch(/la base se cayó/);
+  });
+
+  it('una fila que lanza algo que NO es un Error tampoco tumba la tanda', async () => {
+    const CHE = { line: 4, fullName: 'Che Lópe', email: 'che@x.com' };
+    const m = mundo({ escriturasQueLanzanBasura: new Set(['bea@x.com']) });
+    const r = await crearServicio(m).send(40, 7, bloque([ANA, BEA, CHE]));
+
+    // Lo que se prueba es que ESTO devuelve algo: con `(err as Error).message`
+    // el propio `catch` reventaba al leer el motivo y se perdía el informe de
+    // las filas ya invitadas.
+    expect(r.rows.map((f) => f.outcome)).toEqual(['INVITADA', 'FALLO', 'INVITADA']);
+    expect(m.invitadas.map((i) => i.email)).toEqual(['ana@x.com', 'che@x.com']);
   });
 
   it('los cuatro contadores suman siempre el total de filas', async () => {
@@ -190,6 +220,54 @@ describe('send — el mundo pudo cambiar entre la revisión y la confirmación',
   });
 });
 
+/**
+ * Este informe **se copia del panel y se le manda a la empresa**, igual que el
+ * de la revisión. Así que sus motivos se escriben para quien lo recibe —que no
+ * tiene panel ni archivo— y no para el operador.
+ */
+describe('send — los motivos están escritos para quien recibe el informe', () => {
+  const motivosDe = (r: { rows: { reason: string | null }[] }) =>
+    r.rows.map((f) => f.reason).filter((x): x is string => x !== null);
+
+  it('ninguno manda hacer algo que solo el operador puede hacer', async () => {
+    const CHE = { line: 4, fullName: 'Che Lópe', email: 'che@x.com' };
+    const m = mundo({
+      correosQueFallan: new Set(['ana@x.com']),
+      escriturasQueRevientan: new Set(['bea@x.com']),
+      invitacionesVivas: [{ clientId: 7, email: 'che@x.com', createdAt: new Date() }],
+    });
+    const r = await crearServicio(m).send(40, 7, bloque([ANA, BEA, CHE]));
+
+    expect(r.rows.map((f) => f.outcome)).toEqual([
+      'INVITADA_SIN_CORREO',
+      'FALLO',
+      'OMITIDA',
+    ]);
+    expect(motivosDe(r)).toHaveLength(3);
+    // «Vuelve a subir esta fila» era lo que decían tres de ellos, y es algo que
+    // quien recibe el informe no puede hacer: no tiene panel. Nombrar el
+    // archivo para contar qué pasó sí vale —es el archivo que él mandó—; lo
+    // que no vale es mandarle subirlo.
+    for (const motivo of motivosDe(r)) {
+      expect(motivo).not.toMatch(/vuelve a subir|vuelva a subir|desde el panel/i);
+    }
+  });
+
+  it('el de la fila omitida dice lo que consta y no adivina por qué', async () => {
+    const m = mundo({
+      invitacionesVivas: [{ clientId: 7, email: 'ana@x.com', createdAt: new Date() }],
+    });
+    const r = await crearServicio(m).send(40, 7, bloque([ANA]));
+
+    expect(r.rows[0].outcome).toBe('OMITIDA');
+    // El hecho: hay una invitación suya posterior a la revisión.
+    expect(r.rows[0].reason).toMatch(/después de revisarse el archivo/i);
+    // La conjetura que estaba y no estaba en condiciones de afirmar: en el caso
+    // frecuente la mandó otra persona, y entonces era falsa.
+    expect(r.rows[0].reason).not.toMatch(/puede que|quizá|seguramente/i);
+  });
+});
+
 describe('send — el secreto de la invitación no sube', () => {
   it('en la respuesta no aparece nada con la forma de un secreto de invitación', async () => {
     const r = await crearServicio(mundo()).send(40, 7, bloque([ANA, BEA]));
@@ -201,7 +279,13 @@ describe('send — el secreto de la invitación no sube', () => {
 });
 
 describe('send — el orden de las comprobaciones', () => {
-  it('con la firma mala no se decodifica nada: ni una cadena que no es un bloque llega a interpretarse', async () => {
+  /**
+   * Esta prueba fija que los dos motivos —firma mala y forma mala— dicen lo
+   * mismo, que es una propiedad real y deseada. Lo que NO fija es el ORDEN:
+   * los dos cuerpos son idénticos en los dos órdenes, así que invertirlos la
+   * dejaría en verde. De eso se encarga la siguiente.
+   */
+  it('la firma mala y la forma mala responden exactamente lo mismo', async () => {
     const basura = 'esto-no-es-un-bloque';
     // Firma correcta de basura: pasa la firma, y se rechaza por forma, con el mismo cuerpo.
     const firmada = { revision: basura, mac: reviewMac(CLAVE, basura) };
@@ -211,6 +295,32 @@ describe('send — el orden de las comprobaciones', () => {
       .catch((e) => e);
     expect(e1.getResponse()).toEqual(e2.getResponse());
     expect(e1.getResponse().code).toBe('REVISION_NO_VALIDA');
+  });
+
+  /**
+   * **El orden, anclado donde se puede ver: en lo que se llama.**
+   *
+   * La regla es verificar la firma ANTES de decodificar nada, y las dos formas
+   * de romperla —firmar después de decodificar, y decodificar más caducidad
+   * antes de la firma— sobrevivían a toda la suite porque el cuerpo del error
+   * es el mismo en los tres órdenes. Lo único que las distingue es si el
+   * decodificador llega a tocar una cadena que no hemos firmado nosotros.
+   *
+   * El bloque va **bien formado a propósito**: si fuera basura, una inversión
+   * también acabaría en el mismo error y la prueba volvería a ser una
+   * tautología. Aquí lo único que falla es la firma.
+   */
+  it('con la firma mala NO se decodifica nada: el decodificador no llega a llamarse', async () => {
+    const espia = jest.spyOn(revisionModule, 'decodeReview');
+    try {
+      const b = bloque([ANA]);
+      await expect(
+        crearServicio(mundo()).send(40, 7, { revision: b.revision, mac: 'a'.repeat(64) }),
+      ).rejects.toThrow(/revisión/i);
+      expect(espia).not.toHaveBeenCalled();
+    } finally {
+      espia.mockRestore();
+    }
   });
 
   it('un bloque con la firma de otro secreto no pasa', async () => {
@@ -237,7 +347,47 @@ describe('send — repetir la confirmación no duplica nada', () => {
     expect(primera.totals.invited).toBe(2);
     expect(m.invitadas).toHaveLength(2);
     expect(segunda.rows.map((f) => f.outcome)).toEqual(['OMITIDA', 'OMITIDA']);
-    expect(segunda.rows[0].reason).toMatch(/ya se le mandó/i);
+    expect(segunda.rows[0].reason).toMatch(/ya se le había mandado/i);
+  });
+
+  /**
+   * El hueco de verdad, y el que las dos pruebas de arriba NO cubrían: las dos
+   * usan correos nuevos, que salen de la revisión con una invitación viva y por
+   * tanto como `SE_REINVITARA` en la segunda vuelta. Una persona DESACTIVADA
+   * sale como `SE_INVITARA` —esa rama se resuelve antes de mirar las
+   * invitaciones—, así que con la guarda metida dentro del `if` de la
+   * reinvitación no se le consultaba nunca: cada confirmación repetida le
+   * mandaba un enlace nuevo y mataba el anterior.
+   */
+  it('una persona DESACTIVADA, con el mismo bloque confirmado dos veces: un solo correo', async () => {
+    const m = mundo({
+      usuarios: [{ id: 1, clientId: 7, email: 'ana@x.com', isActive: 0, isAdmin: 0 }],
+    });
+    const s = crearServicio(m);
+    const b = bloque([ANA]);
+
+    const primera = await s.send(40, 7, b);
+    const segunda = await s.send(40, 7, b);
+
+    expect(primera.rows[0].outcome).toBe('INVITADA');
+    expect(segunda.rows[0].outcome).toBe('OMITIDA');
+    expect(segunda.rows[0].reason).toMatch(/ya se le había mandado/i);
+    // Lo medido: un solo envío, no dos.
+    expect(m.invitadas).toHaveLength(1);
+  });
+
+  it('y su primera fila lleva el aviso de que recupera su acceso, que la revisión sí daba', async () => {
+    const m = mundo({
+      usuarios: [{ id: 1, clientId: 7, email: 'ana@x.com', isActive: 0, isAdmin: 0 }],
+    });
+    const r = await crearServicio(m).send(40, 7, bloque([ANA]));
+    expect(r.rows[0].outcome).toBe('INVITADA');
+    expect(r.rows[0].reason).toMatch(/recuperará su acceso y su historial/i);
+  });
+
+  it('una fila corriente sigue saliendo sin motivo: no hay nada que explicar', async () => {
+    const r = await crearServicio(mundo()).send(40, 7, bloque([ANA]));
+    expect(r.rows[0]).toEqual({ ...ANA, outcome: 'INVITADA', reason: null });
   });
 
   it('un reintento tras una caída a medias solo manda lo que faltaba', async () => {

@@ -24,6 +24,19 @@ import { BadRequestException } from '@nestjs/common';
 export const MAX_BULK_ROWS = 200;
 
 /**
+ * Lo más que se admite de un nombre y de un correo. **Los mismos límites que
+ * `InvitePortalUserDto`, no unos nuevos.**
+ *
+ * Viven aquí y no en el servicio porque de ellos sale también el tamaño máximo
+ * del bloque firmado (`MAX_REVISION_LENGTH`), y ese lo necesita el DTO de la
+ * confirmación: tenerlos en el servicio obligaba a que el DTO lo importara, y
+ * el servicio importa el DTO. El dominio no importa a nadie, así que aquí no
+ * hay ciclo posible.
+ */
+export const MAX_FULL_NAME_LENGTH = 180;
+export const MAX_EMAIL_LENGTH = 180;
+
+/**
  * Tope de tamaño: 512 KB. La plantilla con 22 filas pesa unos 6 KB, así que
  * esto son dos órdenes de magnitud de margen y sigue siendo irrelevante para
  * la memoria del proceso.

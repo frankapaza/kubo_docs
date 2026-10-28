@@ -1,7 +1,7 @@
 import { createHmac } from 'crypto';
 
 import { PERU_TIME_ZONE } from '../../../common/time-zone';
-import { MAX_BULK_ROWS } from './bulk-user-file';
+import { MAX_BULK_ROWS, MAX_EMAIL_LENGTH, MAX_FULL_NAME_LENGTH } from './bulk-user-file';
 
 /**
  * Lo que hace que **no se pueda confirmar una cosa distinta de la que se
@@ -41,6 +41,56 @@ export const REVIEW_VERSION = 1;
 
 /** Etiqueta de separación de dominio de la clave: la distingue de la firma de los tokens. */
 export const REVIEW_KEY_DOMAIN_LABEL = 'kubo:carga-masiva-usuarios:v1';
+
+/**
+ * Lo más que puede ocupar UNA fila dentro del JSON del bloque, en bytes, en el
+ * peor caso imaginable:
+ *
+ *  - 48 bytes de andamiaje: `{"line":202,"fullName":"","email":""},`, con sitio
+ *    de sobra para un número de fila de cuatro cifras.
+ *  - El nombre y el correo, hasta `MAX_*_LENGTH` **caracteres** cada uno y
+ *    hasta 4 **bytes** por carácter: el JSON va en UTF-8 y no se escapa a
+ *    `\uXXXX`, así que un nombre entero de caracteres fuera del plano básico es
+ *    el techo. El escape de una comilla o una barra cuesta 2 bytes, menos que
+ *    eso.
+ */
+const MAX_REVIEW_ROW_BYTES = 48 + 4 * (MAX_FULL_NAME_LENGTH + MAX_EMAIL_LENGTH);
+
+/** `{"v":1,"clientId":123456,"issuedAt":1761700000000,"rows":[]}` y un poco más. */
+const MAX_REVIEW_ENVELOPE_BYTES = 96;
+
+/**
+ * Lo más que puede medir la cadena del bloque, **derivado y no elegido**: el
+ * archivo admite `MAX_BULK_ROWS` filas, así que el bloque que las aprueba todas
+ * tiene un tamaño máximo que se puede calcular, y de ese sale el tope de la
+ * validación del cuerpo (`ConfirmBulkInviteDto`) y el del analizador de JSON de
+ * la ruta de envío.
+ *
+ * Que sea derivado es lo que importa: el número anterior (200 000) era un
+ * redondeo a ojo que se quedaba CORTO para 200 filas con nombres y correos
+ * largos, y el cuerpo chocaba contra el analizador de express antes de llegar a
+ * ninguna valla nuestra. Si mañana sube el tope de filas o el de los nombres,
+ * este sube solo.
+ *
+ * Base64url: cuatro caracteres por cada tres bytes.
+ */
+export const MAX_REVISION_LENGTH =
+  Math.ceil((MAX_REVIEW_ENVELOPE_BYTES + MAX_BULK_ROWS * MAX_REVIEW_ROW_BYTES) / 3) * 4;
+
+/**
+ * Lo que el analizador de JSON admite en `POST /client-users/carga-masiva/envio`.
+ *
+ * El de express trae 100 KB por defecto, y rechaza **antes** de que la petición
+ * llegue a ningún guarda, pipe o controlador: una revisión legítima de 200
+ * filas ronda esa cifra, así que el tope que esta funcionalidad anuncia moría
+ * en su propio extremo. Aquí cabe el cuerpo entero del peor caso
+ * (`MAX_REVISION_LENGTH` + la firma + las comillas) con holgura, y sigue siendo
+ * irrelevante para la memoria del proceso.
+ *
+ * Que sea un tope PROPIO de esta ruta y no el global es deliberado: ninguna otra
+ * ruta del producto tiene por qué admitir medio megabyte de JSON.
+ */
+export const BULK_SEND_JSON_LIMIT_BYTES = 768 * 1024;
 
 /** Una fila aprobada en la revisión. El correo ya viene normalizado. */
 export interface ReviewRow {
@@ -184,15 +234,40 @@ export function isReviewExpired(issuedAt: unknown, now: Date): boolean {
  *
  * `hourCycle: 'h23'` y no `hour12: false`: este último, según la versión de
  * ICU, escribe la medianoche como `24:10`.
+ *
+ * **Lleva el día cuando la media hora cruza la medianoche**, y solo entonces.
+ * A las 23:50, «vale hasta las 00:20» a secas se lee como una hora que ya pasó
+ * —la de esta misma mañana— y empuja a volver a subir el archivo sin necesidad.
+ * El resto del tiempo la fecha sobra: la revisión dura media hora, y escribirla
+ * siempre sería ruido en el 99 % de los casos.
  */
 export function reviewExpiryLabel(issuedAt: number): string {
   const caduca = new Date(issuedAt + REVIEW_TTL_MS);
   // Un instante ilegible imprimiría `Invalid Date`, en inglés y a un operador.
   if (Number.isNaN(caduca.getTime())) return 'una hora que no se puede determinar';
-  return caduca.toLocaleTimeString('es-PE', {
+
+  const hora = caduca.toLocaleTimeString('es-PE', {
     timeZone: PERU_TIME_ZONE,
     hour: '2-digit',
     minute: '2-digit',
     hourCycle: 'h23',
   });
+
+  // El día SE COMPARA en hora de Lima, igual que se escribe: con la del proceso
+  // (UTC en producción) la medianoche se cruzaría cinco horas antes de tiempo.
+  const diaDeCaducidad = diaDeLima(caduca);
+  if (diaDeLima(new Date(issuedAt)) === diaDeCaducidad) return hora;
+
+  // Se escribe a partir de la MISMA cadena con la que se ha comparado, en vez
+  // de pedirle otro formato a ICU: así no hay dos lecturas del calendario que
+  // puedan decir días distintos, y el día y el mes salen siempre con sus dos
+  // cifras (ICU, en `es-PE` y para un formato de solo día y mes, se come el
+  // cero de delante y escribe «11/9»).
+  const [, mes, dia] = diaDeCaducidad.split('-');
+  return `${hora} del ${dia}/${mes}`;
+}
+
+/** El día civil de Lima, en una cadena ordenable y comparable (`2026-09-10`). */
+function diaDeLima(instante: Date): string {
+  return instante.toLocaleDateString('en-CA', { timeZone: PERU_TIME_ZONE });
 }

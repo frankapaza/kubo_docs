@@ -17,15 +17,20 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const res = ctx.getResponse<Response>();
     const req = ctx.getRequest<Request>();
 
-    const status =
-      exception instanceof HttpException
-        ? exception.getStatus()
+    // El cuerpo que no cabe se mira ANTES del 500 genérico: no es una
+    // `HttpException`, así que sin esto caía ahí. Ver `cuerpoQueNoCabe`.
+    const noCabe = cuerpoQueNoCabe(exception);
+
+    const status = exception instanceof HttpException
+      ? exception.getStatus()
+      : noCabe
+        ? HttpStatus.PAYLOAD_TOO_LARGE
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
     const payload: string | Record<string, unknown> =
       exception instanceof HttpException
         ? (exception.getResponse() as string | Record<string, unknown>)
-        : { message: 'Internal server error' };
+        : (noCabe ?? { message: 'Internal server error' });
 
     const asObject = typeof payload === 'object' ? payload : {};
     // `message` no es siempre un string: los errores de validación de
@@ -74,4 +79,31 @@ export class HttpExceptionFilter implements ExceptionFilter {
     };
     return map[status] ?? 'INTERNAL_ERROR';
   }
+}
+
+/**
+ * El cuerpo que no cabe en el analizador de express, traducido a un 413 con el
+ * cuerpo de la casa — o `null` si la excepción es otra cosa.
+ *
+ * **Por qué aquí y no en un interceptor de la ruta:** `body-parser` rechaza
+ * antes de que la petición llegue a ningún guarda, pipe, interceptor o
+ * controlador, así que el único sitio desde el que se ve ese error es el filtro
+ * global. Y lo que lanza no es una `HttpException` de Nest sino un error de
+ * `http-errors`, de modo que caía en el 500 genérico: «error interno» para algo
+ * que es culpa del cuerpo enviado y que tiene arreglo por parte de quien lo
+ * envía. Eso engañaba **en todas las rutas**, no solo en la de la carga masiva.
+ *
+ * Se reconoce por `type`, que es el campo con el que `body-parser` etiqueta sus
+ * propios rechazos, y no por el texto del mensaje: el texto cambia con la
+ * siguiente versión menor.
+ */
+function cuerpoQueNoCabe(exception: unknown): Record<string, unknown> | null {
+  const err = exception as { type?: unknown; status?: unknown };
+  if (err?.type !== 'entity.too.large') return null;
+  return {
+    code: 'PAYLOAD_TOO_LARGE',
+    message:
+      'El contenido enviado es demasiado grande para esta operación. ' +
+      'No se ha procesado nada: divídelo en partes más pequeñas y vuelve a intentarlo.',
+  };
 }
