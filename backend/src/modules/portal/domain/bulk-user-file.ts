@@ -42,6 +42,13 @@ export const BULK_UPLOAD_LIMITS = { fileSize: MAX_BULK_FILE_BYTES, files: 1 } as
 export const COLUMNA_NOMBRE = 'Nombre completo';
 export const COLUMNA_CORREO = 'Correo electrónico';
 
+/**
+ * La cabecera del contrato, en una sola cosa: la plantilla la ESCRIBE y
+ * `gridToRows` la EXIGE leyendo esta misma constante, así que no pueden
+ * divergir sin que fallen las pruebas.
+ */
+export const CABECERA_PLANTILLA: readonly string[] = [COLUMNA_NOMBRE, COLUMNA_CORREO];
+
 /** Una fila del archivo, todavía sin validar nada de su contenido. */
 export interface RawBulkRow {
   /** Número de fila **en el archivo**, contando la cabecera. Es lo único que hace accionable el informe. */
@@ -253,7 +260,7 @@ export function gridToRows(grid: string[][]): RawBulkRow[] {
   // ("Nombre completo,Correo,,"): es un artefacto suyo, no un error de nadie.
   const cabecera = (grid[0] ?? []).map(normalizeHeader);
   while (cabecera.length > 0 && cabecera[cabecera.length - 1] === '') cabecera.pop();
-  const esperada = [COLUMNA_NOMBRE, COLUMNA_CORREO].map(normalizeHeader);
+  const esperada = CABECERA_PLANTILLA.map(normalizeHeader);
 
   const cabeceraCorrecta =
     cabecera.length === esperada.length && esperada.every((nombre, i) => cabecera[i] === nombre);
