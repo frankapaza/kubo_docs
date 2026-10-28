@@ -1,6 +1,7 @@
-import { createHmac, timingSafeEqual } from 'crypto';
+import { createHmac } from 'crypto';
 
 import { PERU_TIME_ZONE } from '../../../common/time-zone';
+import { MAX_BULK_ROWS } from './bulk-user-file';
 
 /**
  * Lo que hace que **no se pueda confirmar una cosa distinta de la que se
@@ -38,6 +39,9 @@ export const REVIEW_TTL_MS = 30 * 60 * 1000;
  */
 export const REVIEW_VERSION = 1;
 
+/** Etiqueta de separación de dominio de la clave: la distingue de la firma de los tokens. */
+export const REVIEW_KEY_DOMAIN_LABEL = 'kubo:carga-masiva-usuarios:v1';
+
 /** Una fila aprobada en la revisión. El correo ya viene normalizado. */
 export interface ReviewRow {
   /** Número de fila en el archivo, para poder señalarla en el informe final. */
@@ -73,7 +77,7 @@ export function deriveReviewKey(secret: string): Buffer {
   if (typeof secret !== 'string' || secret === '') {
     throw new Error('No se puede firmar la revisión: falta el secreto del servidor.');
   }
-  return createHmac('sha256', secret).update('kubo:carga-masiva-usuarios:v1').digest();
+  return createHmac('sha256', secret).update(REVIEW_KEY_DOMAIN_LABEL).digest();
 }
 
 /** El bloque, listo para viajar en un JSON y volver verbatim. */
@@ -88,30 +92,14 @@ export function encodeReview(payload: ReviewPayload): string {
  * robustez: no hay ninguna canonicalización que acordar entre las dos puntas,
  * así que no hay ninguna forma de que un `JSON.stringify` con las claves en
  * otro orden rompa la firma por sorpresa. Se verifica **antes** de decodificar.
+ *
+ * Para compararlo con el que llega, `invitationFingerprintsMatch` de
+ * `invitation-secret.ts`: una sola decisión de comparación en tiempo constante,
+ * no una copia. Aquí sí importa que lo sea, a diferencia de las huellas: lo que
+ * el cliente controla es el MAC mismo, sin hash intermedio.
  */
 export function reviewMac(key: Buffer, blob: string): string {
   return createHmac('sha256', key).update(blob, 'utf8').digest('hex');
-}
-
-/**
- * Si dos MAC son el mismo, en tiempo constante.
- *
- * Aquí sí importa, a diferencia de `invitationFingerprintsMatch`: lo que el
- * cliente controla es el MAC mismo, sin pasar por ningún hash intermedio, así
- * que una comparación byte a byte sí daría una señal que seguir.
- *
- * Longitudes distintas devuelven `false` sin llamar a `timingSafeEqual` —que
- * lanzaría—, y eso filtra la longitud, no el contenido: estos MAC son siempre
- * 64 caracteres hexadecimales. Lo que no es texto (ausente, número, objeto)
- * también es `false`: este valor viene del cuerpo de una petición, y una firma
- * mal formada tiene que ser un rechazo, no un error 500.
- */
-export function reviewMacMatches(a: string, b: string): boolean {
-  if (typeof a !== 'string' || typeof b !== 'string') return false;
-  const bytesA = Buffer.from(a, 'utf8');
-  const bytesB = Buffer.from(b, 'utf8');
-  if (bytesA.length !== bytesB.length) return false;
-  return timingSafeEqual(bytesA, bytesB);
 }
 
 /**
@@ -141,7 +129,11 @@ export function decodeReview(blob: string): ReviewPayload | null {
     return null;
   }
   if (typeof p.issuedAt !== 'number' || !Number.isFinite(p.issuedAt)) return null;
-  if (!Array.isArray(p.rows) || p.rows.length === 0) return null;
+  // El mismo tope que el lector del archivo: así no depende de que quien
+  // confirme se acuerde de comprobarlo.
+  if (!Array.isArray(p.rows) || p.rows.length === 0 || p.rows.length > MAX_BULK_ROWS) {
+    return null;
+  }
 
   const rows: ReviewRow[] = [];
   for (const fila of p.rows) {
@@ -194,7 +186,10 @@ export function isReviewExpired(issuedAt: unknown, now: Date): boolean {
  * ICU, escribe la medianoche como `24:10`.
  */
 export function reviewExpiryLabel(issuedAt: number): string {
-  return new Date(issuedAt + REVIEW_TTL_MS).toLocaleTimeString('es-PE', {
+  const caduca = new Date(issuedAt + REVIEW_TTL_MS);
+  // Un instante ilegible imprimiría `Invalid Date`, en inglés y a un operador.
+  if (Number.isNaN(caduca.getTime())) return 'una hora que no se puede determinar';
+  return caduca.toLocaleTimeString('es-PE', {
     timeZone: PERU_TIME_ZONE,
     hour: '2-digit',
     minute: '2-digit',

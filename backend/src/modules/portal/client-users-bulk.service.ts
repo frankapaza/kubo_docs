@@ -59,6 +59,17 @@ export const MAX_EMAIL_LENGTH = 180;
  * válidas—, y no hace falta: lo que decide de verdad si una dirección existe
  * es que el correo llegue.
  */
+const CARACTER_DE_CONTROL = /\p{Cc}/u;
+
+/** Lo más que se repite de una celda rechazada en el informe. */
+const MAX_ECHO_LENGTH = 200;
+
+function truncarEco(texto: string): string {
+  return texto.length > MAX_ECHO_LENGTH
+    ? `${texto.slice(0, MAX_ECHO_LENGTH)}…`
+    : texto;
+}
+
 const FORMA_DE_CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export type BulkRowVerdict = "SE_INVITARA" | "SE_REINVITARA" | "RECHAZADA";
@@ -206,11 +217,17 @@ export class ClientUsersBulkService {
     clientId: number,
     vistos: Map<string, number>,
   ): Promise<BulkReviewRow> {
-    const fullName = cruda.fullName.trim();
+    // Colapsar espacio en blanco (saltos de línea y tabuladores incluidos) no
+    // esconde información; tragarse un carácter de control sí, así que ese se
+    // rechaza en vez de limpiarse.
+    const fullName = cruda.fullName.replace(/\s+/g, " ").trim();
     const email = cruda.email === "" ? "" : normalizeEmailAddress(cruda.email);
     const base = { line: cruda.line, fullName, email };
     const rechazo = (reason: string): BulkReviewRow => ({
       ...base,
+      // El eco de lo rechazado se trunca: un archivo roto puede traer celdas enormes.
+      fullName: truncarEco(fullName),
+      email: truncarEco(email),
       verdict: "RECHAZADA",
       reason,
     });
@@ -221,6 +238,12 @@ export class ClientUsersBulkService {
     if (cruda.problem) return rechazo(cruda.problem);
 
     if (fullName === "") return rechazo("Falta el nombre.");
+    if (CARACTER_DE_CONTROL.test(fullName)) {
+      return rechazo(
+        "El nombre lleva un carácter de control invisible (suele venir de pegar desde otro " +
+          "programa). Bórralo y vuelve a escribir el nombre.",
+      );
+    }
     if (fullName.length > MAX_FULL_NAME_LENGTH) {
       return rechazo(`El nombre pasa de ${MAX_FULL_NAME_LENGTH} caracteres.`);
     }

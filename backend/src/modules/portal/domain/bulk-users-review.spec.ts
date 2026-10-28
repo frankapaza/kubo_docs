@@ -1,4 +1,5 @@
 import {
+  REVIEW_KEY_DOMAIN_LABEL,
   REVIEW_TTL_MS,
   REVIEW_VERSION,
   decodeReview,
@@ -7,8 +8,9 @@ import {
   isReviewExpired,
   reviewExpiryLabel,
   reviewMac,
-  reviewMacMatches,
 } from './bulk-users-review';
+import { MAX_BULK_ROWS } from './bulk-user-file';
+import { invitationFingerprintsMatch as reviewMacMatches } from './invitation-secret';
 
 const CLAVE = deriveReviewKey('un-secreto-de-pruebas');
 
@@ -56,6 +58,31 @@ describe('el bloque firmado', () => {
     expect(deriveReviewKey('x').toString('utf8')).not.toBe('x');
   });
 
+  it('la clave derivada es EXACTAMENTE este vector, escrito a mano: fija la etiqueta y el largo', () => {
+    // HMAC-SHA256(clave 'secreto-de-vector', 'kubo:carga-masiva-usuarios:v1'),
+    // calculado aparte con Node y copiado aquí. Cambiar la etiqueta o el largo
+    // de la clave cambia este valor.
+    expect(deriveReviewKey('secreto-de-vector').toString('hex')).toBe(
+      '3cd6ebf2ac821c86b560dd48825797fc559d6abccc83fe04a6960565a1e699d5',
+    );
+    expect(deriveReviewKey('secreto-de-vector')).toHaveLength(32);
+    expect(REVIEW_KEY_DOMAIN_LABEL).toBe('kubo:carga-masiva-usuarios:v1');
+  });
+
+  it('la revisión vale media hora, por su valor', () => {
+    expect(REVIEW_TTL_MS).toBe(1_800_000);
+  });
+
+  it('una firma contra sí misma con SOLO el último carácter cambiado no casa: mata el comparador de prefijo y el truncado', () => {
+    const mac = reviewMac(CLAVE, encodeReview(PAYLOAD));
+    const ultimo = mac[mac.length - 1] === 'a' ? 'b' : 'a';
+    const casiIgual = `${mac.slice(0, -1)}${ultimo}`;
+    expect(casiIgual).toHaveLength(mac.length);
+    expect(reviewMacMatches(mac, mac)).toBe(true);
+    expect(reviewMacMatches(mac, casiIgual)).toBe(false);
+    expect(reviewMacMatches(casiIgual, mac)).toBe(false);
+  });
+
   it('sin secreto no hay clave: una clave vacía firmaría con algo que cualquiera conoce', () => {
     expect(() => deriveReviewKey('')).toThrow();
     expect(() => deriveReviewKey(undefined as unknown as string)).toThrow();
@@ -101,6 +128,13 @@ describe('decodeReview — todo lo que no tenga EXACTAMENTE la forma es null', (
     ['cadena vacía', ''],
   ])('%s → null', (_caso, blob) => {
     expect(decodeReview(blob)).toBeNull();
+  });
+
+  it('más filas que el tope del archivo → null; justo el tope, vale', () => {
+    const filas = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ line: i + 2, fullName: 'A', email: `a${i}@x.com` }));
+    expect(decodeReview(encodeReview({ ...PAYLOAD, rows: filas(MAX_BULK_ROWS) }))).not.toBeNull();
+    expect(decodeReview(encodeReview({ ...PAYLOAD, rows: filas(MAX_BULK_ROWS + 1) }))).toBeNull();
   });
 
   it('un valor que no es cadena → null, sin lanzar', () => {
@@ -164,5 +198,16 @@ describe('reviewExpiryLabel', () => {
     // 05:10Z = 00:10 en Lima.
     const emitida = Date.UTC(2026, 8, 10, 5, 10, 0) - REVIEW_TTL_MS;
     expect(reviewExpiryLabel(emitida)).toContain('00:10');
+  });
+
+  it('un instante ilegible no imprime Invalid Date: dice algo en español', () => {
+    const etiqueta = reviewExpiryLabel(Number.NaN);
+    expect(etiqueta).not.toMatch(/Invalid/i);
+    expect(etiqueta).toBe('una hora que no se puede determinar');
+  });
+
+  it('suma exactamente media hora', () => {
+    // 20:15Z + 30 min = 20:45Z = 15:45 en Lima.
+    expect(reviewExpiryLabel(Date.UTC(2026, 8, 9, 20, 15, 0))).toContain('15:45');
   });
 });

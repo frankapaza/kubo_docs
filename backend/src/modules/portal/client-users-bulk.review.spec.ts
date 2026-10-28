@@ -366,3 +366,40 @@ describe("review — lo que el brief añade a la receta", () => {
     expect(r.rows[0].reason).toMatch(/ya es usuario/i);
   });
 });
+
+describe("review — nombres con espacio en blanco y con caracteres de control", () => {
+  it("colapsa espacios, tabuladores y saltos de línea a uno solo y recorta", async () => {
+    const r = await crearServicio(mundo()).review(
+      7,
+      csv([['"  Ana \t\n  Pérez  "', "ana@x.com"]]),
+    );
+    expect(r.rows[0].verdict).toBe("SE_INVITARA");
+    expect(r.rows[0].fullName).toBe("Ana Pérez");
+  });
+
+  it("un carácter de control dentro del nombre rechaza la fila, la nombra y dice qué pasa", async () => {
+    const r = await crearServicio(mundo()).review(
+      7,
+      csv([
+        ["Ana\u0007Pérez", "ana@x.com"],
+        ["Luis Gómez", "luis@x.com"],
+      ]),
+    );
+    expect(r.rows[0].verdict).toBe("RECHAZADA");
+    expect(r.rows[0].line).toBe(2);
+    expect(r.rows[0].reason).toMatch(/control/i);
+    expect(r.rows[1].verdict).toBe("SE_INVITARA");
+    // Y no viaja en el bloque firmado.
+    expect(decodeReview(r.revision)!.rows.map((f) => f.fullName)).toEqual(["Luis Gómez"]);
+  });
+
+  it("el eco de una fila rechazada se trunca con puntos suspensivos", async () => {
+    const r = await crearServicio(mundo()).review(
+      7,
+      csv([["N".repeat(5000), "ana@x.com"]]),
+    );
+    expect(r.rows[0].verdict).toBe("RECHAZADA");
+    expect(r.rows[0].fullName.length).toBeLessThan(300);
+    expect(r.rows[0].fullName.endsWith("…")).toBe(true);
+  });
+});
