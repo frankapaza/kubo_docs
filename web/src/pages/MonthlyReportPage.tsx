@@ -5,6 +5,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { reportsApi } from '../api/reports.api';
 import { clientsApi } from '../api/clients.api';
+import { csvEscape } from '../lib/csv';
 import { Button } from '../components/ui/Button';
 import { Card, CardBody, CardHeader } from '../components/ui/Card';
 import { ServiceCategoryBadge } from '../components/ui/Badge';
@@ -92,7 +93,7 @@ function buildRows(report: MonthlyAttentionReport, activeCols: string[]) {
 function exportCsv(report: MonthlyAttentionReport, activeCols: string[], monthLabel: string) {
   const headers = activeCols.map((k) => REPORT_COLUMNS.find((c) => c.key === k)!.label);
   const rows = buildRows(report, activeCols);
-  const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  const escape = csvEscape; // neutraliza formulas, ver `../lib/csv`
   const lines = [headers.map(escape).join(','), ...rows.map((r) => r.map(escape).join(','))];
   const bom = '﻿';
   const blob = new Blob([bom + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
