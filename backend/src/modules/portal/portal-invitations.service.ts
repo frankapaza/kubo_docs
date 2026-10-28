@@ -259,8 +259,7 @@ export class PortalInvitationsService {
 
     const ahora = new Date();
     const secret = generateInvitationSecret();
-    // Misma disciplina de atomicidad que `inviteWithSecret`: revocar y crear
-    // en una única transacción.
+
     const autorPrevio = autorDe(previa);
     // Una invitación sin ningún autor no se puede reenviar: no habría a quién
     // atribuir la nueva, y inventarlo es justo lo que la decisión 8 prohíbe.
@@ -268,6 +267,8 @@ export class PortalInvitationsService {
       throw new NotFoundException({ code: 'NOT_FOUND', message: 'Invitación no encontrada' });
     }
 
+    // Misma disciplina de atomicidad que `inviteWithSecret`: revocar y crear
+    // en una única transacción.
     const invitation = await this.replaceInvitation({
       clientId,
       email: previa.email,
@@ -492,6 +493,25 @@ export class PortalInvitationsService {
   }
 
   /**
+   * Si el autor de esa invitación sigue habilitado para haberla hecho.
+   * Vive en un solo sitio y lo llaman `accept` y `preview`: si cada una
+   * escribiera la suya, la vista previa podría saludar ante un enlace que
+   * aceptar rechaza, y esa diferencia delata el motivo (decisión 10 de R4).
+   */
+  private async autorSigueValido(inv: ClientUserInvitation): Promise<boolean> {
+    const autor = autorDe(inv);
+    if (!autor) return false;
+
+    if (autor.kind === 'CLIENT_ADMIN') {
+      const invitador = await this.clientUsers.findById(autor.clientUserId);
+      return !!invitador && !!invitador.isActive;
+    }
+
+    const empleado = await this.users.findById(autor.userId);
+    return !!empleado && !!empleado.isActive;
+  }
+
+  /**
    * Lo que ve la pantalla de aceptar ANTES de pedir contraseña. Decisión 10
    * de la spec: la página saluda, no es un formulario a ciegas.
    *
@@ -511,25 +531,6 @@ export class PortalInvitationsService {
    * rechaza, la diferencia entre las dos respuestas delataría ese motivo
    * igual de bien que un texto distinto.
    */
-  /**
-   * Si el autor de esa invitación sigue habilitado para haberla hecho.
-   * Vive en un solo sitio y lo llaman `accept` y `preview`: si cada una
-   * escribiera la suya, la vista previa podría saludar ante un enlace que
-   * aceptar rechaza, y esa diferencia delata el motivo (decisión 10 de R4).
-   */
-  private async autorSigueValido(inv: ClientUserInvitation): Promise<boolean> {
-    const autor = autorDe(inv);
-    if (!autor) return false;
-
-    if (autor.kind === 'CLIENT_ADMIN') {
-      const invitador = await this.clientUsers.findById(autor.clientUserId);
-      return !!invitador && !!invitador.isActive;
-    }
-
-    const empleado = await this.users.findById(autor.userId);
-    return !!empleado && !!empleado.isActive;
-  }
-
   async preview(secret: string): Promise<InvitationPreviewView> {
     // La misma disciplina que aceptar para el mismo valor, y con el mismo
     // cuerpo. Aquí el secreto llega por la RUTA, así que no hay DTO ni

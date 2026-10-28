@@ -5,6 +5,8 @@ import { fingerprintInvitationSecret } from './domain/invitation-secret';
 
 function makeService(opciones: {
   usuarioExistente?: any;
+  /** El empleado de la casa que invitó, cuando el autor es STAFF. */
+  empleado?: any;
   invitacionViva?: any;
   pendiente?: any;
   envioFalla?: unknown;
@@ -103,10 +105,20 @@ function makeService(opciones: {
   const clients = { findByIdOrFail: jest.fn(async () => ({ id: 7, razonSocial: 'Acme S.A.C.' })) };
   const config = { get: (k: string, f?: string) => (k === 'FRONTEND_URL' ? 'https://kuboti.com' : f) };
 
+
+  /**
+   * El personal de la casa. Aquí había un `{} as any`, que hoy no esconde
+   * ningún fallo pero deja SIN EJERCITAR la rama del autor de la casa: en
+   * cuanto una prueba pase por una invitación con `invited_by_user_id`, el
+   * servicio llama a `findById` y el doble vacío revienta con «no es una
+   * función» en vez de comprobar nada.
+   */
+  const users = { findById: jest.fn(async () => opciones.empleado ?? { id: 40, isActive: 1 }) };
+
   const service = new PortalInvitationsService(
-    invitations as any, clientUsers as any, email as any, clients as any, config as any, {} as any,
+    invitations as any, clientUsers as any, email as any, clients as any, config as any, users as any,
   );
-  return { service, invitations, clientUsers, email, clients };
+  return { service, users, invitations, clientUsers, email, clients };
 }
 
 const DTO = { email: 'Nuevo@Kuboti.com', fullName: 'Nuevo Nombre' };

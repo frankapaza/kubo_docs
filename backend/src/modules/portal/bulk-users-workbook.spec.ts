@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as zlib from 'zlib';
 import * as ExcelJS from 'exceljs';
 
 import {
@@ -14,6 +15,7 @@ import {
   assertUsableWorkbookZip,
   buildBulkTemplate,
   cellText,
+  parseWorkbookInThread,
   readUploadedGrid,
 } from './bulk-users-workbook';
 
@@ -25,16 +27,98 @@ async function libroCon(filas: unknown[][]): Promise<Buffer> {
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
+/** CRC-32 de toda la vida. Lo exige el formato ZIP; sin él no hay forja creíble. */
+function crc32(datos: Buffer): number {
+  const tabla = new Int32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    tabla[n] = c;
+  }
+  let c = -1;
+  for (let i = 0; i < datos.length; i++) c = tabla[(c ^ datos[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ -1) >>> 0;
+}
+
 /**
- * Reescribe el tamaño sin comprimir de la primera entrada del directorio
- * central. Vive en la prueba y no en el código: es una forja, no una utilidad.
+ * Un ZIP escrito a mano, entrada a entrada, con la opción de **mentir en el
+ * tamaño sin comprimir** que se declara (que es justo lo que hace una bomba de
+ * descompresión de verdad).
+ *
+ * Vive en la prueba y no en el código: es una forja, no una utilidad. Y se
+ * escribe a mano, sin ningún paquete de ZIP, porque el punto de la prueba es
+ * precisamente controlar un campo que ningún escritor decente deja tocar.
  */
-function inflarPrimerTamanoDeclarado(zip: Buffer, tamano: number): Buffer {
-  const copia = Buffer.from(zip);
-  const inicio = copia.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
-  if (inicio < 0) throw new Error('el ZIP de prueba no tiene directorio central');
-  copia.writeUInt32LE(tamano, inicio + 24);
-  return copia;
+function zipForjadoCon(
+  entradas: { nombre: string; datos: Buffer; declara?: number }[],
+): Buffer {
+  const locales: Buffer[] = [];
+  const centrales: Buffer[] = [];
+  let offset = 0;
+
+  for (const { nombre, datos, declara } of entradas) {
+    const comprimido = zlib.deflateRawSync(datos, { level: 9 });
+    const nom = Buffer.from(nombre, 'latin1');
+    const declarado = declara ?? datos.length;
+    const suma = crc32(datos);
+
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(8, 8); // deflate
+    local.writeUInt32LE(suma, 14);
+    local.writeUInt32LE(comprimido.length, 18);
+    local.writeUInt32LE(declarado, 22);
+    local.writeUInt16LE(nom.length, 26);
+
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(8, 10);
+    central.writeUInt32LE(suma, 16);
+    central.writeUInt32LE(comprimido.length, 20);
+    central.writeUInt32LE(declarado, 24);
+    central.writeUInt16LE(nom.length, 28);
+    central.writeUInt32LE(offset, 42);
+
+    locales.push(local, nom, comprimido);
+    centrales.push(central, nom);
+    offset += 30 + nom.length + comprimido.length;
+  }
+
+  const cuerpo = Buffer.concat(locales);
+  const directorio = Buffer.concat(centrales);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(entradas.length, 8);
+  eocd.writeUInt16LE(entradas.length, 10);
+  eocd.writeUInt32LE(directorio.length, 12);
+  eocd.writeUInt32LE(cuerpo.length, 16);
+  return Buffer.concat([cuerpo, directorio, eocd]);
+}
+
+/** Lo mínimo de `xl/workbook.xml` para que el archivo pase por libro. */
+const WORKBOOK_XML = Buffer.from(
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<sheets><sheet name="Usuarios" sheetId="1"/></sheets></workbook>',
+);
+
+/**
+ * **La bomba.** Pequeña por fuera, enorme por dentro: unos 255 KB de archivo
+ * que inflan `infladoMB` megas, y que además **declaran 4 KB** en su propio
+ * directorio central — el campo del que se fiaba la guarda vieja.
+ */
+function bombaDeDescompresion(infladoMB: number): Buffer {
+  return zipForjadoCon([
+    { nombre: 'xl/workbook.xml', datos: WORKBOOK_XML },
+    {
+      nombre: 'xl/sharedStrings.xml',
+      datos: Buffer.alloc(infladoMB * 1024 * 1024, 'a'),
+      declara: 4096,
+    },
+  ]);
 }
 
 /** Una EOCD mínima, para forjar ZIP que no son libros. */
@@ -143,20 +227,13 @@ describe('assertUsableWorkbookZip', () => {
     );
   });
 
-  it('rechaza un ZIP que declara más bytes sin comprimir de los que se admiten', async () => {
-    const bueno = Buffer.from(await buildBulkTemplate());
-    // Se reescribe el tamaño DECLARADO, no se descomprime nada: la guarda lee
-    // cabeceras, y esta prueba comprueba justo eso.
-    expect(() => assertUsableWorkbookZip(inflarPrimerTamanoDeclarado(bueno, 0xfffffffe))).toThrow(
-      /demasiado grande/i,
-    );
-  });
-
-  it('rechaza la marca de ZIP64: un libro de 200 filas no la necesita', async () => {
-    const bueno = Buffer.from(await buildBulkTemplate());
-    expect(() => assertUsableWorkbookZip(inflarPrimerTamanoDeclarado(bueno, 0xffffffff))).toThrow(
-      /demasiado grande/i,
-    );
+  it('una bomba que miente en el tamaño declarado PASA esta guarda: por eso no es la que protege', () => {
+    // Deja constancia de lo que esta guarda NO puede hacer. El tamaño sin
+    // comprimir lo escribe quien forja el archivo; aquí declara 4 KB e infla
+    // 256 MB, y las comprobaciones estructurales —es un ZIP, lleva
+    // `xl/workbook.xml`, tiene dos entradas— son todas ciertas. Quien lo para
+    // es el hilo con tope de memoria, no esto.
+    expect(() => assertUsableWorkbookZip(bombaDeDescompresion(16))).not.toThrow();
   });
 });
 
@@ -238,15 +315,81 @@ describe('readUploadedGrid — decide por los bytes, nunca por la extensión', (
     await expect(readUploadedGrid(grande)).rejects.toThrow(/demasiado pesado/i);
   });
 
-  it('un libro que incumple la guarda de ZIP no llega a exceljs', async () => {
-    const bueno = Buffer.from(await buildBulkTemplate());
-    await expect(readUploadedGrid(inflarPrimerTamanoDeclarado(bueno, 0xfffffffe))).rejects.toThrow(
-      /demasiado grande/i,
+  it('un ZIP que no es libro se rechaza con un mensaje que manda a la plantilla', async () => {
+    await expect(readUploadedGrid(zipForjado(0))).rejects.toThrow(/plantilla/i);
+  });
+});
+
+describe('readUploadedGrid — la bomba de descompresión', () => {
+  /**
+   * El caso del informe, forjado aquí: **255 KB de archivo que inflan 256 MB**,
+   * y que además declaran 4 KB en su directorio central.
+   *
+   * Pasa las cuatro guardas de entrada —cabe en 512 KB, empieza por la firma
+   * de un ZIP, lleva `xl/workbook.xml` y tiene dos entradas— y aun así tiene
+   * que salir con un texto en español, sin que el proceso se entere. Abierta
+   * en este mismo proceso, la misma bomba subía la memoria 634 MB.
+   *
+   * 256 MB y no 500 para que la prueba no cueste medio giga de RAM al
+   * construirla: con un tope de hilo de 64 MB, cuatro veces el tope ya es
+   * tanto como cuarenta.
+   */
+  it('un archivo pequeño que infla 256 MB se rechaza limpio, y el proceso sigue vivo', async () => {
+    const bomba = bombaDeDescompresion(256);
+    expect(bomba.length).toBeLessThan(MAX_BULK_FILE_BYTES);
+
+    await expect(readUploadedGrid(bomba)).rejects.toThrow(/enorme por dentro/i);
+
+    // La mitad que de verdad importa: el proceso que acaba de recibir la bomba
+    // sigue sirviendo. Si el tope matara al servidor en vez de al hilo, esto
+    // no llegaría a ejecutarse.
+    const grid = await readUploadedGrid(await buildBulkTemplate());
+    expect(grid[0]).toEqual([COLUMNA_NOMBRE, COLUMNA_CORREO]);
+  }, 60_000);
+
+  it('un hilo que no contesta a tiempo se mata, y lo que sale es un texto, no un error crudo', async () => {
+    // Plazo de 1 ms: el hilo no llega ni a arrancar. No se prueba lo rápido
+    // que es nadie, se prueba la red del hilo colgado —que por definición no
+    // se puede provocar con un archivo— y que al agotarse el plazo se
+    // responde y se mata, en vez de esperar para siempre.
+    await expect(parseWorkbookInThread(await buildBulkTemplate(), 1)).rejects.toThrow(
+      /tardado demasiado/i,
+    );
+
+    // Y detrás de eso el lector sigue funcionando: matar un hilo no deja el
+    // proceso tocado.
+    expect(await readUploadedGrid(await buildBulkTemplate())).toHaveLength(1);
+  }, 60_000);
+
+  it('el límite del hilo deja margen de sobra para un libro legítimo lleno', async () => {
+    // 200 filas, el tope del contrato. Medido: se abre con ~22 MB, un tercio
+    // del tope del hilo.
+    const filas: string[][] = [[COLUMNA_NOMBRE, COLUMNA_CORREO]];
+    for (let i = 0; i < 200; i++) filas.push([`Persona Número ${i}`, `p${i}@empresa-cliente.com`]);
+    const grid = await readUploadedGrid(await libroCon(filas));
+    expect(grid).toHaveLength(201);
+  }, 60_000);
+});
+
+describe('readUploadedGrid — solo se lee la primera hoja, y se dice', () => {
+  it('con los datos en la segunda hoja, el mensaje manda a MOVERLOS, no a revisar columnas', async () => {
+    const wb = new ExcelJS.Workbook();
+    wb.addWorksheet('Hoja1');
+    const segunda = wb.addWorksheet('Datos');
+    segunda.addRow([COLUMNA_NOMBRE, COLUMNA_CORREO]);
+    segunda.addRow(['Ana Pérez', 'ana@x.com']);
+
+    await expect(readUploadedGrid(Buffer.from(await wb.xlsx.writeBuffer()))).rejects.toThrow(
+      /primera hoja.*vacía|otra pestaña/is,
     );
   });
 
-  it('un ZIP que no es libro se rechaza con un mensaje que manda a la plantilla', async () => {
-    await expect(readUploadedGrid(zipForjado(0))).rejects.toThrow(/plantilla/i);
+  it('con una sola hoja y vacía, el mensaje no habla de pestañas: no hay ninguna a la que ir', async () => {
+    const wb = new ExcelJS.Workbook();
+    wb.addWorksheet('Usuarios');
+    await expect(readUploadedGrid(Buffer.from(await wb.xlsx.writeBuffer()))).rejects.toThrow(
+      /hoja del libro está vacía/i,
+    );
   });
 });
 

@@ -393,6 +393,39 @@ describe("review — nombres con espacio en blanco y con caracteres de control",
     expect(decodeReview(r.revision)!.rows.map((f) => f.fullName)).toEqual(["Luis Gómez"]);
   });
 
+  it("los invisibles de ancho cero se quitan: no son de control, y tampoco son el nombre de nadie", async () => {
+    // Pegado desde una web o un PDF. Sin esto se guardaban dos «Ana Pérez»
+    // que se leen igual y no son iguales para nadie salvo para quien compara
+    // cadenas.
+    const r = await crearServicio(mundo()).review(
+      7,
+      csv([
+        ["Ana\u200bPérez", "ana@x.com"],
+        ["\ufeffLuis \u200d Gómez\u2060", "luis@x.com"],
+      ]),
+    );
+
+    expect(r.rows[0].verdict).toBe("SE_INVITARA");
+    expect(r.rows[0].fullName).toBe("AnaPérez");
+    expect(r.rows[1].verdict).toBe("SE_INVITARA");
+    expect(r.rows[1].fullName).toBe("Luis Gómez");
+    // Y lo que viaja firmado va ya limpio: lo que se aprueba es lo que se
+    // invita, sin un invisible escondido entre medias.
+    expect(decodeReview(r.revision)!.rows.map((f) => f.fullName)).toEqual([
+      "AnaPérez",
+      "Luis Gómez",
+    ]);
+  });
+
+  it("un nombre que SOLO son invisibles es un nombre que falta", async () => {
+    const r = await crearServicio(mundo()).review(
+      7,
+      csv([["\u200b\u200c\u200d", "ana@x.com"]]),
+    );
+    expect(r.rows[0].verdict).toBe("RECHAZADA");
+    expect(r.rows[0].reason).toMatch(/falta el nombre/i);
+  });
+
   it("el eco de una fila rechazada se trunca con puntos suspensivos", async () => {
     const r = await crearServicio(mundo()).review(
       7,

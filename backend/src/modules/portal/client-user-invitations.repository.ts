@@ -5,14 +5,32 @@ import { DataSource, EntityManager, IsNull, MoreThan, Repository } from 'typeorm
 import { ClientUserInvitation } from './entities/client-user-invitation.entity';
 import { normalizeEmailAddress } from './email-address';
 
-/** Lo mínimo para crear una invitación. Sin `usedAt` ni `revokedAt`: nace viva. */
+/**
+ * Lo mínimo para crear una invitación. Sin `usedAt` ni `revokedAt`: nace viva.
+ *
+ * **Las dos columnas de autor, las dos obligatorias de escribir y las dos
+ * nulables**, porque desde la 027 una invitación la puede haber hecho un
+ * administrador de cliente O el personal de la casa, y exactamente una de las
+ * dos está informada (`chk_cui_un_solo_autor`). Exigir solo la del portal
+ * —como decía este tipo antes— era decir lo contrario del contrato: dejaba
+ * escribir una invitación de la casa sin autor, o atribuírsela a un usuario de
+ * cliente inventado, que es el defecto que la decisión 8 de R4 existe para
+ * impedir.
+ *
+ * Quién decide cuál de las dos se rellena es `columnasDeAutor`, en
+ * `portal-invitations.service.ts`, a partir del tipo unión `InvitationAuthor`:
+ * ahí olvidarse no compila. Aquí se escribe lo que venga ya decidido.
+ */
 export interface NewInvitation {
   clientId: number;
   email: string;
   fullName: string;
   /** La huella, nunca el secreto. Ver `domain/invitation-secret.ts`. */
   secretFingerprint: string;
-  invitedByClientUserId: number;
+  /** El administrador de cliente que invitó, o `null` si invitó la casa. */
+  invitedByClientUserId: number | null;
+  /** El empleado de la casa que invitó, o `null` si invitó un administrador de cliente. */
+  invitedByUserId: number | null;
   expiresAt: Date;
 }
 

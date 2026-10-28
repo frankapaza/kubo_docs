@@ -57,6 +57,7 @@ describe('ClientUserInvitationsRepository', () => {
       fullName: 'Ana',
       secretFingerprint: fingerprintInvitationSecret(secreto),
       invitedByClientUserId: 3,
+      invitedByUserId: null,
       expiresAt: new Date('2026-09-02T15:00:00.000Z'),
     });
 
@@ -74,6 +75,7 @@ describe('ClientUserInvitationsRepository', () => {
       fullName: 'Ana',
       secretFingerprint: fingerprintInvitationSecret(secreto),
       invitedByClientUserId: 3,
+      invitedByUserId: null,
       expiresAt: new Date('2026-09-02T15:00:00.000Z'),
     });
 
@@ -94,6 +96,7 @@ describe('ClientUserInvitationsRepository', () => {
       fullName: 'Ana',
       secretFingerprint: 'f'.repeat(64),
       invitedByClientUserId: 3,
+      invitedByUserId: null,
       expiresAt: new Date('2026-09-02T15:00:00.000Z'),
     });
     expect(orm.guardado[0].email).toBe('ana@kuboti.com');

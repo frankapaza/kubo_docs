@@ -61,6 +61,17 @@ export const MAX_EMAIL_LENGTH = 180;
  */
 const CARACTER_DE_CONTROL = /\p{Cc}/u;
 
+/**
+ * Los invisibles de ancho cero: espacio (U+200B), no-unión y unión (U+200C y
+ * U+200D), unión de palabras (U+2060) y el espacio sin salto de ancho cero
+ * (U+FEFF, que es además la marca de orden de bytes cuando va al principio).
+ *
+ * Se tratan como espacio en blanco y se quitan del nombre, igual que se
+ * colapsan los saltos de línea. No son `\p{Cc}`: son de formato, y por eso se
+ * colaban por la guarda de caracteres de control.
+ */
+const ANCHO_CERO = /[\u200b-\u200d\u2060\ufeff]/g;
+
 /** Lo más que se repite de una celda rechazada en el informe. */
 const MAX_ECHO_LENGTH = 200;
 
@@ -220,7 +231,19 @@ export class ClientUsersBulkService {
     // Colapsar espacio en blanco (saltos de línea y tabuladores incluidos) no
     // esconde información; tragarse un carácter de control sí, así que ese se
     // rechaza en vez de limpiarse.
-    const fullName = cruda.fullName.replace(/\s+/g, " ").trim();
+    //
+    // Los de ANCHO CERO se quitan antes de colapsar. No son de control —son de
+    // formato, así que `\p{Cc}` no los ve— pero dentro del nombre de una
+    // persona no son información de ninguna clase: nadie se llama con un
+    // separador invisible dentro. Llegan de pegar desde una web o un PDF, y
+    // dejarlos pasar es guardar dos personas distintas que se leen igual,
+    // «Ana Pérez» y «Ana Pérez», con el correo como única pista de que son la
+    // misma. Se quitan, no se sustituyen por un espacio: son invisibles, así
+    // que quitarlos es lo que deja escrito lo que el operador ve.
+    const fullName = cruda.fullName
+      .replace(ANCHO_CERO, "")
+      .replace(/\s+/g, " ")
+      .trim();
     const email = cruda.email === "" ? "" : normalizeEmailAddress(cruda.email);
     const base = { line: cruda.line, fullName, email };
     const rechazo = (reason: string): BulkReviewRow => ({
