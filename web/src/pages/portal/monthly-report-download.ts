@@ -2,6 +2,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 import type { Compliance, CommitmentVerdict, PortalMonthlyReport } from '../../api/types';
+import { csvEscape } from '../../lib/csv';
 import { fmtDateOnly } from './PortalTicketsListPage';
 
 /**
@@ -165,9 +166,8 @@ function requirementRows(report: PortalMonthlyReport): string[][] {
 // pegar todo en una sola columna.
 // ---------------------------------------------------------------------------
 
-function csvEscape(v: string): string {
-  return `"${v.replace(/"/g, '""')}"`;
-}
+// `csvEscape` (en `../../lib/csv`) neutraliza las formulas: ver ahi por que y
+// como se salvan los numeros y porcentajes.
 
 function csvLine(cells: string[]): string {
   return cells.map(csvEscape).join(',');
