@@ -13,6 +13,7 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { PlusIcon, RefreshIcon, UsersIcon } from '../components/ui/Icon';
 import { toast } from '../ui/Toast';
 import NewClientUserDialog from './client-users/NewClientUserDialog';
+import BulkInviteDialog from './client-users/BulkInviteDialog';
 import EditClientUserDialog from './client-users/EditClientUserDialog';
 
 function fmtDateTime(v: string | null): string {
@@ -26,6 +27,7 @@ export default function ClientUsersPage() {
 
   const [clientId, setClientId] = useState<number | ''>('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [editing, setEditing] = useState<ClientUser | null>(null);
 
   // El picker necesita la lista completa de clientes, sin filtrar por estado
@@ -65,17 +67,29 @@ export default function ClientUsersPage() {
           <h1 className="text-2xl font-bold text-slate-900">Usuarios de clientes</h1>
           <p className="text-sm text-slate-500 mt-1">
             Cuentas con las que las empresas cliente entran al portal de soporte. El alta la hace
-            siempre el equipo interno; no existe autorregistro.
+            siempre el equipo interno; no existe autorregistro. Para una empresa nueva, «Carga
+            masiva» manda invitaciones desde una hoja de cálculo: nadie teclea la contraseña de
+            otro.
           </p>
         </div>
-        <Button
-          icon={<PlusIcon size={16} />}
-          onClick={() => setCreateOpen(true)}
-          disabled={clientId === ''}
-          title={clientId === '' ? 'Elige un cliente primero' : undefined}
-        >
-          Nuevo usuario
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => setBulkOpen(true)}
+            disabled={clientId === ''}
+            title={clientId === '' ? 'Elige un cliente primero' : undefined}
+          >
+            Carga masiva
+          </Button>
+          <Button
+            icon={<PlusIcon size={16} />}
+            onClick={() => setCreateOpen(true)}
+            disabled={clientId === ''}
+            title={clientId === '' ? 'Elige un cliente primero' : undefined}
+          >
+            Nuevo usuario
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -183,6 +197,14 @@ export default function ClientUsersPage() {
         clientName={selectedClient?.razonSocial ?? ''}
         onCancel={() => setCreateOpen(false)}
         onCreated={invalidateUsers}
+      />
+
+      <BulkInviteDialog
+        open={bulkOpen}
+        clientId={clientId === '' ? null : clientId}
+        clientName={selectedClient?.razonSocial ?? ''}
+        onCancel={() => setBulkOpen(false)}
+        onSent={invalidateUsers}
       />
 
       <EditClientUserDialog
