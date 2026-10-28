@@ -19,7 +19,8 @@ import {
 } from './domain/invitation-secret';
 import { assertSessionScope, toIso } from './session-scope';
 import { normalizeEmailAddress } from './email-address';
-import { sameId } from '../../common/ids';
+import { isUsableId, sameId } from '../../common/ids';
+import { UsersService } from '../users/users.service';
 import { ClientsService } from '../clients/clients.service';
 import { EmailService } from '../email/email.service';
 import { resolveClientRazonSocial } from './client-name';
@@ -31,6 +32,47 @@ import { buildInvitationEmail, buildInvitationUrl, resolveFrontendUrl } from './
  * otro coste reabriría el canal de tiempos que ese señuelo existe para cerrar.
  */
 const BCRYPT_ROUNDS = 10;
+
+/**
+ * De dónde salió una invitación. Dos formas, y exactamente una por invitación.
+ *
+ * Es un tipo unión y no dos parámetros opcionales porque olvidarse tiene que
+ * **no compilar**: con dos opcionales, una llamada sin ninguno pasaría el
+ * compilador y llegaría a la base a chocar contra `chk_cui_un_solo_autor` en
+ * producción.
+ *
+ * `CLIENT_ADMIN` es la puerta de R4 (el portal). `STAFF` es la de la carga
+ * masiva del panel, que existe porque una empresa nueva no tiene ningún
+ * usuario de cliente al que atribuir la invitación — y rellenarlo con uno
+ * inventado es el defecto recurrente de este proyecto (decisión 8 de R4).
+ */
+export type InvitationAuthor =
+  | { kind: 'CLIENT_ADMIN'; clientUserId: number }
+  | { kind: 'STAFF'; userId: number };
+
+/** Las dos columnas de autor a partir del tipo unión. Exactamente una informada. */
+function columnasDeAutor(author: InvitationAuthor): {
+  invitedByClientUserId: number | null;
+  invitedByUserId: number | null;
+} {
+  return author.kind === 'CLIENT_ADMIN'
+    ? { invitedByClientUserId: author.clientUserId, invitedByUserId: null }
+    : { invitedByClientUserId: null, invitedByUserId: author.userId };
+}
+
+/** El autor de una invitación ya guardada, leído de sus dos columnas. */
+function autorDe(inv: ClientUserInvitation): InvitationAuthor | null {
+  if (isUsableId(inv.invitedByClientUserId)) {
+    return { kind: 'CLIENT_ADMIN', clientUserId: Number(inv.invitedByClientUserId) };
+  }
+  if (isUsableId(inv.invitedByUserId)) {
+    return { kind: 'STAFF', userId: Number(inv.invitedByUserId) };
+  }
+  // Ninguno de los dos: fila imposible por el CHECK de la 027, pero el código
+  // no se apoya en eso. Sin autor no hay a quién comprobar, así que el enlace
+  // no vale. Falla cerrado.
+  return null;
+}
 
 /**
  * Único cuerpo para CUALQUIER fallo al aceptar: no existe, caducada, ya usada,
@@ -102,6 +144,13 @@ export class PortalInvitationsService {
     private readonly email: EmailService,
     private readonly clients: ClientsService,
     private readonly config: ConfigService,
+    /**
+     * Solo para saber si el empleado que lanzó una carga masiva sigue activo.
+     * Es la misma comprobación que ya se hacía sobre el administrador de
+     * cliente, para el otro tipo de autor: una invitación de la casa no puede
+     * sobrevivir a que ese empleado deje la empresa.
+     */
+    private readonly users: UsersService,
   ) {}
 
   /**
@@ -112,10 +161,10 @@ export class PortalInvitationsService {
    */
   async invite(
     clientId: number,
-    invitedByClientUserId: number,
+    author: InvitationAuthor,
     dto: InvitePortalUserDto,
   ): Promise<PortalInvitationView> {
-    const { invitation, secret } = await this.inviteWithSecret(clientId, invitedByClientUserId, dto);
+    const { invitation, secret } = await this.inviteWithSecret(clientId, author, dto);
     return this.deliver(invitation, secret);
   }
 
@@ -126,14 +175,20 @@ export class PortalInvitationsService {
    */
   async inviteWithSecret(
     clientId: number,
-    invitedByClientUserId: number,
+    author: InvitationAuthor,
     dto: InvitePortalUserDto,
   ): Promise<{ view: PortalInvitationView; secret: string; invitation: ClientUserInvitation }> {
     // Los dos, y antes de tocar la base: un clientId falsy haría desaparecer
     // el filtro de empresa, y un clientUserId falsy dejaría la invitación sin
     // autor real.
     assertSessionScope(clientId, 'clientId', PortalInvitationsService.name);
-    assertSessionScope(invitedByClientUserId, 'clientUserId', PortalInvitationsService.name);
+    // El identificador del autor, sea del tipo que sea: un valor falsy dejaría
+    // la invitación sin autor real y con las dos columnas vacías.
+    assertSessionScope(
+      author.kind === 'CLIENT_ADMIN' ? author.clientUserId : author.userId,
+      author.kind === 'CLIENT_ADMIN' ? 'clientUserId' : 'userId',
+      PortalInvitationsService.name,
+    );
 
     const ahora = new Date();
 
@@ -168,7 +223,7 @@ export class PortalInvitationsService {
       email: dto.email,
       fullName: dto.fullName.trim(),
       secretFingerprint: fingerprintInvitationSecret(secret),
-      invitedByClientUserId,
+      author,
       expiresAt: invitationExpiryFrom(ahora),
       revokeVivaAt: viva ? ahora : undefined,
     });
@@ -204,6 +259,14 @@ export class PortalInvitationsService {
 
     const ahora = new Date();
     const secret = generateInvitationSecret();
+
+    const autorPrevio = autorDe(previa);
+    // Una invitación sin ningún autor no se puede reenviar: no habría a quién
+    // atribuir la nueva, y inventarlo es justo lo que la decisión 8 prohíbe.
+    if (!autorPrevio) {
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Invitación no encontrada' });
+    }
+
     // Misma disciplina de atomicidad que `inviteWithSecret`: revocar y crear
     // en una única transacción.
     const invitation = await this.replaceInvitation({
@@ -213,7 +276,7 @@ export class PortalInvitationsService {
       secretFingerprint: fingerprintInvitationSecret(secret),
       // Se conserva quién invitó originalmente. Atribuírselo a quien pulsa
       // «reenviar» sería reescribir un hecho pasado.
-      invitedByClientUserId: Number(previa.invitedByClientUserId),
+      author: autorPrevio,
       expiresAt: invitationExpiryFrom(ahora),
       revokeVivaAt: ahora,
     });
@@ -242,7 +305,7 @@ export class PortalInvitationsService {
     email: string;
     fullName: string;
     secretFingerprint: string;
-    invitedByClientUserId: number;
+    author: InvitationAuthor;
     expiresAt: Date;
     /** Presente si hay que revocar la viva de esta empresa antes de crear. */
     revokeVivaAt?: Date;
@@ -265,7 +328,8 @@ export class PortalInvitationsService {
           fullName: params.fullName,
           // La huella, jamás el secreto.
           secretFingerprint: params.secretFingerprint,
-          invitedByClientUserId: params.invitedByClientUserId,
+          // Exactamente una de las dos columnas de autor.
+          ...columnasDeAutor(params.author),
           expiresAt: params.expiresAt,
         }),
       );
@@ -325,8 +389,7 @@ export class PortalInvitationsService {
       // Se invalida sola si quien invitó quedó desactivado, o si la empresa
       // dejó de ser cliente. Se comprueba AQUÍ, al aceptar, no por un proceso
       // aparte que podría no haber corrido todavía.
-      const invitador = await this.clientUsers.findById(Number(inv.invitedByClientUserId));
-      if (!invitador || !invitador.isActive) throw enlaceNoValido();
+      if (!(await this.autorSigueValido(inv))) throw enlaceNoValido();
 
       // Solo el "no existe" degrada a enlace no válido. Cualquier otro fallo
       // —la base caída, por ejemplo— sigue subiendo: silenciarlo lo disfrazaría
@@ -376,9 +439,14 @@ export class PortalInvitationsService {
         // sitio donde eso se hace verdad.
         isAdmin: 0,
         isActive: 1,
-        // Autoría honesta: no hubo personal, hubo un administrador de cliente.
-        createdBy: null,
-        createdByClientUserId: Number(inv.invitedByClientUserId),
+        // Autoría honesta, y en la columna que toca: o lo dio de alta el
+        // personal (carga masiva del panel), o lo invitó un administrador de
+        // cliente. Nunca las dos, nunca ninguna (decisión 8 de R4). Se copian
+        // de la invitación, que es el hecho que lo determina.
+        createdBy: isUsableId(inv.invitedByUserId) ? Number(inv.invitedByUserId) : null,
+        createdByClientUserId: isUsableId(inv.invitedByClientUserId)
+          ? Number(inv.invitedByClientUserId)
+          : null,
       });
 
       /*
@@ -425,6 +493,25 @@ export class PortalInvitationsService {
   }
 
   /**
+   * Si el autor de esa invitación sigue habilitado para haberla hecho.
+   * Vive en un solo sitio y lo llaman `accept` y `preview`: si cada una
+   * escribiera la suya, la vista previa podría saludar ante un enlace que
+   * aceptar rechaza, y esa diferencia delata el motivo (decisión 10 de R4).
+   */
+  private async autorSigueValido(inv: ClientUserInvitation): Promise<boolean> {
+    const autor = autorDe(inv);
+    if (!autor) return false;
+
+    if (autor.kind === 'CLIENT_ADMIN') {
+      const invitador = await this.clientUsers.findById(autor.clientUserId);
+      return !!invitador && !!invitador.isActive;
+    }
+
+    const empleado = await this.users.findById(autor.userId);
+    return !!empleado && !!empleado.isActive;
+  }
+
+  /**
    * Lo que ve la pantalla de aceptar ANTES de pedir contraseña. Decisión 10
    * de la spec: la página saluda, no es un formulario a ciegas.
    *
@@ -458,8 +545,7 @@ export class PortalInvitationsService {
     if (inv.usedAt || inv.revokedAt) throw enlaceNoValido();
     if (isInvitationExpired(inv.expiresAt, new Date())) throw enlaceNoValido();
 
-    const invitador = await this.clientUsers.findById(Number(inv.invitedByClientUserId));
-    if (!invitador || !invitador.isActive) throw enlaceNoValido();
+    if (!(await this.autorSigueValido(inv))) throw enlaceNoValido();
 
     // `FORMER_CLIENT` es lo único que este producto llama "empresa
     // desactivada" (decisión 1 de la spec): un prospecto (`PROSPECT`) puede
@@ -520,14 +606,14 @@ export class PortalInvitationsService {
       await this.invitations.markSent(Number(invitation.id), ahora, null);
       return toInvitationView({ ...invitation, lastSentAt: ahora, sendError: null });
     } catch (err) {
-      // `describeSendError` y no `(err as Error).message`: un transporte que
+      // `describeThrown` y no `(err as Error).message`: un transporte que
       // rechazara con algo que no es un `Error` —una cadena, un `undefined`—
       // haría reventar el propio catch al leer `.message` de eso, y ese fallo
       // no lo recoge nadie: la petición saldría con un 500, que es lo
       // contrario exacto de lo que promete el comentario de arriba. Hoy
       // nodemailer siempre rechaza con `Error`, pero nada en este código lo
       // fija, y lo que sostiene la promesa tiene que ser el código.
-      const detalle = describeSendError(err);
+      const detalle = describeThrown(err);
       const motivo = detalle.slice(0, 500);
       // Al log entero, a la base recortado, y a la respuesta NUNCA: el detalle
       // de por qué rechazó el servidor SMTP es diagnóstico interno. El secreto
@@ -588,13 +674,18 @@ async function saveOrInvalid<T>(write: () => Promise<T>): Promise<T> {
 }
 
 /**
- * El motivo del fallo de envío, en texto, venga lo que venga del transporte.
+ * El motivo de un fallo, en texto, venga lo que venga de donde reventó.
  *
- * No se asume que sea un `Error`: este valor se lee DENTRO del catch que
- * existe para que el fallo del correo no tumbe la petición, y una excepción
- * ahí no la recoge nadie.
+ * No se asume que sea un `Error`: esto se lee DENTRO de un catch que existe
+ * para que ese fallo no tumbe algo más grande —la petición de la invitación
+ * aquí, la tanda entera de la carga masiva en `ClientUsersBulkService`—, y una
+ * excepción ahí no la recoge nadie.
+ *
+ * Se exporta porque los dos sitios la necesitan y una regla que vale en los dos
+ * no puede estar escrita dos veces: la segunda copia es la que se olvida de
+ * actualizar. El nombre ya no dice «send» por lo mismo.
  */
-function describeSendError(err: unknown): string {
+export function describeThrown(err: unknown): string {
   if (err instanceof Error && typeof err.message === 'string') return err.message;
   return String(err);
 }

@@ -5,6 +5,8 @@ import { fingerprintInvitationSecret } from './domain/invitation-secret';
 
 function makeService(opciones: {
   usuarioExistente?: any;
+  /** El empleado de la casa que invitó, cuando el autor es STAFF. */
+  empleado?: any;
   invitacionViva?: any;
   pendiente?: any;
   envioFalla?: unknown;
@@ -103,10 +105,20 @@ function makeService(opciones: {
   const clients = { findByIdOrFail: jest.fn(async () => ({ id: 7, razonSocial: 'Acme S.A.C.' })) };
   const config = { get: (k: string, f?: string) => (k === 'FRONTEND_URL' ? 'https://kuboti.com' : f) };
 
+
+  /**
+   * El personal de la casa. Aquí había un `{} as any`, que hoy no esconde
+   * ningún fallo pero deja SIN EJERCITAR la rama del autor de la casa: en
+   * cuanto una prueba pase por una invitación con `invited_by_user_id`, el
+   * servicio llama a `findById` y el doble vacío revienta con «no es una
+   * función» en vez de comprobar nada.
+   */
+  const users = { findById: jest.fn(async () => opciones.empleado ?? { id: 40, isActive: 1 }) };
+
   const service = new PortalInvitationsService(
-    invitations as any, clientUsers as any, email as any, clients as any, config as any,
+    invitations as any, clientUsers as any, email as any, clients as any, config as any, users as any,
   );
-  return { service, invitations, clientUsers, email, clients };
+  return { service, users, invitations, clientUsers, email, clients };
 }
 
 const DTO = { email: 'Nuevo@Kuboti.com', fullName: 'Nuevo Nombre' };
@@ -133,7 +145,7 @@ const usuarioConAcceso = (over: Record<string, unknown> = {}) => ({
 describe('PortalInvitationsService.invite', () => {
   it('fija la empresa desde el argumento de sesión', async () => {
     const { service, invitations } = makeService();
-    await service.invite(7, 3, DTO);
+    await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO);
     expect(invitations.escritas[0].clientId).toBe(7);
     expect(invitations.escritas[0].invitedByClientUserId).toBe(3);
   });
@@ -146,7 +158,7 @@ describe('PortalInvitationsService.invite', () => {
    */
   it('ignora una empresa ajena colada en el cuerpo', async () => {
     const { service, invitations } = makeService();
-    await service.invite(7, 3, { ...DTO, clientId: 99 } as any);
+    await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, { ...DTO, clientId: 99 } as any);
     expect(invitations.escritas[0].clientId).toBe(7);
   });
 
@@ -158,13 +170,13 @@ describe('PortalInvitationsService.invite', () => {
    */
   it('un isAdmin en el cuerpo no llega a la invitación por ningún camino', async () => {
     const { service, invitations } = makeService();
-    await service.invite(7, 3, { ...DTO, isAdmin: true } as any);
+    await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, { ...DTO, isAdmin: true } as any);
     expect(JSON.stringify(invitations.escritas[0])).not.toContain('isAdmin');
   });
 
   it('guarda la huella del secreto, y nunca el secreto', async () => {
     const { service, invitations } = makeService();
-    await service.invite(7, 3, DTO);
+    await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO);
     const fila = invitations.escritas[0];
     expect(fila.secretFingerprint).toMatch(/^[0-9a-f]{64}$/);
     expect(fila).not.toHaveProperty('secret');
@@ -172,13 +184,13 @@ describe('PortalInvitationsService.invite', () => {
 
   it('el secreto que se genera es el que corresponde a la huella guardada', async () => {
     const { service, invitations } = makeService();
-    const { secret } = await service.inviteWithSecret(7, 3, DTO);
+    const { secret } = await service.inviteWithSecret(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO);
     expect(invitations.escritas[0].secretFingerprint).toBe(fingerprintInvitationSecret(secret));
   });
 
   it('la vista que devuelve no contiene ni el secreto ni la huella', async () => {
     const { service } = makeService();
-    const vista = await service.invite(7, 3, DTO);
+    const vista = await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO);
     expect(Object.keys(vista).sort()).toEqual(
       ['createdAt', 'deliveryFailed', 'email', 'expiresAt', 'fullName', 'id', 'lastSentAt'].sort(),
     );
@@ -187,7 +199,7 @@ describe('PortalInvitationsService.invite', () => {
   it('caduca a los 7 días del instante en que se crea', async () => {
     const { service, invitations } = makeService();
     const antes = Date.now();
-    await service.invite(7, 3, DTO);
+    await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO);
     const caduca = (invitations.escritas[0].expiresAt as Date).getTime();
     expect(caduca - antes).toBeGreaterThanOrEqual(7 * 24 * 60 * 60 * 1000 - 5000);
     expect(caduca - antes).toBeLessThanOrEqual(7 * 24 * 60 * 60 * 1000 + 5000);
@@ -201,7 +213,7 @@ describe('PortalInvitationsService.invite', () => {
     const { service, invitations } = makeService({
       usuarioExistente: usuarioConAcceso(),
     });
-    await expect(service.invite(7, 3, DTO)).rejects.toMatchObject({
+    await expect(service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO)).rejects.toMatchObject({
       response: { message: INVITE_REJECTED_MESSAGE },
     });
     expect(invitations.runInTransaction).not.toHaveBeenCalled();
@@ -213,8 +225,8 @@ describe('PortalInvitationsService.invite', () => {
       usuarioExistente: usuarioConAcceso({ id: '8', clientId: '99' }),
     });
 
-    const cuerpoPropio = await propio.service.invite(7, 3, DTO).catch((e) => e.getResponse());
-    const cuerpoAjeno = await ajeno.service.invite(7, 3, DTO).catch((e) => e.getResponse());
+    const cuerpoPropio = await propio.service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO).catch((e) => e.getResponse());
+    const cuerpoAjeno = await ajeno.service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO).catch((e) => e.getResponse());
 
     expect(cuerpoPropio).toEqual(cuerpoAjeno);
   });
@@ -243,7 +255,7 @@ describe('PortalInvitationsService.invite', () => {
 
     it.each(casos)('%s: responde 400 con el texto genérico', async (_nombre, opciones) => {
       const { service } = makeService(opciones);
-      const err = await service.invite(7, 3, DTO).catch((e) => e);
+      const err = await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO).catch((e) => e);
       expect(err.getStatus()).toBe(400);
       expect(err.getResponse()).toEqual({
         code: 'INVITACION_RECHAZADA',
@@ -255,7 +267,7 @@ describe('PortalInvitationsService.invite', () => {
       const resultados = [];
       for (const [, opciones] of casos) {
         const { service } = makeService(opciones);
-        const err = await service.invite(7, 3, DTO).catch((e) => e);
+        const err = await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO).catch((e) => e);
         resultados.push(JSON.stringify({ status: err.getStatus(), body: err.getResponse() }));
       }
       expect(new Set(resultados).size).toBe(1);
@@ -266,7 +278,7 @@ describe('PortalInvitationsService.invite', () => {
     const { service, invitations } = makeService({
       invitacionViva: { id: 4, clientId: '99', email: 'nuevo@kuboti.com' },
     });
-    await expect(service.invite(7, 3, DTO)).rejects.toThrow(BadRequestException);
+    await expect(service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO)).rejects.toThrow(BadRequestException);
     expect(invitations.runInTransaction).not.toHaveBeenCalled();
   });
 
@@ -284,7 +296,7 @@ describe('PortalInvitationsService.invite', () => {
     const { service, invitations } = makeService({
       invitacionViva: { id: 4, clientId: '7', email: 'nuevo@kuboti.com' },
     });
-    await service.invite(7, 3, DTO);
+    await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO);
 
     expect(invitations.runInTransaction).toHaveBeenCalledTimes(1);
     expect(invitations.ordenDeEscritura).toEqual(['revocar', 'crear']);
@@ -297,14 +309,14 @@ describe('PortalInvitationsService.invite', () => {
     'una sesión con clientId inservible (%s) se rechaza sin escribir nada',
     async (malo) => {
       const { service, invitations } = makeService();
-      await expect(service.invite(malo as number, 3, DTO)).rejects.toThrow(UnauthorizedException);
+      await expect(service.invite(malo as number, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO)).rejects.toThrow(UnauthorizedException);
       expect(invitations.runInTransaction).not.toHaveBeenCalled();
     },
   );
 
   it('una sesión sin clientUserId utilizable tampoco escribe: la invitación quedaría sin autor', async () => {
     const { service, invitations } = makeService();
-    await expect(service.invite(7, 0, DTO)).rejects.toThrow(UnauthorizedException);
+    await expect(service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 0 }, DTO)).rejects.toThrow(UnauthorizedException);
     expect(invitations.runInTransaction).not.toHaveBeenCalled();
   });
 });
@@ -314,7 +326,7 @@ describe('la atomicidad de revocar y crear al invitar (finding B)', () => {
     const { service, invitations } = makeService({
       invitacionViva: { id: 4, clientId: '7', email: 'nuevo@kuboti.com' },
     });
-    await service.invite(7, 3, DTO);
+    await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO);
 
     expect(invitations.runInTransaction).toHaveBeenCalledTimes(1);
     expect(invitations.create).not.toHaveBeenCalled();
@@ -336,7 +348,7 @@ describe('la atomicidad de revocar y crear al invitar (finding B)', () => {
       fallaEn: 'crear',
     });
 
-    await expect(service.invite(7, 3, DTO)).rejects.toThrow();
+    await expect(service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO)).rejects.toThrow();
 
     expect(invitations.revocadas).toHaveLength(0);
     expect(invitations.escritas).toHaveLength(0);
@@ -364,7 +376,7 @@ describe('reinvitar a un usuario desactivado (decisión 12)', () => {
   it('un desactivado de la propia empresa SÍ se puede reinvitar: se crea y se manda', async () => {
     const { service, invitations, email } = makeService({ usuarioExistente: desactivado });
 
-    const vista = await service.invite(7, 3, DTO);
+    const vista = await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO);
 
     expect(invitations.escritas).toHaveLength(1);
     expect(invitations.escritas[0]).toMatchObject({ clientId: 7, email: 'nuevo@kuboti.com' });
@@ -395,7 +407,7 @@ describe('reinvitar a un usuario desactivado (decisión 12)', () => {
   it.each(cerrados)('%s se sigue rechazando, y sin escribir nada', async (_n, usuario) => {
     const { service, invitations, email } = makeService({ usuarioExistente: usuario });
 
-    await expect(service.invite(7, 3, DTO)).rejects.toThrow(BadRequestException);
+    await expect(service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO)).rejects.toThrow(BadRequestException);
 
     expect(invitations.runInTransaction).not.toHaveBeenCalled();
     expect(email.send).not.toHaveBeenCalled();
@@ -412,13 +424,13 @@ describe('reinvitar a un usuario desactivado (decisión 12)', () => {
     const respuestas: string[] = [];
     for (const [, usuario] of cerrados) {
       const { service } = makeService({ usuarioExistente: usuario });
-      const err = await service.invite(7, 3, DTO).catch((e) => e);
+      const err = await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO).catch((e) => e);
       respuestas.push(JSON.stringify({ status: err.getStatus(), body: err.getResponse() }));
     }
     const viva = makeService({
       invitacionViva: { id: 4, clientId: '99', email: 'nuevo@kuboti.com' },
     });
-    const errViva = await viva.service.invite(7, 3, DTO).catch((e) => e);
+    const errViva = await viva.service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO).catch((e) => e);
     respuestas.push(JSON.stringify({ status: errViva.getStatus(), body: errViva.getResponse() }));
 
     expect(respuestas).toHaveLength(5);
@@ -435,7 +447,7 @@ describe('reinvitar a un usuario desactivado (decisión 12)', () => {
     const { service, invitations } = makeService({
       usuarioExistente: usuarioConAcceso({ isActive: 0, clientId: '7' }),
     });
-    await service.invite(7, 3, DTO);
+    await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO);
     expect(invitations.escritas).toHaveLength(1);
   });
 });
@@ -466,7 +478,7 @@ describe('PortalInvitationsService.listPending', () => {
 describe('el envío de la invitación', () => {
   it('sale en el acto, a la dirección invitada, con el enlace dentro', async () => {
     const { service, email } = makeService();
-    await service.invite(7, 3, DTO);
+    await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO);
 
     expect(email.send).toHaveBeenCalledTimes(1);
     const enviado = email.enviados[0];
@@ -478,7 +490,7 @@ describe('el envío de la invitación', () => {
 
   it('el enlace del correo lleva el secreto que corresponde a la huella guardada', async () => {
     const { service, email, invitations } = makeService();
-    await service.invite(7, 3, DTO);
+    await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO);
 
     const secreto = email.enviados[0].html.match(/\/portal\/invitacion\/([A-Za-z0-9_-]{43})/)[1];
     expect(invitations.escritas[0].secretFingerprint).toBe(fingerprintInvitationSecret(secreto));
@@ -492,7 +504,7 @@ describe('el envío de la invitación', () => {
   it('si el correo falla, la invitación queda creada igual y se anota el fallo', async () => {
     const { service, invitations } = makeService({ envioFalla: new Error('SMTP dijo que no') });
 
-    const vista = await service.invite(7, 3, DTO);
+    const vista = await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO);
 
     expect(invitations.escritas).toHaveLength(1);
     expect(vista.deliveryFailed).toBe(true);
@@ -519,7 +531,7 @@ describe('el envío de la invitación', () => {
       const { service, invitations, email } = makeService({
         envioFalla: new Error('SMTP dijo que no'),
       });
-      const vista = await service.invite(7, 3, DTO);
+      const vista = await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO);
 
       const secreto = email.enviados[0].html.match(/\/portal\/invitacion\/([A-Za-z0-9_-]{43})/)[1];
       expect(secreto).toHaveLength(43);
@@ -551,7 +563,7 @@ describe('el envío de la invitación', () => {
   ])('un rechazo que no es un Error (%s) se anota igual, sin tumbar la petición', async (_d, opciones) => {
     const { service, invitations } = makeService(opciones);
 
-    const vista = await service.invite(7, 3, DTO);
+    const vista = await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO);
 
     expect(vista.deliveryFailed).toBe(true);
     expect(invitations.escritas).toHaveLength(1);
@@ -561,14 +573,14 @@ describe('el envío de la invitación', () => {
 
   it('un envío correcto deja el registro sin error', async () => {
     const { service, invitations } = makeService();
-    const vista = await service.invite(7, 3, DTO);
+    const vista = await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO);
     expect(invitations.marcados[0][2]).toBeNull();
     expect(vista.deliveryFailed).toBe(false);
   });
 
   it('el secreto no aparece en la vista que devuelve la petición', async () => {
     const { service, email } = makeService();
-    const vista = await service.invite(7, 3, DTO);
+    const vista = await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO);
     const secreto = email.enviados[0].html.match(/\/portal\/invitacion\/([A-Za-z0-9_-]{43})/)[1];
     expect(JSON.stringify(vista)).not.toContain(secreto);
   });
@@ -589,7 +601,7 @@ describe('el envío de la invitación', () => {
 
     try {
       const { service, email } = makeService();
-      await service.invite(7, 3, DTO);
+      await service.invite(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, DTO);
       const secreto = email.enviados[0].html.match(/\/portal\/invitacion\/([A-Za-z0-9_-]{43})/)[1];
 
       const registrado = espias.flatMap((espia) => espia.mock.calls);

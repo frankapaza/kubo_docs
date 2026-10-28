@@ -1,6 +1,12 @@
 # Stack de desarrollo local: solo MySQL + Redis expuestos al host.
 # El backend y el frontend corren en modo dev fuera de Docker.
 #
+# Por eso aqui NO hay limite de memoria del backend: no hay contenedor del
+# backend que limitar. El de produccion esta en docker-compose.yml
+# (`backend.mem_limit`), con el numero razonado en su comentario. En
+# desarrollo el techo lo pone la maquina, y el hilo que abre el libro subido
+# lleva su propio tope de 64 MB en el codigo, que si corre aqui.
+#
 # Uso:
 #   docker compose -f docker-compose.dev.yml up -d
 #   cd backend && npm run start:dev
@@ -57,9 +63,10 @@ services:
       - ./backend/sql/migrations/024_correo_entrante_identificador_servidor.sql:/docker-entrypoint-initdb.d/033_mig_024.sql:ro
       - ./backend/sql/migrations/025_normalizar_email_existente.sql:/docker-entrypoint-initdb.d/034_mig_025.sql:ro
       - ./backend/sql/migrations/026_invitaciones_portal.sql:/docker-entrypoint-initdb.d/035_mig_026.sql:ro
+      - ./backend/sql/migrations/027_carga_masiva_usuarios.sql:/docker-entrypoint-initdb.d/036_mig_027.sql:ro
       # Seeds — van detrás de todas las migraciones, así que el seed se
       # renumera cada vez que entra una migración nueva.
-      - ./backend/sql/seed_document_templates.sql:/docker-entrypoint-initdb.d/036_seed_templates.sql:ro
+      - ./backend/sql/seed_document_templates.sql:/docker-entrypoint-initdb.d/037_seed_templates.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s

@@ -47,8 +47,12 @@ import { ThrottlerOptions } from '@nestjs/throttler';
  * sería peor que el problema que se arregla aquí. El login del personal
  * (`auth.controller.ts`) tiene la misma carencia y queda fuera de esta rama.
  *
- * La única excepción a esa regla es el envío de prueba de una plantilla de
- * correo: ver `NOTIFICATION_TEST_THROTTLE` al final del fichero.
+ * Las excepciones a esa regla están al final del fichero y son tres. Dos
+ * mandan correo de verdad: el envío de prueba de una plantilla de correo
+ * (`NOTIFICATION_TEST_THROTTLE`) y el envío de la carga masiva de usuarios
+ * (`BULK_INVITE_THROTTLE`). La tercera no manda nada y está por la memoria:
+ * la revisión de la carga masiva (`BULK_REVIEW_THROTTLE`), que arranca un hilo
+ * con 64 MB de tope por petición.
  */
 
 /** Ventana corta: frena la ráfaga. */
@@ -74,9 +78,9 @@ export const PORTAL_REFRESH_THROTTLE = {
 /**
  * Override para `POST /notification-templates/:id/test`.
  *
- * La única excepción al «el panel interno no se limita» de arriba, y por un
- * motivo que no aplica al resto: es la única ruta del panel con un efecto
- * externo e irreversible. Cada llamada saca un correo de verdad por el SMTP de
+ * La primera excepción al «el panel interno no se limita» de arriba, y por un
+ * motivo que no aplica al resto: es una de las dos rutas del panel con un
+ * efecto externo e irreversible (la otra es `BULK_INVITE_THROTTLE`). Cada llamada saca un correo de verdad por el SMTP de
  * producción. Un administrador con el dedo pegado al botón —o una sesión suya
  * comprometida— puede quemar la cuota del proveedor y la reputación del
  * remitente, que es justo el activo que la §9 de la spec señala como riesgo:
@@ -133,4 +137,86 @@ export const NOTIFICATION_TEST_THROTTLE = {
 export const PORTAL_INVITATION_THROTTLE = {
   [THROTTLER_BURST]: { ttl: ONE_MINUTE_MS, limit: 5 },
   [THROTTLER_SUSTAINED]: { ttl: FIFTEEN_MINUTES_MS, limit: 20 },
+};
+
+/**
+ * Override para `POST /client-users/carga-masiva/envio`.
+ *
+ * **La segunda excepción al «el panel interno no se limita»**, y por el mismo
+ * motivo que la primera (`NOTIFICATION_TEST_THROTTLE`): efecto externo e
+ * irreversible. Aquí en peor, además: una sola petición saca hasta 200 correos
+ * de verdad por el SMTP de producción, y quemar la cuota del proveedor o la
+ * reputación del remitente es el riesgo que hunde la funcionalidad entera por
+ * perfecto que esté el código.
+ *
+ * **NO es el tope de invitar del portal, y conviene saber por qué.** Aquel
+ * existe para cerrar un oráculo —un 201 contra un 400 dice si una dirección
+ * está libre—. Aquí ese oráculo no existe, y no porque lo hayamos cerrado:
+ * porque el panel dice el motivo de cada fila a propósito (decisión 10 de la
+ * spec), y lo dice porque quien mira ya puede leerse la lista entera de
+ * empresas y usuarios. Copiar aquel tope sería copiar el mecanismo sin su
+ * motivo, que es como se acumulan las reglas que nadie sabe por qué están.
+ *
+ * La plantilla va SIN tope: no manda nada y no cuesta nada. La revisión sí
+ * lleva el suyo, mucho más laxo (`BULK_REVIEW_THROTTLE`), y por otro motivo
+ * —la memoria del hilo que abre el libro, no el correo—.
+ *
+ * **Los números, y por qué estos y no otros (decisión 2 de esta revisión del
+ * diseño):** el caso real es una carga de 22 una vez, pero el tope no se
+ * calibra contra ese caso suelto sino contra la sesión de trabajo completa,
+ * que puede traer **dos clientes seguidos** el mismo rato.
+ *
+ * - **Ráfaga: 1 por minuto.** Entre revisar 22 filas y confirmar pasa siempre
+ *   más de un minuto, así que ningún uso legítimo la roza; lo único que corta
+ *   es un doble clic.
+ * - **Sostenido: 3 cada quince minutos.** Caben los dos clientes seguidos
+ *   **y** un reintento —volver a subir el archivo entero porque una fila
+ *   quedó `INVITADA_SIN_CORREO` (decisión 13 de la spec)— sin esperar entre
+ *   medias. Con 2 cabría la pareja y nada más: el primer reintento del día
+ *   chocaría con el tope, y reintentar no es un caso raro.
+ *
+ * El techo teórico queda anotado tal cual: 3 × 200 = 600 correos cada quince
+ * minutos desde una dirección. Es la mitad del que dejaban los valores
+ * anteriores de este mismo diseño (2 y 6, con un techo de 1200), y llegar a él
+ * exige de todos modos tres archivos de 200 filas en el mismo cuarto de hora
+ * desde una sesión con rol ADMIN y asiento en `audit_log` — no es el patrón de
+ * un cliente cargándose, es el patrón de alguien intentando algo raro. Bajarlo
+ * más (a 1) sí estorbaría el uso legítimo: dejaría sin sitio al segundo
+ * cliente del día o a cualquier reintento del primero.
+ */
+export const BULK_INVITE_THROTTLE = {
+  [THROTTLER_BURST]: { ttl: ONE_MINUTE_MS, limit: 1 },
+  [THROTTLER_SUSTAINED]: { ttl: FIFTEEN_MINUTES_MS, limit: 3 },
+};
+
+/**
+ * Override para `POST /client-users/carga-masiva/revision`.
+ *
+ * **No está aquí por el correo —la revisión no manda ninguno— sino por la
+ * memoria.** Cada revisión abre el libro en un hilo propio con 64 MB de tope
+ * (`WORKBOOK_THREAD_MEMORY_MB`). Ese hilo acota lo que puede hacer UNA bomba de
+ * descompresión: se muere el hilo y no el proceso. Lo que no acota es el
+ * agregado, y sin tope de frecuencia varias revisiones a la vez son varias
+ * veces 64 MB sin techo ninguno, en el mismo proceso que manda los avisos y lee
+ * el correo entrante.
+ *
+ * **Los números, calibrados contra el uso real y no contra el abuso:** un
+ * operador sube el archivo, lee el informe, corrige la hoja y vuelve a subirla.
+ * Ese ciclo son minutos —hay que abrir el Excel y editarlo—, no segundos.
+ *
+ * - **Ráfaga: 6 por minuto.** Seis correcciones en un minuto no es trabajo, es
+ *   un bucle. Y es lo que acota el agregado: 6 × 64 MB = 384 MB de lecturas
+ *   solapadas en el peor caso, que es lo que el límite de memoria del
+ *   contenedor del backend (`mem_limit` en `docker-compose.yml`) está puesto
+ *   para absorber.
+ * - **Sostenido: 30 cada quince minutos.** Una sesión larga —dos clientes,
+ *   varias correcciones en cada uno— cabe entera y sobra sitio.
+ *
+ * Sigue siendo **más laxo que el del envío** a propósito: la revisión existe
+ * justo para que el operador corrija y vuelva a intentarlo, y apretarla
+ * estorbaría el paso que evita los 22 correos mal mandados.
+ */
+export const BULK_REVIEW_THROTTLE = {
+  [THROTTLER_BURST]: { ttl: ONE_MINUTE_MS, limit: 6 },
+  [THROTTLER_SUSTAINED]: { ttl: FIFTEEN_MINUTES_MS, limit: 30 },
 };

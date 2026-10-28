@@ -207,7 +207,7 @@ describe('Portal — gestión de usuarios (integración HTTP)', () => {
         token: admin,
         body: { email: 'nuevo@kuboti.com', fullName: 'Nuevo' },
       });
-      expect(invite).toHaveBeenCalledWith(7, 3, expect.objectContaining({
+      expect(invite).toHaveBeenCalledWith(7, { kind: 'CLIENT_ADMIN', clientUserId: 3 }, expect.objectContaining({
         email: 'nuevo@kuboti.com',
       }));
     });

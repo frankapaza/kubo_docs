@@ -6,12 +6,17 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { createGlobalValidationPipe } from './common/validation/validation-pipe.factory';
+import { registerBulkSendJsonLimit } from './modules/portal/bulk-send-json-limit';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
   const config = app.get(ConfigService);
 
   configureTrustProxy(app, config);
+
+  // Antes de `listen()`, que es quien llama a `init()` y monta el analizador de
+  // cuerpos de Nest: por detrás no serviría de nada. Ver el fichero.
+  registerBulkSendJsonLimit(app);
 
   const apiPrefix = config.get<string>('API_PREFIX', 'api/v1');
   app.setGlobalPrefix(apiPrefix);
@@ -22,6 +27,12 @@ async function bootstrap(): Promise<void> {
   app.enableCors({
     origin: config.get<string>('CORS_ORIGINS', '*').split(','),
     credentials: true,
+    // Sin esto el navegador no deja que el JavaScript de la página lea
+    // `Content-Disposition` en una respuesta de otro origen —y el panel y la
+    // API lo son—, así que las descargas no pueden tomar del servidor el
+    // nombre del fichero y tienen que volver a escribirlo por su cuenta. Es
+    // una cabecera de respuesta, no de petición: no abre nada.
+    exposedHeaders: ['Content-Disposition'],
   });
 
   const swaggerConfig = new DocumentBuilder()

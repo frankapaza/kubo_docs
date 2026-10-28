@@ -24,11 +24,13 @@ import { ClientUsersController } from './client-users.controller';
 import { PortalUsersService } from './portal-users.service';
 import { PortalUsersController } from './portal-users.controller';
 import { PortalInvitationsService } from './portal-invitations.service';
+import { ClientUsersBulkService } from './client-users-bulk.service';
 import { PortalInvitationsController } from './portal-invitations.controller';
 import { TicketsModule } from '../tickets/tickets.module';
 import { ClientsModule } from '../clients/clients.module';
 import { WorkItemsModule } from '../work-items/work-items.module';
 import { EmailModule } from '../email/email.module';
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
@@ -42,6 +44,10 @@ import { EmailModule } from '../email/email.module';
     // marcado @Global, así que sus providers quedan disponibles igualmente.
     ThrottlerModule.forRoot({ throttlers: PORTAL_AUTH_THROTTLERS }),
     TypeOrmModule.forFeature([ClientUser, ClientUserInvitation]),
+    // Solo se consume `UsersService.findById`, y para una sola cosa: saber si
+    // el empleado que lanzó una carga masiva sigue activo. Un solo sentido:
+    // `UsersModule` no conoce el portal.
+    UsersModule,
     // De TicketsModule solo se consumen TicketsRepository, TicketEventsService,
     // TicketsService y ClientSystemsRepository, todos ya exportados por él.
     // La dependencia es en un solo sentido: TicketsModule no conoce el portal.
@@ -83,6 +89,7 @@ import { EmailModule } from '../email/email.module';
     ClientUsersService,
     PortalUsersService,
     PortalInvitationsService,
+    ClientUsersBulkService,
   ],
   // `ClientUsersService` se exporta desde la Task 8: `InboundEmailService`
   // (`modules/inbound-email`) lo necesita para identificar al remitente de un

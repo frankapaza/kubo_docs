@@ -129,7 +129,9 @@ export function fingerprintInvitationSecret(secret: string): string {
  * decisión tomada una vez aquí que ocho `===` sueltos, cada uno con su duda.
  * La segunda es que el día que alguien compare un valor que el atacante SÍ
  * controla sin hashear —un código corto de un solo uso, por ejemplo—, la
- * herramienta ya está y se llama por su nombre.
+ * herramienta ya está y se llama por su nombre. Ese día llegó con el MAC de la
+ * revisión de la carga masiva (`domain/bulk-users-review.ts`), que la llama en
+ * vez de tener su propia copia.
  *
  * No normaliza nada: ni caja, ni recorte, ni relleno. Compara los bytes de las
  * dos cadenas tal cual, por la misma razón que `fingerprintInvitationSecret`.
@@ -139,8 +141,12 @@ export function fingerprintInvitationSecret(secret: string): string {
  * filtrar.
  */
 export function invitationFingerprintsMatch(a: string, b: string): boolean {
-  const bytesA = Buffer.from(a ?? '', 'utf8');
-  const bytesB = Buffer.from(b ?? '', 'utf8');
+  // Lo que no es texto (ausente, número, objeto) es `false`, no un error: este
+  // valor puede venir del cuerpo de una petición, y una firma mal formada tiene
+  // que ser un rechazo, no un 500.
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const bytesA = Buffer.from(a, 'utf8');
+  const bytesB = Buffer.from(b, 'utf8');
   if (bytesA.length !== bytesB.length) return false;
   return timingSafeEqual(bytesA, bytesB);
 }

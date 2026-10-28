@@ -36,6 +36,8 @@ function invitacion(over: Record<string, unknown> = {}) {
  */
 function makeService(opciones: {
   fila?: any;
+  /** El empleado de la casa que invitó, cuando el autor es STAFF. */
+  empleado?: any;
   invitador?: any;
   empresa?: any;
 } = {}) {
@@ -62,10 +64,20 @@ function makeService(opciones: {
   };
   const config = { get: (k: string, f?: string) => f };
 
+
+  /**
+   * El personal de la casa. Aquí había un `{} as any`, que hoy no esconde
+   * ningún fallo pero deja SIN EJERCITAR la rama del autor de la casa: en
+   * cuanto una prueba pase por una invitación con `invited_by_user_id`, el
+   * servicio llama a `findById` y el doble vacío revienta con «no es una
+   * función» en vez de comprobar nada.
+   */
+  const users = { findById: jest.fn(async () => opciones.empleado ?? { id: 40, isActive: 1 }) };
+
   const service = new PortalInvitationsService(
-    invitations as any, clientUsers as any, email as any, clients as any, config as any,
+    invitations as any, clientUsers as any, email as any, clients as any, config as any, users as any,
   );
-  return { service, invitations, clientUsers, clients };
+  return { service, users, invitations, clientUsers, clients };
 }
 
 describe('PortalInvitationsService.preview', () => {
