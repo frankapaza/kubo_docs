@@ -47,8 +47,10 @@ import { ThrottlerOptions } from '@nestjs/throttler';
  * sería peor que el problema que se arregla aquí. El login del personal
  * (`auth.controller.ts`) tiene la misma carencia y queda fuera de esta rama.
  *
- * La única excepción a esa regla es el envío de prueba de una plantilla de
- * correo: ver `NOTIFICATION_TEST_THROTTLE` al final del fichero.
+ * Las excepciones a esa regla son dos, y las dos mandan correo de verdad: el
+ * envío de prueba de una plantilla de correo (`NOTIFICATION_TEST_THROTTLE`) y
+ * el envío de la carga masiva de usuarios (`BULK_INVITE_THROTTLE`), los dos al
+ * final del fichero.
  */
 
 /** Ventana corta: frena la ráfaga. */
@@ -74,9 +76,9 @@ export const PORTAL_REFRESH_THROTTLE = {
 /**
  * Override para `POST /notification-templates/:id/test`.
  *
- * La única excepción al «el panel interno no se limita» de arriba, y por un
- * motivo que no aplica al resto: es la única ruta del panel con un efecto
- * externo e irreversible. Cada llamada saca un correo de verdad por el SMTP de
+ * La primera excepción al «el panel interno no se limita» de arriba, y por un
+ * motivo que no aplica al resto: es una de las dos rutas del panel con un
+ * efecto externo e irreversible (la otra es `BULK_INVITE_THROTTLE`). Cada llamada saca un correo de verdad por el SMTP de
  * producción. Un administrador con el dedo pegado al botón —o una sesión suya
  * comprometida— puede quemar la cuota del proveedor y la reputación del
  * remitente, que es justo el activo que la §9 de la spec señala como riesgo:
@@ -133,4 +135,54 @@ export const NOTIFICATION_TEST_THROTTLE = {
 export const PORTAL_INVITATION_THROTTLE = {
   [THROTTLER_BURST]: { ttl: ONE_MINUTE_MS, limit: 5 },
   [THROTTLER_SUSTAINED]: { ttl: FIFTEEN_MINUTES_MS, limit: 20 },
+};
+
+/**
+ * Override para `POST /client-users/carga-masiva/envio`.
+ *
+ * **La segunda excepción al «el panel interno no se limita»**, y por el mismo
+ * motivo que la primera (`NOTIFICATION_TEST_THROTTLE`): efecto externo e
+ * irreversible. Aquí en peor, además: una sola petición saca hasta 200 correos
+ * de verdad por el SMTP de producción, y quemar la cuota del proveedor o la
+ * reputación del remitente es el riesgo que hunde la funcionalidad entera por
+ * perfecto que esté el código.
+ *
+ * **NO es el tope de invitar del portal, y conviene saber por qué.** Aquel
+ * existe para cerrar un oráculo —un 201 contra un 400 dice si una dirección
+ * está libre—. Aquí ese oráculo no existe, y no porque lo hayamos cerrado:
+ * porque el panel dice el motivo de cada fila a propósito (decisión 10 de la
+ * spec), y lo dice porque quien mira ya puede leerse la lista entera de
+ * empresas y usuarios. Copiar aquel tope sería copiar el mecanismo sin su
+ * motivo, que es como se acumulan las reglas que nadie sabe por qué están.
+ *
+ * Las otras dos rutas de la carga masiva —la plantilla y la revisión— van SIN
+ * tope: no mandan nada, y limitar la revisión molestaría justo en el paso que
+ * existe para que el operador corrija y vuelva a intentarlo.
+ *
+ * **Los números, y por qué estos y no otros (decisión 2 de esta revisión del
+ * diseño):** el caso real es una carga de 22 una vez, pero el tope no se
+ * calibra contra ese caso suelto sino contra la sesión de trabajo completa,
+ * que puede traer **dos clientes seguidos** el mismo rato.
+ *
+ * - **Ráfaga: 1 por minuto.** Entre revisar 22 filas y confirmar pasa siempre
+ *   más de un minuto, así que ningún uso legítimo la roza; lo único que corta
+ *   es un doble clic.
+ * - **Sostenido: 3 cada quince minutos.** Caben los dos clientes seguidos
+ *   **y** un reintento —volver a subir el archivo entero porque una fila
+ *   quedó `INVITADA_SIN_CORREO` (decisión 13 de la spec)— sin esperar entre
+ *   medias. Con 2 cabría la pareja y nada más: el primer reintento del día
+ *   chocaría con el tope, y reintentar no es un caso raro.
+ *
+ * El techo teórico queda anotado tal cual: 3 × 200 = 600 correos cada quince
+ * minutos desde una dirección. Es la mitad del que dejaban los valores
+ * anteriores de este mismo diseño (2 y 6, con un techo de 1200), y llegar a él
+ * exige de todos modos tres archivos de 200 filas en el mismo cuarto de hora
+ * desde una sesión con rol ADMIN y asiento en `audit_log` — no es el patrón de
+ * un cliente cargándose, es el patrón de alguien intentando algo raro. Bajarlo
+ * más (a 1) sí estorbaría el uso legítimo: dejaría sin sitio al segundo
+ * cliente del día o a cualquier reintento del primero.
+ */
+export const BULK_INVITE_THROTTLE = {
+  [THROTTLER_BURST]: { ttl: ONE_MINUTE_MS, limit: 1 },
+  [THROTTLER_SUSTAINED]: { ttl: FIFTEEN_MINUTES_MS, limit: 3 },
 };

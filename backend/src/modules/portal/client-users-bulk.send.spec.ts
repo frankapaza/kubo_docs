@@ -101,7 +101,7 @@ const BEA = { line: 3, fullName: 'Bea Ruiz', email: 'bea@x.com' };
 describe('send — la correspondencia con lo revisado', () => {
   it('un MAC cambiado no pasa', async () => {
     const b = bloque([ANA]);
-    await expect(crearServicio(mundo()).send(40, { ...b, mac: 'f'.repeat(64) })).rejects.toThrow(
+    await expect(crearServicio(mundo()).send(40, 7, { ...b, mac: 'f'.repeat(64) })).rejects.toThrow(
       /revisión/i,
     );
   });
@@ -110,20 +110,20 @@ describe('send — la correspondencia con lo revisado', () => {
     const b = bloque([ANA]);
     const otro = bloque([{ ...ANA, email: 'mia@x.com' }]);
     await expect(
-      crearServicio(mundo()).send(40, { revision: otro.revision, mac: b.mac }),
+      crearServicio(mundo()).send(40, 7, { revision: otro.revision, mac: b.mac }),
     ).rejects.toThrow(/revisión/i);
   });
 
   it('una revisión de hace 31 minutos ya no vale', async () => {
     const b = bloque([ANA], { issuedAt: Date.now() - REVIEW_TTL_MS - 1 });
-    await expect(crearServicio(mundo()).send(40, b)).rejects.toThrow(/revisión/i);
+    await expect(crearServicio(mundo()).send(40, 7, b)).rejects.toThrow(/revisión/i);
   });
 
   it('la empresa sale del bloque firmado: el cuerpo no la trae y no hay dónde ponerla', async () => {
     const m = mundo({ clientes: [{ id: 9, razonSocial: 'OTRA', status: 'CLIENT' }] });
     // El bloque dice empresa 7, que en este mundo no existe: la lectura falla,
     // y no hay ningún `clientId` en el cuerpo que pudiera apuntar a la 9.
-    await expect(crearServicio(m).send(40, bloque([ANA]))).rejects.toThrow();
+    await expect(crearServicio(m).send(40, 7, bloque([ANA]))).rejects.toThrow();
     expect(m.invitadas).toHaveLength(0);
   });
 });
@@ -131,7 +131,7 @@ describe('send — la correspondencia con lo revisado', () => {
 describe('send — invitar', () => {
   it('invita con autor de PERSONAL y en el orden del archivo, una a una', async () => {
     const m = mundo();
-    const r = await crearServicio(m).send(40, bloque([ANA, BEA]));
+    const r = await crearServicio(m).send(40, 7, bloque([ANA, BEA]));
 
     expect(m.invitadas).toEqual([
       { clientId: 7, author: { kind: 'STAFF', userId: 40 }, email: 'ana@x.com' },
@@ -142,7 +142,7 @@ describe('send — invitar', () => {
 
   it('si el correo no sale, la invitación queda igual y se dice — no se calla', async () => {
     const m = mundo({ correosQueFallan: new Set(['bea@x.com']) });
-    const r = await crearServicio(m).send(40, bloque([ANA, BEA]));
+    const r = await crearServicio(m).send(40, 7, bloque([ANA, BEA]));
 
     expect(r.rows.map((f) => f.outcome)).toEqual(['INVITADA', 'INVITADA_SIN_CORREO']);
     expect(r.rows[1].reason).toMatch(/vuelve a subir/i);
@@ -152,7 +152,7 @@ describe('send — invitar', () => {
   it('una fila que revienta al escribir NO tumba las buenas', async () => {
     const CHE = { line: 4, fullName: 'Che Lópe', email: 'che@x.com' };
     const m = mundo({ escriturasQueRevientan: new Set(['bea@x.com']) });
-    const r = await crearServicio(m).send(40, bloque([ANA, BEA, CHE]));
+    const r = await crearServicio(m).send(40, 7, bloque([ANA, BEA, CHE]));
 
     expect(r.rows.map((f) => f.outcome)).toEqual(['INVITADA', 'FALLO', 'INVITADA']);
     expect(r.totals).toEqual({ invited: 2, invitedWithoutEmail: 0, skipped: 0, failed: 1 });
@@ -162,7 +162,7 @@ describe('send — invitar', () => {
 
   it('los cuatro contadores suman siempre el total de filas', async () => {
     const m = mundo({ correosQueFallan: new Set(['bea@x.com']) });
-    const r = await crearServicio(m).send(40, bloque([ANA, BEA]));
+    const r = await crearServicio(m).send(40, 7, bloque([ANA, BEA]));
     const { invited, invitedWithoutEmail, skipped, failed } = r.totals;
     expect(invited + invitedWithoutEmail + skipped + failed).toBe(r.rows.length);
   });
@@ -174,7 +174,7 @@ describe('send — el mundo pudo cambiar entre la revisión y la confirmación',
     const m = mundo({
       usuarios: [{ id: 1, clientId: 7, email: 'ana@x.com', isActive: 1, isAdmin: 0 }],
     });
-    const r = await crearServicio(m).send(40, bloque([ANA, BEA]));
+    const r = await crearServicio(m).send(40, 7, bloque([ANA, BEA]));
 
     expect(r.rows[0].outcome).toBe('OMITIDA');
     expect(r.rows[0].reason).toMatch(/ya es usuario/i);
@@ -183,7 +183,7 @@ describe('send — el mundo pudo cambiar entre la revisión y la confirmación',
 
   it('si la empresa pasó a ex-cliente entre los dos pasos, no sale ni un correo', async () => {
     const m = mundo({ clientes: [{ id: 7, razonSocial: 'ACME', status: 'FORMER_CLIENT' }] });
-    await expect(crearServicio(m).send(40, bloque([ANA, BEA]))).rejects.toThrow(
+    await expect(crearServicio(m).send(40, 7, bloque([ANA, BEA]))).rejects.toThrow(
       /dejó de ser cliente/i,
     );
     expect(m.invitadas).toHaveLength(0);
@@ -192,7 +192,7 @@ describe('send — el mundo pudo cambiar entre la revisión y la confirmación',
 
 describe('send — el secreto de la invitación no sube', () => {
   it('en la respuesta no aparece nada con la forma de un secreto de invitación', async () => {
-    const r = await crearServicio(mundo()).send(40, bloque([ANA, BEA]));
+    const r = await crearServicio(mundo()).send(40, 7, bloque([ANA, BEA]));
     // 43 caracteres del alfabeto base64url: la forma de un secreto. Se busca
     // la FORMA y no una clave concreta, para que la prueba no se quede vieja
     // el día que alguien añada un campo.
@@ -205,9 +205,9 @@ describe('send — el orden de las comprobaciones', () => {
     const basura = 'esto-no-es-un-bloque';
     // Firma correcta de basura: pasa la firma, y se rechaza por forma, con el mismo cuerpo.
     const firmada = { revision: basura, mac: reviewMac(CLAVE, basura) };
-    const e1 = await crearServicio(mundo()).send(40, firmada).catch((e) => e);
+    const e1 = await crearServicio(mundo()).send(40, 7, firmada).catch((e) => e);
     const e2 = await crearServicio(mundo())
-      .send(40, { revision: basura, mac: 'a'.repeat(64) })
+      .send(40, 7, { revision: basura, mac: 'a'.repeat(64) })
       .catch((e) => e);
     expect(e1.getResponse()).toEqual(e2.getResponse());
     expect(e1.getResponse().code).toBe('REVISION_NO_VALIDA');
@@ -216,12 +216,12 @@ describe('send — el orden de las comprobaciones', () => {
   it('un bloque con la firma de otro secreto no pasa', async () => {
     const b = bloque([ANA]);
     const ajena = reviewMac(deriveReviewKey('otro-secreto'), b.revision);
-    await expect(crearServicio(mundo()).send(40, { ...b, mac: ajena })).rejects.toThrow(/revisión/i);
+    await expect(crearServicio(mundo()).send(40, 7, { ...b, mac: ajena })).rejects.toThrow(/revisión/i);
   });
 
   it('una revisión emitida en el futuro no vale', async () => {
     const b = bloque([ANA], { issuedAt: Date.now() + 60_000 });
-    await expect(crearServicio(mundo()).send(40, b)).rejects.toThrow(/revisión/i);
+    await expect(crearServicio(mundo()).send(40, 7, b)).rejects.toThrow(/revisión/i);
   });
 });
 
@@ -231,8 +231,8 @@ describe('send — repetir la confirmación no duplica nada', () => {
     const s = crearServicio(m);
     const b = bloque([ANA, BEA]);
 
-    const primera = await s.send(40, b);
-    const segunda = await s.send(40, b);
+    const primera = await s.send(40, 7, b);
+    const segunda = await s.send(40, 7, b);
 
     expect(primera.totals.invited).toBe(2);
     expect(m.invitadas).toHaveLength(2);
@@ -245,9 +245,9 @@ describe('send — repetir la confirmación no duplica nada', () => {
     const s = crearServicio(m);
     const b = bloque([ANA, BEA]);
 
-    await s.send(40, b);
+    await s.send(40, 7, b);
     m.escriturasQueRevientan.clear();
-    const r = await s.send(40, b);
+    const r = await s.send(40, 7, b);
 
     expect(r.rows.map((f) => f.outcome)).toEqual(['OMITIDA', 'INVITADA']);
     expect(m.invitadas.map((i) => i.email)).toEqual(['ana@x.com', 'bea@x.com']);
@@ -259,7 +259,7 @@ describe('send — repetir la confirmación no duplica nada', () => {
         { clientId: 7, email: 'ana@x.com', createdAt: new Date(Date.now() - 3_600_000) },
       ],
     });
-    const r = await crearServicio(m).send(40, bloque([ANA]));
+    const r = await crearServicio(m).send(40, 7, bloque([ANA]));
     expect(r.rows[0].outcome).toBe('INVITADA');
   });
 
@@ -269,9 +269,9 @@ describe('send — repetir la confirmación no duplica nada', () => {
     const s = crearServicio(m);
     const b = bloque([ANA]);
 
-    const primera = s.send(40, b);
+    const primera = s.send(40, 7, b);
     await new Promise((r) => setImmediate(r));
-    await expect(s.send(40, b)).rejects.toThrow(/ya se está enviando/i);
+    await expect(s.send(40, 7, b)).rejects.toThrow(/ya se está enviando/i);
 
     soltar();
     await primera;
@@ -282,8 +282,8 @@ describe('send — repetir la confirmación no duplica nada', () => {
     const m = mundo({ clientes: [{ id: 7, razonSocial: 'ACME', status: 'FORMER_CLIENT' }] });
     const s = crearServicio(m);
     const b = bloque([ANA]);
-    await expect(s.send(40, b)).rejects.toThrow(/dejó de ser cliente/i);
+    await expect(s.send(40, 7, b)).rejects.toThrow(/dejó de ser cliente/i);
     m.clientes[0].status = 'CLIENT';
-    expect((await s.send(40, b)).totals.invited).toBe(1);
+    expect((await s.send(40, 7, b)).totals.invited).toBe(1);
   });
 });

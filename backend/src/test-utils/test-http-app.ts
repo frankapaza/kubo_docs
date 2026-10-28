@@ -73,6 +73,14 @@ export class TestHttpApp {
     return { status: res.status, body, headers: res.headers };
   }
 
+  /**
+   * Petición cruda, para lo que `request` no cubre (multipart, cabeceras de
+   * respuesta, cuerpos binarios). Devuelve la `Response` de `fetch` tal cual.
+   */
+  raw(path: string, init: RequestInit): Promise<Response> {
+    return fetch(`${this.baseUrl}${path}`, init);
+  }
+
   close(): Promise<void> {
     return this.app.close();
   }

@@ -129,6 +129,8 @@ export interface BulkSendRow {
 }
 
 export interface BulkSendResult {
+  /** La empresa a la que se invitó. Va también aquí para que `audit_log` la guarde. */
+  clientId: number;
   rows: BulkSendRow[];
   totals: {
     invited: number;
@@ -265,6 +267,7 @@ export class ClientUsersBulkService {
    */
   async send(
     staffUserId: number,
+    clientId: number,
     dto: ConfirmBulkInviteDto,
   ): Promise<BulkSendResult> {
     if (
@@ -278,6 +281,19 @@ export class ClientUsersBulkService {
     const payload = decodeReview(dto.revision);
     if (!payload) throw revisionNoValida();
     if (isReviewExpired(payload.issuedAt, new Date())) throw revisionNoValida();
+
+    // La empresa de la URL tiene que ser la del bloque firmado. No es una
+    // defensa (el bloque es auténtico y el operador puede con todas): es que la
+    // petición diga la verdad sobre para quién fue. Va DESPUÉS de la firma, así
+    // que quien llega aquí tenía un bloque auténtico y este motivo no es un oráculo.
+    if (!sameId(payload.clientId, clientId)) {
+      throw new BadRequestException({
+        code: "REVISION_DE_OTRA_EMPRESA",
+        message:
+          "Esta revisión se hizo para otra empresa distinta de la que se está confirmando. " +
+          "No se ha enviado nada: vuelve a subir el archivo desde la empresa correcta.",
+      });
+    }
 
     if (this.enCurso.has(dto.mac)) {
       throw new ConflictException({
@@ -305,6 +321,7 @@ export class ClientUsersBulkService {
       }
 
       return {
+        clientId: payload.clientId,
         rows,
         totals: {
           invited: rows.filter((f) => f.outcome === "INVITADA").length,

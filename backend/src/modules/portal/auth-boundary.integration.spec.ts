@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { PassportModule, PassportStrategy } from '@nestjs/passport';
 import { Test } from '@nestjs/testing';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { PORTAL_AUTH_THROTTLERS } from '../../config/throttler.config';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 
 import { JwtStrategy } from '../auth/strategies/jwt.strategy';
@@ -13,6 +15,7 @@ import { TicketAssignmentService } from '../tickets/ticket-assignment.service';
 import { TicketAIService } from '../tickets/ticket-ai.service';
 import { ClientUsersController } from './client-users.controller';
 import { ClientUsersService } from './client-users.service';
+import { ClientUsersBulkService } from './client-users-bulk.service';
 import { PortalTicketsController } from './portal-tickets.controller';
 import { PortalTicketsService } from './portal-tickets.service';
 import { ClientJwtStrategy } from './strategies/client-jwt.strategy';
@@ -92,7 +95,7 @@ describe('Frontera personal / cliente — las dos estrategias (integración HTTP
     };
 
     const moduleRef = await Test.createTestingModule({
-      imports: [PassportModule],
+      imports: [PassportModule, ThrottlerModule.forRoot({ throttlers: PORTAL_AUTH_THROTTLERS })],
       controllers: [TicketsController, ClientUsersController, PortalTicketsController],
       providers: [
         { provide: ConfigService, useValue: config },
@@ -105,6 +108,7 @@ describe('Frontera personal / cliente — las dos estrategias (integración HTTP
         { provide: TicketAssignmentService, useValue: {} },
         { provide: TicketAIService, useValue: {} },
         { provide: ClientUsersService, useValue: { listByClient: clientUsersList } },
+        { provide: ClientUsersBulkService, useValue: {} },
         { provide: PortalTicketsService, useValue: { list: portalList } },
       ],
     }).compile();
@@ -257,7 +261,7 @@ describe('Frontera personal / cliente — StaffOnlyGuard montado (integración H
     clientUsersList = jest.fn().mockResolvedValue([]);
 
     const moduleRef = await Test.createTestingModule({
-      imports: [PassportModule],
+      imports: [PassportModule, ThrottlerModule.forRoot({ throttlers: PORTAL_AUTH_THROTTLERS })],
       controllers: [TicketsController, ClientUsersController],
       providers: [
         PayloadPassthroughJwtStrategy,
@@ -266,6 +270,7 @@ describe('Frontera personal / cliente — StaffOnlyGuard montado (integración H
         { provide: TicketAssignmentService, useValue: {} },
         { provide: TicketAIService, useValue: {} },
         { provide: ClientUsersService, useValue: { listByClient: clientUsersList } },
+        { provide: ClientUsersBulkService, useValue: {} },
       ],
     }).compile();
 
