@@ -4,10 +4,7 @@ import { ConfigService } from "@nestjs/config";
 import { ClientsService } from "../clients/clients.service";
 import { ClientUsersRepository } from "./client-users.repository";
 import { ClientUserInvitationsRepository } from "./client-user-invitations.repository";
-import {
-  PortalInvitationsService,
-  admiteReinvitacion,
-} from "./portal-invitations.service";
+import { PortalInvitationsService } from "./portal-invitations.service";
 import { normalizeEmailAddress } from "./email-address";
 import { sameId } from "../../common/ids";
 import { buildBulkTemplate, readUploadedGrid } from "./bulk-users-workbook";
@@ -206,17 +203,21 @@ export class ClientUsersBulkService {
     const empresa = await this.clients.findByIdOrFail(clientId);
     if (empresa.status === "FORMER_CLIENT") {
       throw archivoRechazado(
-        "Esa empresa dejó de ser cliente, así que sus invitaciones no funcionarían. " +
-          "Cámbiale el estado antes de dar de alta a su gente.",
+        "Esta empresa dejó de ser cliente, así que sus invitaciones no funcionarían y no se " +
+          "ha enviado nada. Hay que reactivarla antes de volver a subir el archivo.",
       );
     }
     return empresa;
   }
 
   /**
-   * El veredicto de una fila. **La misma función la usan la revisión y el
-   * envío** (Task 7): si el envío tuviera su propia copia, las dos podrían
-   * discrepar y se invitaría a alguien que la pantalla dijo que no.
+   * El veredicto de una fila. Está pensada para que la use también el envío
+   * (Task 7): si el envío tuviera su propia copia, las dos podrían discrepar y
+   * se invitaría a alguien que la pantalla dijo que no.
+   *
+   * **Los motivos están escritos para quien recibe el informe**, que es el
+   * cliente y no tiene panel: dicen qué pasa con la fila y qué hacer con ella
+   * en la hoja, sin vocabulario interno.
    *
    * `vistos` acumula los correos ya normalizados de este mismo archivo, con la
    * fila donde apareció cada uno. Se compara con el correo **normalizado**
@@ -268,19 +269,19 @@ export class ClientUsersBulkService {
       );
     }
     if (fullName.length > MAX_FULL_NAME_LENGTH) {
-      return rechazo(`El nombre pasa de ${MAX_FULL_NAME_LENGTH} caracteres.`);
+      return rechazo(`El nombre pasa de ${MAX_FULL_NAME_LENGTH} caracteres. Acórtalo.`);
     }
     if (email === "") return rechazo("Falta el correo.");
     if (email.length > MAX_EMAIL_LENGTH) {
-      return rechazo(`El correo pasa de ${MAX_EMAIL_LENGTH} caracteres.`);
+      return rechazo(`El correo pasa de ${MAX_EMAIL_LENGTH} caracteres. Revisa que esté bien escrito.`);
     }
     if (!FORMA_DE_CORREO.test(email))
-      return rechazo("El correo no está bien escrito.");
+      return rechazo("El correo no está bien escrito. Corrígelo en la hoja.");
 
     const yaVistoEn = vistos.get(email);
     if (yaVistoEn !== undefined) {
       return rechazo(
-        `Ese correo ya aparece en la fila ${yaVistoEn} de este archivo.`,
+        `Ese correo ya aparece en la fila ${yaVistoEn} de este archivo. Deja solo una de las dos filas.`,
       );
     }
     vistos.set(email, cruda.line);
@@ -292,32 +293,32 @@ export class ClientUsersBulkService {
         // decisión 10: este informe sale del panel hacia un correo al cliente,
         // y ese correo no lo lee ningún ADMIN. Quien necesite el nombre lo
         // busca en el panel, que es donde esa consulta queda auditada.
-        return rechazo("Ese correo ya es de un usuario de otra empresa.");
+        return rechazo(
+          "Ese correo ya es de un usuario de otra empresa, así que no se puede invitar aquí. " +
+            "Usa otro correo o quita la fila.",
+        );
       }
       if (yaEsUsuario.isAdmin) {
         return rechazo(
-          "Es administrador de esta empresa. La carga masiva no toca administradores; " +
-            "usa la edición del panel.",
+          "Es administrador de esta empresa. La carga masiva no modifica a los " +
+            "administradores: quita la fila.",
         );
       }
       if (yaEsUsuario.isActive) {
         return rechazo(
-          "Ya es usuario activo de esta empresa; su contraseña no se toca.",
+          "Ya es usuario activo de esta empresa; no hace falta invitarlo y su contraseña no se toca. Quita la fila.",
         );
       }
       // Desactivado, no administrador y de esta empresa: reinvitación de la
-      // decisión 12 de R4. Se decide con `admiteReinvitacion`, la MISMA
-      // función que usan invitar y aceptar, no con una copia de sus tres
-      // reglas — dos copias terminan divergiendo y la que se olvide es la que
-      // deja reactivar a quien no debía.
-      if (!admiteReinvitacion(yaEsUsuario, clientId)) {
-        return rechazo("Ese correo no se puede invitar desde aquí.");
-      }
+      // decisión 12 de R4. Las tres condiciones de `admiteReinvitacion` ya se
+      // comprobaron arriba, una a una; llamar a la función aquí sería una
+      // comprobación que nunca puede fallar. Si esa regla cambia en el servicio
+      // de invitaciones, hay que cambiarla aquí también.
       return {
         ...base,
         verdict: "SE_INVITARA",
         reason:
-          "Está desactivado en esta empresa: al aceptar recuperará su acceso y su historial.",
+          "Su acceso a esta empresa está desactivado: se le enviará una invitación y, al aceptarla, recuperará su acceso y su historial.",
       };
     }
 
@@ -327,8 +328,8 @@ export class ClientUsersBulkService {
         // No se toca la ajena: sería un efecto cruzado entre empresas por la
         // puerta de atrás. Misma regla que R4.
         return rechazo(
-          "Ese correo tiene una invitación pendiente en otra empresa. No se puede invitar " +
-            "hasta que caduque.",
+          "Ese correo tiene una invitación pendiente de otra empresa, así que no se puede " +
+          "invitar ahora. Quita la fila; podrá invitarse cuando esa invitación caduque.",
         );
       }
       return {

@@ -2,7 +2,25 @@ import { ConfigService } from "@nestjs/config";
 
 import { ClientUsersBulkService } from "./client-users-bulk.service";
 import { COLUMNA_CORREO, COLUMNA_NOMBRE } from "./domain/bulk-user-file";
-import { decodeReview } from "./domain/bulk-users-review";
+import {
+  decodeReview,
+  deriveReviewKey,
+  reviewMac,
+} from "./domain/bulk-users-review";
+
+const SECRETO_DE_PRUEBAS = "secreto-de-pruebas";
+
+/**
+ * Lo que un usuario o una invitación de verdad llevan dentro y que NUNCA debe
+ * salir en el informe. Los dobles lo devuelven de verdad, para que la valla de
+ * «no se escapa nada» pueda fallar: con objetos limpios no había nada que
+ * escapar.
+ */
+const SENSIBLES = [
+  "SECRETO-EN-CLARO-DE-LA-INVITACION",
+  "HUELLA-DEL-SECRETO-DE-LA-INVITACION",
+  "HASH-DE-CONTRASENA-CIFRADA",
+];
 
 /** El archivo, en la forma más simple de las dos que se aceptan. */
 function csv(filas: string[][]): Buffer {
@@ -22,18 +40,33 @@ interface Mundo {
     isActive: number;
     isAdmin: number;
   }[];
-  invitacionesVivas: { clientId: number; email: string }[];
+  invitacionesVivas: { clientId: number; email: string; expiresAt?: Date }[];
   clientes: { id: number; razonSocial: string; status: string }[];
 }
 
-function crearServicio(mundo: Mundo) {
+const LEJANO = new Date("2999-01-01T00:00:00Z");
+
+function crearServicio(mundo: Mundo, secreto: string = SECRETO_DE_PRUEBAS) {
   const clientUsers = {
-    findByEmail: async (email: string) =>
-      mundo.usuarios.find((u) => u.email === email) ?? null,
+    findByEmail: async (email: string) => {
+      const u = mundo.usuarios.find((x) => x.email === email);
+      return u ? { ...u, passwordHash: SENSIBLES[2], fullName: "Nombre BD" } : null;
+    },
   };
   const invitations = {
-    findLiveByEmail: async (email: string) =>
-      mundo.invitacionesVivas.find((i) => i.email === email) ?? null,
+    // Respeta el instante de frescura, como el repositorio real: solo
+    // devuelve la que aún no caducó en `now`.
+    findLiveByEmail: async (email: string, now: Date) => {
+      const i = mundo.invitacionesVivas.find((x) => x.email === email);
+      if (!i || (i.expiresAt ?? LEJANO).getTime() <= now.getTime()) return null;
+      return {
+        ...i,
+        id: 1,
+        secret: SENSIBLES[0],
+        secretFingerprint: SENSIBLES[1],
+        expiresAt: i.expiresAt ?? LEJANO,
+      };
+    },
   };
   const clients = {
     findByIdOrFail: async (id: number) => {
@@ -42,7 +75,7 @@ function crearServicio(mundo: Mundo) {
       return c;
     },
   };
-  const config = new ConfigService({ JWT_ACCESS_SECRET: "secreto-de-pruebas" });
+  const config = new ConfigService({ JWT_ACCESS_SECRET: secreto });
 
   return new ClientUsersBulkService(
     clientUsers as never,
@@ -100,6 +133,23 @@ describe("review — veredictos, uno por fila", () => {
     expect(r.rows[0].reason).toMatch(/correo/i);
     expect(r.rows[1].reason).toMatch(/nombre/i);
     expect(r.rows[2].reason).toMatch(/180/);
+  });
+
+  it("el correo de 181 caracteres se rechaza, no entra en el bloque; el de 180 pasa", async () => {
+    const r = await crearServicio(mundo()).review(
+      7,
+      csv([
+        ["Largo", `${"a".repeat(175)}@x.com`],
+        ["Justo", `${"b".repeat(174)}@x.com`],
+      ]),
+    );
+
+    expect(r.rows[0].verdict).toBe("RECHAZADA");
+    expect(r.rows[0].reason).toMatch(/correo.*180/i);
+    expect(r.rows[1].verdict).toBe("SE_INVITARA");
+    expect(decodeReview(r.revision)!.rows.map((f) => f.fullName)).toEqual([
+      "Justo",
+    ]);
   });
 
   it("el repetido dentro del archivo se detecta con el correo YA normalizado, y dice en qué fila estaba", async () => {
@@ -181,6 +231,7 @@ describe("review — veredictos, uno por fila", () => {
 
     expect(r.rows[0].verdict).toBe("SE_REINVITARA");
     expect(r.rows[0].reason).toMatch(/dejará de funcionar/i);
+    expect(r.totals).toEqual({ willInvite: 0, willReinvite: 1, rejected: 0 });
   });
 
   it("una invitación viva de OTRA empresa se rechaza, y la ajena no se toca", async () => {
@@ -233,7 +284,37 @@ describe("review — el bloque firmado que sale", () => {
     expect(payload.rows).toEqual([
       { line: 2, fullName: "Ana", email: "ana@x.com" },
     ]);
-    expect(r.mac).toHaveLength(64);
+    // Firmado de verdad: es el MAC de ESTE bloque con la clave derivada del
+    // secreto del servidor, no una constante ni una clave escrita en el código.
+    expect(r.mac).toBe(
+      reviewMac(deriveReviewKey(SECRETO_DE_PRUEBAS), r.revision),
+    );
+  });
+
+  it("la firma depende del secreto del servidor: con otro secreto, otra firma", async () => {
+    const archivo = csv([["Ana", "ana@x.com"]]);
+    const a = await crearServicio(mundo(), "un-secreto").review(7, archivo);
+    const b = await crearServicio(mundo(), "otro-secreto").review(7, archivo);
+
+    expect(a.mac).toBe(reviewMac(deriveReviewKey("un-secreto"), a.revision));
+    expect(b.mac).toBe(reviewMac(deriveReviewKey("otro-secreto"), b.revision));
+    expect(a.mac).not.toBe(b.mac);
+  });
+
+  it("la etiqueta de caducidad sale en hora de Lima, media hora después de la emisión", async () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-01-15T15:00:00Z"));
+    try {
+      const r = await crearServicio(mundo()).review(
+        7,
+        csv([["Ana", "ana@x.com"]]),
+      );
+      expect(r.expiresAtLabel).toBe("10:30");
+      expect(decodeReview(r.revision)!.issuedAt).toBe(
+        new Date("2026-01-15T15:00:00Z").getTime(),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("un archivo sin ninguna fila aprobada NO devuelve bloque: no hay nada que confirmar", async () => {
@@ -331,8 +412,14 @@ describe("review — lo que el brief añade a la receta", () => {
     const m = mundo({
       usuarios: [
         { id: 1, clientId: 9, email: "ana@x.com", isActive: 1, isAdmin: 0 },
+        { id: 2, clientId: 7, email: "ya@x.com", isActive: 1, isAdmin: 0 },
+        { id: 3, clientId: 7, email: "jefe@x.com", isActive: 1, isAdmin: 1 },
+        { id: 4, clientId: 7, email: "baja@x.com", isActive: 0, isAdmin: 0 },
       ],
-      invitacionesVivas: [{ clientId: 9, email: "luis@x.com" }],
+      invitacionesVivas: [
+        { clientId: 9, email: "luis@x.com" },
+        { clientId: 7, email: "propia@x.com" },
+      ],
       clientes: [
         { id: 7, razonSocial: "ACME S.A.C.", status: "CLIENT" },
         { id: 9, razonSocial: "OTRA S.A.", status: "CLIENT" },
@@ -343,10 +430,47 @@ describe("review — lo que el brief añade a la receta", () => {
       csv([
         ["Ana", "ana@x.com"],
         ["Luis", "luis@x.com"],
+        ["Ya", "ya@x.com"],
+        ["Jefe", "jefe@x.com"],
+        ["Baja", "baja@x.com"],
+        ["Propia", "propia@x.com"],
       ]),
     );
 
-    expect(JSON.stringify(r)).not.toContain("OTRA");
+    // Se mira el JSON ENTERO de la respuesta, no campos sueltos: así la valla
+    // sigue en pie el día que alguien añada un campo.
+    const json = JSON.stringify(r);
+    expect(json).not.toContain("OTRA");
+    for (const sensible of SENSIBLES) expect(json).not.toContain(sensible);
+    expect(json).not.toContain("Nombre BD");
+    // Y el bloque, ya decodificado, tampoco.
+    expect(JSON.stringify(decodeReview(r.revision))).not.toContain("HASH");
+  });
+
+  it("la invitación se busca con el instante actual: una caducada no cuenta como viva", async () => {
+    const m = mundo({
+      invitacionesVivas: [
+        {
+          clientId: 7,
+          email: "ana@x.com",
+          expiresAt: new Date("2026-01-15T14:00:00Z"),
+        },
+      ],
+    });
+    jest.useFakeTimers().setSystemTime(new Date("2026-01-15T15:00:00Z"));
+    try {
+      // Caducó hace una hora: no hay invitación viva, es una invitación nueva.
+      const despues = await crearServicio(m).review(7, csv([["Ana", "ana@x.com"]]));
+      expect(despues.rows[0].verdict).toBe("SE_INVITARA");
+      expect(despues.rows[0].reason).toBeNull();
+
+      // Una hora antes de caducar, sí estaba viva.
+      jest.setSystemTime(new Date("2026-01-15T13:00:00Z"));
+      const antes = await crearServicio(m).review(7, csv([["Ana", "ana@x.com"]]));
+      expect(antes.rows[0].verdict).toBe("SE_REINVITARA");
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("el identificador de la empresa llega como cadena desde la base y aun así se reconoce como propia", async () => {
