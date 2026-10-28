@@ -55,6 +55,12 @@ export interface RawBulkRow {
   line: number;
   fullName: string;
   email: string;
+  /**
+   * Presente cuando la fila no se puede leer como dos columnas (hoy: lleva más
+   * celdas rellenas de las que tiene la cabecera). La fila se CONSERVA para que
+   * se informe de ella por su número, en vez de truncarla en silencio.
+   */
+  problem?: string;
 }
 
 /** Cuerpo único de los rechazos que tumban el archivo entero. */
@@ -113,7 +119,8 @@ const BOM = [0xef, 0xbb, 0xbf];
  *    encabezado pasa a ser `﻿Nombre completo` y no casa con nada — un
  *    archivo perfectamente correcto rechazado por un carácter invisible.
  * 2. **La codificación se deduce, no se supone.** Si los bytes son UTF-8
- *    válido, es UTF-8; si no, se lee como `latin1`, que es lo que escribe un
+ *    válido, es UTF-8; si no, se lee como `windows-1252` (no `latin1`, que deja caracteres de control
+ *    donde Excel pone el apóstrofo y las comillas curvas), que es lo que escribe un
  *    Excel en español cuando no pone la marca. La comprobación es
  *    reinterpretar y comparar los bytes, la misma que hace
  *    `decodeMultipartFilename` en `common/http/`, y no una lista de
@@ -126,8 +133,32 @@ const BOM = [0xef, 0xbb, 0xbf];
  * `looksLikeZip` se haya llevado los ZIP.
  */
 export function decodeTextFile(buffer: Buffer): string {
+  if (buffer.length === 0) {
+    throw archivoRechazado(
+      'El archivo está vacío (0 bytes). Vuelve a guardarlo con los datos escritos y súbelo de nuevo.',
+    );
+  }
+
+  // «Texto Unicode» de Excel es UTF-16 con marca de orden de bytes: lleva bytes
+  // nulos, así que sin esta guarda saldría como «no es una hoja de cálculo».
+  if (
+    buffer.length >= 2 &&
+    ((buffer[0] === 0xff && buffer[1] === 0xfe) || (buffer[0] === 0xfe && buffer[1] === 0xff))
+  ) {
+    throw archivoRechazado(
+      'El archivo está guardado como «Texto Unicode» (UTF-16), que no se puede leer. ' +
+        'En Excel usa «Guardar como» y elige «CSV UTF-8 (delimitado por comas)» o «Libro de Excel (.xlsx)».',
+    );
+  }
+
   const sinBom =
     buffer.length >= 3 && BOM.every((byte, i) => buffer[i] === byte) ? buffer.subarray(3) : buffer;
+
+  if (sinBom.length === 0) {
+    throw archivoRechazado(
+      'El archivo está vacío: solo tiene la marca de codificación. Escribe los datos y súbelo de nuevo.',
+    );
+  }
 
   if (sinBom.includes(0x00)) {
     throw archivoRechazado(
@@ -138,7 +169,7 @@ export function decodeTextFile(buffer: Buffer): string {
 
   const comoUtf8 = sinBom.toString('utf8');
   const esUtf8Valido = Buffer.from(comoUtf8, 'utf8').equals(sinBom);
-  return esUtf8Valido ? comoUtf8 : sinBom.toString('latin1');
+  return esUtf8Valido ? comoUtf8 : new TextDecoder('windows-1252').decode(sinBom);
 }
 
 /** Los tres separadores que se aceptan, en orden de preferencia ante un empate. */
@@ -238,6 +269,15 @@ export function parseDelimitedText(text: string): string[][] {
     }
   }
 
+  // Una comilla sin cerrar se tragaría el resto del archivo como si fuera una
+  // sola celda: las demás personas desaparecerían sin un solo error. Se rechaza.
+  if (dentroDeComillas) {
+    throw archivoRechazado(
+      'El archivo tiene unas comillas (") sin cerrar, y por eso no se puede saber dónde acaban ' +
+        'las filas. Busca el nombre que tenga una comilla suelta, quítala o ciérrala, y súbelo de nuevo.',
+    );
+  }
+
   // La última fila no lleva salto detrás si el archivo no termina en uno.
   if (celda !== '' || celdas.length > 0) {
     celdas.push(celda);
@@ -275,13 +315,15 @@ export function gridToRows(grid: string[][]): RawBulkRow[] {
 
   const filas: RawBulkRow[] = [];
   for (let i = 1; i < grid.length; i++) {
-    const fullName = (grid[i][0] ?? '').trim();
-    const email = (grid[i][1] ?? '').trim();
+    const celdas = grid[i] ?? [];
+    const fullName = (celdas[0] ?? '').trim();
+    const email = (celdas[1] ?? '').trim();
+    const sobrantes = celdas.slice(esperada.length).some((c) => (c ?? '').trim() !== '');
 
     // Del todo vacía: la deja Excel al arrastrar y no es un error de nadie.
     // Una fila con UN campo relleno SÍ es un error, y se conserva para poder
     // informar de ella — callarla sería decidir por la ausencia de un valor.
-    if (fullName === '' && email === '') continue;
+    if (fullName === '' && email === '' && !sobrantes) continue;
 
     if (filas.length >= MAX_BULK_ROWS) {
       throw archivoRechazado(
@@ -289,7 +331,14 @@ export function gridToRows(grid: string[][]): RawBulkRow[] {
           'de uno en uno.',
       );
     }
-    filas.push({ line: i + 1, fullName, email });
+    const fila: RawBulkRow = { line: i + 1, fullName, email };
+    if (sobrantes) {
+      fila.problem =
+        `La fila ${i + 1} tiene más de ${esperada.length} celdas rellenas, y las columnas ya no ` +
+        'corresponden al nombre y al correo. Suele ser una coma dentro de un nombre: ' +
+        'entrecomilla el nombre o quítale la coma.';
+    }
+    filas.push(fila);
   }
 
   if (filas.length === 0) {

@@ -1,6 +1,8 @@
 import {
   COLUMNA_CORREO,
   COLUMNA_NOMBRE,
+  BULK_UPLOAD_LIMITS,
+  MAX_BULK_FILE_BYTES,
   MAX_BULK_ROWS,
   decodeTextFile,
   gridToRows,
@@ -49,10 +51,36 @@ describe('decodeTextFile', () => {
     expect(decodeTextFile(Buffer.from('Muñoz Peña', 'utf8'))).toBe('Muñoz Peña');
   });
 
-  it('cae a latin1 cuando los bytes NO son UTF-8 válido — el Excel en español', () => {
+  it('cae a windows-1252 cuando los bytes NO son UTF-8 válido — el Excel en español', () => {
     // `Muñoz` con la eñe en un solo byte (0xF1): lo que escribe Excel al
     // guardar «CSV (delimitado por comas)» en un Windows en español.
     expect(decodeTextFile(Buffer.from('Mu\xf1oz', 'latin1'))).toBe('Muñoz');
+  });
+
+  it('windows-1252: el apóstrofo y las comillas curvas de Excel no son caracteres de control', () => {
+    // 0x92 apóstrofo tipográfico, 0x93/0x94 comillas curvas, 0x96 raya.
+    const bytes = Buffer.from([0x44, 0x92, 0x41, 0x20, 0x93, 0x50, 0x94, 0x20, 0x96, 0x20, 0x50, 0xf1]);
+    expect(decodeTextFile(bytes)).toBe('D\u2019A \u201cP\u201d \u2013 P\u00f1');
+  });
+
+  it('un archivo de cero bytes dice que está vacío, no que falta el separador', () => {
+    expect(() => decodeTextFile(Buffer.alloc(0))).toThrow(/vacío/i);
+    expect(() => decodeTextFile(Buffer.from([0xef, 0xbb, 0xbf]))).toThrow(/vacío/i);
+  });
+
+  it('el «Texto Unicode» de Excel (UTF-16) se nombra, no habla de hojas de cálculo', () => {
+    const bytes = Buffer.from('\ufeffNombre completo\tCorreo', 'utf16le');
+    expect(() => decodeTextFile(bytes)).toThrow(/Unicode/);
+    expect(() => decodeTextFile(bytes)).not.toThrow(/hoja de cálculo/);
+  });
+
+  it('un byte nulo bien entrado el archivo también lo descarta', () => {
+    const bytes = Buffer.concat([
+      Buffer.from('Nombre completo,Correo\n' + 'x'.repeat(500)),
+      Buffer.from([0x00]),
+      Buffer.from('fin'),
+    ]);
+    expect(() => decodeTextFile(bytes)).toThrow(/hoja de cálculo/i);
   });
 
   it('rechaza un binario disfrazado: un byte nulo no aparece en un archivo de texto', () => {
@@ -79,6 +107,15 @@ describe('sniffDelimiter', () => {
     expect(sniffDelimiter('"Pérez, Ana";Correo')).toBe(';');
   });
 
+  it('solo mira la cabecera: las comas de los datos no le ganan al punto y coma', () => {
+    const texto = 'Nombre completo;Correo electrónico\nA,B,C,D,E;a@x.com\nF,G,H,I;f@x.com';
+    expect(parseDelimitedText(texto)).toEqual([
+      ['Nombre completo', 'Correo electrónico'],
+      ['A,B,C,D,E', 'a@x.com'],
+      ['F,G,H,I', 'f@x.com'],
+    ]);
+  });
+
   it('sin ningún separador no hay dos columnas: se rechaza', () => {
     expect(() => sniffDelimiter('Nombre completo')).toThrow(/separador/i);
   });
@@ -91,6 +128,13 @@ describe('parseDelimitedText', () => {
       ['Nombre completo', 'Correo electrónico'],
       ['Pérez, Ana', 'ana@x.com'],
       ['Di "Bo"', 'bo@x.com'],
+    ]);
+  });
+
+  it('un salto de línea dentro de comillas (Alt+Enter) es parte de la celda', () => {
+    expect(parseDelimitedText('a,b\n"Ana\nPérez",a@x.com')).toEqual([
+      ['a', 'b'],
+      ['Ana\nPérez', 'a@x.com'],
     ]);
   });
 
@@ -139,6 +183,29 @@ describe('gridToRows', () => {
     expect(() => gridToRows([CABECERA])).toThrow(/ninguna fila/i);
   });
 
+  it('el tope es 200 filas y 512 KB, por valor y no por la constante', () => {
+    expect(MAX_BULK_ROWS).toBe(200);
+    expect(MAX_BULK_FILE_BYTES).toBe(524288);
+    expect(BULK_UPLOAD_LIMITS).toEqual({ fileSize: 524288, files: 1 });
+    const grid = (n: number) => [CABECERA, ...Array.from({ length: n }, (_, i) => [`P${i}`, `p${i}@x.com`])];
+    expect(gridToRows(grid(200))).toHaveLength(200);
+    expect(() => gridToRows(grid(201))).toThrow(/200/);
+  });
+
+  it('una fila con hueco en la cuadrícula no revienta con un error de tipo', () => {
+    const grid = [CABECERA, undefined, ['Ana', 'a@x.com']] as unknown as string[][];
+    expect(gridToRows(grid)).toEqual([{ line: 3, fullName: 'Ana', email: 'a@x.com' }]);
+  });
+
+  it('una fila con una tercera celda rellena se señala, no se trunca, y las buenas siguen', () => {
+    const filas = gridToRows([CABECERA, ['Pérez', 'Ana', 'ana@x.com'], ['Bea', 'b@x.com'], ['Cris', 'c@x.com', '']]);
+    expect(filas).toHaveLength(3);
+    expect(filas[0].line).toBe(2);
+    expect(filas[0].problem).toMatch(/fila 2/);
+    expect(filas[1]).toEqual({ line: 3, fullName: 'Bea', email: 'b@x.com' });
+    expect(filas[2]).toEqual({ line: 4, fullName: 'Cris', email: 'c@x.com' });
+  });
+
   it('rechaza el archivo ENTERO al pasarse del tope, no recorta las primeras', () => {
     const grid = [CABECERA, ...Array.from({ length: MAX_BULK_ROWS + 1 }, (_, i) => [`P${i}`, `p${i}@x.com`])];
     expect(() => gridToRows(grid)).toThrow(new RegExp(String(MAX_BULK_ROWS)));
@@ -147,7 +214,7 @@ describe('gridToRows', () => {
 
 describe('bordes del archivo que llega de fuera', () => {
   it('un archivo vacío no es una hoja con datos: se rechaza', () => {
-    expect(() => parseDelimitedText(decodeTextFile(Buffer.alloc(0)))).toThrow(/separador/i);
+    expect(() => parseDelimitedText(decodeTextFile(Buffer.alloc(0)))).toThrow(/vacío/i);
   });
 
   it('la marca de orden de bytes no estropea el primer encabezado', () => {
@@ -167,8 +234,11 @@ describe('bordes del archivo que llega de fuera', () => {
     ]);
   });
 
-  it('una comilla sin cerrar no revienta: sale una cuadrícula finita', () => {
-    expect(() => parseDelimitedText('a,b\n"x,y\nz')).not.toThrow();
+  it('una comilla sin cerrar rechaza el archivo en vez de tragarse las filas siguientes', () => {
+    const filas = Array.from({ length: 22 }, (_, i) => `P${i},p${i}@x.com`);
+    filas[1] = 'Ana "Anita,ana@x.com';
+    const texto = ['Nombre completo,Correo electrónico', ...filas].join('\n');
+    expect(() => parseDelimitedText(texto)).toThrow(/comillas.*sin cerrar/i);
   });
 
   it('exactamente MAX_BULK_ROWS filas se admite', () => {
