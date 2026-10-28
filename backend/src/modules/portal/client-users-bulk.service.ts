@@ -1,4 +1,9 @@
-import { Injectable } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 
 import { ClientsService } from "../clients/clients.service";
@@ -7,6 +12,8 @@ import { ClientUserInvitationsRepository } from "./client-user-invitations.repos
 import { PortalInvitationsService } from "./portal-invitations.service";
 import { normalizeEmailAddress } from "./email-address";
 import { sameId } from "../../common/ids";
+import { ConfirmBulkInviteDto } from "./dto/bulk-users.dto";
+import { invitationFingerprintsMatch as reviewMacMatches } from "./domain/invitation-secret";
 import { buildBulkTemplate, readUploadedGrid } from "./bulk-users-workbook";
 import {
   RawBulkRow,
@@ -17,7 +24,9 @@ import {
   REVIEW_VERSION,
   ReviewRow,
   deriveReviewKey,
+  decodeReview,
   encodeReview,
+  isReviewExpired,
   reviewExpiryLabel,
   reviewMac,
 } from "./domain/bulk-users-review";
@@ -105,8 +114,59 @@ export interface BulkReviewResult {
   expiresAtLabel: string;
 }
 
+export type BulkSendOutcome =
+  | "INVITADA"
+  | "INVITADA_SIN_CORREO"
+  | "OMITIDA"
+  | "FALLO";
+
+export interface BulkSendRow {
+  line: number;
+  fullName: string;
+  email: string;
+  outcome: BulkSendOutcome;
+  reason: string | null;
+}
+
+export interface BulkSendResult {
+  rows: BulkSendRow[];
+  totals: {
+    invited: number;
+    invitedWithoutEmail: number;
+    skipped: number;
+    failed: number;
+  };
+}
+
+/**
+ * Único cuerpo para cualquier motivo por el que una revisión no vale: firma
+ * que no casa, forma mala, versión vieja, caducada.
+ *
+ * No se distinguen porque al operador le sirven todos para lo mismo —volver a
+ * subir el archivo— y porque distinguirlos daría pistas sobre la firma sin
+ * ayudar a nadie.
+ */
+export const REVISION_NO_VALIDA_MESSAGE =
+  "Esa revisión ya no vale. Vuelve a subir el archivo y revísalo otra vez antes de enviar.";
+
+export const YA_SE_ESTA_ENVIANDO_MESSAGE =
+  "Esa revisión ya se está enviando. Espera a que termine antes de volver a confirmarla.";
+
+/** Holgura al comparar con `createdAt`: la columna puede venir truncada al segundo. */
+const HOLGURA_DE_CREACION_MS = 1000;
+
 @Injectable()
 export class ClientUsersBulkService {
+  private readonly logger = new Logger(ClientUsersBulkService.name);
+
+  /**
+   * Las revisiones que se están enviando ahora mismo en ESTE proceso, por su
+   * firma. Corta la doble pulsación. No cubre dos procesos a la vez: ahí la
+   * defensa es la comprobación contra la base de `enviarUna`, que solo deja
+   * una ventana de milisegundos entre leer y escribir.
+   */
+  private readonly enCurso = new Set<string>();
+
   constructor(
     private readonly clientUsers: ClientUsersRepository,
     private readonly invitations: ClientUserInvitationsRepository,
@@ -179,6 +239,155 @@ export class ClientUsersBulkService {
       mac: reviewMac(this.reviewKey(), revision),
       expiresAtLabel: reviewExpiryLabel(issuedAt),
     };
+  }
+
+  /**
+   * Crea las invitaciones de una revisión ya confirmada y manda los correos.
+   *
+   *  1. La firma se verifica **antes de decodificar nada**, sobre la cadena
+   *     tal cual llegó; después la caducidad. La empresa sale del bloque
+   *     firmado: el cuerpo no la trae, así que no hay una distinta que casar.
+   *  2. **Cada fila se vuelve a evaluar contra la base** con la MISMA función
+   *     que la revisión: la firma prueba que la lista no se tocó, no que siga
+   *     siendo válida.
+   *  3. **Cada fila es su propio try/catch.** Una que revienta no deshace las
+   *     anteriores ni impide las siguientes, y la invitación queda creada
+   *     aunque el correo falle (reenviar es el reintento).
+   *  4. **Repetir la confirmación no duplica.** Contra la doble pulsación en el
+   *     mismo proceso, `enCurso`; contra el reintento posterior, `enviarUna`
+   *     omite a quien ya tiene una invitación viva nacida después de la
+   *     revisión. Que el bloque caduque a los 30 minutos acota el problema
+   *     pero no lo resuelve: dentro de esa media hora se puede confirmar dos
+   *     veces.
+   *
+   * Los envíos van en serie: muchas conexiones SMTP simultáneas es la forma
+   * más rápida de que el proveedor nos marque.
+   */
+  async send(
+    staffUserId: number,
+    dto: ConfirmBulkInviteDto,
+  ): Promise<BulkSendResult> {
+    if (
+      typeof dto?.revision !== "string" ||
+      typeof dto?.mac !== "string" ||
+      !reviewMacMatches(reviewMac(this.reviewKey(), dto.revision), dto.mac)
+    ) {
+      throw revisionNoValida();
+    }
+
+    const payload = decodeReview(dto.revision);
+    if (!payload) throw revisionNoValida();
+    if (isReviewExpired(payload.issuedAt, new Date())) throw revisionNoValida();
+
+    if (this.enCurso.has(dto.mac)) {
+      throw new ConflictException({
+        code: "REVISION_EN_CURSO",
+        message: YA_SE_ESTA_ENVIANDO_MESSAGE,
+      });
+    }
+    this.enCurso.add(dto.mac);
+    try {
+      // Pudo pasar a ex-cliente entre los dos pasos: entonces no sale ni un correo.
+      await this.empresaQuePuedeRecibirInvitaciones(payload.clientId);
+
+      const vistos = new Map<string, number>();
+      const rows: BulkSendRow[] = [];
+      for (const fila of payload.rows) {
+        rows.push(
+          await this.enviarUna(
+            staffUserId,
+            payload.clientId,
+            payload.issuedAt,
+            fila,
+            vistos,
+          ),
+        );
+      }
+
+      return {
+        rows,
+        totals: {
+          invited: rows.filter((f) => f.outcome === "INVITADA").length,
+          invitedWithoutEmail: rows.filter(
+            (f) => f.outcome === "INVITADA_SIN_CORREO",
+          ).length,
+          skipped: rows.filter((f) => f.outcome === "OMITIDA").length,
+          failed: rows.filter((f) => f.outcome === "FALLO").length,
+        },
+      };
+    } finally {
+      this.enCurso.delete(dto.mac);
+    }
+  }
+
+  /** Una fila: revalidar, invitar, y no dejar que su fallo salpique a las demás. */
+  private async enviarUna(
+    staffUserId: number,
+    clientId: number,
+    issuedAt: number,
+    fila: ReviewRow,
+    vistos: Map<string, number>,
+  ): Promise<BulkSendRow> {
+    const base = { line: fila.line, fullName: fila.fullName, email: fila.email };
+
+    try {
+      const ahora = await this.evaluar(fila, clientId, vistos);
+      if (ahora.verdict === "RECHAZADA") {
+        return { ...base, outcome: "OMITIDA", reason: ahora.reason };
+      }
+
+      // Una invitación viva nacida DESPUÉS de la revisión no es la que la
+      // revisión vio: es de esta misma confirmación repetida (o de alguien
+      // que se adelantó), y reemplazarla mandaría un segundo correo y mataría
+      // el enlace del primero.
+      if (ahora.verdict === "SE_REINVITARA") {
+        const viva = await this.invitations.findLiveByEmail(
+          ahora.email,
+          new Date(),
+        );
+        const nacida = viva?.createdAt ? new Date(viva.createdAt).getTime() : NaN;
+        if (
+          Number.isFinite(nacida) &&
+          nacida >= issuedAt - HOLGURA_DE_CREACION_MS
+        ) {
+          return {
+            ...base,
+            outcome: "OMITIDA",
+            reason:
+              "Ya se le mandó una invitación después de revisar el archivo (puede que esta " +
+              "confirmación ya se hubiera hecho), así que no se le manda otra.",
+          };
+        }
+      }
+
+      const view = await this.portalInvitations.invite(
+        clientId,
+        { kind: "STAFF", userId: staffUserId },
+        { email: fila.email, fullName: fila.fullName },
+      );
+
+      // `deliver` ya se traga el fallo de envío y deja la invitación creada:
+      // aquí solo se traduce a algo que el operador pueda accionar.
+      return view.deliveryFailed
+        ? {
+            ...base,
+            outcome: "INVITADA_SIN_CORREO",
+            reason:
+              "La invitación quedó creada pero el correo no salió. Vuelve a subir esta fila " +
+              "para mandarle un enlace nuevo.",
+          }
+        : { ...base, outcome: "INVITADA", reason: null };
+    } catch (err) {
+      // Al log, a la respuesta nunca: el motivo técnico es diagnóstico interno.
+      this.logger.error(
+        `Carga masiva: falló la fila ${fila.line} (${fila.email}): ${(err as Error)?.message}`,
+      );
+      return {
+        ...base,
+        outcome: "FALLO",
+        reason: "No se pudo crear su invitación. Vuelve a subir esta fila.",
+      };
+    }
   }
 
   /**
@@ -343,4 +552,11 @@ export class ClientUsersBulkService {
 
     return { ...base, verdict: "SE_INVITARA", reason: null };
   }
+}
+
+function revisionNoValida(): BadRequestException {
+  return new BadRequestException({
+    code: "REVISION_NO_VALIDA",
+    message: REVISION_NO_VALIDA_MESSAGE,
+  });
 }
