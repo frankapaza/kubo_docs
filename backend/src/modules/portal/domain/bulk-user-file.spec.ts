@@ -63,6 +63,40 @@ describe('decodeTextFile', () => {
     expect(decodeTextFile(bytes)).toBe('D\u2019A \u201cP\u201d \u2013 P\u00f1');
   });
 
+  /**
+   * La tabla de 0x80-0x9F recorrida ENTERA, con los valores esperados escritos
+   * aquí aparte (de la tabla oficial de windows-1252), NO derivados del código:
+   * si se derivaran de él, la prueba se estaría mirando a sí misma.
+   */
+  const CP1252_ESPERADO: Array<[number, number]> = [
+    [0x80, 0x20ac], [0x82, 0x201a], [0x83, 0x0192], [0x84, 0x201e],
+    [0x85, 0x2026], [0x86, 0x2020], [0x87, 0x2021], [0x88, 0x02c6],
+    [0x89, 0x2030], [0x8a, 0x0160], [0x8b, 0x2039], [0x8c, 0x0152],
+    [0x8e, 0x017d], [0x91, 0x2018], [0x92, 0x2019], [0x93, 0x201c],
+    [0x94, 0x201d], [0x95, 0x2022], [0x96, 0x2013], [0x97, 0x2014],
+    [0x98, 0x02dc], [0x99, 0x2122], [0x9a, 0x0161], [0x9b, 0x203a],
+    [0x9c, 0x0153], [0x9e, 0x017e], [0x9f, 0x0178],
+  ];
+  const CP1252_HUECOS = [0x81, 0x8d, 0x8f, 0x90, 0x9d];
+
+  it.each(CP1252_ESPERADO)('windows-1252: el byte 0x%s se lee como el carácter que le toca', (byte, codePoint) => {
+    // Un 0x80-0x9F suelto nunca es UTF-8 válido, así que siempre cae a windows-1252.
+    expect(decodeTextFile(Buffer.from([0x41, byte, 0x41]))).toBe(`A${String.fromCodePoint(codePoint)}A`);
+  });
+
+  it.each(CP1252_HUECOS)('windows-1252: el byte 0x%s no tiene carácter y sigue siendo el control de latin1', (byte) => {
+    expect(decodeTextFile(Buffer.from([0x41, byte, 0x41]))).toBe(`A${String.fromCharCode(byte)}A`);
+  });
+
+  it('windows-1252: los 32 bytes del tramo están cubiertos (27 con carácter y 5 huecos)', () => {
+    expect(CP1252_ESPERADO.length + CP1252_HUECOS.length).toBe(32);
+  });
+
+  it('windows-1252: de 0xA0 a 0xFF coincide con latin1', () => {
+    const bytes = Buffer.from(Array.from({ length: 0x60 }, (_, i) => 0xa0 + i));
+    expect(decodeTextFile(Buffer.concat([Buffer.from('A'), bytes]))).toBe('A' + bytes.toString('latin1'));
+  });
+
   it('un archivo de cero bytes dice que está vacío, no que falta el separador', () => {
     expect(() => decodeTextFile(Buffer.alloc(0))).toThrow(/vacío/i);
     expect(() => decodeTextFile(Buffer.from([0xef, 0xbb, 0xbf]))).toThrow(/vacío/i);

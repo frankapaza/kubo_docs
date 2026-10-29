@@ -122,6 +122,35 @@ export function looksLikeZip(buffer: Buffer): boolean {
 const BOM = [0xef, 0xbb, 0xbf];
 
 /**
+ * Los 32 caracteres del tramo 0x80-0x9F de windows-1252: lo unico en lo que se
+ * diferencia de latin1 (que ahi tiene caracteres de control). Los cinco huecos
+ * (0x81, 0x8D, 0x8F, 0x90, 0x9D) quedan como el control de latin1, igual que
+ * hace el estandar WHATWG.
+ *
+ * **Escrita a mano a proposito; no la cambies por `new TextDecoder('windows-1252')`.**
+ * Pedirle esa codificacion al sistema da resultados distintos segun la version
+ * de Node, porque depende de la libreria de idiomas (ICU) que traiga. Medido
+ * con los bytes 0x44 0x92 0x41:
+ *
+ *   Node 24  windows-1252 -> U+0044 U+2019 U+0041  (correcto)
+ *   Node 20  windows-1252 -> U+0044 U+0092 U+0041  (identico a latin1: no hace nada)
+ *   Node 20  latin1       -> U+0044 U+0092 U+0041
+ *
+ * Node 20 es lo que corre en CI y en produccion (`backend/Dockerfile`). Con la
+ * tabla explicita el resultado no depende de nada externo.
+ */
+const CP1252_0X80_0X9F =
+  '€\u0081‚ƒ„…†‡ˆ‰Š‹Œ\u008DŽ\u008F' +
+  '\u0090‘’“”•–—˜™š›œ\u009DžŸ';
+
+function decodeWindows1252(bytes: Buffer): string {
+  // latin1 coincide con windows-1252 salvo en 0x80-0x9F, que se traduce aqui.
+  return bytes
+    .toString('latin1')
+    .replace(/[\u0080-\u009F]/g, (c) => CP1252_0X80_0X9F[c.charCodeAt(0) - 0x80]);
+}
+
+/**
  * Los bytes, convertidos a texto.
  *
  * Dos cuidados, y los dos vienen de lo que Excel hace de verdad al guardar un
@@ -182,7 +211,7 @@ export function decodeTextFile(buffer: Buffer): string {
 
   const comoUtf8 = sinBom.toString('utf8');
   const esUtf8Valido = Buffer.from(comoUtf8, 'utf8').equals(sinBom);
-  return esUtf8Valido ? comoUtf8 : new TextDecoder('windows-1252').decode(sinBom);
+  return esUtf8Valido ? comoUtf8 : decodeWindows1252(sinBom);
 }
 
 /** Los tres separadores que se aceptan, en orden de preferencia ante un empate. */
