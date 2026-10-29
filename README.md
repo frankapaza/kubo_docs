@@ -35,6 +35,10 @@ Crear reunión
 - [docs/04-api-contracts.md](docs/04-api-contracts.md) — Contratos API web/móvil
 - [docs/05-roadmap.md](docs/05-roadmap.md) — Roadmap por sprints
 
+## Versión de Node
+
+El proyecto exige **Node 20** (`.nvmrc` y `engines` de `backend/` y `web/`): es lo que corre en CI y en producción (`node:20-alpine` en los Dockerfile). Con otra versión, `npm install` avisa. No es un capricho: algunas APIs de Node cambian según la versión (p. ej. `TextDecoder('windows-1252')` no hace nada en Node 20 y sí en Node 24), y lo que se verifica en otra versión no vale. Si cambias de versión, cámbiala a la vez en `.nvmrc`, `engines` y los Dockerfile; el CI lee `.nvmrc`.
+
 ## Arranque rápido
 
 ### Backend

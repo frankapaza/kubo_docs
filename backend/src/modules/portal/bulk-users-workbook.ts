@@ -61,6 +61,16 @@ export const MAX_ZIP_ENTRIES = 64;
  *    el proceso solo sube 88 MB, contra los 634 MB que subía abriéndola aquí
  *    dentro.
  *
+ * Y vuelto a medir en **Node 20, que es lo que corre en producción**, con el
+ * hilo compilado (`dist`, sin ts-node, que es como corre de verdad): la
+ * plantilla se abre con 16 MB y un libro denso de 605 KB (más que el tope de
+ * 512 KB) con 36 MB, y con 32 MB revienta. Así que el tope de 64 MB sigue
+ * dejando un margen de ~1,8 veces sobre el libro más denso, en las dos
+ * versiones (en Node 24 ese libro pide 40 MB). Las cifras de arriba incluyen
+ * la carga de ts-node de las pruebas, por eso son mayores que las de `dist`.
+ * Cerca del límite el resultado depende del momento del recolector de basura:
+ * no bajes el tope sin volver a medir en Node 20.
+ *
  * **Más grande NO es más seguro**, y esto también está medido: con 128 MB la
  * misma bomba tumba el PROCESO ENTERO en vez del hilo. Node le deja a V8 16 MB
  * de respiro para terminar el hilo ordenadamente cuando se pasa del tope; si
