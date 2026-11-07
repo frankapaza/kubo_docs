@@ -24,6 +24,13 @@ export const FRAMEWORK_PREFIXES: readonly string[] = [
 
 const MAX_NORMALIZED = 500;
 const MAX_TITLE_MESSAGE = 200;
+/**
+ * Topes contra entrada hostil: un marco con miles de espacios haría
+ * cuadráticas las expresiones de limpieza, y 1000 eventos así frenarían la
+ * ingesta. Un marco real cabe de sobra en 1000 caracteres.
+ */
+const MAX_FRAME_LINE_CHARS = 1000;
+const MAX_FRAMES = 200;
 
 /**
  * Quita del mensaje lo que cambia entre ocurrencias del MISMO error (ids,
@@ -75,7 +82,9 @@ export function parseException(text: string | null): { type: string | null; fram
   const type = m ? m[1] : null;
 
   const frames: string[] = [];
-  for (const line of lines) {
+  for (const rawLine of lines) {
+    if (frames.length >= MAX_FRAMES) break;
+    const line = rawLine.slice(0, MAX_FRAME_LINE_CHARS);
     const f = /^\s*(?:at|en)\s+(.+\(.*)$/.exec(line);
     if (!f) continue;
     const limpio = f[1]

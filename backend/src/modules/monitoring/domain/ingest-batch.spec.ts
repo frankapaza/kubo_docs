@@ -128,6 +128,7 @@ describe('parseIngestBatch', () => {
     expect(ok(lote({ descartados: -3 })).descartados).toBe(0);
     expect(ok(lote({ descartados: 'x' })).descartados).toBe(0);
     expect(ok(lote({ descartados: 7 })).descartados).toBe(7);
+    expect(ok(lote({ descartados: 1e15 })).descartados).toBe(2147483647);
     expect(ok(lote({ loteId: 12 })).loteId).toBeNull();
     expect(ok(lote({ loteId: 'abc' })).loteId).toBe('abc');
   });

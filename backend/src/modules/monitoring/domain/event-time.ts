@@ -1,3 +1,4 @@
+import { truncateText } from './ingest-batch';
 import { PERU_UTC_OFFSET_MINUTES } from '../../../common/peru-month';
 
 /**
@@ -15,6 +16,13 @@ export const MAX_EVENT_FUTURE_MS = 5 * 60 * 1000;
 const MAX_ORIGINAL_CHARS = 64;
 
 /**
+ * Solo ISO 8601 con zona explícita (Z o ±hh:mm). Sin zona, Date.parse
+ * interpreta la hora en la zona del proceso (UTC en producción, Lima en
+ * desarrollo) y el mismo evento tendría dos instantes distintos.
+ */
+const ISO_CON_ZONA = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/i;
+
+/**
  * Decide con qué instante se registra un evento.
  *
  * `original` solo viene informado cuando se SUSTITUYÓ la hora, para que
@@ -24,7 +32,7 @@ export function resolveEventTime(
   rawTs: unknown,
   receivedAt: Date,
 ): { at: Date; original: string | null } {
-  if (typeof rawTs === 'string') {
+  if (typeof rawTs === 'string' && ISO_CON_ZONA.test(rawTs)) {
     const ms = Date.parse(rawTs);
     if (
       Number.isFinite(ms) &&
@@ -40,7 +48,7 @@ export function resolveEventTime(
   } catch {
     original = '';
   }
-  return { at: receivedAt, original: original.slice(0, MAX_ORIGINAL_CHARS) };
+  return { at: receivedAt, original: truncateText(original, MAX_ORIGINAL_CHARS) };
 }
 
 /**

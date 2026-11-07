@@ -13,6 +13,8 @@ const MAX_LOGGER_CHARS = 255;
 const MAX_THREAD_CHARS = 100;
 const MAX_VERSION_CHARS = 50;
 const MAX_BATCH_ID_CHARS = 100;
+/** `descartados` termina en contadores INT de MySQL: se acota a 2^31-1. */
+const MAX_DISCARDED = 2147483647;
 
 export interface IngestEvent {
   /** Sin validar: `resolveEventTime` decide qué hacer con él. */
@@ -132,7 +134,7 @@ export function parseIngestBatch(
   const version = cleanLabel(raw.appenderVersion, MAX_VERSION_CHARS);
   const descartados =
     typeof raw.descartados === 'number' && Number.isFinite(raw.descartados) && raw.descartados > 0
-      ? Math.floor(raw.descartados)
+      ? Math.min(Math.floor(raw.descartados), MAX_DISCARDED)
       : 0;
 
   return {
