@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
+import { TICKET_ORIGINS } from '../modules/tickets/entities/ticket.entity';
 
 /**
  * El guardián de las tres listas de despliegue.
@@ -51,5 +52,36 @@ describe('la migración del catálogo no borra ni una fila', () => {
 
   it('anota los dudosos en su propia tabla en vez de decidir por ellos', () => {
     expect(sql()).toContain('SYSTEM_CATALOG_CONFLICTS');
+  });
+});
+
+describe('la migración del monitoreo', () => {
+  const crudo = () => readFileSync(join(MIGRACIONES, '030_logs_centralizados.sql'), 'utf8');
+  const sql = () => crudo().toUpperCase();
+
+  /** La lista de orígenes, escrita a mano: es lo que ata la migración a la entidad. */
+  const ORIGENES = [
+    'EMAIL',
+    'WHATSAPP_TEXT',
+    'WHATSAPP_AUDIO',
+    'VOICE_LIVE',
+    'MEETING',
+    'NOTE',
+    'PORTAL',
+    'MONITOREO',
+  ];
+
+  it.each(['DROP TABLE', 'TRUNCATE', 'DELETE FROM'])('no contiene «%s»', (prohibido) => {
+    expect(sql()).not.toContain(prohibido);
+  });
+
+  it('amplía el ENUM de tickets.origin con la lista completa y en orden', () => {
+    const lista = ORIGENES.map((o) => `'${o}'`).join(',');
+    // Se ignoran espacios y saltos de línea: el SQL parte la lista en varias líneas.
+    expect(crudo().replace(/\s+/g, '')).toContain(`ENUM(${lista})`);
+  });
+
+  it('la lista de la migración coincide con TICKET_ORIGINS de la entidad', () => {
+    expect([...TICKET_ORIGINS]).toEqual(ORIGENES);
   });
 });

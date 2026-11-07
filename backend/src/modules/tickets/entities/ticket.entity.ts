@@ -24,7 +24,8 @@ export type TicketOrigin =
   | 'VOICE_LIVE'
   | 'MEETING'
   | 'NOTE'
-  | 'PORTAL';
+  | 'PORTAL'
+  | 'MONITOREO';
 
 export type TicketRequestType = 'INCIDENCIA' | 'BUG' | 'MEJORA' | 'FEATURE' | 'AJUSTE';
 
@@ -47,6 +48,7 @@ export const TICKET_ORIGINS: TicketOrigin[] = [
   'MEETING',
   'NOTE',
   'PORTAL',
+  'MONITOREO',
 ];
 
 export const TICKET_REQUEST_TYPES: TicketRequestType[] = [
@@ -248,4 +250,15 @@ export class Ticket {
 
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt!: Date;
+}
+
+/**
+ * Orígenes que no nacen de una persona sino del propio sistema. Un ticket así
+ * no tiene remitente a quien responder ni conversación que abrir: la bandeja
+ * y las notificaciones lo tratan aparte.
+ */
+export const INTERNAL_TICKET_ORIGINS: readonly TicketOrigin[] = ['MONITOREO'];
+
+export function isInternalTicketOrigin(origin: TicketOrigin | string | null | undefined): boolean {
+  return INTERNAL_TICKET_ORIGINS.includes(origin as TicketOrigin);
 }

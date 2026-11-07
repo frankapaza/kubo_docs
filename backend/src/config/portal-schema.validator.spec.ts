@@ -79,6 +79,15 @@ const COLUMNA_028 = { tableName: 'tickets', columnName: 'archived_at' };
 /** La tabla que añade la 029: el catálogo de sistemas. */
 const TABLA_029 = 'systems';
 
+/** Las tablas que añade la 030: instalaciones, grupos de error y sus ocurrencias. */
+const TABLAS_030 = [
+  'log_installations',
+  'log_installation_sources',
+  'error_groups',
+  'error_occurrences',
+  'error_group_daily',
+];
+
 /** La columna que añade la 029: el producto del catálogo de cada asignación. */
 const COLUMNA_029 = { tableName: 'client_systems', columnName: 'system_id' };
 
@@ -107,6 +116,7 @@ const TABLAS_ESPERADAS = [
   'ticket_attachments',
   TABLA_026,
   TABLA_029,
+  ...TABLAS_030,
 ];
 
 /**
@@ -449,6 +459,19 @@ describe('PortalSchemaValidator', () => {
 
     await expect(validator.onApplicationBootstrap()).rejects.toThrow(
       /029_catalogo_de_sistemas\.sql/,
+    );
+  });
+
+  it('atribuye a la 030 las tablas del monitoreo', async () => {
+    const validator = new PortalSchemaValidator(
+      dataSourceWith(
+        TABLAS_ESPERADAS.filter((t) => t !== 'error_groups'),
+        COLUMNAS_ESPERADAS,
+      ),
+    );
+
+    await expect(validator.onApplicationBootstrap()).rejects.toThrow(
+      /030_logs_centralizados\.sql/,
     );
   });
 

@@ -182,7 +182,8 @@ jobs:
                      026_invitaciones_portal \
                      027_carga_masiva_usuarios \
                      028_tickets_archivados \
-                     029_catalogo_de_sistemas; do
+                     029_catalogo_de_sistemas \
+                     030_logs_centralizados; do
               echo "--- $m"
               sql_file "backend/sql/migrations/$m.sql"
             done

@@ -88,6 +88,7 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
   private static readonly MIGRATION_027 = 'migrations/027_carga_masiva_usuarios.sql';
   private static readonly MIGRATION_028 = 'migrations/028_tickets_archivados.sql';
   private static readonly MIGRATION_029 = 'migrations/029_catalogo_de_sistemas.sql';
+  private static readonly MIGRATION_030 = 'migrations/030_logs_centralizados.sql';
 
   /**
    * Lo que hace falta para que exista `workspace_settings.team_inbox_email`, en
@@ -144,6 +145,15 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
     // «Sistemas» de cada cliente, el formulario de ticket y la pantalla del
     // catálogo leen de ella: sin la tabla, las tres responden 500.
     { table: 'systems', files: [PortalSchemaValidator.MIGRATION_029] },
+    // 030: el monitoreo de logs. El ingreso (POST /ingest/logs) lee las
+    // instalaciones para autenticar la clave y escribe grupos y ocurrencias en
+    // cada lote: sin ellas el ingreso responde 500 y el aplicativo reintenta
+    // sin fin.
+    { table: 'log_installations', files: [PortalSchemaValidator.MIGRATION_030] },
+    { table: 'log_installation_sources', files: [PortalSchemaValidator.MIGRATION_030] },
+    { table: 'error_groups', files: [PortalSchemaValidator.MIGRATION_030] },
+    { table: 'error_occurrences', files: [PortalSchemaValidator.MIGRATION_030] },
+    { table: 'error_group_daily', files: [PortalSchemaValidator.MIGRATION_030] },
     // La 019 tampoco está aquí, y por el mismo motivo que el enum de arriba
     // más uno propio: no crea ninguna tabla ni ninguna columna --solo corrige
     // el `COMMENT` de `ticket_attachments.message_id`--, así que no hay nada
