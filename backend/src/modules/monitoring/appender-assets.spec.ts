@@ -55,11 +55,15 @@ describe('paquete del appender de logs', () => {
     }
   });
 
-  it('la DLL no lleva el commit de git en la versión informativa', () => {
-    // El SDK de .NET 8+ añade "+<sha del commit>" a AssemblyInformationalVersion. Con eso la DLL, y
-    // por tanto el zip y su SHA-256, cambian con cada commit aunque el appender no se haya tocado,
-    // y build.ps1 deja backend/assets/ modificado en cada corrida.
+  it('la DLL no lleva el commit de git (ni en la versión informativa ni en el Source Link)', () => {
+    // El SDK de .NET 8+ añade "+<sha del commit>" a AssemblyInformationalVersion y mete el commit en el
+    // Source Link del PDB, cuyo identificador queda en la DLL. Con eso la DLL, y por tanto el zip y su
+    // SHA-256, cambian con cada commit aunque el appender no se haya tocado, y build.ps1 deja
+    // backend/assets/ modificado en cada corrida.
     const props = readFileSync(PROPS, 'utf8');
+    expect(props).toMatch(
+      /<EnableSourceControlManagerQueries>\s*false\s*<\/EnableSourceControlManagerQueries>/,
+    );
     expect(props).toMatch(
       /<IncludeSourceRevisionInInformationalVersion>\s*false\s*<\/IncludeSourceRevisionInInformationalVersion>/,
     );

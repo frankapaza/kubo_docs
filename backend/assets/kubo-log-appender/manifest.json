@@ -1,8 +1,8 @@
 {
   "version": "1.0.0",
   "zip": "kubo-log-appender-1.0.0.zip",
-  "sha256": "0aa06e955c638ba0367ea7ad5c299d4f9aba462b15b1cf7f0946482169aaada2",
+  "sha256": "cd9fcdd2b9c010d359850c2ac31b7da2340d496d7071c93809731817915dbcb8",
   "manualMd": "MANUAL.md",
   "manualHtml": "MANUAL.html",
-  "generatedAt": "2026-11-07T21:44:11Z"
+  "generatedAt": "2026-11-07T21:45:36Z"
 }
