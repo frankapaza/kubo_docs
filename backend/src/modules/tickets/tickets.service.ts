@@ -6,6 +6,7 @@ import { TicketEventsService } from './ticket-events.service';
 import { SlaService } from './sla.service';
 import { ClientsService } from '../clients/clients.service';
 import { ProjectsService } from '../projects/projects.service';
+import { ClientSystemsRepository } from './client-systems.repository';
 
 import { Ticket } from './entities/ticket.entity';
 import { TicketEvent } from './entities/ticket-event.entity';
@@ -18,6 +19,11 @@ import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { derivePriority } from './domain/ticket-priority';
 import { OPEN_STATUSES } from './domain/ticket-state-machine';
 import { TicketActor, resolveActorIds } from './domain/ticket-actor';
+import {
+  SystemRequirement,
+  assertSystemBelongsToClient,
+  resolveTicketSystem,
+} from './domain/system-requirement';
 
 /**
  * Reexportado desde aquí porque es donde vivía antes de que el hilo de mensajes
@@ -123,6 +129,9 @@ export class TicketsService {
     private readonly sla: SlaService,
     private readonly clients: ClientsService,
     private readonly projects: ProjectsService,
+    // Las asignaciones cliente-sistema: contra ellas se valida y se exige el
+    // sistema del ticket (`domain/system-requirement.ts`).
+    private readonly systems: ClientSystemsRepository,
     // Opcional: los avisos en vivo son un extra; sin gateway (tests) no se emite.
     @Optional() private readonly realtime?: TicketsRealtimeGateway,
   ) {}
@@ -214,6 +223,10 @@ export class TicketsService {
     actor: TicketActor,
     dto: CreateTicketDto,
     emailOrigin?: EmailOrigin,
+    // Por defecto se exige: un camino de escritura nuevo hereda la regla del
+    // sistema en vez de saltársela por omisión. Solo la ingesta de correo pasa
+    // la exención, y la nombra (ver `SystemRequirement`).
+    requirement: SystemRequirement = 'EXIGIDO',
   ): Promise<CreatedTicket> {
     // Lo primero: sin autor no se escribe nada, ni ticket, ni evento, ni mensaje.
     const actorColumns = resolveActorColumns(actor);
@@ -232,6 +245,18 @@ export class TicketsService {
 
     if (dto.clientId) await this.clients.findByIdOrFail(dto.clientId);
     if (dto.projectId) await this.projects.findById(dto.projectId);
+
+    // El sistema, antes de abrir la transacción: un alta rechazada no escribe
+    // ni ticket, ni evento, ni mensaje. Las asignaciones solo se consultan si
+    // hay cliente: sin cliente no hay sistemas de los que elegir, y una
+    // consulta con `undefined` traería los de todos.
+    const activeSystems = dto.clientId ? await this.systems.listActiveByClient(dto.clientId) : [];
+    const systemId = resolveTicketSystem({
+      requirement,
+      clientId: dto.clientId ?? null,
+      systemId: dto.systemId,
+      activeSystems,
+    });
 
     const createdAt = new Date();
     const priority = derivePriority(dto.impact ?? null, dto.urgency ?? null);
@@ -264,7 +289,7 @@ export class TicketsService {
         ticketRepo.create({
           clientId: dto.clientId ?? null,
           projectId: dto.projectId ?? null,
-          systemId: dto.systemId ?? null,
+          systemId,
           meetingId: dto.meetingId ?? null,
           origin: dto.origin ?? 'NOTE',
           requestType: dto.requestType ?? null,
@@ -351,6 +376,18 @@ export class TicketsService {
     // cuando algo intente resolver su cliente o proyecto.
     if (dto.clientId !== undefined) await this.clients.findByIdOrFail(dto.clientId);
     if (dto.projectId !== undefined) await this.projects.findById(dto.projectId);
+
+    // Solo si se toca. La obligación de elegir no es retroactiva (decisión 6
+    // del diseño): un ticket viejo sin sistema se sigue editando. Pero el que
+    // se escriba tiene que ser una asignación activa del cliente del ticket
+    // --el nuevo, si también se cambia--: el panel ya no lo escribe a ciegas.
+    if (dto.systemId !== undefined) {
+      const clientId = dto.clientId ?? current.clientId;
+      assertSystemBelongsToClient({
+        systemId: dto.systemId,
+        activeSystems: clientId ? await this.systems.listActiveByClient(Number(clientId)) : [],
+      });
+    }
 
     const patch: Partial<Ticket> = { ...dto } as Partial<Ticket>;
     if (dto.capturedAt) patch.capturedAt = new Date(dto.capturedAt);

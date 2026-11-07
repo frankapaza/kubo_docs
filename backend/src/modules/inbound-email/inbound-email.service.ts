@@ -653,7 +653,16 @@ export class InboundEmailService {
     const emailOrigin: EmailOrigin = { emailMessageId: messageId, bodyFull: message.textBody };
 
     try {
-      const created = await this.tickets.create({ kind: 'CLIENT', clientUserId }, dto, emailOrigin);
+      // Exenta de elegir sistema, y dicho con su nombre: aquí no hay nadie a
+      // quien preguntar, y un correo que no se convierte en ticket es una
+      // petición de cliente perdida. No se deduce del `origin` (ver
+      // `SystemRequirement`).
+      const created = await this.tickets.create(
+        { kind: 'CLIENT', clientUserId },
+        dto,
+        emailOrigin,
+        'EXENTO_SIN_QUIEN_ELIJA',
+      );
       await this.repo.updateOutcome(row.id, { ticketId: Number(created.id) });
       await this.safeAttachInboundEmail(created.firstMessageId, row.id);
       summary.ticketsCreated += 1;

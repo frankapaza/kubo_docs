@@ -259,6 +259,13 @@ describe('InboundEmailService.drain', () => {
   // -------------------------------------------------------------------------
 
   describe('un correo de un cliente registrado sin referencia', () => {
+    it('la ingesta pide explicitamente la exencion de sistema', async () => {
+      const { service, tickets } = montar({ clientUser: CLIENT_USER });
+      await service.drain();
+      const [, , , requirement] = tickets.create.mock.calls[0];
+      expect(requirement).toBe('EXENTO_SIN_QUIEN_ELIJA');
+    });
+
     it('crea el ticket con origen EMAIL y el clientId del remitente, nunca de lo que traiga el correo', async () => {
       const { service, tickets, repo } = montar({ clientUser: CLIENT_USER });
 

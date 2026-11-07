@@ -130,17 +130,140 @@ const makeService = (fallaEn?: PuntoDeFallo) => {
   };
   const clients = { findByIdOrFail: jest.fn().mockResolvedValue({ id: 1 }) };
   const projects = { findById: jest.fn().mockResolvedValue({ id: 1 }) };
+  // Las asignaciones activas de cada cliente. El cliente 1 --el de las pruebas
+  // de siempre, que no van de sistemas-- no tiene ninguna, así que su alta no
+  // exige elegir; el 7 tiene una, la asignación 5.
+  const systems = {
+    listActiveByClient: jest
+      .fn()
+      .mockImplementation((clientId: number) =>
+        Promise.resolve(Number(clientId) === 7 ? [{ id: 5 }] : []),
+      ),
+  };
 
   return {
-    service: new TicketsService(repo as any, events as any, sla as any, clients as any, projects as any),
+    service: new TicketsService(
+      repo as any, events as any, sla as any, clients as any, projects as any, systems as any,
+    ),
     repo,
     manager,
     events,
     sla,
     clients,
     projects,
+    systems,
   };
 };
+
+describe('el sistema del ticket', () => {
+  it('un cliente con sistemas y un alta sin elegir no escribe nada', async () => {
+    const { service, repo } = makeService();
+    await expect(
+      service.create({ kind: 'STAFF', userId: 5 }, { rawText: 'algo', clientId: 7 } as any),
+    ).rejects.toThrow('Elige el sistema afectado.');
+    // Antes de abrir la transaccion: ni ticket, ni evento, ni mensaje.
+    expect(repo.runInTransaction).not.toHaveBeenCalled();
+    expect(repo.savedTickets).toHaveLength(0);
+    expect(repo.savedEvents).toHaveLength(0);
+    expect(repo.savedMessages).toHaveLength(0);
+  });
+
+  it('un systemId que no es del cliente se rechaza sin escribir nada', async () => {
+    const { service, repo } = makeService();
+    await expect(
+      service.create(
+        { kind: 'STAFF', userId: 5 },
+        { rawText: 'algo', clientId: 7, systemId: 99 } as any,
+      ),
+    ).rejects.toThrow('El sistema indicado no es de este cliente o está inactivo.');
+    expect(repo.runInTransaction).not.toHaveBeenCalled();
+    expect(repo.savedTickets).toHaveLength(0);
+  });
+
+  it('un systemId de una asignacion inactiva se rechaza igual', async () => {
+    const { service, systems, repo } = makeService();
+    // El 6 esta asignado a este cliente, pero desactivado: no sale de
+    // `listActiveByClient`, asi que para el alta es inelegible.
+    systems.listActiveByClient.mockResolvedValue([{ id: 5 }]);
+    await expect(
+      service.create(
+        { kind: 'STAFF', userId: 5 },
+        { rawText: 'algo', clientId: 7, systemId: 6 } as any,
+      ),
+    ).rejects.toThrow('El sistema indicado no es de este cliente o está inactivo.');
+    expect(repo.savedTickets).toHaveLength(0);
+  });
+
+  it('un systemId valido del cliente se escribe en el ticket', async () => {
+    const { service, repo, systems } = makeService();
+    await service.create(
+      { kind: 'STAFF', userId: 5 },
+      { rawText: 'algo', clientId: 7, systemId: 5 } as any,
+    );
+    expect(systems.listActiveByClient).toHaveBeenCalledWith(7);
+    expect(repo.savedTickets[0].systemId).toBe(5);
+  });
+
+  it('un cliente sin asignaciones activas crea el ticket sin sistema', async () => {
+    const { service, repo, systems } = makeService();
+    systems.listActiveByClient.mockResolvedValue([]);
+    await service.create({ kind: 'STAFF', userId: 5 }, { rawText: 'algo', clientId: 7 } as any);
+    expect(repo.savedTickets[0].systemId).toBeNull();
+  });
+
+  it('un ticket sin cliente no exige sistema y ni siquiera consulta las asignaciones', async () => {
+    const { service, repo, systems } = makeService();
+    await service.create({ kind: 'STAFF', userId: 5 }, { rawText: 'algo' } as any);
+    expect(systems.listActiveByClient).not.toHaveBeenCalled();
+    expect(repo.savedTickets[0].systemId).toBeNull();
+  });
+
+  it('la ingesta esta exenta: crea el ticket aunque el cliente tenga sistemas', async () => {
+    const { service, repo } = makeService();
+    await service.create(
+      { kind: 'CLIENT', clientUserId: 11 },
+      { rawText: 'algo', clientId: 7, origin: 'EMAIL' } as any,
+      { emailMessageId: '<a@b>', bodyFull: 'algo' },
+      'EXENTO_SIN_QUIEN_ELIJA',
+    );
+    expect(repo.savedTickets[0].systemId).toBeNull();
+  });
+
+  // `origin` lo teclea cualquiera en el panel: no puede servir de exencion.
+  it('un alta con origin EMAIL pero sin la exencion nombrada sigue exigiendo', async () => {
+    const { service, repo } = makeService();
+    await expect(
+      service.create(
+        { kind: 'STAFF', userId: 5 },
+        { rawText: 'algo', clientId: 7, origin: 'EMAIL' } as any,
+      ),
+    ).rejects.toThrow('Elige el sistema afectado.');
+    expect(repo.savedTickets).toHaveLength(0);
+  });
+
+  it('la obligacion no es retroactiva: editar un ticket viejo sin tocar el sistema no falla', async () => {
+    const { service, repo, systems } = makeService();
+    (repo as any).findById = jest
+      .fn()
+      .mockResolvedValue({ id: 1, clientId: 7, status: 'NUEVO', systemId: null });
+    (repo as any).update = jest.fn().mockResolvedValue({ id: 1 });
+    await service.update(1, { subject: 'otro asunto' } as any);
+    expect(systems.listActiveByClient).not.toHaveBeenCalled();
+  });
+
+  it('editar el sistema exige que sea una asignacion activa del cliente del ticket', async () => {
+    const { service, repo } = makeService();
+    (repo as any).findById = jest
+      .fn()
+      .mockResolvedValue({ id: 1, clientId: '7', status: 'NUEVO', systemId: null });
+    (repo as any).update = jest.fn().mockResolvedValue({ id: 1 });
+    await expect(service.update(1, { systemId: 99 } as any)).rejects.toThrow(
+      'El sistema indicado no es de este cliente o está inactivo.',
+    );
+    expect((repo as any).update).not.toHaveBeenCalled();
+    await expect(service.update(1, { systemId: 5 } as any)).resolves.toBeDefined();
+  });
+});
 
 describe('create con actor', () => {
   it('un ticket del equipo pone created_by y deja nulo el de cliente', async () => {

@@ -32,7 +32,7 @@ const makeService = (inicial: Partial<Ticket>) => {
     runInTransaction: jest.fn().mockImplementation((work: (m: unknown) => unknown) => work(manager)),
   };
 
-  const service = new TicketsService(repo as any, {} as any, {} as any, {} as any, {} as any);
+  const service = new TicketsService(repo as any, {} as any, {} as any, {} as any, {} as any, {} as any);
   return { service, eventos, repo, current: () => ticket };
 };
 

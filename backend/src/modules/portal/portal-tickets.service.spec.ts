@@ -252,6 +252,15 @@ describe('la frontera', () => {
     expect(rows).toEqual([{ id: 5, name: 'ERP' }]);
   });
 
+  it('el alta del portal no se exime de la regla del sistema', async () => {
+    const { service, tickets } = makeService();
+    await service.create(11, 7, { subject: 'No carga', description: 'Detalle' } as any);
+    // Sin cuarto argumento: hereda 'EXIGIDO' por defecto. Si alguien le pasara
+    // aqui la exencion, un cliente con sistemas podria volver a abrir tickets
+    // sin clasificar y nada mas lo delataria.
+    expect(tickets.create.mock.calls[0]).toHaveLength(2);
+  });
+
   it('crear rechaza un systemId que no es del cliente y no escribe nada', async () => {
     const { service, tickets } = makeService();
     await expect(
