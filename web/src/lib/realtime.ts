@@ -12,9 +12,49 @@ export interface TicketCreatedEvent {
   origin: string;
 }
 
+/** Grupo de errores nuevo o reabierto (ErrorNewPayload del gateway). */
+export interface ErrorNewEvent {
+  id: number;
+  title: string;
+  aplicativo: string;
+  clienteNombre: string | null;
+  reopened: boolean;
+  reason: string | null;
+}
+
+/** Línea en vivo (LiveLogLine del backend): como LogLineView pero sin id ni propiedades. */
+export interface LiveLogLine {
+  ts: string;
+  nivel: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | 'FATAL';
+  instalacionId: number;
+  clienteId: number | null;
+  sistemaId: number | null;
+  aplicativo: string;
+  servidor: string;
+  logger: string;
+  mensaje: string;
+  excepcion: string | null;
+  hilo: string | null;
+}
+
+/** Líneas en vivo ya filtradas por el servidor; `omitidas` cuenta el exceso sobre 200/s. */
+export interface LogsLinesEvent {
+  lines: LiveLogLine[];
+  omitidas: number;
+}
+
+export interface DiskAlertEvent {
+  usedPct: number;
+  threshold: number;
+}
+
 interface RealtimeEvents {
   'ticket:created': TicketCreatedEvent;
   'tickets:changed': Record<string, never>;
+  'error:new': ErrorNewEvent;
+  'errors:changed': Record<string, never>;
+  'logs:lines': LogsLinesEvent;
+  'monitoreo:disco': DiskAlertEvent;
 }
 
 let socket: Socket | null = null;
@@ -70,4 +110,30 @@ export function useRealtime<E extends keyof RealtimeEvents>(
       s.off(event as string, fn);
     };
   }, [event, handler]);
+}
+
+/**
+ * Mensajes del cliente al servidor (`logs:subscribe` con el filtro, o
+ * `logs:unsubscribe`). El servidor contesta con un ack `{ ok }` que aquí se
+ * ignora: si fue falso (el handshake aún no metía al socket en `staff`), la
+ * pantalla reenvía al reconectar con `useRealtimeConnect`.
+ */
+export function emitRealtime(event: 'logs:subscribe' | 'logs:unsubscribe', payload?: unknown): void {
+  getSocket().emit(event, payload ?? {});
+}
+
+/**
+ * Llama a `handler` en cada `connect`, incluida la reconexión (y de inmediato
+ * si el socket ya está conectado al montar). socket.io pierde las salas al
+ * reconectar: quien depende de una suscripción tiene que repetirla aquí.
+ */
+export function useRealtimeConnect(handler: () => void): void {
+  useEffect(() => {
+    const s = getSocket();
+    s.on('connect', handler);
+    if (s.connected) handler();
+    return () => {
+      s.off('connect', handler);
+    };
+  }, [handler]);
 }

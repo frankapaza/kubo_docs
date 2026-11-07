@@ -475,7 +475,7 @@ export type AgentLevel = 'N1' | 'N2' | 'N3';
 
 export type TicketOrigin =
   | 'EMAIL' | 'WHATSAPP_TEXT' | 'WHATSAPP_AUDIO' | 'VOICE_LIVE'
-  | 'MEETING' | 'NOTE' | 'PORTAL';
+  | 'MEETING' | 'NOTE' | 'PORTAL' | 'MONITOREO';
 
 export type TicketRequestType = 'INCIDENCIA' | 'BUG' | 'MEJORA' | 'FEATURE' | 'AJUSTE';
 

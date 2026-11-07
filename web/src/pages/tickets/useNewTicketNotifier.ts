@@ -12,6 +12,7 @@ const ORIGIN_LABELS: Record<string, string> = {
   VOICE_LIVE: 'llamada',
   MEETING: 'reunión',
   NOTE: 'panel',
+  MONITOREO: 'monitoreo',
 };
 
 /**

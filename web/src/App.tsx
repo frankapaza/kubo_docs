@@ -29,6 +29,10 @@ import WorkItemsBoardPage from './pages/WorkItemsBoardPage';
 import MonthlyReportPage from './pages/MonthlyReportPage';
 import SignaturePage from './pages/SignaturePage';
 import HelpPage from './pages/HelpPage';
+import MonitoringErrorsPage from './pages/monitoring/MonitoringErrorsPage';
+import MonitoringErrorDetailPage from './pages/monitoring/MonitoringErrorDetailPage';
+import MonitoringLogsPage from './pages/monitoring/MonitoringLogsPage';
+import MonitoringInstallationsPage from './pages/monitoring/MonitoringInstallationsPage';
 import PortalLoginPage from './pages/portal/PortalLoginPage';
 import PortalTicketsListPage from './pages/portal/PortalTicketsListPage';
 import PortalTicketDetailPage from './pages/portal/PortalTicketDetailPage';
@@ -135,6 +139,10 @@ export default function App() {
           <Route path="/actas/:actaId" element={<ActaEditorPage />} />
           <Route path="/tickets" element={<TicketsListPage />} />
           <Route path="/tickets/:ticketId" element={<TicketDetailPage />} />
+          <Route path="/monitoreo/errores" element={<MonitoringErrorsPage />} />
+          <Route path="/monitoreo/errores/:errorId" element={<MonitoringErrorDetailPage />} />
+          <Route path="/monitoreo/logs" element={<MonitoringLogsPage />} />
+          <Route path="/monitoreo/instalaciones" element={<MonitoringInstallationsPage />} />
           <Route path="/work-items" element={<WorkItemsBoardPage />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agents/:type" element={<AgentChatPage />} />

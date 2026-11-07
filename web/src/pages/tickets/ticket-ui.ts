@@ -18,6 +18,7 @@ export const ORIGIN_LABELS: Record<TicketOrigin, string> = {
   MEETING: 'Reunión / acta',
   NOTE: 'Nota rápida',
   PORTAL: 'Portal',
+  MONITOREO: 'Monitoreo',
 };
 
 export interface Swatch {

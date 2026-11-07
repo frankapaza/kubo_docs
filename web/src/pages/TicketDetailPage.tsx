@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { monitoringApi } from '../api/monitoring.api';
 
 import { ticketsApi, supportAgentsApi, clientSystemsApi } from '../api/tickets.api';
 import { clientsApi } from '../api/clients.api';
@@ -111,6 +113,16 @@ export default function TicketDetailPage() {
       cancelled = true;
     };
   }, [id]);
+
+  // Si el ticket nació de un error de monitoreo, se busca el grupo que lo tiene
+  // enlazado para ofrecer el salto al detalle.
+  const fromMonitoring = detail?.ticket.origin === 'MONITOREO';
+  const { data: linkedErrors } = useQuery({
+    queryKey: ['monitoring-error-by-ticket', id],
+    queryFn: () => monitoringApi.listErrors({ ticketId: id, pageSize: 1 }),
+    enabled: fromMonitoring && Number.isFinite(id),
+  });
+  const linkedError = linkedErrors?.items[0] ?? null;
 
   const clientId = detail?.ticket.clientId ?? null;
   useEffect(() => {
@@ -452,6 +464,16 @@ export default function TicketDetailPage() {
                 )}
               />
               <Field label="Origen" value={ORIGIN_LABELS[ticket.origin]} />
+              {linkedError && (
+                <div>
+                  <Link
+                    to={`/monitoreo/errores/${linkedError.id}`}
+                    style={{ fontSize: 12, fontWeight: 600, color: '#0b6e75', textDecoration: 'none' }}
+                  >
+                    Ver el error
+                  </Link>
+                </div>
+              )}
               <Field label="Tipo" value={ticket.requestType ? REQUEST_TYPE_LABELS[ticket.requestType] : '—'} />
               <Field label="Categoría" value={ticket.serviceCategory ?? '—'} />
               <Field

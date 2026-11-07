@@ -18,6 +18,12 @@ export const canManageUsers = (user: User | null): boolean => user?.role === 'AD
  */
 export const canManageSystemCatalog = (user: User | null): boolean => user?.role === 'ADMIN';
 
+/**
+ * Instalaciones de monitoreo y sus claves: quien tiene una clave escribe logs
+ * bajo la identidad de un cliente, así que solo ADMIN (como en el backend).
+ */
+export const canManageLogInstallations = (user: User | null): boolean => user?.role === 'ADMIN';
+
 export const canCreateProject = (user: User | null): boolean =>
   user?.role === 'ADMIN' || user?.role === 'PRODUCT_OWNER';
 

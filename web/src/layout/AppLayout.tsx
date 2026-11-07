@@ -1,15 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../auth/AuthContext';
 import { useIdleLogout } from '../auth/useIdleLogout';
-import { canManageUsers } from '../auth/permissions';
+import { canManageLogInstallations, canManageUsers } from '../auth/permissions';
+import { monitoringApi } from '../api/monitoring.api';
+import { useRealtime } from '../lib/realtime';
 import { workspaceApi } from '../api/workspace.api';
 import { roleLabels } from '../components/ui/Badge';
 import { ArchiveIcon, BellIcon, BookOpenIcon, BotIcon, FileTextIcon, FolderIcon, InboxIcon, KuboLogo, LogOutIcon, SettingsIcon, SparklesIcon, UsersIcon, ZapIcon } from '../components/ui/Icon';
 // Nota: "InboxIcon" también se usa en la sección Tickets (nav principal); es intencional.
 import { toast } from '../ui/Toast';
 import { useNewTicketNotifier } from '../pages/tickets/useNewTicketNotifier';
+import { useNewErrorNotifier } from '../pages/monitoring/useNewErrorNotifier';
 // Nota: "UsersIcon" también se usa en la sección Clientes; es intencional.
 
 export default function AppLayout() {
@@ -17,6 +20,8 @@ export default function AppLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   useNewTicketNotifier();
+  useNewErrorNotifier();
+  const queryClient = useQueryClient();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
 
@@ -27,6 +32,18 @@ export default function AppLayout() {
     staleTime: 60_000,
   });
   const sessionTimeout = ws?.sessionTimeoutMinutes ?? 0;
+
+  // Errores nuevos sin atender, para la insignia del menú. Se recarga cuando
+  // el servidor avisa que la lista cambió.
+  const { data: errorsSummary } = useQuery({
+    queryKey: ['monitoring-errors-summary'],
+    queryFn: monitoringApi.errorsSummary,
+    staleTime: 30_000,
+  });
+  const onErrorsChanged = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ['monitoring-errors-summary'] });
+  }, [queryClient]);
+  useRealtime('errors:changed', onErrorsChanged);
 
   // En la página de grabación no aplicamos idle logout: el usuario está en otra pestaña
   const isRecorderPage = /^\/meetings\/\d+\/record-web/.test(location.pathname);
@@ -113,6 +130,38 @@ export default function AppLayout() {
             <ArchiveIcon size={18} />
             Requerimientos
           </NavLink>
+
+          <p className="px-3 py-1 mt-4 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+            Monitoreo
+          </p>
+          <NavLink
+            to="/monitoreo/errores"
+            className={({ isActive }) => `${navItem} ${isActive ? navActive : navIdle}`}
+          >
+            <BellIcon size={18} />
+            <span className="flex-1">Errores</span>
+            {(errorsSummary?.nuevos ?? 0) > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 text-[11px] font-semibold">
+                {errorsSummary!.nuevos}
+              </span>
+            )}
+          </NavLink>
+          <NavLink
+            to="/monitoreo/logs"
+            className={({ isActive }) => `${navItem} ${isActive ? navActive : navIdle}`}
+          >
+            <FileTextIcon size={18} />
+            Logs
+          </NavLink>
+          {canManageLogInstallations(user) && (
+            <NavLink
+              to="/monitoreo/instalaciones"
+              className={({ isActive }) => `${navItem} ${isActive ? navActive : navIdle}`}
+            >
+              <SettingsIcon size={18} />
+              Instalaciones
+            </NavLink>
+          )}
 
           <p className="px-3 py-1 mt-4 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
             Agentes IA
