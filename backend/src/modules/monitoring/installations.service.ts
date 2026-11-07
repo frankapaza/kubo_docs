@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 
+import { isDuplicateEntry } from '../../common/db-errors';
 import { sameId } from '../../common/ids';
 import { ClientsRepository } from '../clients/clients.repository';
 import { ClientSystemsRepository } from '../tickets/client-systems.repository';
@@ -61,11 +62,6 @@ interface Identity {
 }
 
 const iso = (d: Date | string | null): string | null => (d ? new Date(d).toISOString() : null);
-
-/** `ER_DUP_ENTRY`: dos peticiones simultáneas pasaron la comprobación previa. */
-const isDuplicateEntry = (e: unknown): boolean =>
-  (e as { errno?: number; code?: string })?.errno === 1062 ||
-  (e as { code?: string })?.code === 'ER_DUP_ENTRY';
 
 @Injectable()
 export class InstallationsService {
@@ -329,7 +325,7 @@ export class InstallationsService {
     cache: Map<string, Promise<unknown>>,
   ): Promise<InstallationView> {
     // Si la asignación faltara (no debería: la FK lo impide) la fila se lista
-    // igual, sin cliente ni producto, para poder revocarla o borrarla.
+    // igual, sin cliente ni producto, para poder revocar su clave.
     const identity = (await this.identityOf(row, cache)) ?? {
       clientId: null,
       clientName: null,

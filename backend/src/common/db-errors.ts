@@ -10,3 +10,12 @@ export function isForeignKeyRestrict(e: unknown): boolean {
   const err = e as { errno?: number; code?: string } | null;
   return err?.errno === 1451 || err?.code === 'ER_ROW_IS_REFERENCED_2' || err?.code === 'ER_ROW_IS_REFERENCED';
 }
+
+/**
+ * ¿Es `ER_DUP_ENTRY` (1062)? Dos peticiones simultáneas pasaron la
+ * comprobación previa y la clave única de la base decidió cuál gana.
+ */
+export function isDuplicateEntry(e: unknown): boolean {
+  const err = e as { errno?: number; code?: string } | null;
+  return err?.errno === 1062 || err?.code === 'ER_DUP_ENTRY';
+}

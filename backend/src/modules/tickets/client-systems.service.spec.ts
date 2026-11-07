@@ -105,7 +105,7 @@ describe('borrar una asignación con instalación de monitoreo', () => {
     repo.remove.mockRejectedValue(Object.assign(new Error('Cannot delete'), { errno: 1451, code: 'ER_ROW_IS_REFERENCED_2' }));
     await expect(service.remove(50)).rejects.toMatchObject({
       status: 409,
-      response: { code: 'CONFLICT', message: 'Tiene una instalación de monitoreo; revócala o bórrala primero.' },
+      response: { code: 'CONFLICT', message: 'Tiene una instalación de monitoreo asociada; no se puede quitar mientras exista.' },
     });
   });
 

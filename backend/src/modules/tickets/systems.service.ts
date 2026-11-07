@@ -70,7 +70,7 @@ export class SystemsService {
       if (isForeignKeyRestrict(e)) {
         throw new ConflictException({
           code: 'CONFLICT',
-          message: 'Tiene una instalación de monitoreo; revócala o bórrala primero.',
+          message: 'Algún cliente o instalación interna de monitoreo usa este sistema; no se puede quitar mientras exista.',
         });
       }
       throw e;
