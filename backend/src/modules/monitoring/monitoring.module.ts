@@ -20,6 +20,8 @@ import { RecentBatches } from './ingest/recent-batches';
 import { InstallationsController } from './installations.controller';
 import { InstallationsRepository } from './installations.repository';
 import { InstallationsService } from './installations.service';
+import { LogsController } from './logs.controller';
+import { LogsService } from './logs.service';
 import { LokiClient } from './loki/loki.client';
 
 @Module({
@@ -32,6 +34,7 @@ import { LokiClient } from './loki/loki.client';
     InstallationsRepository,
     InstallationsService,
     LokiClient,
+    LogsService,
     ErrorGroupsRepository,
     ErrorGroupsService,
     ErrorActionsService,
@@ -42,7 +45,7 @@ import { LokiClient } from './loki/loki.client';
     IngestRateLimiter,
     RecentBatches,
   ],
-  controllers: [InstallationsController, ErrorsController, IngestController],
+  controllers: [InstallationsController, ErrorsController, IngestController, LogsController],
   // LokiClient, el servicio de instalaciones y el de grupos de error los
   // usarán la ingesta (que registra las ocurrencias) y la lectura de logs.
   exports: [InstallationsService, LokiClient, ErrorGroupsService],

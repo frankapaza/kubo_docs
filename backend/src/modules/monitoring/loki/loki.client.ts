@@ -103,13 +103,15 @@ export class LokiClient {
     query: string;
     start: Date;
     end: Date;
+    /** Fin exacto en ns: un Date solo llega al ms y el cursor necesita ns para no repetir ni saltar líneas. */
+    endNs?: string;
     limit: number;
     direction: 'backward' | 'forward';
   }): Promise<LokiEntry[]> {
     const params = new URLSearchParams({
       query: q.query,
       start: String(toNs(q.start)),
-      end: String(toNs(q.end)),
+      end: q.endNs ?? String(toNs(q.end)),
       limit: String(q.limit),
       direction: q.direction,
     });
