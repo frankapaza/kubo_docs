@@ -54,4 +54,14 @@ describe('paquete del appender de logs', () => {
       throw new Error(`El paquete es de la ${manifest().version} y el appender es la ${version}. ${AYUDA}`);
     }
   });
+
+  it('la DLL no lleva el commit de git en la versión informativa', () => {
+    // El SDK de .NET 8+ añade "+<sha del commit>" a AssemblyInformationalVersion. Con eso la DLL, y
+    // por tanto el zip y su SHA-256, cambian con cada commit aunque el appender no se haya tocado,
+    // y build.ps1 deja backend/assets/ modificado en cada corrida.
+    const props = readFileSync(PROPS, 'utf8');
+    expect(props).toMatch(
+      /<IncludeSourceRevisionInInformationalVersion>\s*false\s*<\/IncludeSourceRevisionInInformationalVersion>/,
+    );
+  });
 });

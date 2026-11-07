@@ -6,6 +6,9 @@
     <!-- Compilación independiente de dónde esté el clon: sin esto la ruta absoluta del PDB queda en la DLL y el SHA-256 del zip cambia entre máquinas. -->
     <Deterministic>true</Deterministic>
     <PathMap>$(MSBuildThisFileDirectory)=/_/</PathMap>
+    <!-- El SDK de .NET 8+ añade "+<sha del commit>" a la versión informativa: la DLL, y con ella el zip y su
+         SHA-256, cambiarían con cada commit aunque el appender no se haya tocado. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Nullable>disable</Nullable>
     <!-- Las versiones de log4net (2.0.8 y 3.2.0) son las que ya usan los clientes y las fija el
          diseño; los avisos de vulnerabilidad del auditor no las cambian y ensucian la salida. -->
