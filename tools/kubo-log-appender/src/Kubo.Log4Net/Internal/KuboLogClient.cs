@@ -28,6 +28,8 @@ namespace Kubo.Log4Net.Internal
         private long _droppedPending;
         private bool _flushRequested;
         private bool _closing;
+        // El hilo abandonó un lote por el cierre: un solo intento por lote al cerrar. Solo lo toca el hilo de fondo.
+        private bool _giveUp;
 
         private readonly AutoResetEvent _wake = new AutoResetEvent(false);
         private readonly ManualResetEvent _closeSignal = new ManualResetEvent(false);
@@ -148,7 +150,8 @@ namespace Kubo.Log4Net.Internal
                     if (_closing)
                     {
                         // Cierre: vaciar con un solo intento por lote y sin esperas.
-                        Drenar(true);
+                        // Si el primer Drenar ya abandonó un lote por el cierre, no se vuelve a intentar.
+                        if (!_giveUp) Drenar(true);
                         return;
                     }
                 }
@@ -162,14 +165,43 @@ namespace Kubo.Log4Net.Internal
         /// <summary>Envía lotes mientras toque. <paramref name="todo"/>: ignorar el umbral de BatchSize.</summary>
         private void Drenar(bool todo)
         {
-            while (true)
+            while (!_giveUp)
             {
-                if (_curJson == null)
+                try
                 {
-                    if (!PrepararLote(todo)) return;
+                    if (_curJson == null)
+                    {
+                        if (!PrepararLote(todo)) return;
+                    }
+                    if (!EnviarLote())
+                    {
+                        _giveUp = true;
+                        return;
+                    }
                 }
-                if (!EnviarLote()) return;
+                catch (Exception ex)
+                {
+                    // Un lote que no se puede preparar o serializar se tira para no matar el hilo ni
+                    // quedar atascado en él; el resto de la cola sigue.
+                    Diag("Kubo: error interno con un lote; se descarta", ex);
+                    AbandonarLote();
+                }
             }
+        }
+
+        private void AbandonarLote()
+        {
+            lock (_gate)
+            {
+                // Si falló antes de fijar el lote (_inflight == 0) se tira al menos el primer evento: es el sospechoso.
+                var n = Math.Min(_queue.Count, Math.Max(_inflight, 1));
+                _queue.RemoveRange(0, n);
+                _inflight = 0;
+                Monitor.PulseAll(_gate);
+            }
+            _curJson = null;
+            _curCount = 0;
+            _curDropped = 0;
         }
 
         private bool PrepararLote(bool todo)
@@ -245,22 +277,34 @@ namespace Kubo.Log4Net.Internal
 
                 if (_closing) return false; // cierre: un intento por lote
 
+                var rep = _sender as IFailureReporter;
+                var motivo = rep != null && rep.LastFailure != null ? rep.LastFailure : "sin detalle";
                 var espera = r == SendOutcome.RetryLater
                     ? RetryLaterMs
                     : Backoff.DelayMs(intento, retryAfterMs, _rnd);
                 if (r == SendOutcome.RetryLater)
-                    Diag("Kubo: clave rechazada (401); se reintenta en 5 minutos", null);
+                    Diag("Kubo: el servidor rechazó el envío (" + motivo + "); se reintenta en 5 minutos", null);
+                else if (DebeAvisar(intento))
+                    // Primer fallo del lote y luego solo en los intentos 2, 4, 8...: avisa sin inundar LogLog
+                    // durante una caída larga.
+                    Diag("Kubo: no se pudo enviar el lote (intento " + (intento + 1) + "), se reintentará: " + motivo, null);
                 intento++;
                 // La espera se corta al cerrar; el bucle hace entonces su último intento.
                 _closeSignal.WaitOne(espera);
             }
         }
 
+        /// <summary>Avisar en el primer fallo y luego en los intentos 1, 2, 4, 8...: sin inundar LogLog en una caída larga.</summary>
+        internal static bool DebeAvisar(int intento)
+        {
+            return intento == 0 || (intento & (intento - 1)) == 0;
+        }
+
         private void Terminar(bool aceptado)
         {
             lock (_gate)
             {
-                _queue.RemoveRange(0, _curCount);
+                _queue.RemoveRange(0, _inflight);
                 _inflight = 0;
                 // Solo un lote aceptado reporta de verdad lo descartado; en un Drop se reintenta en el siguiente.
                 if (aceptado) _droppedPending -= _curDropped;
@@ -285,6 +329,10 @@ namespace Kubo.Log4Net.Internal
             return n;
         }
 
+        /// <summary>
+        /// Bytes UTF-8 del texto ya escapado: el límite del servidor (2 MB) es en bytes y KuboJson
+        /// deja los no ASCII sin escapar. Los escapes se cuentan por arriba (\uXXXX = 6).
+        /// </summary>
         private static long LargoEscapado(string s, int tope)
         {
             if (s == null) return 0;
@@ -294,8 +342,16 @@ namespace Kubo.Log4Net.Internal
             {
                 var c = s[i];
                 if (c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '\t' || c == '\b' || c == '\f') n += 2;
-                else if (c < 0x20 || char.IsSurrogate(c)) n += 6;
-                else n++;
+                else if (c < 0x20) n += 6;
+                else if (c < 0x80) n++;
+                else if (c < 0x800) n += 2;
+                else if (char.IsHighSurrogate(c) && i + 1 < s.Length && char.IsLowSurrogate(s[i + 1]))
+                {
+                    n += 4; // el par completo ocupa 4 bytes en UTF-8
+                    i++;
+                }
+                else if (char.IsSurrogate(c)) n += 6; // suelto: el serializador lo escapa
+                else n += 3;
             }
             return n;
         }

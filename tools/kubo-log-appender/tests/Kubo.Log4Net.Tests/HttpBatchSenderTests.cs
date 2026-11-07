@@ -42,6 +42,9 @@ namespace Kubo.Log4Net.Tests
         [InlineData(500, "Retry")]
         [InlineData(429, "Retry")]
         [InlineData(401, "RetryLater")]
+        [InlineData(403, "RetryLater")]
+        [InlineData(404, "RetryLater")]
+        [InlineData(407, "RetryLater")]
         [InlineData(400, "Drop")]
         [InlineData(413, "Drop")]
         public void MapeaCodigos(int status, string esperado)

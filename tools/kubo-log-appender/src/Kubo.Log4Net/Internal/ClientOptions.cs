@@ -19,8 +19,8 @@ namespace Kubo.Log4Net.Internal
         public string Proxy;
         public int ShutdownTimeoutMs = 3000;
         /// <summary>
-        /// Tope de caracteres del cuerpo JSON de un lote. El servidor rechaza con 413 por encima
-        /// de 2 MB descomprimido; 1,5 M deja margen (UTF-8 puede ocupar más de un byte por carácter).
+        /// Tope de bytes UTF-8 (estimados) del cuerpo JSON de un lote. El servidor rechaza con 413 por encima
+        /// de 2 MB descomprimido; 1,5 M deja margen.
         /// </summary>
         public int MaxBatchChars = 1500000;
     }

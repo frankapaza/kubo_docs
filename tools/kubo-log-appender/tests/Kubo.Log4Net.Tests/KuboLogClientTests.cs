@@ -186,7 +186,7 @@ namespace Kubo.Log4Net.Tests
         {
             using (var fake = new FakeIngestServer())
             {
-                var o = Opciones(fake); o.BatchSize = 1000; o.FlushIntervalMs = 60000;
+                var o = Opciones(fake); o.BatchSize = 1000; o.FlushIntervalMs = 60000; o.ShutdownTimeoutMs = 10000; // servidor sano: holgura para que la CPU cargada no corte el vaciado
                 var c = Cliente(o);
                 for (var i = 0; i < 50; i++) c.Enqueue(Ev("m" + i));
                 c.Dispose();
@@ -202,6 +202,134 @@ namespace Kubo.Log4Net.Tests
                 var sw = Stopwatch.StartNew();
                 c.Dispose();
                 Assert.True(sw.ElapsedMilliseconds < o.ShutdownTimeoutMs + 1000, "tardó " + sw.ElapsedMilliseconds + " ms");
+            }
+        }
+
+        private static bool Espera(Func<bool> cond, int ms)
+        {
+            var fin = DateTime.UtcNow.AddMilliseconds(ms);
+            while (DateTime.UtcNow < fin)
+            {
+                if (cond()) return true;
+                Thread.Sleep(10);
+            }
+            return cond();
+        }
+
+        [Fact]
+        public void UnFallo503GeneraAvisoEnElPrimerIntento()
+        {
+            using (var fake = new FakeIngestServer())
+            {
+                fake.DefaultStatus = 503;
+                var diag = new List<string>();
+                var o = Opciones(fake); o.FlushIntervalMs = 60000;
+                using (var c = Cliente(o, diag))
+                {
+                    c.Enqueue(Ev("x"));
+                    Assert.False(c.Flush(500));
+                    Assert.True(Espera(() => { lock (diag) return diag.Any(m => m.Contains("503")); }, 3000));
+                }
+            }
+        }
+
+        [Fact]
+        public void LosAvisosDeReintentoSeEspacian()
+        {
+            Assert.True(KuboLogClient.DebeAvisar(0));
+            Assert.True(KuboLogClient.DebeAvisar(1));
+            Assert.True(KuboLogClient.DebeAvisar(2));
+            Assert.False(KuboLogClient.DebeAvisar(3));
+            Assert.True(KuboLogClient.DebeAvisar(4));
+            Assert.False(KuboLogClient.DebeAvisar(5));
+            Assert.False(KuboLogClient.DebeAvisar(7));
+            Assert.True(KuboLogClient.DebeAvisar(8));
+            Assert.Equal(8, Enumerable.Range(0, 100).Count(KuboLogClient.DebeAvisar)); // 0,1,2,4,8,16,32,64
+        }
+
+        [Fact]
+        public void Un404EsRetryLaterYAvisaDeLaUrl()
+        {
+            using (var fake = new FakeIngestServer())
+            {
+                fake.DefaultStatus = 404;
+                var diag = new List<string>();
+                var o = Opciones(fake); o.FlushIntervalMs = 60000;
+                using (var c = Cliente(o, diag))
+                {
+                    c.Enqueue(Ev("x"));
+                    Assert.False(c.Flush(1500));
+                    // RetryLater espera 5 minutos: en este tiempo no hubo un segundo intento.
+                    Assert.Single(fake.Requests);
+                    Assert.True(Espera(() => { lock (diag) return diag.Any(m => m.Contains("404") && m.Contains("Url")); }, 3000));
+                }
+            }
+        }
+
+        [Fact]
+        public void CierreHaceUnSoloIntentoPorLote()
+        {
+            using (var fake = new FakeIngestServer())
+            {
+                fake.DefaultStatus = 503;
+                var o = Opciones(fake); o.FlushIntervalMs = 60000; o.ShutdownTimeoutMs = 10000;
+                var c = Cliente(o);
+                c.Enqueue(Ev("x"));
+                c.Dispose();
+                Assert.Single(fake.Requests);
+            }
+        }
+
+        [Fact]
+        public void LoteConTextoNoAsciiNoSuperaElTopeEnBytes()
+        {
+            using (var fake = new FakeIngestServer())
+            {
+                var o = Opciones(fake); o.BatchSize = 1000; o.FlushIntervalMs = 60000;
+                using (var c = Cliente(o))
+                {
+                    var tres = new string('あ', 30000);                                  // 3 bytes por carácter
+                    var cuatro = string.Concat(Enumerable.Repeat("\U0001F600", 15000));  // 4 bytes por par
+                    for (var i = 0; i < 60; i++) c.Enqueue(Ev(i % 2 == 0 ? tres : cuatro));
+                    Assert.True(c.Flush(60000));
+                    var reqs = fake.Requests;
+                    Assert.True(reqs.Count > 1);
+                    Assert.All(reqs, r => Assert.True(System.Text.Encoding.UTF8.GetByteCount(r.Body) <= 1500000, "bytes: " + System.Text.Encoding.UTF8.GetByteCount(r.Body)));
+                    Assert.Equal(60, reqs.Sum(r => Eventos(r)));
+                }
+            }
+        }
+
+        // Diccionario cuya enumeración falla: simula un evento que rompe al estimar/serializar.
+        private sealed class PropiedadesVenenosas : Dictionary<string, string>, IEnumerable<KeyValuePair<string, string>>
+        {
+            IEnumerator<KeyValuePair<string, string>> IEnumerable<KeyValuePair<string, string>>.GetEnumerator()
+            {
+                throw new InvalidOperationException("propiedades rotas");
+            }
+        }
+
+        [Fact]
+        public void UnEventoQueRompeLaPreparacionNoMataElHilo()
+        {
+            using (var fake = new FakeIngestServer())
+            {
+                var diag = new List<string>();
+                var o = Opciones(fake); o.FlushIntervalMs = 60000;
+                using (var c = Cliente(o, diag))
+                {
+                    var malo = Ev("malo");
+                    malo.Properties = new PropiedadesVenenosas();
+                    c.Enqueue(malo);
+                    Assert.True(c.Flush(5000));
+                    lock (diag) Assert.NotEmpty(diag);
+                    Assert.Empty(fake.Requests);
+
+                    // El hilo sigue vivo: un evento normal posterior se envía.
+                    c.Enqueue(Ev("bueno"));
+                    Assert.True(c.Flush(5000));
+                    Assert.Contains("bueno", Assert.Single(fake.Requests).Body);
+                }
             }
         }
 
