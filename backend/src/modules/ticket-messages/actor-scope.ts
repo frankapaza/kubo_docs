@@ -1,7 +1,7 @@
 import { Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 
 import { sameId } from '../../common/ids';
-import { Ticket } from '../tickets/entities/ticket.entity';
+import { Ticket, isInternalTicketOrigin } from '../tickets/entities/ticket.entity';
 import { TicketsRepository } from '../tickets/tickets.repository';
 import { ActorIds, TicketActor, resolveActorIds } from '../tickets/domain/ticket-actor';
 
@@ -206,7 +206,14 @@ function assertUsableActorId(
  */
 export function ticketIsVisible(ticket: Ticket | null | undefined, scope: ClientScope): boolean {
   if (!ticket) return false;
-  return !scope.restricted || sameId(ticket.clientId, scope.clientId);
+  // Con alcance restringido (cliente) un ticket interno --origen `MONITOREO`--
+  // no se ve, ni su hilo ni sus adjuntos, aunque sea de su empresa: es del
+  // equipo por decisión del responsable. Esta es la puerta común de mensajes y
+  // adjuntos, así que basta una condición aquí.
+  return (
+    !scope.restricted ||
+    (sameId(ticket.clientId, scope.clientId) && !isInternalTicketOrigin(ticket.origin))
+  );
 }
 
 /**

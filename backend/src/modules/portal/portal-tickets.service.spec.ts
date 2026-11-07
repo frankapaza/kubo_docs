@@ -162,6 +162,23 @@ describe('la frontera', () => {
     expect(repo.list).toHaveBeenCalledWith(expect.objectContaining({ clientId: 7 }));
   });
 
+  it('el listado pide excluir los tickets internos', async () => {
+    const { service, repo } = makeService();
+    await service.list(7);
+    expect(repo.list).toHaveBeenCalledWith({ clientId: 7, excludeInternal: true });
+  });
+
+  it('el detalle de un ticket MONITOREO del propio cliente responde NOT_FOUND, igual que uno inexistente', async () => {
+    const interno = makeService({ id: 3, clientId: 7, origin: 'MONITOREO' });
+    const inexistente = makeService();
+    inexistente.repo.findById.mockResolvedValue(null);
+    const a = await interno.service.detail(7, 3).catch((e: any) => e);
+    const b = await inexistente.service.detail(7, 3).catch((e: any) => e);
+    expect(a).toBeInstanceOf(NotFoundException);
+    expect(a.getResponse()).toEqual(b.getResponse());
+    expect(interno.events.listByTicket).not.toHaveBeenCalled();
+  });
+
   it('el listado no devuelve ni un ticket de otra empresa', async () => {
     const { service } = makeService();
     const vistos = await service.list(7);

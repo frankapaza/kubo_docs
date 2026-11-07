@@ -344,3 +344,22 @@ describe('plansForEvent -- una nota interna no avisa a nadie', () => {
     },
   );
 });
+
+describe('plansForEvent -- tickets internos', () => {
+  it('un ticket MONITOREO nunca produce aviso al cliente, con cualquier tipo, estado o autor', () => {
+    for (const type of TICKET_EVENT_TYPES) {
+      for (const toStatus of TICKET_STATUSES) {
+        for (const hasClientAuthor of [true, false]) {
+          for (const messageVisibility of [null, 'PUBLICA'] as const) {
+            for (const actorKind of ['CLIENT', 'TEAM'] as const) {
+              const plan = plansForEvent(
+                baseEvent({ type, toStatus, origin: 'MONITOREO', hasClientAuthor, messageVisibility, actorKind }),
+              );
+              expect(plan.filter((p) => p.audience === 'CLIENT')).toEqual([]);
+            }
+          }
+        }
+      }
+    }
+  });
+});

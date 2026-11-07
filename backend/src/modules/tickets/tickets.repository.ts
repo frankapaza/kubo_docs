@@ -8,10 +8,11 @@ import {
   IsNull,
   LessThan,
   MoreThanOrEqual,
+  Not,
   Repository,
 } from 'typeorm';
 
-import { Ticket, ServiceCategory } from './entities/ticket.entity';
+import { Ticket, ServiceCategory, INTERNAL_TICKET_ORIGINS } from './entities/ticket.entity';
 import { TicketStatus, OPEN_STATUSES } from './domain/ticket-state-machine';
 import { TicketPriority } from './domain/ticket-priority';
 
@@ -19,6 +20,11 @@ export interface TicketListFilters {
   status?: TicketStatus;
   open?: boolean;
   clientId?: number;
+  /**
+   * Oculta los tickets internos (origen `MONITOREO`). Lo pide el portal: esos
+   * tickets son del equipo por decisión del responsable y el cliente no los ve.
+   */
+  excludeInternal?: boolean;
   systemId?: number;
   priority?: TicketPriority;
   assigneeUserId?: number;
@@ -55,6 +61,9 @@ export class TicketsRepository {
     if (filters.status) qb.andWhere('t.status = :status', { status: filters.status });
     if (filters.open) qb.andWhere('t.status IN (:...open)', { open: OPEN_STATUSES });
     if (filters.clientId) qb.andWhere('t.client_id = :clientId', { clientId: filters.clientId });
+    if (filters.excludeInternal) {
+      qb.andWhere('t.origin NOT IN (:...internal)', { internal: INTERNAL_TICKET_ORIGINS });
+    }
     if (filters.systemId) qb.andWhere('t.system_id = :systemId', { systemId: filters.systemId });
     if (filters.priority) qb.andWhere('t.priority = :priority', { priority: filters.priority });
     if (filters.assigneeUserId) {
@@ -166,7 +175,9 @@ export class TicketsRepository {
    */
   listForClientPeriod(clientId: number, from: Date, to: Date): Promise<Ticket[]> {
     return this.repo.find({
-      where: { clientId, capturedAt: And(MoreThanOrEqual(from), LessThan(to)) },
+      // El informe es para el cliente: los tickets internos (monitoreo) no
+      // cuentan ahí, igual que no salen en su listado.
+      where: { clientId, origin: Not(In(INTERNAL_TICKET_ORIGINS)), capturedAt: And(MoreThanOrEqual(from), LessThan(to)) },
       order: { capturedAt: 'ASC', id: 'ASC' },
     });
   }
@@ -181,7 +192,8 @@ export class TicketsRepository {
    */
   countResolvedInPeriod(clientId: number, from: Date, to: Date): Promise<number> {
     return this.repo.count({
-      where: { clientId, resolvedAt: And(MoreThanOrEqual(from), LessThan(to)) },
+      // Mismo criterio que `listForClientPeriod`: sin tickets internos.
+      where: { clientId, origin: Not(In(INTERNAL_TICKET_ORIGINS)), resolvedAt: And(MoreThanOrEqual(from), LessThan(to)) },
     });
   }
 }

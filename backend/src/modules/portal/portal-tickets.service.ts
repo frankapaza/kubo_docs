@@ -6,7 +6,7 @@ import { TicketsRepository } from '../tickets/tickets.repository';
 import { TicketEventsService } from '../tickets/ticket-events.service';
 import { TicketsService } from '../tickets/tickets.service';
 import { ClientSystemsRepository } from '../tickets/client-systems.repository';
-import { Ticket } from '../tickets/entities/ticket.entity';
+import { Ticket, isInternalTicketOrigin } from '../tickets/entities/ticket.entity';
 import { TicketEvent } from '../tickets/entities/ticket-event.entity';
 
 import { CreatePortalTicketDto } from './dto/create-portal-ticket.dto';
@@ -113,7 +113,9 @@ export class PortalTicketsService {
     // Antes de consultar, no después: si el `clientId` no sirve para acotar,
     // `TicketsRepository.list` devolvería tickets de todas las empresas.
     assertSessionScope(clientId, 'clientId', PortalTicketsService.name);
-    const rows = await this.tickets.list({ clientId });
+    // Los tickets del monitoreo son internos por decisión del responsable: el
+    // cliente no los ve aunque lleven su `clientId`.
+    const rows = await this.tickets.list({ clientId, excludeInternal: true });
     return rows.map((t) => this.toPortalView(t));
   }
 
@@ -122,7 +124,9 @@ export class PortalTicketsService {
     const ticket = await this.tickets.findById(ticketId);
     // La comprobación de pertenencia va aquí y no en la consulta a propósito:
     // es explícita, y el mismo error cubre "no existe" y "no es tuyo".
-    if (!ticket || !sameId(ticket.clientId, clientId)) {
+    // Un ticket interno del propio cliente responde igual que uno inexistente:
+    // otro error confirmaría que existe.
+    if (!ticket || !sameId(ticket.clientId, clientId) || isInternalTicketOrigin(ticket.origin)) {
       throw ticketNotFound();
     }
 

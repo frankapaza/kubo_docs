@@ -1,4 +1,5 @@
 import { TicketsRepository } from './tickets.repository';
+import { INTERNAL_TICKET_ORIGINS } from './entities/ticket.entity';
 
 /**
  * Estas dos consultas alimentan el informe mensual del portal (tarea 4 de
@@ -45,6 +46,16 @@ function expectOpenRangeOperator(op: any, from: Date, to: Date) {
   expect(op.value[1].value).toEqual(to);
 }
 
+/**
+ * El informe es la cara del cliente: los tickets internos (monitoreo) no
+ * cuentan ahí. Se comprueba la forma `Not(In([...]))`, no una serialización.
+ */
+function expectExcludesInternal(op: any) {
+  expect(op.type).toBe('not');
+  expect(op.child.type).toBe('in');
+  expect(op.child.value).toEqual([...INTERNAL_TICKET_ORIGINS]);
+}
+
 describe('TicketsRepository', () => {
   describe('countByClientSystem', () => {
     // `tickets.system_id` apunta a la ASIGNACIÓN (`client_systems.id`), no al
@@ -64,7 +75,7 @@ describe('TicketsRepository', () => {
       const to = new Date('2026-09-01T05:00:00Z');
       await repo.listForClientPeriod(7, from, to);
       expect(typeormRepo.find).toHaveBeenCalledWith({
-        where: { clientId: 7, capturedAt: expect.anything() },
+        where: { clientId: 7, origin: expect.anything(), capturedAt: expect.anything() },
         order: { capturedAt: 'ASC', id: 'ASC' },
       });
       expectOpenRangeOperator(typeormRepo.find.mock.calls[0][0].where.capturedAt, from, to);
@@ -81,7 +92,7 @@ describe('TicketsRepository', () => {
       // (mezclando el criterio de alta con el de resolución), esta llamada
       // ya no calzaría con lo esperado y la prueba fallaría.
       expect(typeormRepo.count).toHaveBeenCalledWith({
-        where: { clientId: 7, resolvedAt: expect.anything() },
+        where: { clientId: 7, origin: expect.anything(), resolvedAt: expect.anything() },
       });
       expectOpenRangeOperator(typeormRepo.count.mock.calls[0][0].where.resolvedAt, from, to);
     });

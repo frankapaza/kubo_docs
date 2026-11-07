@@ -21,7 +21,7 @@
  */
 
 import type { TicketEventType } from '../../tickets/entities/ticket-event.entity';
-import type { TicketOrigin } from '../../tickets/entities/ticket.entity';
+import { isInternalTicketOrigin, type TicketOrigin } from '../../tickets/entities/ticket.entity';
 import type { TicketStatus } from '../../tickets/domain/ticket-state-machine';
 import type { TicketMessageVisibility } from '../../ticket-messages/entities/ticket-message.entity';
 import type { NotificationAudience } from './template-renderer';
@@ -190,7 +190,10 @@ function teamTriggerFor(event: TicketNotificationEvent): string | null {
 export function plansForEvent(event: TicketNotificationEvent): NotificationPlan {
   const plan: NotificationPlan = [];
 
-  if (event.hasClientAuthor) {
+  // Los tickets del monitoreo son internos por decisión del responsable. Hoy
+  // no avisarían al cliente porque nacen sin autor cliente, pero la regla no
+  // puede depender de eso: basta que alguien les asigne uno para que escape.
+  if (!isInternalTicketOrigin(event.origin) && event.hasClientAuthor) {
     const clientTriggerKey = clientTriggerFor(event);
     if (clientTriggerKey) plan.push({ triggerKey: clientTriggerKey, audience: 'CLIENT' });
   }
