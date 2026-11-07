@@ -93,3 +93,16 @@ export function assertSystemBelongsToClient(params: {
     throw new BadRequestException({ code: 'BAD_INPUT', message: SISTEMA_AJENO });
   }
 }
+
+/**
+ * El sistema que la ingesta de correo le pone sola a un ticket: el único
+ * asignado y activo del cliente, o ninguno.
+ *
+ * Con uno solo no es una suposición: es el único software que esa empresa nos
+ * arrienda, y es lo que anotaría cualquiera que mirara el correo. Con dos o
+ * más, adivinar sería inventarse justo el dato que todo esto existe para tener
+ * fiable: el ticket entra sin sistema y el equipo lo asigna en el triaje.
+ */
+export function soleActiveSystemId(activeSystems: ActiveSystem[]): number | null {
+  return activeSystems.length === 1 ? Number(activeSystems[0].id) : null;
+}

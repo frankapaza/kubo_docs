@@ -1,4 +1,8 @@
-import { resolveTicketSystem, assertSystemBelongsToClient } from './system-requirement';
+import {
+  resolveTicketSystem,
+  assertSystemBelongsToClient,
+  soleActiveSystemId,
+} from './system-requirement';
 
 const ACTIVOS = [{ id: 5 }, { id: 6 }];
 
@@ -94,5 +98,23 @@ describe('assertSystemBelongsToClient', () => {
     expect(() => assertSystemBelongsToClient({ systemId: 99, activeSystems: ACTIVOS })).toThrow(
       'El sistema indicado no es de este cliente o está inactivo.',
     );
+  });
+});
+
+describe('soleActiveSystemId', () => {
+  it('con un solo sistema asignado y activo, ese es', () => {
+    expect(soleActiveSystemId([{ id: 5 }])).toBe(5);
+  });
+
+  it('con dos, no se adivina', () => {
+    expect(soleActiveSystemId([{ id: 5 }, { id: 6 }])).toBeNull();
+  });
+
+  it('sin ninguno, no hay nada que elegir', () => {
+    expect(soleActiveSystemId([])).toBeNull();
+  });
+
+  it('el id de la base llega como cadena y sale como numero', () => {
+    expect(soleActiveSystemId([{ id: '5' } as unknown as { id: number }])).toBe(5);
   });
 });

@@ -197,6 +197,8 @@ interface Opciones {
    * acordarse también de este ajuste.
    */
   authServerId?: string | null;
+  /** Los sistemas asignados y activos del cliente del remitente. Ninguno, por omision. */
+  sistemasActivos?: { id: number }[];
 }
 
 function montar(opciones: Opciones = {}) {
@@ -208,6 +210,7 @@ function montar(opciones: Opciones = {}) {
     postMensajeImpl,
     ingestionEnabled = true,
     authServerId = 'mx.kuboti.com',
+    sistemasActivos = [],
   } = opciones;
 
   const mailbox = mailboxDoble(mensajes);
@@ -232,6 +235,9 @@ function montar(opciones: Opciones = {}) {
     isImapIngestionEnabled: jest.fn().mockResolvedValue(ingestionEnabled),
     getImapAuthServerId: jest.fn().mockResolvedValue(authServerId),
   };
+  const clientSystems = {
+    listActiveByClient: jest.fn().mockResolvedValue(sistemasActivos),
+  };
 
   const service = new InboundEmailService(
     mailbox as any,
@@ -243,9 +249,21 @@ function montar(opciones: Opciones = {}) {
     users as any,
     email as any,
     workspace as any,
+    clientSystems as any,
   );
 
-  return { service, mailbox, repo, tickets, ticketMessages, clientUsers, users, email, workspace };
+  return {
+    service,
+    mailbox,
+    repo,
+    tickets,
+    ticketMessages,
+    clientUsers,
+    users,
+    email,
+    workspace,
+    clientSystems,
+  };
 }
 
 /** La fila final de `inbound_emails` para un `messageIdRaw` dado, o `undefined` si no hay ninguna. */
@@ -264,6 +282,52 @@ describe('InboundEmailService.drain', () => {
       await service.drain();
       const [, , , requirement] = tickets.create.mock.calls[0];
       expect(requirement).toBe('EXENTO_SIN_QUIEN_ELIJA');
+    });
+
+    it('con un unico sistema asignado, el ticket nace con ese sistema', async () => {
+      const { service, tickets, clientSystems } = montar({
+        clientUser: CLIENT_USER,
+        sistemasActivos: [{ id: 5 }],
+      });
+      const resumen = await service.drain();
+      expect(clientSystems.listActiveByClient).toHaveBeenCalledWith(7);
+      const [, dto] = tickets.create.mock.calls[0];
+      expect(dto.systemId).toBe(5);
+      expect(resumen.ticketsCreated).toBe(1);
+    });
+
+    it('con dos sistemas no se adivina: entra sin sistema y el correo NO se descarta', async () => {
+      const { service, tickets } = montar({
+        clientUser: CLIENT_USER,
+        sistemasActivos: [{ id: 5 }, { id: 6 }],
+      });
+      const resumen = await service.drain();
+      const [, dto] = tickets.create.mock.calls[0];
+      expect(dto.systemId).toBeUndefined();
+      expect(resumen.ticketsCreated).toBe(1);
+      expect(resumen.discarded).toBe(0);
+      expect(resumen.errors).toBe(0);
+    });
+
+    // Una clasificacion no puede costar un correo: si la consulta de sistemas
+    // revienta, el ticket entra igual, sin sistema, y se triará a mano.
+    it('si la consulta de sistemas falla, el ticket entra igual sin sistema', async () => {
+      const { service, tickets, clientSystems } = montar({ clientUser: CLIENT_USER });
+      clientSystems.listActiveByClient.mockRejectedValue(new Error('base caida un instante'));
+      const resumen = await service.drain();
+      const [, dto] = tickets.create.mock.calls[0];
+      expect(dto.systemId).toBeUndefined();
+      expect(resumen.ticketsCreated).toBe(1);
+      expect(resumen.errors).toBe(0);
+    });
+
+    it('sin ningun sistema asignado, entra sin sistema y el correo tampoco se pierde', async () => {
+      const { service, tickets } = montar({ clientUser: CLIENT_USER, sistemasActivos: [] });
+      const resumen = await service.drain();
+      const [, dto] = tickets.create.mock.calls[0];
+      expect(dto.systemId).toBeUndefined();
+      expect(resumen.ticketsCreated).toBe(1);
+      expect(resumen.discarded).toBe(0);
     });
 
     it('crea el ticket con origen EMAIL y el clientId del remitente, nunca de lo que traiga el correo', async () => {

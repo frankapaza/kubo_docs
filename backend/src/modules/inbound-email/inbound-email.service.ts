@@ -33,6 +33,8 @@ import { CreateTicketDto } from '../tickets/dto/create-ticket.dto';
 import { EmailOrigin, TicketsService } from '../tickets/tickets.service';
 import { PostMessageInput, TicketMessagesService } from '../ticket-messages/ticket-messages.service';
 import { WorkspaceService } from '../workspace/workspace.service';
+import { ClientSystemsRepository } from '../tickets/client-systems.repository';
+import { soleActiveSystemId } from '../tickets/domain/system-requirement';
 
 /**
  * Token de inyección para la dirección del propio buzón (p. ej.
@@ -298,6 +300,7 @@ export class InboundEmailService {
     private readonly users: UsersService,
     private readonly email: EmailService,
     private readonly workspace: WorkspaceService,
+    private readonly clientSystems: ClientSystemsRepository,
   ) {}
 
   async drain(limit: number = INBOUND_EMAIL_BATCH_SIZE): Promise<DrainSummary> {
@@ -515,6 +518,26 @@ export class InboundEmailService {
    * nada que venga dentro del correo -- ver `correlate` y su comentario sobre
    * la frontera entre empresas.
    */
+  /**
+   * El sistema con el que nace un ticket por correo: el único asignado y activo
+   * del cliente, o ninguno (`soleActiveSystemId`).
+   *
+   * Si la consulta falla, ninguno: una clasificación no puede costar un correo.
+   * El ticket entra sin sistema y el equipo lo asigna en el triaje, igual que
+   * cuando el cliente tiene dos o más.
+   */
+  private async soleSystemOf(clientId: number): Promise<number | null> {
+    try {
+      return soleActiveSystemId(await this.clientSystems.listActiveByClient(clientId));
+    } catch (error) {
+      this.logger.warn(
+        `No se pudieron leer los sistemas del cliente ${clientId}; el ticket entra sin sistema: ` +
+          errorText(error),
+      );
+      return null;
+    }
+  }
+
   private async handleClientSender(
     message: IncomingMessage,
     messageId: string,
@@ -644,11 +667,17 @@ export class InboundEmailService {
       return;
     }
 
+    // El único sistema asignado al cliente, si solo hay uno. Aquí no hay nadie
+    // a quien preguntar -- por eso el alta va con `'EXENTO_SIN_QUIEN_ELIJA'` --,
+    // pero cuando la empresa arrienda un solo sistema no hay nada que preguntar.
+    const systemId = await this.soleSystemOf(senderClientId);
+
     const dto: CreateTicketDto = {
       rawText: bodyMd,
       subject: cleanSubject(message.subject),
       clientId: senderClientId,
       origin: 'EMAIL',
+      systemId: systemId ?? undefined,
     } as CreateTicketDto;
     const emailOrigin: EmailOrigin = { emailMessageId: messageId, bodyFull: message.textBody };
 
