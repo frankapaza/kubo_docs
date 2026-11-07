@@ -7,6 +7,7 @@ import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { createGlobalValidationPipe } from './common/validation/validation-pipe.factory';
 import { registerBulkSendJsonLimit } from './modules/portal/bulk-send-json-limit';
+import { registerIngestJsonLimit } from './modules/monitoring/ingest/ingest-json-limit';
 import { CorsIoAdapter } from './common/realtime/cors-io.adapter';
 
 async function bootstrap(): Promise<void> {
@@ -18,6 +19,8 @@ async function bootstrap(): Promise<void> {
   // Antes de `listen()`, que es quien llama a `init()` y monta el analizador de
   // cuerpos de Nest: por detrás no serviría de nada. Ver el fichero.
   registerBulkSendJsonLimit(app);
+  // Ídem para la ingesta de logs: 2 MB descomprimidos (el appender manda gzip).
+  registerIngestJsonLimit(app);
 
   const apiPrefix = config.get<string>('API_PREFIX', 'api/v1');
   app.setGlobalPrefix(apiPrefix);

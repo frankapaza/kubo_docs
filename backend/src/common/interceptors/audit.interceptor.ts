@@ -25,6 +25,9 @@ interface AuditActor {
   clientUserId: number | null;
 }
 
+/** `POST /api/v1/ingest/logs` (el appender). Anclado al final: `/ingest/logs-otros` sí se audita. */
+const INGESTA_DE_LOGS = /\/ingest\/logs\/?(?:\?.*)?$/;
+
 /**
  * Registra toda acción mutante (POST/PATCH/PUT/DELETE) en `audit_log`.
  * Lee `user` inyectado por `JwtAuthGuard` / `ClientJwtGuard` y resuelve la
@@ -41,6 +44,11 @@ export class AuditInterceptor implements NestInterceptor {
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const req = context.switchToHttp().getRequest<Request & { user?: AuditPrincipal }>();
+    // La ingesta de logs queda fuera de la auditoría (Review Focus 3): cada
+    // lote —hasta 2 MB, cientos por minuto— llenaría audit_log, y no es una
+    // acción de nadie sino tráfico de máquina. Se compara el final del camino
+    // para que valga con o sin el prefijo global.
+    if (INGESTA_DE_LOGS.test(req.path ?? req.url ?? '')) return next.handle();
     const method = req.method.toUpperCase();
     const isMutation = ['POST', 'PATCH', 'PUT', 'DELETE'].includes(method);
     const actor = AuditInterceptor.resolveActor(req.user);

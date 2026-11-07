@@ -68,6 +68,36 @@ describe('AuditInterceptor: la clave de instalacion', () => {
   });
 });
 
+describe('AuditInterceptor: la ingesta de logs', () => {
+  const ctxPost = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+    ({
+      switchToHttp: () => ({
+        getRequest: () => ({ method: 'POST', url: path, path, route: { path }, body, headers, ip: '10.0.0.1' }),
+      }),
+    }) as unknown as ExecutionContext;
+
+  it('el ingreso de logs no se audita', async () => {
+    const { interceptor, saved, repo } = makeInterceptor();
+    const ctx = ctxPost(
+      '/api/v1/ingest/logs',
+      { aplicativo: 'A', servidor: 'B', eventos: [{ mensaje: 'x'.repeat(1000) }] },
+      { 'x-kubo-log-key': 'klog_' + 'A'.repeat(43) },
+    );
+    await firstValueFrom(interceptor.intercept(ctx, { handle: () => of({ aceptados: 1, descartadosPorNivel: 0 }) }));
+    // `tap` con async: una vuelta al bucle para no aprobar por mirar antes que el save.
+    await new Promise((r) => setImmediate(r));
+    expect(repo.save).not.toHaveBeenCalled();
+    expect(saved).toHaveLength(0);
+  });
+
+  it('otro POST que solo se parece sí se audita', async () => {
+    const { interceptor, repo } = makeInterceptor();
+    await firstValueFrom(interceptor.intercept(ctxPost('/api/v1/ingest/logs-otros', {}), next));
+    await new Promise((r) => setImmediate(r));
+    expect(repo.save).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('AuditInterceptor: a quien se atribuye la accion', () => {
   it('una accion del personal va en user_id y deja client_user_id nulo', async () => {
     const entry = await run({ id: 5, email: 'admin@kubo.pe', role: 'ADMIN' });

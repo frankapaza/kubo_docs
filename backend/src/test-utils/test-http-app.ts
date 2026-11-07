@@ -4,6 +4,7 @@ import { TestingModule } from '@nestjs/testing';
 import { HttpExceptionFilter } from '../common/filters/http-exception.filter';
 import { createGlobalValidationPipe } from '../common/validation/validation-pipe.factory';
 import { registerBulkSendJsonLimit } from '../modules/portal/bulk-send-json-limit';
+import { registerIngestJsonLimit } from '../modules/monitoring/ingest/ingest-json-limit';
 
 /**
  * Utilidad para pruebas de integración: levanta un `TestingModule` como una
@@ -101,6 +102,7 @@ export async function startTestHttpApp(moduleRef: TestingModule): Promise<TestHt
   // `init()` por el mismo motivo que allí: después, el analizador de Nest ya
   // habría leído (y rechazado) el cuerpo.
   registerBulkSendJsonLimit(app);
+  registerIngestJsonLimit(app);
 
   await app.init();
   await app.listen(0, '127.0.0.1');
