@@ -219,6 +219,19 @@ export default function AppLayout() {
                   <ZapIcon size={15} className="text-slate-500" />
                   Integraciones
                 </button>
+                {/*
+                  Aquí y no en el menú principal: es mantenimiento de una lista
+                  que se toca cada varios meses. El desplegable entero ya está
+                  detrás de `canManageUsers`, la misma condición que
+                  `canManageSystemCatalog`.
+                */}
+                <button
+                  onClick={() => go('/admin/sistemas')}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition text-left"
+                >
+                  <SettingsIcon size={15} className="text-slate-500" />
+                  Catálogo de sistemas
+                </button>
                 <button
                   onClick={() => go('/admin/templates')}
                   className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition text-left"

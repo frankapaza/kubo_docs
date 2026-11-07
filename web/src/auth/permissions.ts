@@ -10,6 +10,14 @@ export const ROLE_OPTIONS: UserRole[] = [
 
 export const canManageUsers = (user: User | null): boolean => user?.role === 'ADMIN';
 
+/**
+ * Mantener el catálogo de sistemas: alta, renombrado, retirada y borrado. Solo
+ * ADMIN, como las demás listas globales de la casa: el catálogo es la lista de
+ * productos que la casa arrienda, y una fila mal puesta la heredan todos los
+ * clientes.
+ */
+export const canManageSystemCatalog = (user: User | null): boolean => user?.role === 'ADMIN';
+
 export const canCreateProject = (user: User | null): boolean =>
   user?.role === 'ADMIN' || user?.role === 'PRODUCT_OWNER';
 

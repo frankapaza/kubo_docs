@@ -12,6 +12,7 @@ import UsersPage from './pages/UsersPage';
 import ClientUsersPage from './pages/ClientUsersPage';
 import AIProvidersPage from './pages/AIProvidersPage';
 import IntegrationsPage from './pages/IntegrationsPage';
+import SystemCatalogPage from './pages/SystemCatalogPage';
 import TemplatesPage from './pages/TemplatesPage';
 import NotificationTemplatesPage from './pages/NotificationTemplatesPage';
 import DocumentEditorPage from './pages/DocumentEditorPage';
@@ -141,6 +142,7 @@ export default function App() {
           <Route path="/admin/client-users" element={<ClientUsersPage />} />
           <Route path="/admin/ai-providers" element={<AIProvidersPage />} />
           <Route path="/admin/integrations" element={<IntegrationsPage />} />
+          <Route path="/admin/sistemas" element={<SystemCatalogPage />} />
           <Route path="/admin/templates" element={<TemplatesPage />} />
           {/*
             Distinta de "/admin/templates": esa es de plantillas de
