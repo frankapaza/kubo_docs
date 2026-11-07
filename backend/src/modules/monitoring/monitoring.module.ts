@@ -8,6 +8,9 @@ import { ErrorGroupDaily } from './entities/error-group-daily.entity';
 import { ErrorOccurrence } from './entities/error-occurrence.entity';
 import { LogInstallation } from './entities/log-installation.entity';
 import { LogInstallationSource } from './entities/log-installation-source.entity';
+import { AppenderPackageService } from './appender-package.service';
+import { DiskWatchService } from './disk-watch.service';
+import { MonitoringRetentionScheduler } from './monitoring-retention.scheduler';
 import { ErrorActionsService } from './error-actions.service';
 import { ErrorGroupsRepository } from './error-groups.repository';
 import { ErrorGroupsService } from './error-groups.service';
@@ -44,6 +47,10 @@ import { LokiClient } from './loki/loki.client';
     InstallationKeyGuard,
     IngestRateLimiter,
     RecentBatches,
+    // Mantenimiento: purga de 180 días, vigilancia del disco y paquete del appender.
+    MonitoringRetentionScheduler,
+    DiskWatchService,
+    AppenderPackageService,
   ],
   controllers: [InstallationsController, ErrorsController, IngestController, LogsController],
   // LokiClient, el servicio de instalaciones y el de grupos de error los

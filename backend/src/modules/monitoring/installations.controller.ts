@@ -1,10 +1,15 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Res, UseGuards } from '@nestjs/common';
+import { Response } from 'express';
+import { createReadStream, promises as fsp } from 'fs';
 
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
+import { serveAttachment } from '../../common/http/attachment-response';
+import { AppenderPackageService } from './appender-package.service';
+import { DiskWatchService } from './disk-watch.service';
 import { CreateInstallationDto, UpdateInstallationDto } from './dto/installation.dto';
 import { InstallationsService } from './installations.service';
 
@@ -19,7 +24,11 @@ import { InstallationsService } from './installations.service';
 @Controller('monitoring')
 @UseGuards(JwtAuthGuard, StaffOnlyGuard, RolesGuard)
 export class InstallationsController {
-  constructor(private readonly service: InstallationsService) {}
+  constructor(
+    private readonly service: InstallationsService,
+    private readonly disk: DiskWatchService,
+    private readonly appender: AppenderPackageService,
+  ) {}
 
   @Get('installations')
   @Roles('ADMIN')
@@ -55,5 +64,34 @@ export class InstallationsController {
   @Get('sources')
   sources() {
     return this.service.listSourceOptions();
+  }
+
+  /** Estado del disco de Loki, tal como lo midió la última comprobación. */
+  @Get('disk')
+  @Roles('ADMIN')
+  diskStatus() {
+    return this.disk.status();
+  }
+
+  /** El zip del appender, siempre como descarga (`attachment`, `nosniff`). */
+  @Get('appender/package')
+  @Roles('ADMIN')
+  async appenderPackage(@Res() res: Response): Promise<void> {
+    // Primero resolver y medir: si falla aún no hay cabeceras y el filtro global contesta su 404.
+    const { path, filename } = await this.appender.packageFile();
+    const { size } = await fsp.stat(path);
+    await serveAttachment(res, {
+      stream: createReadStream(path),
+      filename,
+      headerFilename: filename, // el servicio garantiza un nombre llano y ASCII
+      mimeType: 'application/zip',
+      size,
+    });
+  }
+
+  @Get('appender/manual')
+  @Roles('ADMIN')
+  appenderManual() {
+    return this.appender.manual();
   }
 }
