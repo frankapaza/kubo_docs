@@ -87,6 +87,7 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
   private static readonly MIGRATION_026 = 'migrations/026_invitaciones_portal.sql';
   private static readonly MIGRATION_027 = 'migrations/027_carga_masiva_usuarios.sql';
   private static readonly MIGRATION_028 = 'migrations/028_tickets_archivados.sql';
+  private static readonly MIGRATION_029 = 'migrations/029_catalogo_de_sistemas.sql';
 
   /**
    * Lo que hace falta para que exista `workspace_settings.team_inbox_email`, en
@@ -139,6 +140,10 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
     // cliente abre la pantalla de su gente — y el alta desde el portal deja de
     // existir sin que nadie sepa por qué.
     { table: 'client_user_invitations', files: [PortalSchemaValidator.MIGRATION_026] },
+    // 029: el catálogo de sistemas. `System` es una entidad, y la pestaña
+    // «Sistemas» de cada cliente, el formulario de ticket y la pantalla del
+    // catálogo leen de ella: sin la tabla, las tres responden 500.
+    { table: 'systems', files: [PortalSchemaValidator.MIGRATION_029] },
     // La 019 tampoco está aquí, y por el mismo motivo que el enum de arriba
     // más uno propio: no crea ninguna tabla ni ninguna columna --solo corrige
     // el `COMMENT` de `ticket_attachments.message_id`--, así que no hay nada
@@ -280,6 +285,17 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
       table: 'tickets',
       column: 'archived_at',
       files: [PortalSchemaValidator.MIGRATION_028],
+    },
+    // 029: el producto del catálogo de cada asignación. `client-system.entity
+    // .ts` declara la columna, así que TypeORM la emite en TODO SELECT e
+    // INSERT sobre `client_systems`: sin ella, el alta de ticket (que consulta
+    // los sistemas del cliente) y la ficha del cliente responden 500. La tabla
+    // de conflictos, la nulabilidad de `name` y las claves únicas van en el
+    // mismo fichero.
+    {
+      table: 'client_systems',
+      column: 'system_id',
+      files: [PortalSchemaValidator.MIGRATION_029],
     },
   ];
 

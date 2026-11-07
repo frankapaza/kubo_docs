@@ -22,7 +22,7 @@ export class ClientSystemsService {
     const name = dto.name.trim();
 
     const existing = await this.repo.listByClient(clientId);
-    if (existing.some((s) => s.name.toLowerCase() === name.toLowerCase())) {
+    if (existing.some((s) => (s.name ?? '').toLowerCase() === name.toLowerCase())) {
       throw new ConflictException({
         code: 'CONFLICT',
         message: `El cliente ya tiene un sistema llamado «${name}».`,
@@ -40,7 +40,7 @@ export class ClientSystemsService {
     if (dto.name !== undefined) {
       const name = dto.name.trim();
       const existing = await this.repo.listByClient(current.clientId);
-      if (existing.some((s) => s.id !== id && s.name.toLowerCase() === name.toLowerCase())) {
+      if (existing.some((s) => s.id !== id && (s.name ?? '').toLowerCase() === name.toLowerCase())) {
         throw new ConflictException({
           code: 'CONFLICT',
           message: `El cliente ya tiene un sistema llamado «${name}».`,

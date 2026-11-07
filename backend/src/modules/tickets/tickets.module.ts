@@ -7,6 +7,7 @@ import { TicketEvent } from './entities/ticket-event.entity';
 import { SlaPolicy } from './entities/sla-policy.entity';
 import { SupportAgent } from './entities/support-agent.entity';
 import { ClientSystem } from './entities/client-system.entity';
+import { System } from './entities/system.entity';
 
 import { TicketsRepository } from './tickets.repository';
 import { TicketEventsRepository } from './ticket-events.repository';
@@ -36,7 +37,7 @@ import { DocumentsModule } from '../documents/documents.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Ticket, TicketEvent, SlaPolicy, SupportAgent, ClientSystem]),
+    TypeOrmModule.forFeature([Ticket, TicketEvent, SlaPolicy, SupportAgent, ClientSystem, System]),
     // Sin opciones: el gateway pasa el secreto en cada verificación, igual que AuthModule.
     JwtModule.register({}),
     ClientsModule,

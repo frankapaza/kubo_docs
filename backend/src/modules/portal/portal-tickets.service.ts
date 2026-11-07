@@ -174,7 +174,7 @@ export class PortalTicketsService {
   async systems(clientId: number): Promise<PortalClientSystemView[]> {
     assertSessionScope(clientId, 'clientId', PortalTicketsService.name);
     const rows = await this.systemsRepo.listByClient(clientId);
-    return rows.filter((s) => !!s.isActive).map((s) => ({ id: Number(s.id), name: s.name }));
+    return rows.filter((s) => !!s.isActive).map((s) => ({ id: Number(s.id), name: s.name ?? '' }));
   }
 
   /**

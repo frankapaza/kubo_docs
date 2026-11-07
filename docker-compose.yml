@@ -73,6 +73,14 @@ services:
       # invited_by_client_user_id a nulable y exige por CHECK que este
       # informado exactamente uno de los dos.
       - ./backend/sql/migrations/027_carga_masiva_usuarios.sql:/docker-entrypoint-initdb.d/027_carga_masiva_usuarios.sql:ro
+      # La 028 anade a tickets las columnas de archivo (archived_at,
+      # archived_by), su indice y los tipos de evento ARCHIVED/UNARCHIVED.
+      # Archivar no toca estado ni SLA.
+      - ./backend/sql/migrations/028_tickets_archivados.sql:/docker-entrypoint-initdb.d/028_tickets_archivados.sql:ro
+      # La 029 crea el catalogo de sistemas (systems) y convierte client_systems
+      # en la pareja cliente-producto. Lo dudoso no se convierte: queda anotado
+      # en system_catalog_conflicts. No escribe en tickets.
+      - ./backend/sql/migrations/029_catalogo_de_sistemas.sql:/docker-entrypoint-initdb.d/029_catalogo_de_sistemas.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s

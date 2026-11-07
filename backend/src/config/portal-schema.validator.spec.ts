@@ -76,6 +76,12 @@ const COLUMNA_027 = {
 /** La columna que añade la 028: cuándo se archivó un ticket. */
 const COLUMNA_028 = { tableName: 'tickets', columnName: 'archived_at' };
 
+/** La tabla que añade la 029: el catálogo de sistemas. */
+const TABLA_029 = 'systems';
+
+/** La columna que añade la 029: el producto del catálogo de cada asignación. */
+const COLUMNA_029 = { tableName: 'client_systems', columnName: 'system_id' };
+
 const COLUMNAS_ESPERADAS = [
   ...COLUMNAS_013,
   COLUMNA_014,
@@ -87,6 +93,7 @@ const COLUMNAS_ESPERADAS = [
   COLUMNA_026,
   COLUMNA_027,
   COLUMNA_028,
+  COLUMNA_029,
 ];
 
 /**
@@ -99,6 +106,7 @@ const TABLAS_ESPERADAS = [
   'ticket_messages',
   'ticket_attachments',
   TABLA_026,
+  TABLA_029,
 ];
 
 /**
@@ -414,6 +422,34 @@ describe('PortalSchemaValidator', () => {
     );
 
     await expect(validator.onApplicationBootstrap()).rejects.toThrow(/028_tickets_archivados\.sql/);
+  });
+
+  it('atribuye a la 029 la columna del catálogo en las asignaciones', async () => {
+    const validator = new PortalSchemaValidator(
+      dataSourceWith(
+        TABLAS_ESPERADAS,
+        COLUMNAS_ESPERADAS.filter(
+          (c) => !(c.tableName === 'client_systems' && c.columnName === 'system_id'),
+        ),
+      ),
+    );
+
+    await expect(validator.onApplicationBootstrap()).rejects.toThrow(
+      /029_catalogo_de_sistemas\.sql/,
+    );
+  });
+
+  it('atribuye a la 029 la tabla del catálogo de sistemas', async () => {
+    const validator = new PortalSchemaValidator(
+      dataSourceWith(
+        TABLAS_ESPERADAS.filter((t) => t !== TABLA_029),
+        COLUMNAS_ESPERADAS,
+      ),
+    );
+
+    await expect(validator.onApplicationBootstrap()).rejects.toThrow(
+      /029_catalogo_de_sistemas\.sql/,
+    );
   });
 
   it('nombra a la vez las tablas y todas las columnas ausentes, no solo la primera', async () => {

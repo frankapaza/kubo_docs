@@ -180,7 +180,9 @@ jobs:
                      024_correo_entrante_identificador_servidor \
                      025_normalizar_email_existente \
                      026_invitaciones_portal \
-                     027_carga_masiva_usuarios; do
+                     027_carga_masiva_usuarios \
+                     028_tickets_archivados \
+                     029_catalogo_de_sistemas; do
               echo "--- $m"
               sql_file "backend/sql/migrations/$m.sql"
             done
