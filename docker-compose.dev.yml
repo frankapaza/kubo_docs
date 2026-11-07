@@ -86,14 +86,14 @@ services:
     volumes:
       - redis_dev_data:/data
 
-  # Loki de desarrollo: el backend local (fuera de Docker) lo alcanza por
+  # Loki de desarrollo: el backend local (fuera de Docker) lo alcanza por Solo en 127.0.0.1: Loki no tiene autenticacion.
   # localhost:3100. En produccion NO lleva `ports`.
   loki:
     image: grafana/loki:3.4.2
     container_name: kubo-loki-dev
     restart: unless-stopped
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
     command: ["-config.file=/etc/loki/config.yaml", "-config.expand-env=true"]
     environment:
       LOKI_RETENTION: 720h

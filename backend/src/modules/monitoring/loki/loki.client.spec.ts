@@ -47,6 +47,26 @@ describe('LokiClient.push', () => {
     expect(BigInt(ns2)).toBeGreaterThan(BigInt(ns1));
   });
 
+  it('una entrada más antigua conserva su propia hora', async () => {
+    const { client, fetchFn } = make();
+    fetchFn.mockResolvedValue(res(204));
+    const viejo = new Date('2026-11-07T09:00:00.000Z');
+    await client.push([{ labels, entries: [{ at, line: 'nuevo' }] }]);
+    await client.push([{ labels, entries: [{ at: viejo, line: 'viejo' }] }]);
+    const ns = JSON.parse(fetchFn.mock.calls[1][1].body).streams[0].values[0][0];
+    expect(ns).toBe(String(BigInt(viejo.getTime()) * 1000000n));
+  });
+
+  it('el mismo lote enviado dos veces lleva los mismos ns', async () => {
+    const { client, fetchFn } = make();
+    fetchFn.mockResolvedValue(res(204));
+    const streams: LokiStream[] = [{ labels, entries: [{ at, line: 'a' }, { at, line: 'a' }] }];
+    await client.push(streams);
+    await client.push(streams);
+    const v = (i: number) => JSON.parse(fetchFn.mock.calls[i][1].body).streams[0].values;
+    expect(v(1)).toEqual(v(0));
+  });
+
   it('por omisión usa http://loki:3100 y timeout de 5000', async () => {
     const { client, fetchFn } = make();
     fetchFn.mockResolvedValue(res(204));

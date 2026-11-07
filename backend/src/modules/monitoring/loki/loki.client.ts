@@ -39,8 +39,6 @@ export class LokiClient {
   private readonly logger = new Logger(LokiClient.name);
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
-  /** Último ns entregado: garantiza marcas estrictamente crecientes. */
-  private lastNs = 0n;
 
   /** Público solo para que las pruebas sustituyan `fetch` en la instancia. */
   fetchFn: typeof fetch = (...args) => fetch(...args);
@@ -52,14 +50,23 @@ export class LokiClient {
   }
 
   /**
-   * Marca en ns única y creciente. Dos eventos del mismo milisegundo
-   * compartirían ns; Loki los aceptaría pero el orden entre ellos (y la
-   * paginación por tiempo) quedaría indefinido, así que se separa 1 ns.
+   * ns de cada entrada de un stream, función pura de la entrada.
+   *
+   * Parte de la hora del evento y solo desplaza 1 ns cuando OTRA entrada del
+   * mismo stream (en esta llamada) ya ocupa ese ns: Loki deduplica por
+   * ts+línea dentro del stream y el orden entre iguales quedaría indefinido.
+   * Sin estado de instancia: un reintento del mismo lote produce los mismos
+   * ns y Loki lo deduplica en lugar de duplicarlo, y una entrada antigua no
+   * se corre por haber enviado otra más nueva.
    */
-  private nextNs(at: Date): bigint {
-    const ns = toNs(at);
-    this.lastNs = ns > this.lastNs ? ns : this.lastNs + 1n;
-    return this.lastNs;
+  private streamValues(entries: LokiStream['entries']): [string, string][] {
+    const used = new Set<bigint>();
+    return entries.map((e) => {
+      let ns = toNs(e.at);
+      while (used.has(ns)) ns += 1n;
+      used.add(ns);
+      return [String(ns), e.line];
+    });
   }
 
   async push(streams: LokiStream[]): Promise<LokiPushResult> {
@@ -68,7 +75,7 @@ export class LokiClient {
         .filter((s) => s.entries.length > 0)
         .map((s) => ({
           stream: s.labels,
-          values: s.entries.map((e) => [String(this.nextNs(e.at)), e.line]),
+          values: this.streamValues(s.entries),
         })),
     };
     if (body.streams.length === 0) return { ok: true };
