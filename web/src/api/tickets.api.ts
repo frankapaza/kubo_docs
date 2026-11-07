@@ -2,7 +2,7 @@ import { api } from './client';
 import type {
   CreatedTicket,
   Ticket, TicketDetail, TicketStatus, TicketPriority, TicketImpact, TicketUrgency,
-  TicketOrigin, TicketRequestType, ServiceCategory, ClientSystem, SupportAgent, SupportAgentView, AgentLevel,
+  TicketOrigin, TicketRequestType, ServiceCategory, ClientSystem, System, SupportAgent, SupportAgentView, AgentLevel,
 } from './types';
 
 export interface CreateTicketBody {
@@ -107,12 +107,22 @@ export const ticketsApi = {
   },
 };
 
+/** El catálogo de sistemas. Leer, todo el personal; escribir, solo ADMIN. */
+export const systemsApi = {
+  list: () => api.get<System[]>('/systems').then((r) => r.data),
+  create: (body: { name: string }) => api.post<System>('/systems', body).then((r) => r.data),
+  update: (id: number, body: { name?: string; isActive?: boolean }) =>
+    api.patch<System>(`/systems/${id}`, body).then((r) => r.data),
+  remove: (id: number) => api.delete<{ ok: true }>(`/systems/${id}`).then((r) => r.data),
+};
+
+/** Los sistemas del catálogo asignados a un cliente. Se eligen, no se teclean. */
 export const clientSystemsApi = {
   list: (clientId: number) =>
     api.get<ClientSystem[]>(`/clients/${clientId}/systems`).then((r) => r.data),
-  create: (clientId: number, body: { name: string }) =>
+  create: (clientId: number, body: { systemId: number }) =>
     api.post<ClientSystem>(`/clients/${clientId}/systems`, body).then((r) => r.data),
-  update: (clientId: number, id: number, body: { name?: string; isActive?: boolean }) =>
+  update: (clientId: number, id: number, body: { isActive: boolean }) =>
     api.patch<ClientSystem>(`/clients/${clientId}/systems/${id}`, body).then((r) => r.data),
   remove: (clientId: number, id: number) =>
     api.delete<{ ok: true }>(`/clients/${clientId}/systems/${id}`).then((r) => r.data),

@@ -173,8 +173,11 @@ export class PortalTicketsService {
 
   async systems(clientId: number): Promise<PortalClientSystemView[]> {
     assertSessionScope(clientId, 'clientId', PortalTicketsService.name);
-    const rows = await this.systemsRepo.listByClient(clientId);
-    return rows.filter((s) => !!s.isActive).map((s) => ({ id: Number(s.id), name: s.name ?? '' }));
+    // Ya vienen solo las asignaciones activas y con producto del catálogo; el
+    // `id` es el de la asignación, que es lo que el ticket guarda. Proyección
+    // campo a campo: el portal no publica `systemId` ni nada que no pida.
+    const rows = await this.systemsRepo.listActiveByClient(clientId);
+    return rows.map((s) => ({ id: Number(s.id), name: s.name }));
   }
 
   /**

@@ -1,64 +1,89 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 
-import { ClientSystemsRepository } from './client-systems.repository';
+import { ClientSystemsRepository, ClientSystemView } from './client-systems.repository';
+import { SystemsRepository } from './systems.repository';
+import { TicketsRepository } from './tickets.repository';
 import { ClientsService } from '../clients/clients.service';
 import { ClientSystem } from './entities/client-system.entity';
-import { CreateClientSystemDto, UpdateClientSystemDto } from './dto/client-system.dto';
+import { AssignClientSystemDto, UpdateClientSystemDto } from './dto/client-system.dto';
 
+/**
+ * Los sistemas asignados a un cliente: qué productos del catálogo le arrienda
+ * la casa.
+ *
+ * Desactivar y quitar son dos gestos distintos:
+ *
+ * - **Desactivar** («este cliente dejó de usarlo») no toca ningún ticket: deja
+ *   de poder elegirse en el formulario y se sigue viendo, con la marca
+ *   «(inactivo)», en los tickets que ya lo apuntan. Es el gesto normal.
+ * - **Quitar** borra la fila, y solo se permite si ningún ticket la apunta: la
+ *   asignación que alguien puso por error hace cinco minutos. Con tickets
+ *   detrás, borrarla dejaría `tickets.system_id` apuntando a una fila que ya no
+ *   existe, y el informe por sistema leería un id que no resuelve a nada.
+ */
 @Injectable()
 export class ClientSystemsService {
   constructor(
     private readonly repo: ClientSystemsRepository,
     private readonly clients: ClientsService,
+    private readonly systems: SystemsRepository,
+    private readonly tickets: TicketsRepository,
   ) {}
 
-  async listByClient(clientId: number): Promise<ClientSystem[]> {
+  async listByClient(clientId: number): Promise<ClientSystemView[]> {
     await this.clients.findByIdOrFail(clientId);
     return this.repo.listByClient(clientId);
   }
 
-  async create(clientId: number, dto: CreateClientSystemDto): Promise<ClientSystem> {
+  async create(clientId: number, dto: AssignClientSystemDto): Promise<ClientSystem> {
     await this.clients.findByIdOrFail(clientId);
-    const name = dto.name.trim();
 
-    const existing = await this.repo.listByClient(clientId);
-    if (existing.some((s) => (s.name ?? '').toLowerCase() === name.toLowerCase())) {
-      throw new ConflictException({
-        code: 'CONFLICT',
-        message: `El cliente ya tiene un sistema llamado «${name}».`,
+    const system = await this.systems.findById(dto.systemId);
+    if (!system) {
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Sistema no encontrado' });
+    }
+    // Retirado del catálogo = la casa ya no lo ofrece a nadie más. Los clientes
+    // que ya lo tienen lo conservan; este no lo recibe.
+    if (!system.isActive) {
+      throw new BadRequestException({
+        code: 'BAD_INPUT',
+        message: 'Este sistema está retirado del catálogo y ya no se puede asignar.',
       });
     }
-    return this.repo.create({ clientId, name, isActive: 1 });
+    if (await this.repo.findByClientAndSystem(clientId, dto.systemId)) {
+      throw new ConflictException({
+        code: 'CONFLICT',
+        message: `Este cliente ya tiene asignado «${system.name}».`,
+      });
+    }
+    return this.repo.create({ clientId, systemId: dto.systemId, isActive: 1 });
   }
 
   async update(id: number, dto: UpdateClientSystemDto): Promise<ClientSystem> {
-    const current = await this.repo.findById(id);
-    if (!current) {
-      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Sistema no encontrado' });
-    }
+    await this.findByIdOrFail(id);
     const patch: Partial<ClientSystem> = {};
-    if (dto.name !== undefined) {
-      const name = dto.name.trim();
-      const existing = await this.repo.listByClient(current.clientId);
-      if (existing.some((s) => s.id !== id && (s.name ?? '').toLowerCase() === name.toLowerCase())) {
-        throw new ConflictException({
-          code: 'CONFLICT',
-          message: `El cliente ya tiene un sistema llamado «${name}».`,
-        });
-      }
-      patch.name = name;
-    }
     if (dto.isActive !== undefined) patch.isActive = dto.isActive ? 1 : 0;
-
     const updated = await this.repo.update(id, patch);
     return updated!;
   }
 
   async remove(id: number): Promise<void> {
+    await this.findByIdOrFail(id);
+    // Por el id de la asignación: es lo que el ticket guarda en `system_id`.
+    if ((await this.tickets.countByClientSystem(id)) > 0) {
+      throw new ConflictException({
+        code: 'CONFLICT',
+        message: 'Este cliente tiene tickets de este sistema. Desactívalo en lugar de quitarlo.',
+      });
+    }
+    await this.repo.remove(id);
+  }
+
+  private async findByIdOrFail(id: number): Promise<ClientSystem> {
     const current = await this.repo.findById(id);
     if (!current) {
       throw new NotFoundException({ code: 'NOT_FOUND', message: 'Sistema no encontrado' });
     }
-    await this.repo.remove(id);
+    return current;
   }
 }

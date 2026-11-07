@@ -116,6 +116,18 @@ export class TicketsRepository {
       .getMany();
   }
 
+  /**
+   * Cuántos tickets apuntan a una asignación cliente-sistema, en cualquier
+   * estado (archivados y cerrados incluidos: son histórico igual).
+   *
+   * El nombre dice de qué id habla: `tickets.system_id` apunta a
+   * `client_systems.id`, no al producto del catálogo (decisión 2 del diseño), y
+   * confundirlos aquí dejaría borrar una asignación con tickets detrás.
+   */
+  countByClientSystem(clientSystemId: number): Promise<number> {
+    return this.repo.count({ where: { systemId: clientSystemId } });
+  }
+
   /** Carga por técnico: cuántos tickets abiertos tiene asignados cada uno. */
   async countOpenByAssignee(): Promise<Map<number, number>> {
     const rows = await this.repo

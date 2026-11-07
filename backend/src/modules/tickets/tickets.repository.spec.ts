@@ -46,6 +46,17 @@ function expectOpenRangeOperator(op: any, from: Date, to: Date) {
 }
 
 describe('TicketsRepository', () => {
+  describe('countByClientSystem', () => {
+    // `tickets.system_id` apunta a la ASIGNACIÓN (`client_systems.id`), no al
+    // producto del catálogo: se cuenta por esa columna y por nada más.
+    it('cuenta los tickets que apuntan a esa asignación, sin filtrar por estado', async () => {
+      const { repo, typeormRepo } = makeRepo();
+      typeormRepo.count.mockResolvedValue(2);
+      await expect(repo.countByClientSystem(50)).resolves.toBe(2);
+      expect(typeormRepo.count).toHaveBeenCalledWith({ where: { systemId: 50 } });
+    });
+  });
+
   describe('listForClientPeriod', () => {
     it('acota por empresa y por el intervalo [from, to)', async () => {
       const { repo, typeormRepo } = makeRepo();

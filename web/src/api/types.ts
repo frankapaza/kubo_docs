@@ -562,10 +562,25 @@ export interface TicketDetail {
   timeline: TicketEvent[];
 }
 
+/** Un producto del catálogo: lo que la casa arrienda, uno para todos los clientes. */
+export interface System {
+  id: number;
+  name: string;
+  /** 1 = la casa lo sigue ofreciendo; 0 = retirado (no se asigna a nadie más). */
+  isActive: number;
+}
+
+/**
+ * Un sistema del catálogo asignado a un cliente. `id` es el de la asignación,
+ * y es lo que el ticket guarda en `systemId`; `systemId` aquí es el producto
+ * del catálogo. `name` viene del catálogo.
+ */
 export interface ClientSystem {
   id: number;
   clientId: number;
+  systemId: number;
   name: string;
+  /** 1 = este cliente lo sigue usando. */
   isActive: number;
 }
 

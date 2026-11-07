@@ -137,10 +137,12 @@ const makeService = (ticketOver: Record<string, unknown> = {}) => {
   // `TicketsService.create` devuelve el ticket **y** el identificador del
   // primer mensaje de su hilo, que es de donde cuelgan los adjuntos del alta.
   const tickets = { create: jest.fn().mockResolvedValue({ ...ticket, firstMessageId: 700 }) };
+  // Solo las activas y con producto del catálogo: el filtro vive en la
+  // consulta (`listActiveByClient`), no en el portal. La asignación 6 existe
+  // pero está desactivada, así que la consulta no la devuelve.
   const systems = {
-    listByClient: jest.fn().mockResolvedValue([
-      { id: 5, clientId: 7, name: 'ERP', isActive: 1 },
-      { id: 6, clientId: 7, name: 'Antiguo', isActive: 0 },
+    listActiveByClient: jest.fn().mockResolvedValue([
+      { id: 5, clientId: 7, systemId: 3, name: 'ERP', isActive: 1 },
     ]),
   };
 
@@ -215,7 +217,7 @@ describe('la frontera', () => {
   it('systems rechaza un clientId invalido sin llegar a consultar', async () => {
     const { service, systems } = makeService();
     await expect(service.systems(undefined as any)).rejects.toThrow();
-    expect(systems.listByClient).not.toHaveBeenCalled();
+    expect(systems.listActiveByClient).not.toHaveBeenCalled();
   });
 
   it('el detalle de un ticket de otro cliente devuelve NOT_FOUND, no el ticket', async () => {
@@ -246,7 +248,7 @@ describe('la frontera', () => {
   it('los sistemas se piden siempre para el clientId recibido y solo devuelve los activos', async () => {
     const { service, systems } = makeService();
     const rows = await service.systems(7);
-    expect(systems.listByClient).toHaveBeenCalledWith(7);
+    expect(systems.listActiveByClient).toHaveBeenCalledWith(7);
     expect(rows).toEqual([{ id: 5, name: 'ERP' }]);
   });
 
