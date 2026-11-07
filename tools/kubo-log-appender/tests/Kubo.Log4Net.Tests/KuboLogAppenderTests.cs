@@ -189,6 +189,18 @@ namespace Kubo.Log4Net.Tests
         }
 
         [Fact]
+        public void BatchSizeSuperiorAlMaximoDelServidorSeRecortaA1000()
+        {
+            var ap = new KuboLogAppender(o => new ThrowingSender())
+            {
+                Url = "http://x/", ApiKey = "k", Aplicativo = "a", BatchSize = 5000
+            };
+            ap.ActivateOptions();
+            Assert.Equal(1000, ap.BatchSize);
+            ap.Close();
+        }
+
+        [Fact]
         public void NuncaLanzaAlAplicativo()
         {
             var repo = NuevoRepo();

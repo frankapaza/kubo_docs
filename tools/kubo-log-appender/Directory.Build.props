@@ -3,6 +3,9 @@
     <!-- Versión del appender; el zip y el manual la toman de aquí. -->
     <Version>1.0.0</Version>
     <LangVersion>latest</LangVersion>
+    <!-- Compilación independiente de dónde esté el clon: sin esto la ruta absoluta del PDB queda en la DLL y el SHA-256 del zip cambia entre máquinas. -->
+    <Deterministic>true</Deterministic>
+    <PathMap>$(MSBuildThisFileDirectory)=/_/</PathMap>
     <Nullable>disable</Nullable>
     <!-- Las versiones de log4net (2.0.8 y 3.2.0) son las que ya usan los clientes y las fija el
          diseño; los avisos de vulnerabilidad del auditor no las cambian y ensucian la salida. -->

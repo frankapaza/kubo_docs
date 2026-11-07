@@ -41,7 +41,7 @@
 <li>Entra a DevDocs → <strong>Monitoreo → Instalaciones</strong> (requiere rol de administrador).</li>
 <li>Crea la instalación (o abre la existente) y genera su clave.</li>
 <li><strong>Copia la clave en ese momento: se muestra una sola vez.</strong> Tiene la forma <code>klog_</code> seguido de 43 caracteres. Si se pierde, hay que regenerarla (la anterior deja de funcionar).</li>
-<li>Anota también la URL de recepción que muestra la pantalla (termina en <code>/api/v1/ingest/logs</code>).</li>
+<li>La URL de recepción es <code>https://docs.kuboti.com/api/v1/ingest/logs</code>; la pantalla de Instalaciones muestra la misma.</li>
 </ol>
 <p>Cada instalación (un servidor o un cliente) tiene su propia clave. La clave identifica al cliente y al sistema: no hay que configurarlos aparte.</p>
 <h2>3. Elegir la variante de la DLL</h2>
@@ -86,7 +86,7 @@
 <p>Dentro de <code>&lt;log4net&gt;</code>, agrega este appender (el mismo está en <code>ejemplo-log4net.config</code>):</p>
 <pre><code class="language-xml">&lt;appender name=&quot;kubo&quot; type=&quot;Kubo.Log4Net.KuboLogAppender, Kubo.Log4Net&quot;&gt;
   &lt;!-- Obligatorios: sin alguno de los tres el appender queda inactivo y lo avisa en LogLog. --&gt;
-  &lt;url value=&quot;https://URL-DE-DEVDOCS/api/v1/ingest/logs&quot; /&gt;
+  &lt;url value=&quot;https://docs.kuboti.com/api/v1/ingest/logs&quot; /&gt;
   &lt;apiKey value=&quot;klog_PEGA_AQUI_LA_CLAVE_DE_LA_INSTALACION&quot; /&gt;
   &lt;aplicativo value=&quot;NombreDelAplicativo&quot; /&gt;
 
@@ -121,7 +121,7 @@
 <td><code>url</code></td>
 <td>Sí</td>
 <td></td>
-<td>URL de recepción que muestra DevDocs.</td>
+<td>URL de recepción: <code>https://docs.kuboti.com/api/v1/ingest/logs</code> (la pantalla de Instalaciones muestra la misma).</td>
 </tr>
 <tr>
 <td><code>apiKey</code></td>
@@ -133,7 +133,7 @@
 <td><code>aplicativo</code></td>
 <td>Sí</td>
 <td></td>
-<td>Nombre del aplicativo tal como quieres verlo en DevDocs (máximo 100 caracteres).</td>
+<td>Nombre del aplicativo tal como quieres verlo en DevDocs (se recorta a 100 caracteres).</td>
 </tr>
 <tr>
 <td><code>threshold</code></td>
@@ -145,7 +145,7 @@
 <td><code>batchSize</code></td>
 <td>No</td>
 <td>200</td>
-<td>Eventos por envío (máximo 1000).</td>
+<td>Eventos por envío. El máximo es 1000: si pones más, el appender lo recorta a 1000 y lo avisa en <code>LogLog</code>.</td>
 </tr>
 <tr>
 <td><code>flushIntervalMs</code></td>
@@ -193,6 +193,7 @@
 </code></pre>
 <p>Ajusta <code>newVersion</code> a <strong>la versión real de log4net del aplicativo</strong> (paso 3) y el límite superior de <code>oldVersion</code> a la misma versión. Por ejemplo, para log4net 2.0.10 serían <code>0.0.0.0-2.0.10.0</code> y <code>2.0.10.0</code>.</p>
 <ul>
+<li>Con la variante <code>net462</code> o <code>netstandard2.0</code> (compiladas contra 3.2.0) y un aplicativo con otra 3.x, el redirect es <code>0.0.0.0-3.x.y.0</code> → <code>3.x.y.0</code> (la versión real, por ejemplo <code>3.0.4.0</code>).</li>
 <li><strong>No hace falta</strong> si el aplicativo usa justo log4net 2.0.8 con la variante <code>net45</code>, o 3.2.0 con la variante <code>net462</code>.</li>
 <li>Si el aplicativo ya tiene un <code>&lt;dependentAssembly&gt;</code> de <code>log4net</code>, <strong>no lo dupliques</strong>: confirma que <code>newVersion</code> es la versión que realmente se despliega.</li>
 <li>En .NET 5 o posterior no se usa <code>bindingRedirect</code>.</li>

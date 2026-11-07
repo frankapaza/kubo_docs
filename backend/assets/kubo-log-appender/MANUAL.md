@@ -18,7 +18,7 @@ Sirve para aplicativos .NET Framework 4.5 a 4.8 con log4net 2.0.8 a 2.0.12 o 3.2
 1. Entra a DevDocs → **Monitoreo → Instalaciones** (requiere rol de administrador).
 2. Crea la instalación (o abre la existente) y genera su clave.
 3. **Copia la clave en ese momento: se muestra una sola vez.** Tiene la forma `klog_` seguido de 43 caracteres. Si se pierde, hay que regenerarla (la anterior deja de funcionar).
-4. Anota también la URL de recepción que muestra la pantalla (termina en `/api/v1/ingest/logs`).
+4. La URL de recepción es `https://docs.kuboti.com/api/v1/ingest/logs`; la pantalla de Instalaciones muestra la misma.
 
 Cada instalación (un servidor o un cliente) tiene su propia clave. La clave identifica al cliente y al sistema: no hay que configurarlos aparte.
 
@@ -59,7 +59,7 @@ Dentro de `<log4net>`, agrega este appender (el mismo está en `ejemplo-log4net.
 ```xml
 <appender name="kubo" type="Kubo.Log4Net.KuboLogAppender, Kubo.Log4Net">
   <!-- Obligatorios: sin alguno de los tres el appender queda inactivo y lo avisa en LogLog. -->
-  <url value="https://URL-DE-DEVDOCS/api/v1/ingest/logs" />
+  <url value="https://docs.kuboti.com/api/v1/ingest/logs" />
   <apiKey value="klog_PEGA_AQUI_LA_CLAVE_DE_LA_INSTALACION" />
   <aplicativo value="NombreDelAplicativo" />
 
@@ -87,11 +87,11 @@ Y en `<root>`, agrega la referencia **junto a las que ya hay** (no reemplaces la
 
 | Parámetro | Obligatorio | Por omisión | Qué es |
 |---|---|---|---|
-| `url` | Sí | | URL de recepción que muestra DevDocs. |
+| `url` | Sí | | URL de recepción: `https://docs.kuboti.com/api/v1/ingest/logs` (la pantalla de Instalaciones muestra la misma). |
 | `apiKey` | Sí | | Clave de la instalación (paso 2). |
-| `aplicativo` | Sí | | Nombre del aplicativo tal como quieres verlo en DevDocs (máximo 100 caracteres). |
+| `aplicativo` | Sí | | Nombre del aplicativo tal como quieres verlo en DevDocs (se recorta a 100 caracteres). |
 | `threshold` | No | todos | Nivel mínimo que este appender envía. Se recomienda `INFO`. |
-| `batchSize` | No | 200 | Eventos por envío (máximo 1000). |
+| `batchSize` | No | 200 | Eventos por envío. El máximo es 1000: si pones más, el appender lo recorta a 1000 y lo avisa en `LogLog`. |
 | `flushIntervalMs` | No | 2000 | Cada cuántos milisegundos se envía lo pendiente. |
 | `maxQueueSize` | No | 10000 | Eventos que se guardan en memoria esperando envío. |
 | `timeoutMs` | No | 5000 | Espera máxima por cada envío. |
@@ -122,6 +122,7 @@ La DLL de la variante `net45` se compiló contra log4net **2.0.8**, y la de `net
 
 Ajusta `newVersion` a **la versión real de log4net del aplicativo** (paso 3) y el límite superior de `oldVersion` a la misma versión. Por ejemplo, para log4net 2.0.10 serían `0.0.0.0-2.0.10.0` y `2.0.10.0`.
 
+- Con la variante `net462` o `netstandard2.0` (compiladas contra 3.2.0) y un aplicativo con otra 3.x, el redirect es `0.0.0.0-3.x.y.0` → `3.x.y.0` (la versión real, por ejemplo `3.0.4.0`).
 - **No hace falta** si el aplicativo usa justo log4net 2.0.8 con la variante `net45`, o 3.2.0 con la variante `net462`.
 - Si el aplicativo ya tiene un `<dependentAssembly>` de `log4net`, **no lo dupliques**: confirma que `newVersion` es la versión que realmente se despliega.
 - En .NET 5 o posterior no se usa `bindingRedirect`.

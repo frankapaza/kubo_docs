@@ -20,6 +20,7 @@ namespace Kubo.Log4Net
         private const int MaxPropiedad = 1024;
         private const string PrefijoInterno = "log4net:";
 
+        private const int MaxBatchSize = 1000;
         private const int BatchSizeDefecto = 200;
         private const int FlushIntervalDefecto = 2000;
         private const int MaxQueueDefecto = 10000;
@@ -74,6 +75,8 @@ namespace Kubo.Log4Net
                 if (BatchSize <= 0) { Avisar("BatchSize", BatchSize, BatchSizeDefecto); BatchSize = BatchSizeDefecto; }
                 if (FlushIntervalMs <= 0) { Avisar("FlushIntervalMs", FlushIntervalMs, FlushIntervalDefecto); FlushIntervalMs = FlushIntervalDefecto; }
                 if (MaxQueueSize <= 0) { Avisar("MaxQueueSize", MaxQueueSize, MaxQueueDefecto); MaxQueueSize = MaxQueueDefecto; }
+                // El servidor rechaza con 413 los lotes de más de 1000 eventos y el cliente descarta los 413: sin tope se perderían logs en silencio.
+                if (BatchSize > MaxBatchSize) { LogLog.Warn(typeof(KuboLogAppender), "Kubo: BatchSize=" + BatchSize + " supera el máximo del servidor; se usa " + MaxBatchSize + "."); BatchSize = MaxBatchSize; }
                 if (TimeoutMs <= 0) { Avisar("TimeoutMs", TimeoutMs, TimeoutDefecto); TimeoutMs = TimeoutDefecto; }
 
                 TlsSetup.EnsureTls12();
