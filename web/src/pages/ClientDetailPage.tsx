@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { clientsApi, CreateClientBody } from '../api/clients.api';
 import { projectsApi } from '../api/projects.api';
@@ -34,6 +34,17 @@ import ClientSystemsTab from './tickets/ClientSystemsTab';
 
 type Tab = 'summary' | 'projects' | 'documents' | 'systems';
 
+/**
+ * Las pestañas que se pueden pedir por `?tab=`. La lista blanca no es
+ * defensiva: sin ella, un `?tab=` cualquiera dejaría la ficha sin ninguna
+ * pestaña pintada, porque `tab === t.key` sería falso para las cuatro.
+ */
+const LINKABLE_TABS: readonly Tab[] = ['projects', 'documents', 'systems'];
+
+function initialTab(param: string | null): Tab {
+  return (LINKABLE_TABS as readonly string[]).includes(param ?? '') ? (param as Tab) : 'summary';
+}
+
 const STATUS_TONE: Record<ClientStatus, 'neutral' | 'success' | 'info'> = {
   PROSPECT: 'info',
   CLIENT: 'success',
@@ -44,7 +55,10 @@ export default function ClientDetailPage() {
   const { clientId } = useParams();
   const id = Number(clientId);
   const navigate = useNavigate();
-  const [tab, setTab] = useState<Tab>('summary');
+  const [searchParams] = useSearchParams();
+  // La pestaña inicial sale del enlace: `clientSystemsHref(id)` abre la ficha
+  // ya en «Sistemas».
+  const [tab, setTab] = useState<Tab>(() => initialTab(searchParams.get('tab')));
 
   if (!Number.isFinite(id) || id <= 0) return <Navigate to="/clients" replace />;
 

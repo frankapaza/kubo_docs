@@ -15,6 +15,7 @@ import {
   type RejectedAttachment,
 } from '../../components/upload';
 import { withTimeout } from '../../lib/with-timeout';
+import { SIN_SISTEMAS_PORTAL, systemFieldState } from '../tickets/system-field';
 
 interface Props {
   open: boolean;
@@ -51,6 +52,9 @@ export default function NewPortalTicketDialog({ open, onCancel, onCreated }: Pro
   const [description, setDescription] = useState('');
   const [systemId, setSystemId] = useState<number | ''>('');
   const [systems, setSystems] = useState<PortalClientSystem[]>([]);
+  // Si la lista ya llegó (o falló). Sin esto, la lista vacía de antes de cargar
+  // pintaría el aviso de «no tiene sistemas» un instante en cada apertura.
+  const [systemsLoaded, setSystemsLoaded] = useState(false);
   const [files, setFiles] = useState<PendingAttachment[]>([]);
 
   const [busy, setBusy] = useState(false);
@@ -118,6 +122,7 @@ export default function NewPortalTicketDialog({ open, onCancel, onCreated }: Pro
     setSubject('');
     setDescription('');
     setSystemId('');
+    setSystemsLoaded(false);
     setErrors([]);
     setFiles([]);
     setCreatedTicket(null);
@@ -136,12 +141,16 @@ export default function NewPortalTicketDialog({ open, onCancel, onCreated }: Pro
     portalApi
       .listSystems()
       .then((list) => {
-        if (!cancelled) setSystems(list);
+        if (!cancelled) {
+          setSystems(list);
+          setSystemsLoaded(true);
+        }
       })
       .catch((e) => {
         if (!cancelled) {
           console.warn('[NewPortalTicketDialog] No se pudo cargar la lista de sistemas.', e);
           setSystems([]);
+          setSystemsLoaded(true);
         }
       });
     return () => {
@@ -186,6 +195,13 @@ export default function NewPortalTicketDialog({ open, onCancel, onCreated }: Pro
   if (!open) return null;
 
   const canSubmit = subject.trim().length > 0 && description.trim().length > 0;
+
+  // El portal siempre tiene cliente: la empresa sale de la sesión.
+  const systemField = systemFieldState({
+    hasClient: true,
+    loaded: systemsLoaded,
+    count: systems.length,
+  });
 
   const submit = async () => {
     // La guarda, antes que nada y sin ningún `await` por delante: entre esta
@@ -389,19 +405,30 @@ export default function NewPortalTicketDialog({ open, onCancel, onCreated }: Pro
             <label className="label" htmlFor="portal-ticket-system">
               Sistema (opcional)
             </label>
-            <select
-              id="portal-ticket-system"
-              className="input"
-              value={systemId}
-              onChange={(e) => setSystemId(e.target.value ? Number(e.target.value) : '')}
-            >
-              <option value="">(sin sistema)</option>
-              {systems.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+            {/*
+              Sin sistemas registrados no se pinta un desplegable con una sola
+              opción muerta: se dice qué pasa, que no es culpa del cliente y que
+              puede seguir.
+            */}
+            {systemField === 'SIN_SISTEMAS' ? (
+              <p id="portal-ticket-system" className="text-sm text-slate-500">
+                {SIN_SISTEMAS_PORTAL}
+              </p>
+            ) : (
+              <select
+                id="portal-ticket-system"
+                className="input"
+                value={systemId}
+                onChange={(e) => setSystemId(e.target.value ? Number(e.target.value) : '')}
+              >
+                <option value="">(sin sistema)</option>
+                {systems.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
 

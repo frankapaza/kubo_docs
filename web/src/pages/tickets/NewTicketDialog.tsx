@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 
 import { ticketsApi, clientSystemsApi } from '../../api/tickets.api';
 import { ticketMessagesApi } from '../../api/ticket-messages.api';
@@ -24,6 +25,15 @@ import {
 } from '../../components/upload';
 import { withTimeout } from '../../lib/with-timeout';
 import { ORIGIN_LABELS, PRIORITY_STYLES, TICKET_IMPACTS, TICKET_URGENCIES, previewPriority } from './ticket-ui';
+import { useAuth } from '../../auth/AuthContext';
+import { canManageClientSystems } from '../../auth/permissions';
+import {
+  SIN_SISTEMAS_PANEL,
+  SIN_SISTEMAS_PANEL_ENLACE,
+  SIN_SISTEMAS_PANEL_SIN_PERMISO,
+  clientSystemsHref,
+  systemFieldState,
+} from './system-field';
 
 /** Los adjuntos pueden ser de 10 MB y van de uno en uno: se acota por archivo. */
 const UPLOAD_TIMEOUT_MS_PER_FILE = 60_000;
@@ -49,6 +59,7 @@ const inputStyle: React.CSSProperties = {
 const labelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 600, marginBottom: 5, display: 'block' };
 
 export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
+  const { user } = useAuth();
   const [mode, setMode] = useState<CaptureMode>('text');
   const [rawText, setRawText] = useState('');
   const [subject, setSubject] = useState('');
@@ -63,6 +74,9 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
   const [clients, setClients] = useState<Client[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [systems, setSystems] = useState<ClientSystem[]>([]);
+  // Si la lista del cliente elegido ya llegó (o falló): sin esto, el aviso de
+  // «no tiene sistemas» parpadearía cada vez que se elige un cliente.
+  const [systemsLoaded, setSystemsLoaded] = useState(false);
   const [files, setFiles] = useState<PendingAttachment[]>([]);
 
   const [busy, setBusy] = useState(false);
@@ -159,6 +173,7 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
 
   // Sistemas del cliente elegido; el select se deshabilita sin cliente.
   useEffect(() => {
+    setSystemsLoaded(false);
     if (!open || !clientId) {
       setSystems([]);
       return;
@@ -167,12 +182,16 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
     clientSystemsApi
       .list(clientId)
       .then((list) => {
-        if (!cancelled) setSystems(list.filter((s) => s.isActive === 1));
+        if (!cancelled) {
+          setSystems(list.filter((s) => s.isActive === 1));
+          setSystemsLoaded(true);
+        }
       })
       .catch((e) => {
         if (!cancelled) {
           console.warn('[NewTicketDialog] No se pudo cargar los sistemas del cliente.', e);
           setSystems([]);
+          setSystemsLoaded(true);
         }
       });
     return () => {
@@ -210,6 +229,12 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
 
   const priority = previewPriority(impact, urgency);
   const pr = PRIORITY_STYLES[priority];
+
+  const systemField = systemFieldState({
+    hasClient: Boolean(clientId),
+    loaded: systemsLoaded,
+    count: systems.length,
+  });
 
   const submit = async () => {
     // La guarda, antes que nada y sin ningún `await` por delante.
@@ -473,20 +498,39 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
 
           <label htmlFor="new-ticket-system">
             <span style={labelStyle}>Sistema</span>
-            <select
-              id="new-ticket-system"
-              value={systemId}
-              disabled={!clientId}
-              onChange={(e) => setSystemId(e.target.value ? Number(e.target.value) : '')}
-              style={{ ...inputStyle, cursor: clientId ? 'pointer' : 'not-allowed', background: clientId ? '#fff' : '#f5f6f6' }}
-            >
-              <option value="">{clientId ? '(sin sistema)' : 'Elige un cliente primero'}</option>
-              {systems.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+            {systemField === 'SIN_SISTEMAS' ? (
+              /*
+                Sin desplegable de una sola opción muerta. Quien puede asignar
+                sistemas ve el enlace al sitio exacto donde se hace; quien no,
+                a quién pedírselo: un enlace a una grilla de solo lectura
+                prometería una salida que no está.
+              */
+              <span id="new-ticket-system" style={{ display: 'block', fontSize: 12, color: '#6d7577', lineHeight: 1.4 }}>
+                {SIN_SISTEMAS_PANEL}{' '}
+                {canManageClientSystems(user) ? (
+                  <Link to={clientSystemsHref(Number(clientId))} style={{ color: '#15191a', fontWeight: 600 }}>
+                    {SIN_SISTEMAS_PANEL_ENLACE}
+                  </Link>
+                ) : (
+                  SIN_SISTEMAS_PANEL_SIN_PERMISO
+                )}
+              </span>
+            ) : (
+              <select
+                id="new-ticket-system"
+                value={systemId}
+                disabled={systemField !== 'ELEGIBLE'}
+                onChange={(e) => setSystemId(e.target.value ? Number(e.target.value) : '')}
+                style={{ ...inputStyle, cursor: systemField === 'ELEGIBLE' ? 'pointer' : 'not-allowed', background: systemField === 'ELEGIBLE' ? '#fff' : '#f5f6f6' }}
+              >
+                <option value="">{clientId ? '(sin sistema)' : 'Elige un cliente primero'}</option>
+                {systems.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            )}
           </label>
         </div>
 

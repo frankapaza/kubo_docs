@@ -13,6 +13,14 @@ export const canManageUsers = (user: User | null): boolean => user?.role === 'AD
 export const canCreateProject = (user: User | null): boolean =>
   user?.role === 'ADMIN' || user?.role === 'PRODUCT_OWNER';
 
+/**
+ * Asignar (o quitar) un sistema del catálogo a un cliente. Es un hecho de la
+ * relación comercial, del mismo peso que editar su ficha, así que lleva la
+ * misma guarda que ella: ADMIN o PRODUCT_OWNER (decisión 5 del diseño).
+ */
+export const canManageClientSystems = (user: User | null): boolean =>
+  user?.role === 'ADMIN' || user?.role === 'PRODUCT_OWNER';
+
 export const canApproveActa = (user: User | null): boolean =>
   user?.role === 'ADMIN' ||
   user?.role === 'PRODUCT_OWNER' ||
