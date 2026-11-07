@@ -379,6 +379,7 @@ export class ErrorGroupsService implements OnModuleDestroy {
       status: group.status,
       resolvedAt: group.resolvedAt ? new Date(group.resolvedAt) : null,
       ticketId: idOrNull(group.ticketId),
+      ticketLinkedAt: group.ticketLinkedAt ? new Date(group.ticketLinkedAt) : null,
       ticket,
     };
   }

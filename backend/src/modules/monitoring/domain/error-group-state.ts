@@ -14,6 +14,8 @@ export interface GroupState {
   status: ErrorGroupStatus;
   resolvedAt: Date | null;
   ticketId: number | null;
+  /** Cuándo se reservó/enlazó el ticket: distingue un alta en curso de un enlace que quedó a medias. */
+  ticketLinkedAt?: Date | null;
   /** `null` con `ticketId` informado significa que el ticket fue borrado. */
   ticket: LinkedTicketState | null;
 }
@@ -48,7 +50,14 @@ const reabrir = (reason: string): OccurrenceDecision => ({
  * anterior a la resolución no prueba que el error siga vivo. La igualdad
  * exacta cuenta como "no posterior" y tampoco reabre.
  */
-export function decideOnOccurrence(group: GroupState | null, occurredAt: Date): OccurrenceDecision {
+/** Un alta de ticket reservada hace menos de esto sigue «en creación»: no se reabre. */
+export const TICKET_CREATION_GRACE_MS = 5 * 60_000;
+
+export function decideOnOccurrence(
+  group: GroupState | null,
+  occurredAt: Date,
+  now: Date = new Date(),
+): OccurrenceDecision {
   if (!group) return { status: 'NUEVO', notify: true, reopened: false, reason: null };
 
   if (group.status === 'NUEVO') return IGUAL('NUEVO');
@@ -61,6 +70,16 @@ export function decideOnOccurrence(group: GroupState | null, occurredAt: Date): 
   }
 
   // CON_TICKET
+  // Reserva sin ticket todavía (`ticket_id` NULL): el personal está creando el
+  // ticket en este instante. Reabrir ahora dejaría el grupo en NUEVO justo
+  // antes de enlazarlo. Pasado el margen, un NULL es un alta fallida: se trata como ticket borrado.
+  if (
+    (group.ticketId === null || group.ticketId === undefined) &&
+    group.ticketLinkedAt &&
+    now.getTime() - group.ticketLinkedAt.getTime() < TICKET_CREATION_GRACE_MS
+  ) {
+    return IGUAL('CON_TICKET');
+  }
   if (!group.ticket) return reabrir('Reapareció y su ticket ya no existe');
   const t = group.ticket;
   if (t.status === 'RESUELTO' || t.status === 'CERRADO') {

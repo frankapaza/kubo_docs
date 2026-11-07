@@ -167,6 +167,16 @@ describe('ErrorGroupsService.recordOccurrences', () => {
     expect(gateway.notifyErrorNew).not.toHaveBeenCalled();
   });
 
+  it('un CON_TICKET con reserva reciente y sin ticket (alta en curso) no se reabre ni avisa', async () => {
+    const { service, repo, gateway } = makeService();
+    sembrar(repo, { status: 'CON_TICKET', ticketId: null, ticketLinkedAt: new Date(Date.now() - 10_000) });
+
+    await service.recordOccurrences(ctx, [ev()]);
+
+    expect(repo.applyBatch).toHaveBeenCalledWith(expect.anything(), 9, expect.objectContaining({ status: 'CON_TICKET', reopen: null }));
+    expect(gateway.notifyErrorNew).not.toHaveBeenCalled();
+  });
+
   it('con el ticket RESUELTO antes de la ocurrencia se reabre con «Reapareció tras el ticket KB-0012»', async () => {
     const { service, repo, gateway, manager } = makeService();
     sembrar(repo, { status: 'CON_TICKET', ticketId: '12' });

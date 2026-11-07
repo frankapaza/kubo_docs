@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 
 import { ErrorActionsService } from './error-actions.service';
 
@@ -117,6 +117,26 @@ describe('ErrorActionsService.createTicket', () => {
     await expect(service.createTicket(5, 11, {})).rejects.toThrow('db caída');
     expect(repo.restoreReservation).toHaveBeenCalledWith(5, expect.objectContaining({ status: 'RESUELTO' }));
     expect(gateway.notifyErrorsChanged).not.toHaveBeenCalled();
+  });
+
+  it('si el enlace falla una vez se reintenta y todo sigue bien', async () => {
+    const { service, repo } = make();
+    repo.attachTicket.mockRejectedValueOnce(new Error('deadlock'));
+    await expect(service.createTicket(5, 11, {})).resolves.toMatchObject({ ticket: { id: 99 } });
+    expect(repo.attachTicket).toHaveBeenCalledTimes(2);
+  });
+
+  it('si el enlace sigue fallando responde 500 con el código del ticket y no restaura', async () => {
+    const { service, repo } = make();
+    repo.attachTicket.mockRejectedValue(new Error('caída'));
+    const err: any = await service.createTicket(5, 11, {}).catch((e) => e);
+    expect(err).toBeInstanceOf(InternalServerErrorException);
+    expect(err.getResponse()).toEqual({
+      code: 'TICKET_LINK_FAILED',
+      message: 'Se creó el ticket TK-99 pero no se pudo enlazar al error.',
+    });
+    expect(repo.attachTicket).toHaveBeenCalledTimes(2);
+    expect(repo.restoreReservation).not.toHaveBeenCalled();
   });
 
   it('un grupo que ya tiene ticket responde 409 sin reservar', async () => {

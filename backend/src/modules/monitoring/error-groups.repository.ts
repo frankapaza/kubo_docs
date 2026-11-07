@@ -301,13 +301,15 @@ export class ErrorGroupsRepository {
    * Reserva el grupo para crear su ticket. El `WHERE status <> 'CON_TICKET'`
    * es el cerrojo: de dos clics simultáneos solo uno afecta la fila, el otro
    * recibe 0 y no crea nada (Review Focus 5). Devuelve si ganó la reserva.
-   * No toca `ticket_id`: si el alta falla hay que poder restaurarlo tal cual.
+   * Deja `ticket_id` en NULL: un ticket viejo (grupo reabierto) no debe pasar por el de esta
+   * alta, y la ingesta reconoce «NULL + reserva reciente» como alta en curso. El valor previo
+   * lo guarda quien llama (`findReservationState`) para restaurarlo si el alta falla.
    */
   async reserveForTicket(id: number, userId: number, at: Date): Promise<boolean> {
     const r = await this.groups
       .createQueryBuilder()
       .update(ErrorGroup)
-      .set({ status: 'CON_TICKET', ticketLinkedBy: userId, ticketLinkedAt: at })
+      .set({ status: 'CON_TICKET', ticketId: null, ticketLinkedBy: userId, ticketLinkedAt: at })
       .where('id = :id AND status <> :st', { id, st: 'CON_TICKET' })
       .execute();
     return (r.affected ?? 0) > 0;
@@ -318,7 +320,7 @@ export class ErrorGroupsRepository {
     await this.groups
       .createQueryBuilder()
       .update(ErrorGroup)
-      .set({ ticketId, resolvedAt: null, resolvedBy: null, resolutionNote: null })
+      .set({ status: 'CON_TICKET', ticketId, resolvedAt: null, resolvedBy: null, resolutionNote: null })
       .where('id = :id', { id })
       .execute();
   }

@@ -60,6 +60,16 @@ describe('decideOnOccurrence', () => {
       reason: null,
     });
   });
+  it('CON_TICKET sin ticket y con reserva reciente: alta en curso, no reabre', () => {
+    const now = d('2026-11-07T12:04:00Z');
+    const g = grupo({ status: 'CON_TICKET', ticketId: null, ticketLinkedAt: d('2026-11-07T12:00:30Z') });
+    expect(decideOnOccurrence(g, ocurre, now)).toEqual({ status: 'CON_TICKET', notify: false, reopened: false, reason: null });
+  });
+  it('CON_TICKET sin ticket y con reserva vieja: alta fallida, reabre', () => {
+    const now = d('2026-11-07T12:06:00Z');
+    const g = grupo({ status: 'CON_TICKET', ticketId: null, ticketLinkedAt: d('2026-11-07T12:00:00Z') });
+    expect(decideOnOccurrence(g, ocurre, now)).toMatchObject({ status: 'NUEVO', reopened: true, reason: 'Reapareció y su ticket ya no existe' });
+  });
   it('CON_TICKET con ticket en atención: igual', () => {
     expect(
       decideOnOccurrence(grupo({ status: 'CON_TICKET', ticketId: 1, ticket: ticket() }), ocurre),

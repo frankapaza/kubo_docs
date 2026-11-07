@@ -1,4 +1,11 @@
-import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { sameId } from '../../common/ids';
@@ -96,9 +103,32 @@ export class ErrorActionsService {
     }
 
     // El ticket ya existe: si esto fallara NO se restaura (dejaría un ticket huérfano).
-    await this.repo.attachTicket(id, ticket.id);
+    await this.attachWithRetry(id, ticket);
     this.notifyChanged();
     return { group: await this.groups.detail(id), ticket };
+  }
+
+  /**
+   * Enlaza el ticket ya creado; un reintento cubre un fallo momentáneo. Si sigue
+   * fallando NO se restaura (dejaría el ticket huérfano) y el 500 nombra el ticket
+   * para que se enlace a mano; sin esto el reintento del usuario solo recibiría 409.
+   */
+  private async attachWithRetry(id: number, ticket: { id: number; code: string }): Promise<void> {
+    try {
+      await this.repo.attachTicket(id, ticket.id);
+    } catch {
+      try {
+        await this.repo.attachTicket(id, ticket.id);
+      } catch (e) {
+        this.log.error(
+          `Ticket ${ticket.code} (id ${ticket.id}) creado pero no se pudo enlazar al error ${id}: ${(e as Error)?.message ?? e}`,
+        );
+        throw new InternalServerErrorException({
+          code: 'TICKET_LINK_FAILED',
+          message: `Se creó el ticket ${ticket.code} pero no se pudo enlazar al error.`,
+        });
+      }
+    }
   }
 
   async resolve(id: number, actorUserId: number, note?: string): Promise<ErrorGroupView> {
