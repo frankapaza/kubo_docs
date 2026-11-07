@@ -2,6 +2,10 @@ import { TicketsService } from './tickets.service';
 import { Ticket } from './entities/ticket.entity';
 import { TicketEvent } from './entities/ticket-event.entity';
 import { TicketMessage } from '../ticket-messages/entities/ticket-message.entity';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { CreateTicketDto } from './dto/create-ticket.dto';
+import { UpdateTicketDto } from './dto/update-ticket.dto';
 
 /** Lo que una ejecución de `create` llega a escribir, por entidad. */
 interface Escrituras {
@@ -129,7 +133,6 @@ const makeService = (fallaEn?: PuntoDeFallo) => {
     }),
   };
   const clients = { findByIdOrFail: jest.fn().mockResolvedValue({ id: 1 }) };
-  const projects = { findById: jest.fn().mockResolvedValue({ id: 1 }) };
   // Las asignaciones activas de cada cliente. El cliente 1 --el de las pruebas
   // de siempre, que no van de sistemas-- no tiene ninguna, así que su alta no
   // exige elegir; el 7 tiene una, la asignación 5.
@@ -143,14 +146,13 @@ const makeService = (fallaEn?: PuntoDeFallo) => {
 
   return {
     service: new TicketsService(
-      repo as any, events as any, sla as any, clients as any, projects as any, systems as any,
+      repo as any, events as any, sla as any, clients as any, systems as any,
     ),
     repo,
     manager,
     events,
     sla,
     clients,
-    projects,
     systems,
   };
 };
@@ -557,5 +559,31 @@ describe('el alta es todo o nada', () => {
       service.create({ kind: 'STAFF', userId: 5 }, { rawText: 'algo' } as any),
     ).rejects.toThrow('fallo al guardar el mensaje');
     expect(repo.savedTickets).toHaveLength(0);
+  });
+});
+
+describe('el proyecto sale del ticket', () => {
+  it('el alta ya no escribe proyecto, aunque lo manden', async () => {
+    const { service, repo } = makeService();
+    await service.create(
+      { kind: 'STAFF', userId: 5 },
+      { rawText: 'algo', clientId: 7, systemId: 5, projectId: 42 } as any,
+    );
+    expect(repo.savedTickets[0].projectId).toBeUndefined();
+  });
+
+  // La misma configuracion que `createGlobalValidationPipe()`: es la que
+  // convierte "el DTO no lo declara" en un 400 de verdad.
+  it('el DTO rechaza un projectId con la lista blanca global', async () => {
+    const dto = plainToInstance(CreateTicketDto, { rawText: 'algo', projectId: 42 });
+    const errors = await validate(dto, { whitelist: true, forbidNonWhitelisted: true });
+    expect(errors.map((e) => e.property)).toContain('projectId');
+  });
+
+  // `UpdateTicketDto` deriva del de alta: hereda la ausencia.
+  it('la edicion tampoco admite projectId', async () => {
+    const dto = plainToInstance(UpdateTicketDto, { projectId: 42 });
+    const errors = await validate(dto, { whitelist: true, forbidNonWhitelisted: true });
+    expect(errors.map((e) => e.property)).toContain('projectId');
   });
 });

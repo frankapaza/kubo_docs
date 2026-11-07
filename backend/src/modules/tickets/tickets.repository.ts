@@ -19,7 +19,6 @@ export interface TicketListFilters {
   status?: TicketStatus;
   open?: boolean;
   clientId?: number;
-  projectId?: number;
   systemId?: number;
   priority?: TicketPriority;
   assigneeUserId?: number;
@@ -56,7 +55,6 @@ export class TicketsRepository {
     if (filters.status) qb.andWhere('t.status = :status', { status: filters.status });
     if (filters.open) qb.andWhere('t.status IN (:...open)', { open: OPEN_STATUSES });
     if (filters.clientId) qb.andWhere('t.client_id = :clientId', { clientId: filters.clientId });
-    if (filters.projectId) qb.andWhere('t.project_id = :projectId', { projectId: filters.projectId });
     if (filters.systemId) qb.andWhere('t.system_id = :systemId', { systemId: filters.systemId });
     if (filters.priority) qb.andWhere('t.priority = :priority', { priority: filters.priority });
     if (filters.assigneeUserId) {

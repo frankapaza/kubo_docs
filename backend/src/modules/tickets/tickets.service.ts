@@ -5,7 +5,6 @@ import { TicketsRealtimeGateway } from './tickets-realtime.gateway';
 import { TicketEventsService } from './ticket-events.service';
 import { SlaService } from './sla.service';
 import { ClientsService } from '../clients/clients.service';
-import { ProjectsService } from '../projects/projects.service';
 import { ClientSystemsRepository } from './client-systems.repository';
 
 import { Ticket } from './entities/ticket.entity';
@@ -128,7 +127,6 @@ export class TicketsService {
     private readonly events: TicketEventsService,
     private readonly sla: SlaService,
     private readonly clients: ClientsService,
-    private readonly projects: ProjectsService,
     // Las asignaciones cliente-sistema: contra ellas se valida y se exige el
     // sistema del ticket (`domain/system-requirement.ts`).
     private readonly systems: ClientSystemsRepository,
@@ -244,7 +242,6 @@ export class TicketsService {
     }
 
     if (dto.clientId) await this.clients.findByIdOrFail(dto.clientId);
-    if (dto.projectId) await this.projects.findById(dto.projectId);
 
     // El sistema, antes de abrir la transacción: un alta rechazada no escribe
     // ni ticket, ni evento, ni mensaje. Las asignaciones solo se consultan si
@@ -288,7 +285,6 @@ export class TicketsService {
       const ticket = await ticketRepo.save(
         ticketRepo.create({
           clientId: dto.clientId ?? null,
-          projectId: dto.projectId ?? null,
           systemId,
           meetingId: dto.meetingId ?? null,
           origin: dto.origin ?? 'NOTE',
@@ -373,9 +369,8 @@ export class TicketsService {
 
     // No hay FK en la tabla: sin esta validación, un id inexistente se
     // guardaría igual y el ticket fallaría con 404 en cascada más adelante,
-    // cuando algo intente resolver su cliente o proyecto.
+    // cuando algo intente resolver su cliente.
     if (dto.clientId !== undefined) await this.clients.findByIdOrFail(dto.clientId);
-    if (dto.projectId !== undefined) await this.projects.findById(dto.projectId);
 
     // Solo si se toca. La obligación de elegir no es retroactiva (decisión 6
     // del diseño): un ticket viejo sin sistema se sigue editando. Pero el que

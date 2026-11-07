@@ -14,7 +14,6 @@ export interface CreateTicketBody {
   impact?: TicketImpact;
   urgency?: TicketUrgency;
   clientId?: number;
-  projectId?: number;
   systemId?: number;
   capturedAt?: string;
   scheduledAt?: string;

@@ -4,12 +4,10 @@ import { Link } from 'react-router-dom';
 import { ticketsApi, clientSystemsApi } from '../../api/tickets.api';
 import { ticketMessagesApi } from '../../api/ticket-messages.api';
 import { clientsApi } from '../../api/clients.api';
-import { projectsApi } from '../../api/projects.api';
 import type {
   Client,
   ClientSystem,
   CreatedTicket,
-  Project,
   ServiceCategory,
   Ticket,
   TicketImpact,
@@ -70,11 +68,9 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
   const [impact, setImpact] = useState<TicketImpact | ''>('');
   const [urgency, setUrgency] = useState<TicketUrgency | ''>('');
   const [clientId, setClientId] = useState<number | ''>('');
-  const [projectId, setProjectId] = useState<number | ''>('');
   const [systemId, setSystemId] = useState<number | ''>('');
 
   const [clients, setClients] = useState<Client[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
   const [systems, setSystems] = useState<ClientSystem[]>([]);
   // Si la lista del cliente elegido ya llegó (o falló): sin esto, el aviso de
   // «no tiene sistemas» parpadearía cada vez que se elige un cliente.
@@ -131,7 +127,6 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
     setImpact('');
     setUrgency('');
     setClientId('');
-    setProjectId('');
     setSystemId('');
     setError(null);
     setFiles([]);
@@ -155,23 +150,6 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
       cancelled = true;
     };
   }, [open]);
-
-  // Proyectos activos, filtrados por cliente cuando hay uno elegido.
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    projectsApi
-      .list({ status: 'ACTIVE', clientId: clientId || undefined })
-      .then((p) => {
-        if (!cancelled) setProjects(p.data);
-      })
-      .catch((e) => {
-        if (!cancelled) console.warn('[NewTicketDialog] No se pudo cargar la lista de proyectos.', e);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, clientId]);
 
   // Sistemas del cliente elegido; el select se deshabilita sin cliente.
   useEffect(() => {
@@ -283,7 +261,6 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
         impact: impact || undefined,
         urgency: urgency || undefined,
         clientId: clientId || undefined,
-        projectId: projectId || undefined,
         systemId: systemId || undefined,
       });
     } catch (e: any) {
@@ -420,7 +397,7 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
           El cliente decide qué sistemas hay, así que es lo primero que se
           contesta; y el sistema, de lo que trata el ticket, va con él.
         */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <label htmlFor="new-ticket-client">
             <span style={labelStyle}>Cliente</span>
             <select
@@ -429,7 +406,6 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
               onChange={(e) => {
                 const v = e.target.value ? Number(e.target.value) : '';
                 setClientId(v);
-                setProjectId('');
                 setSystemId('');
               }}
               style={inputStyle}
@@ -438,23 +414,6 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
               {clients.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.razonSocial}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label htmlFor="new-ticket-project">
-            <span style={labelStyle}>Proyecto</span>
-            <select
-              id="new-ticket-project"
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value ? Number(e.target.value) : '')}
-              style={inputStyle}
-            >
-              <option value="">(sin proyecto)</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
                 </option>
               ))}
             </select>
