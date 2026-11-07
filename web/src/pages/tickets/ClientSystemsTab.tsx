@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { clientSystemsApi, systemsApi } from '../../api/tickets.api';
 import type { ClientSystem, System } from '../../api/types';
@@ -20,6 +21,7 @@ import { canManageClientSystems } from '../../auth/permissions';
 export default function ClientSystemsTab({ clientId }: { clientId: number }) {
   const { user } = useAuth();
   const canManage = canManageClientSystems(user);
+  const qc = useQueryClient();
 
   const [systems, setSystems] = useState<ClientSystem[]>([]);
   const [catalog, setCatalog] = useState<System[]>([]);
@@ -87,6 +89,9 @@ export default function ClientSystemsTab({ clientId }: { clientId: number }) {
   // aunque el cambio quedó guardado en el servidor. Sin este aviso separado, el
   // usuario ve el estado divergir de lo que realmente pasó.
   const safeReload = async () => {
+    // La ficha del cliente lee la misma lista (con react-query) para su aviso
+    // de «sin sistemas»: que se entere de que cambió.
+    void qc.invalidateQueries({ queryKey: ['client-systems', clientId] });
     try {
       await reload();
     } catch (e) {

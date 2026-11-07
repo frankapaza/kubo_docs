@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { clientsApi, CreateClientBody } from '../api/clients.api';
 import { CLIENT_STATUS_LABELS, CLIENT_STATUSES, type ClientStatus } from '../api/types';
@@ -9,6 +9,7 @@ import { Badge } from '../components/ui/Badge';
 import { EmptyState } from '../components/ui/EmptyState';
 import { PlusIcon, UsersIcon, XIcon } from '../components/ui/Icon';
 import { toast } from '../ui/Toast';
+import { clientSystemsHref } from './tickets/system-field';
 
 const STATUS_TONE: Record<ClientStatus, 'neutral' | 'success' | 'info'> = {
   PROSPECT: 'info',
@@ -28,6 +29,7 @@ const EMPTY_FORM: CreateClientBody = {
 
 export default function ClientsListPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | ClientStatus>('ALL');
   const [showForm, setShowForm] = useState(false);
@@ -51,10 +53,15 @@ export default function ClientsListPage() {
       });
       return clientsApi.create(payload);
     },
-    onSuccess: () => {
+    onSuccess: (created) => {
       qc.invalidateQueries({ queryKey: ['clients'] });
       setForm(EMPTY_FORM);
       setShowForm(false);
+      // A su pestaña «Sistemas», con el catálogo a la vista: el momento en que
+      // alguien acaba de escribir quién es el cliente es el momento en que sabe
+      // qué le arrienda. No bloquea nada: si no asigna nada, ya está en la
+      // ficha, que es donde iba a acabar igualmente.
+      navigate(clientSystemsHref(created.id));
     },
     onError: (e: { response?: { data?: { message?: string } } }) =>
       toast.error(e.response?.data?.message ?? 'No se pudo crear el cliente'),

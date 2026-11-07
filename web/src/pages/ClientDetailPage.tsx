@@ -31,6 +31,10 @@ import {
 } from '../components/ui/Icon';
 import { toast } from '../ui/Toast';
 import ClientSystemsTab from './tickets/ClientSystemsTab';
+import { clientSystemsApi } from '../api/tickets.api';
+import { useAuth } from '../auth/AuthContext';
+import { canManageClientSystems } from '../auth/permissions';
+import { SIN_SISTEMAS_PANEL, SIN_SISTEMAS_PANEL_ENLACE, SIN_SISTEMAS_PANEL_SIN_PERMISO } from './tickets/system-field';
 
 type Tab = 'summary' | 'projects' | 'documents' | 'systems';
 
@@ -55,6 +59,7 @@ export default function ClientDetailPage() {
   const { clientId } = useParams();
   const id = Number(clientId);
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [searchParams] = useSearchParams();
   // La pestaña inicial sale del enlace: `clientSystemsHref(id)` abre la ficha
   // ya en «Sistemas».
@@ -77,6 +82,13 @@ export default function ClientDetailPage() {
     queryFn: () => documentsApi.list({ clientId: id }),
   });
 
+  // Para el aviso de «sin sistemas». Mientras carga (o si falla) no se avisa:
+  // un aviso que aparece y se va es ruido.
+  const { data: clientSystems } = useQuery({
+    queryKey: ['client-systems', id],
+    queryFn: () => clientSystemsApi.list(id),
+  });
+
   if (isLoading) {
     return (
       <Card>
@@ -87,6 +99,13 @@ export default function ClientDetailPage() {
   if (!client) return <Navigate to="/clients" replace />;
 
   const projects = projectsData?.data ?? [];
+
+  // Solo un cliente de verdad: un prospecto no arrienda nada todavía, y avisar
+  // de una falta que no lo es enseña a ignorar los avisos.
+  const missingSystems =
+    client.status === 'CLIENT' &&
+    clientSystems !== undefined &&
+    !clientSystems.some((s) => s.isActive === 1);
 
   return (
     <div className="space-y-6">
@@ -143,6 +162,28 @@ export default function ClientDetailPage() {
             </button>
           ))}
         </div>
+
+        {/*
+          Reaparece cada vez que se abre la ficha hasta que se resuelve. Sin
+          sistemas, los tickets de este cliente no se pueden clasificar ni
+          agrupar en su informe.
+        */}
+        {missingSystems && (
+          <div
+            role="status"
+            className="mt-4 flex items-center gap-3 flex-wrap rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+          >
+            <span className="flex-1 min-w-[16rem]">
+              {SIN_SISTEMAS_PANEL}
+              {!canManageClientSystems(user) && ` ${SIN_SISTEMAS_PANEL_SIN_PERMISO}`}
+            </span>
+            {canManageClientSystems(user) && tab !== 'systems' && (
+              <Button size="sm" variant="secondary" onClick={() => setTab('systems')}>
+                {SIN_SISTEMAS_PANEL_ENLACE}
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       {tab === 'summary' && <SummaryTab client={client} projectsCount={projects.length} documentsCount={documentsList.length} />}
@@ -167,7 +208,7 @@ export default function ClientDetailPage() {
           <CardHeader
             icon={<SettingsIcon size={18} />}
             title="Sistemas del cliente"
-            subtitle="Catálogo de sistemas para clasificar y agrupar los tickets de este cliente"
+            subtitle="Sistemas del catálogo que arrienda este cliente: clasifican y agrupan sus tickets"
           />
           <CardBody>
             <ClientSystemsTab clientId={id} />
