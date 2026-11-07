@@ -130,6 +130,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      loki:
+        condition: service_started
     environment:
       NODE_ENV: production
       PORT: 3000
@@ -183,8 +185,35 @@ services:
       # ticket en el panel, firma de documentos). El backend no la puede
       # deducir: las peticiones le llegan por Caddy, no desde el navegador.
       FRONTEND_URL: ${FRONTEND_URL}
+      # Monitoreo de logs. LOKI_DATA_PATH apunta al volumen de Loki montado de
+      # solo lectura: el backend mide el disco para avisar antes de que se llene.
+      LOKI_URL: http://loki:3100
+      LOKI_DATA_PATH: /loki-data
+      LOKI_DISK_ALERT_PCT: ${LOKI_DISK_ALERT_PCT:-80}
+      APPENDER_ASSETS_DIR: /app/assets/kubo-log-appender
     volumes:
       - backend_uploads:/app/uploads
+      - loki_data:/loki-data:ro
+    networks:
+      - internal
+
+  # Almacen de logs del monitoreo. Solo el backend lo usa: va por la red
+  # `internal`, SIN `ports` y sin ruta en el Caddyfile. Loki no tiene
+  # autenticacion (auth_enabled: false), asi que publicarlo seria exponer todos
+  # los logs de los clientes.
+  loki:
+    image: grafana/loki:3.4.2
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/config.yaml", "-config.expand-env=true"]
+    environment:
+      LOKI_RETENTION: ${LOKI_RETENTION:-720h}
+      # Go no conoce el limite del contenedor: con GOMEMLIMIT por debajo de
+      # mem_limit el recolector aprieta antes de que el OOM killer mate a Loki.
+      GOMEMLIMIT: 400MiB
+    mem_limit: 512m
+    volumes:
+      - ./loki/loki-config.yaml:/etc/loki/config.yaml:ro
+      - loki_data:/loki
     networks:
       - internal
 
@@ -220,5 +249,6 @@ volumes:
   mysql_data:
   redis_data:
   backend_uploads:
+  loki_data:
   caddy_data:
   caddy_config:

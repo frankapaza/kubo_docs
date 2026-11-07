@@ -1,0 +1,63 @@
+# Loki 3 en modo monolito con disco local. Un solo proceso, sin objeto
+# externo: el volumen de logs es modesto (30 dias) y no justifica S3 ni un
+# cluster. Solo el backend habla con el: no se publica por Caddy ni por puertos.
+#
+# Se arranca con -config.expand-env=true para que ${LOKI_RETENTION:-720h}
+# tome el valor del entorno del contenedor.
+
+auth_enabled: false # un solo inquilino; el aislamiento por cliente lo hace el backend
+
+server:
+  http_listen_port: 3100
+  log_level: warn # a info, Loki escribe una linea por consulta y llena el log del contenedor
+
+common:
+  path_prefix: /loki
+  replication_factor: 1 # una sola instancia
+  ring:
+    kvstore:
+      store: inmemory # sin consul/etcd: no hay mas nodos con quien coordinarse
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+
+schema_config:
+  configs:
+    - from: 2026-11-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h # el compactor de retencion exige indice diario
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true # sin esto retention_period no borra nada
+  delete_request_store: filesystem # obligatorio en Loki 3 cuando la retencion esta activa
+
+limits_config:
+  # 30 dias por omision (720h). Configurable con LOKI_RETENTION.
+  retention_period: ${LOKI_RETENTION:-720h}
+  # Techos de ingesta: un appender descontrolado no debe tumbar Loki ni llenar
+  # el disco. 8 MB/s sostenidos con rafagas de 16 MB cubren de sobra el trafico
+  # normal de las instalaciones.
+  ingestion_rate_mb: 8
+  ingestion_burst_size_mb: 16
+  # El backend recorta mensaje y excepcion a 32 KB; 256 KB deja margen para el
+  # JSON de la linea (propiedades, logger...) sin aceptar lineas absurdas.
+  max_line_size: 256KB
+  # Loki rechaza muestras de mas de 7 dias: el backend ya sustituye la hora de
+  # eventos fuera de ventana, esto es la red de seguridad.
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+
+  # Loki 3 inventa las etiquetas service_name y detected_level en cada stream.
+  # Aqui ya hay etiquetas propias (aplicativo, nivel): se apagan para que no
+  # aparezcan en cada resultado ni cuenten como series extra.
+  discover_service_name: []
+  discover_log_levels: false
+
+analytics:
+  reporting_enabled: false # sin telemetria hacia Grafana Labs

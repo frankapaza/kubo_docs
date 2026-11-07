@@ -86,6 +86,22 @@ services:
     volumes:
       - redis_dev_data:/data
 
+  # Loki de desarrollo: el backend local (fuera de Docker) lo alcanza por
+  # localhost:3100. En produccion NO lleva `ports`.
+  loki:
+    image: grafana/loki:3.4.2
+    container_name: kubo-loki-dev
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    command: ["-config.file=/etc/loki/config.yaml", "-config.expand-env=true"]
+    environment:
+      LOKI_RETENTION: 720h
+    volumes:
+      - ./loki/loki-config.yaml:/etc/loki/config.yaml:ro
+      - loki_dev_data:/loki
+
 volumes:
   mysql_dev_data:
   redis_dev_data:
+  loki_dev_data:
