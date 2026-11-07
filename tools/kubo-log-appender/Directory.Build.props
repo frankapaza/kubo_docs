@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <!-- Versión del appender; el zip y el manual la toman de aquí. -->
+    <Version>1.0.0</Version>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <!-- Las versiones de log4net (2.0.8 y 3.2.0) son las que ya usan los clientes y las fija el
+         diseño; los avisos de vulnerabilidad del auditor no las cambian y ensucian la salida. -->
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+</Project>

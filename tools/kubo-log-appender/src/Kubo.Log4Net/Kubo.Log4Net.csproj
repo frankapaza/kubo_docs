@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- net45 queda con log4net 2.0.8 y las otras dos con 3.2.0: cada cliente carga la
+         variante que coincide con la versión de log4net que ya trae, sin bindingRedirect. -->
+    <TargetFrameworks>net45;net462;netstandard2.0</TargetFrameworks>
+    <RootNamespace>Kubo.Log4Net</RootNamespace>
+    <AssemblyName>Kubo.Log4Net</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="log4net" Version="2.0.8" Condition="'$(TargetFramework)'=='net45'" />
+    <PackageReference Include="log4net" Version="3.2.0" Condition="'$(TargetFramework)'!='net45'" />
+    <!-- Solo para compilar: esta máquina no tiene los reference assemblies de 4.5/4.6.2. No viaja en el paquete. -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kubo.Log4Net.Tests" />
+  </ItemGroup>
+
+</Project>

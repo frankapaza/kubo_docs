@@ -31,3 +31,8 @@ backend/sql/*.sh
 backend/sql/check_*.sql
 backend/sql/fix_*.sql
 backend/sql/add_service_cols.sql
+
+# appender log4net (.NET): artefactos de compilacion y paquete
+tools/kubo-log-appender/**/bin/
+tools/kubo-log-appender/**/obj/
+tools/kubo-log-appender/out/
