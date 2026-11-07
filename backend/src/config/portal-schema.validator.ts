@@ -86,6 +86,7 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
   private static readonly MIGRATION_023 = 'migrations/023_correo_entrante_imap.sql';
   private static readonly MIGRATION_026 = 'migrations/026_invitaciones_portal.sql';
   private static readonly MIGRATION_027 = 'migrations/027_carga_masiva_usuarios.sql';
+  private static readonly MIGRATION_028 = 'migrations/028_tickets_archivados.sql';
 
   /**
    * Lo que hace falta para que exista `workspace_settings.team_inbox_email`, en
@@ -269,6 +270,16 @@ export class PortalSchemaValidator implements OnApplicationBootstrap {
       table: 'client_user_invitations',
       column: 'invited_by_user_id',
       files: [PortalSchemaValidator.MIGRATION_027],
+    },
+    // 028: archivar tickets. `ticket.entity.ts` declara las dos columnas, así
+    // que TypeORM las emite en TODO SELECT e INSERT sobre `tickets`: sin ellas
+    // la bandeja, el detalle y el alta responden 500. Basta con exigir una: la
+    // otra, el índice y los tipos de evento ARCHIVED/UNARCHIVED van en el
+    // mismo fichero.
+    {
+      table: 'tickets',
+      column: 'archived_at',
+      files: [PortalSchemaValidator.MIGRATION_028],
     },
   ];
 

@@ -35,6 +35,10 @@ export interface TicketListParams {
   serviceCategory?: ServiceCategory;
   atRisk?: boolean;
   q?: string;
+  /** Oculta los CERRADO (vista "Todos"). */
+  excludeClosed?: boolean;
+  /** `true` = solo archivados; si no, los archivados nunca vienen. */
+  archived?: boolean;
 }
 
 export const ticketsApi = {
@@ -55,6 +59,11 @@ export const ticketsApi = {
     api.patch<Ticket>(`/tickets/${id}`, body).then((r) => r.data),
 
   remove: (id: number) => api.delete<{ ok: true }>(`/tickets/${id}`).then((r) => r.data),
+
+  archive: (id: number, reason?: string) =>
+    api.post<Ticket>(`/tickets/${id}/archive`, { reason }).then((r) => r.data),
+
+  unarchive: (id: number) => api.post<Ticket>(`/tickets/${id}/unarchive`).then((r) => r.data),
 
   transition: (
     id: number,

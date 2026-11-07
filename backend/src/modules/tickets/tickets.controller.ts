@@ -28,6 +28,8 @@ import { TransitionTicketDto } from './dto/transition-ticket.dto';
 import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { EscalateTicketDto } from './dto/escalate-ticket.dto';
 import { OverridePriorityDto } from './dto/override-priority.dto';
+import { ArchiveTicketDto } from './dto/archive-ticket.dto';
+import { TicketsRealtimeGateway } from './tickets-realtime.gateway';
 import { ServiceCategory } from './entities/ticket.entity';
 import { TicketStatus } from './domain/ticket-state-machine';
 import { TicketPriority } from './domain/ticket-priority';
@@ -42,7 +44,20 @@ export class TicketsController {
     private readonly transitions: TicketTransitionsService,
     private readonly assignment: TicketAssignmentService,
     private readonly ai: TicketAIService,
+    private readonly realtime: TicketsRealtimeGateway,
   ) {}
+
+  /**
+   * Toda acción del personal que cambia un ticket avisa a las bandejas
+   * abiertas para que recarguen. Se avisa solo si la acción salió bien.
+   * (El alta avisa desde `TicketsService.create`, que es la puerta común del
+   * panel, el portal y el correo.)
+   */
+  private async changed<T>(work: Promise<T>): Promise<T> {
+    const result = await work;
+    this.realtime.notifyChanged();
+    return result;
+  }
 
   /**
    * Transcribir un audio (WhatsApp voice note o grabación en vivo) y devolver
@@ -79,6 +94,8 @@ export class TicketsController {
     @Query('serviceCategory') serviceCategory?: ServiceCategory,
     @Query('atRisk') atRisk?: string,
     @Query('q') q?: string,
+    @Query('excludeClosed') excludeClosed?: string,
+    @Query('archived') archived?: string,
   ) {
     return this.service.list({
       status,
@@ -91,6 +108,8 @@ export class TicketsController {
       serviceCategory,
       atRisk: atRisk === 'true',
       q,
+      excludeClosed: excludeClosed === 'true',
+      archived: archived === 'true',
     });
   }
 
@@ -106,13 +125,27 @@ export class TicketsController {
 
   @Patch(':id')
   update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateTicketDto) {
-    return this.service.update(id, dto);
+    return this.changed(this.service.update(id, dto));
   }
 
   @Delete(':id')
   async remove(@Param('id', ParseIntPipe) id: number): Promise<{ ok: true }> {
-    await this.service.remove(id);
+    await this.changed(this.service.remove(id));
     return { ok: true };
+  }
+
+  @Post(':id/archive')
+  archive(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ArchiveTicketDto,
+  ) {
+    return this.changed(this.service.archive(id, user.id, dto.reason));
+  }
+
+  @Post(':id/unarchive')
+  unarchive(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number) {
+    return this.changed(this.service.unarchive(id, user.id));
   }
 
   @Post(':id/transition')
@@ -121,7 +154,7 @@ export class TicketsController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: TransitionTicketDto,
   ) {
-    return this.transitions.transition({
+    return this.changed(this.transitions.transition({
       ticketId: id,
       actorUserId: user.id,
       toStatus: dto.toStatus,
@@ -129,7 +162,7 @@ export class TicketsController {
       resolutionMd: dto.resolutionMd,
       rootCause: dto.rootCause,
       correctiveAction: dto.correctiveAction,
-    });
+    }));
   }
 
   @Post(':id/assign')
@@ -138,17 +171,17 @@ export class TicketsController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: AssignTicketDto,
   ) {
-    return this.assignment.assign({
+    return this.changed(this.assignment.assign({
       ticketId: id,
       actorUserId: user.id,
       assigneeUserId: dto.assigneeUserId,
       reason: dto.reason,
-    });
+    }));
   }
 
   @Post(':id/take')
   take(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number) {
-    return this.assignment.take({ ticketId: id, actorUserId: user.id });
+    return this.changed(this.assignment.take({ ticketId: id, actorUserId: user.id }));
   }
 
   @Post(':id/escalate')
@@ -157,13 +190,13 @@ export class TicketsController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: EscalateTicketDto,
   ) {
-    return this.assignment.escalate({
+    return this.changed(this.assignment.escalate({
       ticketId: id,
       actorUserId: user.id,
       toLevel: dto.toLevel,
       reason: dto.reason,
       assigneeUserId: dto.assigneeUserId,
-    });
+    }));
   }
 
   @Post(':id/priority')
@@ -172,14 +205,14 @@ export class TicketsController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: OverridePriorityDto,
   ) {
-    return this.assignment.overridePriority({
+    return this.changed(this.assignment.overridePriority({
       ticketId: id,
       actorUserId: user.id,
       impact: dto.impact,
       urgency: dto.urgency,
       priority: dto.priority,
       reason: dto.reason,
-    });
+    }));
   }
 
   @Get(':id/suggest-assignee')
@@ -189,7 +222,7 @@ export class TicketsController {
 
   @Post(':id/triage')
   triage(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number) {
-    return this.ai.triage(id, user.id);
+    return this.changed(this.ai.triage(id, user.id));
   }
 
   @Post(':id/push-to-jira')

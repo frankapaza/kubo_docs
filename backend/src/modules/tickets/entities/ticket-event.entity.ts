@@ -28,7 +28,9 @@ export type TicketEventType =
   | 'REOPENED'
   | 'SLA_AT_RISK'
   | 'PRIORITY_OVERRIDDEN'
-  | 'MESSAGE_POSTED';
+  | 'MESSAGE_POSTED'
+  | 'ARCHIVED'
+  | 'UNARCHIVED';
 
 export const TICKET_EVENT_TYPES: TicketEventType[] = [
   'CREATED',
@@ -44,6 +46,8 @@ export const TICKET_EVENT_TYPES: TicketEventType[] = [
   'SLA_AT_RISK',
   'PRIORITY_OVERRIDDEN',
   'MESSAGE_POSTED',
+  'ARCHIVED',
+  'UNARCHIVED',
 ];
 
 /**

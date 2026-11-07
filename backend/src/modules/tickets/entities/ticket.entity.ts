@@ -232,6 +232,17 @@ export class Ticket {
   @Column({ name: 'email_message_id', type: 'varchar', length: 998, nullable: true })
   emailMessageId!: string | null;
 
+  /**
+   * Archivado (migración 028): fuera de la bandeja, pero con su estado y SLA
+   * intactos. No es un estado de la máquina: se archiva en cualquier estado y
+   * al desarchivar vuelve tal cual. `null` = visible.
+   */
+  @Column({ name: 'archived_at', type: 'datetime', nullable: true })
+  archivedAt!: Date | null;
+
+  @Column({ name: 'archived_by', type: 'bigint', unsigned: true, nullable: true })
+  archivedBy!: number | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

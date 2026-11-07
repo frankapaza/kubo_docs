@@ -1,21 +1,27 @@
-import { useEffect, useMemo, useState } from 'react';
+import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { ticketsApi, supportAgentsApi } from '../api/tickets.api';
 import type { Ticket, TicketStatus } from '../api/types';
+import { useRealtime } from '../lib/realtime';
+import { toast } from '../ui/Toast';
 import { STATUS_STYLES, PRIORITY_STYLES, STATUS_LABELS, slaBarColor } from './tickets/ticket-ui';
 import NewTicketDialog from './tickets/NewTicketDialog';
 
-type Chip = 'Todos' | 'Abiertos' | 'P1' | 'SLA en riesgo' | TicketStatus;
+type Chip = 'Todos' | 'Abiertos' | 'P1' | 'SLA en riesgo' | 'Archivados' | TicketStatus;
 
-const CHIPS: Chip[] = ['Todos', 'Abiertos', 'P1', 'SLA en riesgo', 'DERIVADO', 'ESPERA_CLIENTE', 'RESUELTO'];
+const CHIPS: Chip[] = [
+  'Todos', 'Abiertos', 'P1', 'SLA en riesgo', 'DERIVADO', 'ESPERA_CLIENTE', 'RESUELTO', 'CERRADO', 'Archivados',
+];
+
+const STATUS_CHIPS: TicketStatus[] = ['DERIVADO', 'ESPERA_CLIENTE', 'RESUELTO', 'CERRADO'];
 
 const chipLabel = (c: Chip): string =>
-  c === 'Todos' || c === 'Abiertos' || c === 'P1' || c === 'SLA en riesgo'
-    ? c
-    : STATUS_LABELS[c];
+  (STATUS_CHIPS as string[]).includes(c) ? STATUS_LABELS[c as TicketStatus] : c;
 
 const SEARCH_DEBOUNCE_MS = 280;
+
+const GRID_COLUMNS = '82px 1fr 118px 96px 116px 110px 130px 84px';
 
 export default function TicketsListPage() {
   const navigate = useNavigate();
@@ -52,22 +58,35 @@ export default function TicketsListPage() {
     return () => clearTimeout(t);
   }, [qInput]);
 
+  // Recarga en vivo: el backend avisa con `tickets:changed` cuando alguien
+  // crea, mueve o archiva un ticket. La recarga es silenciosa (sin el
+  // "Cargando…") para que la lista no parpadee mientras se mira.
+  const [reloadTick, setReloadTick] = useState(0);
+  const silentReload = useRef(false);
+  const onChanged = useCallback(() => {
+    silentReload.current = true;
+    setReloadTick((n) => n + 1);
+  }, []);
+  useRealtime('tickets:changed', onChanged);
+
   // El filtrado va al backend: es donde vive la definición de "abierto" y de
   // "en riesgo", y así la bandeja no diverge del informe.
   // `cancelled` evita que una respuesta lenta y ya obsoleta (de un filtro o
   // búsqueda anteriores) pise el resultado de una más reciente.
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    if (!silentReload.current) setLoading(true);
+    silentReload.current = false;
     setError(null);
     ticketsApi
       .list({
         open: filter === 'Abiertos' ? true : undefined,
         priority: filter === 'P1' ? 'P1' : undefined,
         atRisk: filter === 'SLA en riesgo' ? true : undefined,
-        status: ['DERIVADO', 'ESPERA_CLIENTE', 'RESUELTO'].includes(filter as string)
-          ? (filter as TicketStatus)
-          : undefined,
+        status: (STATUS_CHIPS as string[]).includes(filter) ? (filter as TicketStatus) : undefined,
+        // "Todos" es la bandeja de trabajo: lo cerrado tiene su propio filtro.
+        excludeClosed: filter === 'Todos' ? true : undefined,
+        archived: filter === 'Archivados' ? true : undefined,
         q: q || undefined,
       })
       .then((data) => {
@@ -82,9 +101,26 @@ export default function TicketsListPage() {
     return () => {
       cancelled = true;
     };
-  }, [filter, q]);
+  }, [filter, q, reloadTick]);
 
   const count = useMemo(() => tickets.length, [tickets]);
+
+  // Se puede archivar en cualquier estado. Es reversible (filtro "Archivados"),
+  // por eso no pide confirmación. Se quita de la lista al momento; el aviso en
+  // vivo recarga igualmente las demás bandejas abiertas.
+  const toggleArchive = async (e: MouseEvent, t: Ticket) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      if (t.archivedAt) await ticketsApi.unarchive(t.id);
+      else await ticketsApi.archive(t.id);
+      setTickets((list) => list.filter((x) => x.id !== t.id));
+      toast.success(`${t.code ?? `#${t.id}`} ${t.archivedAt ? 'desarchivado' : 'archivado'}`);
+    } catch (err) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      toast.error(msg ?? 'No se pudo actualizar el ticket');
+    }
+  };
 
   return (
     <div style={{ padding: 26, display: 'flex', flexDirection: 'column', gap: 22 }}>
@@ -129,9 +165,9 @@ export default function TicketsListPage() {
           </span>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '82px 1fr 118px 96px 116px 110px 130px', gap: 12, padding: '10px 18px', borderBottom: '1px solid #eceeef', background: '#fafbfb', fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#6d7577' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: GRID_COLUMNS, gap: 12, padding: '10px 18px', borderBottom: '1px solid #eceeef', background: '#fafbfb', fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#6d7577' }}>
           <span>Ticket</span><span>Asunto</span><span>Categoría</span>
-          <span>Prior.</span><span>Estado</span><span>Asignado</span><span>SLA</span>
+          <span>Prior.</span><span>Estado</span><span>Asignado</span><span>SLA</span><span />
         </div>
 
         {loading && <div style={{ padding: 18, fontSize: 13, color: '#6d7577' }}>Cargando…</div>}
@@ -152,7 +188,7 @@ export default function TicketsListPage() {
             <Link
               key={t.id}
               to={`/tickets/${t.id}`}
-              style={{ display: 'grid', gridTemplateColumns: '82px 1fr 118px 96px 116px 110px 130px', gap: 12, alignItems: 'center', padding: '13px 18px', borderBottom: '1px solid #f1f3f3', cursor: 'pointer', color: 'inherit', textDecoration: 'none' }}
+              style={{ display: 'grid', gridTemplateColumns: GRID_COLUMNS, gap: 12, alignItems: 'center', padding: '13px 18px', borderBottom: '1px solid #f1f3f3', cursor: 'pointer', color: 'inherit', textDecoration: 'none' }}
             >
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: '#6d7577' }}>{t.code}</span>
               <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -172,6 +208,14 @@ export default function TicketsListPage() {
                 </div>
                 <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: '#6d7577' }}>{t.slaLabel}</span>
               </div>
+              <button
+                type="button"
+                onClick={(e) => toggleArchive(e, t)}
+                title={t.archivedAt ? 'Devolver a la bandeja' : 'Quitar de la bandeja (reversible)'}
+                style={{ justifySelf: 'end', cursor: 'pointer', fontSize: 11, fontWeight: 500, padding: '4px 9px', borderRadius: 6, border: '1px solid #dfe3e4', background: '#fff', color: '#3a4041' }}
+              >
+                {t.archivedAt ? 'Desarchivar' : 'Archivar'}
+              </button>
             </Link>
           );
         })}

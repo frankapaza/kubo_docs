@@ -73,6 +73,9 @@ const COLUMNA_027 = {
   columnName: 'invited_by_user_id',
 };
 
+/** La columna que añade la 028: cuándo se archivó un ticket. */
+const COLUMNA_028 = { tableName: 'tickets', columnName: 'archived_at' };
+
 const COLUMNAS_ESPERADAS = [
   ...COLUMNAS_013,
   COLUMNA_014,
@@ -83,6 +86,7 @@ const COLUMNAS_ESPERADAS = [
   COLUMNA_023,
   COLUMNA_026,
   COLUMNA_027,
+  COLUMNA_028,
 ];
 
 /**
@@ -399,6 +403,17 @@ describe('PortalSchemaValidator', () => {
     await expect(validator.onApplicationBootstrap()).rejects.toThrow(
       /027_carga_masiva_usuarios\.sql/,
     );
+  });
+
+  it('atribuye a la 028 el archivado de tickets', async () => {
+    const validator = new PortalSchemaValidator(
+      dataSourceWith(
+        TABLAS_ESPERADAS,
+        COLUMNAS_ESPERADAS.filter((c) => !(c.tableName === 'tickets' && c.columnName === 'archived_at')),
+      ),
+    );
+
+    await expect(validator.onApplicationBootstrap()).rejects.toThrow(/028_tickets_archivados\.sql/);
   });
 
   it('nombra a la vez las tablas y todas las columnas ausentes, no solo la primera', async () => {

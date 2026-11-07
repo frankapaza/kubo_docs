@@ -13,6 +13,7 @@ import { TicketsService } from '../tickets/tickets.service';
 import { TicketTransitionsService } from '../tickets/ticket-transitions.service';
 import { TicketAssignmentService } from '../tickets/ticket-assignment.service';
 import { TicketAIService } from '../tickets/ticket-ai.service';
+import { TicketsRealtimeGateway } from '../tickets/tickets-realtime.gateway';
 import { ClientUsersController } from './client-users.controller';
 import { ClientUsersService } from './client-users.service';
 import { ClientUsersBulkService } from './client-users-bulk.service';
@@ -107,6 +108,7 @@ describe('Frontera personal / cliente — las dos estrategias (integración HTTP
         { provide: TicketTransitionsService, useValue: {} },
         { provide: TicketAssignmentService, useValue: {} },
         { provide: TicketAIService, useValue: {} },
+        { provide: TicketsRealtimeGateway, useValue: { notifyChanged: jest.fn() } },
         { provide: ClientUsersService, useValue: { listByClient: clientUsersList } },
         { provide: ClientUsersBulkService, useValue: {} },
         { provide: PortalTicketsService, useValue: { list: portalList } },
@@ -269,6 +271,7 @@ describe('Frontera personal / cliente — StaffOnlyGuard montado (integración H
         { provide: TicketTransitionsService, useValue: {} },
         { provide: TicketAssignmentService, useValue: {} },
         { provide: TicketAIService, useValue: {} },
+        { provide: TicketsRealtimeGateway, useValue: { notifyChanged: jest.fn() } },
         { provide: ClientUsersService, useValue: { listByClient: clientUsersList } },
         { provide: ClientUsersBulkService, useValue: {} },
       ],

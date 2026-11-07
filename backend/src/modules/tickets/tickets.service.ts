@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 
 import { TicketsRepository, TicketListFilters } from './tickets.repository';
+import { TicketsRealtimeGateway } from './tickets-realtime.gateway';
 import { TicketEventsService } from './ticket-events.service';
 import { SlaService } from './sla.service';
 import { ClientsService } from '../clients/clients.service';
@@ -122,6 +123,8 @@ export class TicketsService {
     private readonly sla: SlaService,
     private readonly clients: ClientsService,
     private readonly projects: ProjectsService,
+    // Opcional: los avisos en vivo son un extra; sin gateway (tests) no se emite.
+    @Optional() private readonly realtime?: TicketsRealtimeGateway,
   ) {}
 
   async findByIdOrFail(id: number): Promise<Ticket> {
@@ -252,7 +255,7 @@ export class TicketsService {
     // participarían del commit/rollback. Por eso el mensaje no se delega en
     // `TicketMessagesService.post`, que además escribiría el `MESSAGE_POSTED`
     // que aquí no debe existir.
-    return this.repo.runInTransaction(async (manager) => {
+    const created = await this.repo.runInTransaction(async (manager) => {
       const ticketRepo = manager.getRepository(Ticket);
       const eventRepo = manager.getRepository(TicketEvent);
       const messageRepo = manager.getRepository(TicketMessage);
@@ -323,6 +326,11 @@ export class TicketsService {
       const fresh = (await ticketRepo.findOneBy({ id: ticket.id }))!;
       return Object.assign({}, fresh, { firstMessageId: message.id }) as CreatedTicket;
     });
+
+    // Después del commit, no dentro: avisar de un ticket que luego se revierte
+    // mandaría al equipo a buscar algo que no existe.
+    this.realtime?.notifyCreated(created);
+    return created;
   }
 
   private buildCode(id: number): string {
@@ -365,5 +373,52 @@ export class TicketsService {
       });
     }
     await this.repo.remove(id);
+  }
+
+  /**
+   * Archiva en cualquier estado (decisión de negocio): saca el ticket de la
+   * bandeja sin tocar estado ni SLA. El ticket y su evento ARCHIVED se
+   * confirman juntos, igual que el alta. Archivar uno ya archivado es un
+   * no-op: no deja un segundo evento por el mismo hecho.
+   */
+  async archive(id: number, actorUserId: number, reason?: string): Promise<Ticket> {
+    return this.setArchived(id, actorUserId, true, reason);
+  }
+
+  async unarchive(id: number, actorUserId: number): Promise<Ticket> {
+    return this.setArchived(id, actorUserId, false);
+  }
+
+  private async setArchived(
+    id: number,
+    actorUserId: number,
+    archive: boolean,
+    reason?: string,
+  ): Promise<Ticket> {
+    const current = await this.findByIdOrFail(id);
+    if ((current.archivedAt !== null) === archive) return current;
+
+    return this.repo.runInTransaction(async (manager) => {
+      const ticketRepo = manager.getRepository(Ticket);
+      const eventRepo = manager.getRepository(TicketEvent);
+
+      await ticketRepo.update(id, {
+        archivedAt: archive ? new Date() : null,
+        archivedBy: archive ? actorUserId : null,
+      });
+      await eventRepo.save(
+        eventRepo.create({
+          ticketId: id,
+          type: archive ? 'ARCHIVED' : 'UNARCHIVED',
+          actorUserId,
+          actorClientUserId: null,
+          fromStatus: null,
+          toStatus: null,
+          reason: reason?.trim() || null,
+          payload: { status: current.status },
+        }),
+      );
+      return (await ticketRepo.findOneBy({ id }))!;
+    });
   }
 }

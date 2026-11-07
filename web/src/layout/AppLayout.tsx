@@ -9,12 +9,14 @@ import { roleLabels } from '../components/ui/Badge';
 import { ArchiveIcon, BellIcon, BookOpenIcon, BotIcon, FileTextIcon, FolderIcon, InboxIcon, KuboLogo, LogOutIcon, SettingsIcon, SparklesIcon, UsersIcon, ZapIcon } from '../components/ui/Icon';
 // Nota: "InboxIcon" también se usa en la sección Tickets (nav principal); es intencional.
 import { toast } from '../ui/Toast';
+import { useNewTicketNotifier } from '../pages/tickets/useNewTicketNotifier';
 // Nota: "UsersIcon" también se usa en la sección Clientes; es intencional.
 
 export default function AppLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  useNewTicketNotifier();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
 

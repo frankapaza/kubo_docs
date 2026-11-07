@@ -488,7 +488,8 @@ export type TicketRequestType = 'INCIDENCIA' | 'BUG' | 'MEJORA' | 'FEATURE' | 'A
 export type TicketEventType =
   | 'CREATED' | 'TRIAGED' | 'ASSIGNED' | 'TAKEN' | 'STATUS_CHANGED'
   | 'ESCALATED' | 'COMMENT' | 'RESOLVED' | 'CLOSED' | 'REOPENED'
-  | 'SLA_AT_RISK' | 'PRIORITY_OVERRIDDEN' | 'MESSAGE_POSTED';
+  | 'SLA_AT_RISK' | 'PRIORITY_OVERRIDDEN' | 'MESSAGE_POSTED'
+  | 'ARCHIVED' | 'UNARCHIVED';
 
 export interface Ticket {
   id: number;
@@ -521,6 +522,9 @@ export interface Ticket {
   correctiveAction: string | null;
   jiraIssueKey: string | null;
   jiraIssueUrl: string | null;
+  /** Archivado: fuera de la bandeja, con estado y SLA intactos (migración 028). */
+  archivedAt: string | null;
+  archivedBy: number | null;
   createdAt: string;
   // Derivados que calcula el backend (TicketsService.decorate)
   slaLabel: string;

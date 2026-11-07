@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { Ticket } from './entities/ticket.entity';
@@ -21,6 +22,7 @@ import { TicketAIService } from './ticket-ai.service';
 import { ClientSystemsService } from './client-systems.service';
 import { SupportAgentsService } from './support-agents.service';
 import { SlaRiskScheduler } from './sla-risk.scheduler';
+import { TicketsRealtimeGateway } from './tickets-realtime.gateway';
 import { TicketsController } from './tickets.controller';
 import { ClientSystemsController } from './client-systems.controller';
 import { SupportAgentsController } from './support-agents.controller';
@@ -35,6 +37,8 @@ import { DocumentsModule } from '../documents/documents.module';
 @Module({
   imports: [
     TypeOrmModule.forFeature([Ticket, TicketEvent, SlaPolicy, SupportAgent, ClientSystem]),
+    // Sin opciones: el gateway pasa el secreto en cada verificación, igual que AuthModule.
+    JwtModule.register({}),
     ClientsModule,
     ProjectsModule,
     UsersModule,
@@ -58,6 +62,7 @@ import { DocumentsModule } from '../documents/documents.module';
     ClientSystemsService,
     SupportAgentsService,
     SlaRiskScheduler,
+    TicketsRealtimeGateway,
   ],
   controllers: [TicketsController, ClientSystemsController, SupportAgentsController],
   exports: [
@@ -73,6 +78,7 @@ import { DocumentsModule } from '../documents/documents.module';
     TicketAssignmentService,
     ClientSystemsService,
     SupportAgentsService,
+    TicketsRealtimeGateway,
   ],
 })
 export class TicketsModule {}

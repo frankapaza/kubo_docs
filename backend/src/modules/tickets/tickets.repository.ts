@@ -26,6 +26,10 @@ export interface TicketListFilters {
   serviceCategory?: ServiceCategory;
   atRisk?: boolean;
   q?: string;
+  /** Oculta los CERRADO (vista "Todos" de la bandeja). */
+  excludeClosed?: boolean;
+  /** `true` = solo archivados; si no, los archivados nunca salen. */
+  archived?: boolean;
 }
 
 @Injectable()
@@ -62,6 +66,10 @@ export class TicketsRepository {
       qb.andWhere('t.service_category = :cat', { cat: filters.serviceCategory });
     }
     if (filters.atRisk) qb.andWhere('t.sla_at_risk = 1');
+    if (filters.excludeClosed) qb.andWhere("t.status <> 'CERRADO'");
+    // Archivar es "no lo quiero ver": un archivado no sale en ningún filtro
+    // salvo en el suyo propio.
+    qb.andWhere(filters.archived ? 't.archived_at IS NOT NULL' : 't.archived_at IS NULL');
     if (filters.q) {
       qb.andWhere('(t.raw_text LIKE :q OR t.subject LIKE :q OR t.code LIKE :q)', {
         q: `%${filters.q}%`,

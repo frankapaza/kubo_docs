@@ -4,6 +4,7 @@ import {
 import { authApi } from '../api/auth.api';
 import { TOKEN_STORAGE_KEY } from '../api/client';
 import type { User } from '../api/types';
+import { disconnectRealtime } from '../lib/realtime';
 
 interface AuthCtx {
   user: User | null;
@@ -48,6 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     localStorage.removeItem(TOKEN_STORAGE_KEY);
     localStorage.removeItem('kubo.refreshToken');
+    disconnectRealtime();
     setUser(null);
   };
 

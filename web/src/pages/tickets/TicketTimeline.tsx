@@ -19,6 +19,8 @@ const EVENT_LABELS: Record<TicketEventType, string> = {
   // tipo del evento es real y este mapa se indexa con él: sin entrada, un
   // MESSAGE_POSTED que llegara por otra vía saldría con el título en blanco.
   MESSAGE_POSTED: 'Mensaje en el hilo',
+  ARCHIVED: 'Archivado',
+  UNARCHIVED: 'Desarchivado',
 };
 
 export default function TicketTimeline({ events }: { events: TicketEvent[] }) {

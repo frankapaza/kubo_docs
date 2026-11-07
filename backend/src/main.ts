@@ -7,6 +7,7 @@ import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { createGlobalValidationPipe } from './common/validation/validation-pipe.factory';
 import { registerBulkSendJsonLimit } from './modules/portal/bulk-send-json-limit';
+import { CorsIoAdapter } from './common/realtime/cors-io.adapter';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
@@ -34,6 +35,11 @@ async function bootstrap(): Promise<void> {
     // una cabecera de respuesta, no de petición: no abre nada.
     exposedHeaders: ['Content-Disposition'],
   });
+
+  // Avisos en vivo de la mesa de servicio (TicketsRealtimeGateway).
+  app.useWebSocketAdapter(
+    new CorsIoAdapter(app, config.get<string>('CORS_ORIGINS', '*').split(',')),
+  );
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Kubo DevDocs API')
