@@ -3,7 +3,6 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { WorkItemsRepository, WorkItemListFilters } from './work-items.repository';
 import { WorkItemEventsService } from './work-item-events.service';
 import { ClientsService } from '../clients/clients.service';
-import { ProjectsService } from '../projects/projects.service';
 
 import { WorkItem } from './entities/work-item.entity';
 import { WorkItemEvent } from './entities/work-item-event.entity';
@@ -17,7 +16,6 @@ export class WorkItemsService {
     private readonly repo: WorkItemsRepository,
     private readonly events: WorkItemEventsService,
     private readonly clients: ClientsService,
-    private readonly projects: ProjectsService,
   ) {}
 
   async findByIdOrFail(id: number): Promise<WorkItem> {
@@ -40,7 +38,6 @@ export class WorkItemsService {
 
   async create(userId: number, dto: CreateWorkItemDto): Promise<WorkItem> {
     await this.clients.findByIdOrFail(dto.clientId);
-    if (dto.projectId !== undefined) await this.projects.findById(dto.projectId);
 
     const priority: WorkItemPriority = dto.priority ?? DEFAULT_PRIORITY;
 
@@ -68,7 +65,6 @@ export class WorkItemsService {
       const saved = await itemRepo.save(
         itemRepo.create({
           clientId: dto.clientId,
-          projectId: dto.projectId ?? null,
           title: dto.title.trim(),
           descriptionMd: dto.descriptionMd ?? null,
           acceptanceCriteria: dto.acceptanceCriteria ?? null,
@@ -124,7 +120,6 @@ export class WorkItemsService {
   async update(id: number, dto: UpdateWorkItemDto): Promise<WorkItem> {
     await this.findByIdOrFail(id);
     if (dto.clientId !== undefined) await this.clients.findByIdOrFail(dto.clientId);
-    if (dto.projectId !== undefined) await this.projects.findById(dto.projectId);
 
     const updated = await this.repo.update(id, { ...dto } as Partial<WorkItem>);
     return updated!;

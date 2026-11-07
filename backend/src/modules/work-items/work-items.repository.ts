@@ -10,7 +10,6 @@ export type DueFilter = 'vencidos' | 'semana';
 
 export interface WorkItemListFilters {
   clientId?: number;
-  projectId?: number;
   status?: WorkItemStatus;
   priority?: WorkItemPriority;
   assigneeUserId?: number;
@@ -30,7 +29,6 @@ export class WorkItemsRepository {
     const qb = this.repo.createQueryBuilder('w');
 
     if (filters.clientId) qb.andWhere('w.client_id = :clientId', { clientId: filters.clientId });
-    if (filters.projectId) qb.andWhere('w.project_id = :projectId', { projectId: filters.projectId });
     if (filters.status) qb.andWhere('w.status = :status', { status: filters.status });
     if (filters.priority) qb.andWhere('w.priority = :priority', { priority: filters.priority });
     if (filters.assigneeUserId) {

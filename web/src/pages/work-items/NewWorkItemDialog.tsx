@@ -2,9 +2,8 @@ import { useEffect, useState } from 'react';
 
 import { workItemsApi } from '../../api/work-items.api';
 import { clientsApi } from '../../api/clients.api';
-import { projectsApi } from '../../api/projects.api';
 import { supportAgentsApi } from '../../api/tickets.api';
-import type { Client, Project, SupportAgentView, WorkItem, WorkItemPriority } from '../../api/types';
+import type { Client, SupportAgentView, WorkItem, WorkItemPriority } from '../../api/types';
 
 export interface NewWorkItemDialogProps {
   open: boolean;
@@ -41,7 +40,6 @@ const labelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 600, marginB
  */
 export default function NewWorkItemDialog({ open, onCancel, onCreated }: NewWorkItemDialogProps) {
   const [clientId, setClientId] = useState<number | ''>('');
-  const [projectId, setProjectId] = useState<number | ''>('');
   const [title, setTitle] = useState('');
   const [descriptionMd, setDescriptionMd] = useState('');
   const [priority, setPriority] = useState<WorkItemPriority>('MEDIA');
@@ -49,7 +47,6 @@ export default function NewWorkItemDialog({ open, onCancel, onCreated }: NewWork
   const [dueDate, setDueDate] = useState('');
 
   const [clients, setClients] = useState<Client[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
   const [agents, setAgents] = useState<SupportAgentView[]>([]);
 
   const [busy, setBusy] = useState(false);
@@ -61,7 +58,6 @@ export default function NewWorkItemDialog({ open, onCancel, onCreated }: NewWork
   useEffect(() => {
     if (!open) return;
     setClientId('');
-    setProjectId('');
     setTitle('');
     setDescriptionMd('');
     setPriority('MEDIA');
@@ -102,27 +98,6 @@ export default function NewWorkItemDialog({ open, onCancel, onCreated }: NewWork
     };
   }, [open]);
 
-  // Proyectos activos del cliente elegido; sin cliente, el select queda
-  // vacío y deshabilitado.
-  useEffect(() => {
-    if (!open || !clientId) {
-      setProjects([]);
-      return;
-    }
-    let cancelled = false;
-    projectsApi
-      .list({ status: 'ACTIVE', clientId })
-      .then((p) => {
-        if (!cancelled) setProjects(p.data);
-      })
-      .catch((e) => {
-        if (!cancelled) console.warn('[NewWorkItemDialog] No se pudo cargar los proyectos del cliente.', e);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, clientId]);
-
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -143,7 +118,6 @@ export default function NewWorkItemDialog({ open, onCancel, onCreated }: NewWork
     try {
       const created = await workItemsApi.create({
         clientId: Number(clientId),
-        projectId: projectId || undefined,
         title: title.trim(),
         descriptionMd: descriptionMd.trim() || undefined,
         priority,
@@ -193,7 +167,7 @@ export default function NewWorkItemDialog({ open, onCancel, onCreated }: NewWork
           </div>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
           <label htmlFor="new-wi-client">
             <span style={labelStyle}>Cliente *</span>
             <select
@@ -202,29 +176,12 @@ export default function NewWorkItemDialog({ open, onCancel, onCreated }: NewWork
               onChange={(e) => {
                 const v = e.target.value ? Number(e.target.value) : '';
                 setClientId(v);
-                setProjectId('');
               }}
               style={inputStyle}
             >
               <option value="">Selecciona un cliente…</option>
               {clients.map((c) => (
                 <option key={c.id} value={c.id}>{c.razonSocial}</option>
-              ))}
-            </select>
-          </label>
-
-          <label htmlFor="new-wi-project">
-            <span style={labelStyle}>Proyecto</span>
-            <select
-              id="new-wi-project"
-              value={projectId}
-              disabled={!clientId}
-              onChange={(e) => setProjectId(e.target.value ? Number(e.target.value) : '')}
-              style={{ ...inputStyle, cursor: clientId ? 'pointer' : 'not-allowed', background: clientId ? '#fff' : '#f5f6f6' }}
-            >
-              <option value="">{clientId ? '(sin proyecto)' : 'Elige un cliente primero'}</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
           </label>

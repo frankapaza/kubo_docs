@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 
 import { workItemsApi } from '../../api/work-items.api';
 import { clientsApi } from '../../api/clients.api';
-import { projectsApi } from '../../api/projects.api';
 import { supportAgentsApi } from '../../api/tickets.api';
 import type { SupportAgentView, WorkItemDetail, WorkItemPriority } from '../../api/types';
 import { PRIORITY_STYLES, STATUS_LABELS } from './workitem-ui';
@@ -54,7 +53,6 @@ export default function WorkItemPanel({ workItemId, onClose, onChanged }: WorkIt
   const [agents, setAgents] = useState<SupportAgentView[]>([]);
   const [usersById, setUsersById] = useState<Map<number, string>>(new Map());
   const [clientName, setClientName] = useState<string | null>(null);
-  const [projectName, setProjectName] = useState<string | null>(null);
 
   const [busy, setBusy] = useState(false);
   // Un fallo al escribir el cambio y un fallo al refrescar después de que el
@@ -128,29 +126,6 @@ export default function WorkItemPanel({ workItemId, onClose, onChanged }: WorkIt
       cancelled = true;
     };
   }, [clientId]);
-
-  const projectId = detail?.workItem.projectId ?? null;
-  useEffect(() => {
-    if (!projectId) {
-      setProjectName(null);
-      return;
-    }
-    let cancelled = false;
-    projectsApi
-      .findOne(projectId)
-      .then((p) => {
-        if (!cancelled) setProjectName(p.name);
-      })
-      .catch((e) => {
-        if (!cancelled) {
-          console.warn('[WorkItemPanel] No se pudo cargar el proyecto del requerimiento.', e);
-          setProjectName(null);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -303,10 +278,6 @@ export default function WorkItemPanel({ workItemId, onClose, onChanged }: WorkIt
               <div style={fieldRow}>
                 <span style={fieldLabel}>Cliente</span>
                 <span style={fieldValue}>{clientName ?? String(item.clientId)}</span>
-              </div>
-              <div style={fieldRow}>
-                <span style={fieldLabel}>Proyecto</span>
-                <span style={fieldValue}>{item.projectId ? projectName ?? String(item.projectId) : 'Sin proyecto'}</span>
               </div>
               <div style={fieldRow}>
                 <span style={fieldLabel}>Fecha objetivo</span>

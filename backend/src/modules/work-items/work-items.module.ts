@@ -11,10 +11,9 @@ import { WorkItemBoardService } from './work-item-board.service';
 import { WorkItemIntakeService } from './work-item-intake.service';
 import { WorkItemsController } from './work-items.controller';
 import { ClientsModule } from '../clients/clients.module';
-import { ProjectsModule } from '../projects/projects.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([WorkItem, WorkItemEvent]), ClientsModule, ProjectsModule],
+  imports: [TypeOrmModule.forFeature([WorkItem, WorkItemEvent]), ClientsModule],
   controllers: [WorkItemsController],
   providers: [
     WorkItemsRepository,

@@ -5,7 +5,6 @@ import type {
 
 export interface WorkItemListParams {
   clientId?: number;
-  projectId?: number;
   status?: WorkItemStatus;
   priority?: WorkItemPriority;
   assigneeId?: number;
@@ -15,7 +14,6 @@ export interface WorkItemListParams {
 
 export interface CreateWorkItemBody {
   clientId: number;
-  projectId?: number;
   title: string;
   descriptionMd?: string;
   acceptanceCriteria?: string[];

@@ -31,7 +31,6 @@ export class WorkItemsController {
   @Get()
   list(
     @Query('clientId') clientId?: string,
-    @Query('projectId') projectId?: string,
     @Query('status') status?: WorkItemStatus,
     @Query('priority') priority?: WorkItemPriority,
     @Query('assigneeId') assigneeId?: string,
@@ -40,7 +39,6 @@ export class WorkItemsController {
   ) {
     return this.service.list({
       clientId: clientId ? Number(clientId) : undefined,
-      projectId: projectId ? Number(projectId) : undefined,
       status,
       priority,
       assigneeUserId: assigneeId ? Number(assigneeId) : undefined,

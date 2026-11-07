@@ -1,6 +1,10 @@
 import { WorkItemsService } from './work-items.service';
 import { WorkItem } from './entities/work-item.entity';
 import { WorkItemEvent } from './entities/work-item-event.entity';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { CreateWorkItemDto } from './dto/create-work-item.dto';
+import { UpdateWorkItemDto } from './dto/update-work-item.dto';
 
 const column = (priorities: string[]): WorkItem[] =>
   priorities.map((p, i) => ({ id: i + 1, priority: p, boardOrder: i }) as WorkItem);
@@ -52,29 +56,40 @@ const makeService = (pendingColumn: WorkItem[] = []) => {
   };
   const events = { record: jest.fn().mockResolvedValue({}), listByItem: jest.fn() };
   const clients = { findByIdOrFail: jest.fn().mockResolvedValue({ id: 1 }) };
-  const projects = { findById: jest.fn().mockResolvedValue({ id: 1 }) };
   return {
-    service: new WorkItemsService(repo as any, events as any, clients as any, projects as any),
-    repo, events, clients, projects, applied, savedEvents,
+    service: new WorkItemsService(repo as any, events as any, clients as any),
+    repo, events, clients, applied, savedEvents,
     itemRepoFind: itemRepoStub.find,
+    itemRepoCreate: itemRepoStub.create,
   };
 };
+
+describe('el proyecto sale del requerimiento', () => {
+  it('el alta ya no escribe proyecto, aunque lo manden', async () => {
+    const { service, itemRepoCreate } = makeService();
+    await service.create(1, { clientId: 7, title: 'Algo', projectId: 42 } as any);
+    expect(itemRepoCreate.mock.calls[0][0]).not.toHaveProperty('projectId');
+  });
+
+  it('el DTO rechaza un projectId con la lista blanca global', async () => {
+    const dto = plainToInstance(CreateWorkItemDto, { clientId: 7, title: 'Algo', projectId: 42 });
+    const errors = await validate(dto, { whitelist: true, forbidNonWhitelisted: true });
+    expect(errors.map((e) => e.property)).toContain('projectId');
+  });
+
+  // `UpdateWorkItemDto` deriva del de alta: hereda la ausencia.
+  it('la edicion tampoco admite projectId', async () => {
+    const dto = plainToInstance(UpdateWorkItemDto, { projectId: 42 });
+    const errors = await validate(dto, { whitelist: true, forbidNonWhitelisted: true });
+    expect(errors.map((e) => e.property)).toContain('projectId');
+  });
+});
 
 describe('create', () => {
   it('valida el cliente', async () => {
     const { service, clients } = makeService();
     await service.create(5, { clientId: 1, title: 'Ajustar IGV' });
     expect(clients.findByIdOrFail).toHaveBeenCalledWith(1);
-  });
-
-  it('valida el proyecto solo si viene', async () => {
-    const { service, projects } = makeService();
-    await service.create(5, { clientId: 1, title: 'X' });
-    expect(projects.findById).not.toHaveBeenCalled();
-
-    const b = makeService();
-    await b.service.create(5, { clientId: 1, projectId: 7, title: 'X' });
-    expect(b.projects.findById).toHaveBeenCalledWith(7);
   });
 
   it('usa MEDIA cuando no se indica prioridad', async () => {
