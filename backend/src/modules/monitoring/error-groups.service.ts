@@ -1,12 +1,10 @@
 import { Injectable, Logger, NotFoundException, OnModuleDestroy } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 
-import { isDuplicateEntry } from '../../common/db-errors';
 import { PERU_UTC_OFFSET_MINUTES } from '../../common/peru-month';
 import { ClientsRepository } from '../clients/clients.repository';
 import { TicketStatus } from '../tickets/domain/ticket-state-machine';
 import { ErrorNewPayload, TicketsRealtimeGateway } from '../tickets/tickets-realtime.gateway';
-import { TicketsRepository } from '../tickets/tickets.repository';
 import { computeErrorFingerprint } from './domain/error-fingerprint';
 import { decideOnOccurrence, ErrorGroupStatus, GroupState, OccurrenceDecision } from './domain/error-group-state';
 import { peruDay } from './domain/event-time';
@@ -82,6 +80,18 @@ export const MAX_SAMPLES = 50;
 export const MAX_SERVERS = 20;
 /** `errors:changed` como mucho cada 5 s: la lista del panel no se recarga en cada lote. */
 export const ERRORS_CHANGED_MIN_INTERVAL_MS = 5000;
+/** Intentos de la transacción de una huella ante deadlock o espera de bloqueo agotada. */
+export const TX_MAX_ATTEMPTS = 3;
+const TX_RETRY_BASE_MS = 25;
+
+/** 1213 ER_LOCK_DEADLOCK, 1205 ER_LOCK_WAIT_TIMEOUT: conflictos de la carrera, no del lote. */
+function isLockConflict(e: unknown): boolean {
+  const err = e as { errno?: number; code?: string } | null;
+  return (
+    err?.errno === 1213 || err?.errno === 1205 || err?.code === 'ER_LOCK_DEADLOCK' || err?.code === 'ER_LOCK_WAIT_TIMEOUT'
+  );
+}
+
 const DAILY_WINDOW_DAYS = 30;
 const DEFAULT_PAGE_SIZE = 25;
 const MAX_PAGE_SIZE = 100;
@@ -154,7 +164,6 @@ export class ErrorGroupsService implements OnModuleDestroy {
 
   constructor(
     private readonly repo: ErrorGroupsRepository,
-    private readonly tickets: TicketsRepository,
     private readonly clients: ClientsRepository,
     private readonly gateway: TicketsRealtimeGateway,
   ) {}
@@ -169,8 +178,14 @@ export class ErrorGroupsService implements OnModuleDestroy {
   /**
    * Registra los errores de un lote. Una transacción por huella y no una por
    * lote: el bloqueo de cada grupo dura lo mínimo y un grupo que falla no
-   * deshace los demás. Si alguno falla se procesan los restantes igual y al
-   * final se relanza el primer error (la ingesta decide qué hacer con él).
+   * deshace los demás.
+   *
+   * Contrato de fallo (la ingesta depende de él): si una huella falla, las
+   * demás se procesan y CONFIRMAN igual, y al terminar se relanza el PRIMER
+   * error. Así quien llama sabe que el lote quedó a medias y no debe darlo
+   * por registrado (no marcarlo como visto), aunque parte ya esté guardado.
+   * Un deadlock o una espera de bloqueo agotada se reintentan antes, hasta
+   * `TX_MAX_ATTEMPTS` veces: no son fallos del lote sino de la carrera.
    *
    * Los avisos al panel salen DESPUÉS de confirmar: avisar de un grupo cuya
    * transacción luego se revierte mostraría un error que no existe.
@@ -185,7 +200,7 @@ export class ErrorGroupsService implements OnModuleDestroy {
 
     for (const batch of batches) {
       try {
-        const r = await this.repo.runInTransaction((m) => this.recordOne(m, ctx, batch));
+        const r = await this.withLockRetry(() => this.repo.runInTransaction((m) => this.recordOne(m, ctx, batch)));
         changed = true;
         if (r.decision.notify) toNotify.push({ ...r, batch });
       } catch (e) {
@@ -200,6 +215,30 @@ export class ErrorGroupsService implements OnModuleDestroy {
     if (changed && toNotify.length === 0) this.notifyChangedThrottled();
 
     if (firstError) throw firstError;
+  }
+
+  /**
+   * Reintenta la transacción entera ante 1213 (deadlock: MySQL ya la
+   * revirtió) o 1205 (espera de bloqueo agotada). Sin esto las ocurrencias,
+   * el conteo diario y el aviso se perderían, porque un lote reintentado por
+   * el appender ya no vuelve a sumar (Review Focus 1). Espera breve y con
+   * azar para que los dos lotes en carrera no vuelvan a chocar al mismo paso.
+   */
+  private async withLockRetry<T>(work: () => Promise<T>): Promise<T> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await work();
+      } catch (e) {
+        if (!isLockConflict(e) || attempt >= TX_MAX_ATTEMPTS) throw e;
+        this.log.warn(`Conflicto de bloqueo (${(e as { errno?: number }).errno}); reintento ${attempt}`);
+        await this.sleep(TX_RETRY_BASE_MS * attempt + Math.floor(Math.random() * TX_RETRY_BASE_MS));
+      }
+    }
+  }
+
+  /** Separado para que las pruebas no esperen de verdad. */
+  protected sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /** Separa el lote por huella. El cliente y el sistema son del evento (la ingesta ya resolvió `kubo:ruc`). */
@@ -242,39 +281,44 @@ export class ErrorGroupsService implements OnModuleDestroy {
     const first = batch.events[0].at;
     const latest = batch.events[batch.events.length - 1].at;
 
-    let group = await this.repo.lockByFingerprint(m, batch.fingerprint);
-    let created = false;
-    if (!group) {
-      try {
-        // Se crea con total 0 y sin servidores: la suma va por el mismo
-        // camino que un grupo existente, así no hay dos lógicas.
-        await this.repo.insertGroup(m, {
-          fingerprint: batch.fingerprint,
-          installationId: ctx.installationId,
-          clientId: batch.clientId,
-          systemId: batch.systemId,
-          aplicativo: ctx.aplicativo,
-          exceptionType: batch.exceptionType?.slice(0, 255) ?? null,
-          title: batch.title.slice(0, 300),
-          logger: batch.logger.slice(0, 255),
-          firstSeenAt: first,
-          lastSeenAt: latest,
-          occurrencesTotal: 0,
-          servers: [],
-          status: 'NUEVO',
-        });
-        created = true;
-      } catch (e) {
-        // Otro lote creó el grupo entre nuestro SELECT y el INSERT. En MySQL
-        // el choque solo revierte la sentencia, no la transacción: se relee
-        // con bloqueo (esperando a que el otro confirme) y se suma encima.
-        if (!isDuplicateEntry(e)) throw e;
-      }
-      group = await this.repo.lockByFingerprint(m, batch.fingerprint);
-      if (!group) throw new Error(`El grupo ${batch.fingerprint} no aparece tras crearlo`);
+    // Primero una lectura SIN bloqueo. Un `SELECT ... FOR UPDATE` sobre una
+    // huella que aún no existe toma en REPEATABLE READ un bloqueo de hueco, y
+    // dos lotes que crean la misma huella (o dos huellas del mismo hueco) se
+    // bloquearían mutuamente al insertar (ER_LOCK_DEADLOCK, 1213). Por eso
+    // solo se bloquea una fila que ya existe.
+    if (!(await this.repo.findByFingerprint(m, batch.fingerprint))) {
+      // `INSERT ... ON DUPLICATE KEY UPDATE id = id`: si otro lote la creó a
+      // la vez no hay error, y el choque deja un bloqueo exclusivo sobre su
+      // fila (no uno compartido que luego habría que subir, otro deadlock
+      // clásico). Se crea con total 0 y sin servidores: la suma va por el
+      // mismo camino que un grupo existente.
+      await this.repo.insertGroupIfMissing(m, {
+        fingerprint: batch.fingerprint,
+        installationId: ctx.installationId,
+        clientId: batch.clientId,
+        systemId: batch.systemId,
+        aplicativo: ctx.aplicativo,
+        exceptionType: batch.exceptionType?.slice(0, 255) ?? null,
+        title: batch.title.slice(0, 300),
+        logger: batch.logger.slice(0, 255),
+        firstSeenAt: first,
+        lastSeenAt: latest,
+        occurrencesTotal: 0,
+        servers: [],
+        status: 'NUEVO',
+      });
     }
+    // Ahora la fila existe seguro: este bloqueo es de registro, sin hueco.
+    // Espera a que confirme quien la tenga y lee lo último confirmado.
+    const group = await this.repo.lockByFingerprint(m, batch.fingerprint);
+    if (!group) throw new Error(`El grupo ${batch.fingerprint} no aparece tras crearlo`);
 
-    const decision = created ? decideOnOccurrence(null, latest) : decideOnOccurrence(await this.stateOf(group), latest);
+    // «Nuevo» = nadie ha sumado todavía. Todo lote confirmado suma al menos
+    // 1 en la misma transacción que crea la fila, así que total 0 bajo el
+    // bloqueo solo puede ser la fila que acaba de insertar ESTE lote. Sirve
+    // igual si el INSERT fue nuestro o si chocó con el de otro lote.
+    const created = Number(group.occurrencesTotal) === 0;
+    const decision = created ? decideOnOccurrence(null, latest) : decideOnOccurrence(await this.stateOf(m, group), latest);
     const groupId = Number(group.id);
 
     const current = parseJson<string[]>(group.servers, []);
@@ -320,17 +364,16 @@ export class ErrorGroupsService implements OnModuleDestroy {
   }
 
   /**
-   * Estado del grupo para decidir. El ticket se lee fuera del bloqueo (con el
-   * repositorio inyectado): es solo una lectura de otra tabla, no participa
-   * de la escritura y no hace falta que vea un estado transaccional.
+   * Estado del grupo para decidir. El ticket se lee con el `EntityManager` de
+   * la transacción (la misma conexión que tiene el bloqueo): con el
+   * repositorio inyectado cada lote retendría una segunda conexión del pool
+   * mientras espera, y diez lotes simultáneos de grupos con ticket agotarían
+   * el pool (10 por omisión) y colgarían el backend.
    */
-  private async stateOf(group: ErrorGroup): Promise<GroupState> {
+  private async stateOf(m: EntityManager, group: ErrorGroup): Promise<GroupState> {
     let ticket: GroupState['ticket'] = null;
     if (group.status === 'CON_TICKET' && group.ticketId !== null && group.ticketId !== undefined) {
-      const t = await this.tickets.findById(Number(group.ticketId));
-      ticket = t
-        ? { code: t.code ?? `#${t.id}`, status: t.status, resolvedAt: t.resolvedAt ?? null, closedAt: t.closedAt ?? null }
-        : null;
+      ticket = await this.repo.findTicketState(m, Number(group.ticketId));
     }
     return {
       status: group.status,

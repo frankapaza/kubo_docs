@@ -2,7 +2,8 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 
-import { ErrorGroupStatus } from './domain/error-group-state';
+import { Ticket } from '../tickets/entities/ticket.entity';
+import { ErrorGroupStatus, LinkedTicketState } from './domain/error-group-state';
 import { ErrorGroup } from './entities/error-group.entity';
 import { ErrorOccurrence } from './entities/error-occurrence.entity';
 
@@ -117,9 +118,60 @@ export class ErrorGroupsRepository {
       .getOne();
   }
 
-  /** Crea el grupo; si otro lote lo creó a la vez, lanza ER_DUP_ENTRY (lo maneja el servicio). */
-  async insertGroup(manager: EntityManager, data: Partial<ErrorGroup>): Promise<void> {
-    await manager.getRepository(ErrorGroup).insert(data);
+  /**
+   * Lectura sin bloqueo (instantánea de la transacción). Solo decide si hay
+   * que intentar crear la fila; el estado con el que se decide se lee
+   * después, ya bloqueado, con `lockByFingerprint`.
+   */
+  findByFingerprint(manager: EntityManager, fingerprint: string): Promise<ErrorGroup | null> {
+    return manager.getRepository(ErrorGroup).findOne({ where: { fingerprint } });
+  }
+
+  /**
+   * Crea el grupo si no existe. `ON DUPLICATE KEY UPDATE id = id` en vez de
+   * un INSERT a secas: si otro lote lo creó a la vez no hay ER_DUP_ENTRY, y
+   * InnoDB toma directamente un bloqueo EXCLUSIVO de su fila. Con el INSERT a
+   * secas el choque deja un bloqueo compartido, y dos lotes que luego piden
+   * el exclusivo (FOR UPDATE) se bloquean mutuamente.
+   */
+  async insertGroupIfMissing(manager: EntityManager, d: Partial<ErrorGroup>): Promise<void> {
+    await manager.query(
+      `INSERT INTO error_groups
+         (fingerprint, installation_id, client_id, system_id, aplicativo, exception_type, title, logger,
+          first_seen_at, last_seen_at, occurrences_total, servers, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?)
+       ON DUPLICATE KEY UPDATE id = id`,
+      [
+        d.fingerprint,
+        d.installationId,
+        d.clientId ?? null,
+        d.systemId ?? null,
+        d.aplicativo,
+        d.exceptionType ?? null,
+        d.title,
+        d.logger,
+        d.firstSeenAt,
+        d.lastSeenAt,
+        d.occurrencesTotal ?? 0,
+        JSON.stringify(d.servers ?? []),
+        d.status ?? 'NUEVO',
+      ],
+    );
+  }
+
+  /**
+   * Estado del ticket vinculado, leído con el manager de la transacción: la
+   * misma conexión que tiene el bloqueo, nunca una segunda del pool.
+   */
+  async findTicketState(manager: EntityManager, ticketId: number): Promise<LinkedTicketState | null> {
+    const t = await manager.getRepository(Ticket).findOne({ where: { id: ticketId } });
+    if (!t) return null;
+    return {
+      code: t.code ?? `#${t.id}`,
+      status: t.status,
+      resolvedAt: t.resolvedAt ?? null,
+      closedAt: t.closedAt ?? null,
+    };
   }
 
   /**
@@ -129,6 +181,10 @@ export class ErrorGroupsRepository {
    * un valor leído, por si algún día se escribe fuera de este bloqueo.
    */
   async applyBatch(manager: EntityManager, groupId: number, u: GroupBatchUpdate): Promise<void> {
+    // Al reabrir se borra la resolución anterior (una resolución que el error
+    // desmintió no debe seguir mostrándose) pero se CONSERVA ticket_id: el
+    // motivo de reapertura nombra ese ticket y su página enlaza al error por él.
+    const reopen = u.reopen ? 1 : 0;
     await manager.query(
       `UPDATE error_groups
           SET first_seen_at = LEAST(first_seen_at, ?),
@@ -137,7 +193,10 @@ export class ErrorGroupsRepository {
               servers = CAST(? AS JSON),
               status = ?,
               reopened_at = IF(?, ?, reopened_at),
-              reopen_reason = IF(?, ?, reopen_reason)
+              reopen_reason = IF(?, ?, reopen_reason),
+              resolved_at = IF(?, NULL, resolved_at),
+              resolved_by = IF(?, NULL, resolved_by),
+              resolution_note = IF(?, NULL, resolution_note)
         WHERE id = ?`,
       [
         u.firstSeenAt,
@@ -145,10 +204,13 @@ export class ErrorGroupsRepository {
         u.count,
         JSON.stringify(u.servers),
         u.status,
-        u.reopen ? 1 : 0,
+        reopen,
         u.reopen?.at ?? null,
-        u.reopen ? 1 : 0,
+        reopen,
         u.reopen?.reason ?? null,
+        reopen,
+        reopen,
+        reopen,
         groupId,
       ],
     );

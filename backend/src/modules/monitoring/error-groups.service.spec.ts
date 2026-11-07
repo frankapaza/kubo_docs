@@ -1,4 +1,5 @@
-import { ErrorGroupsService, ErrorEventInput, OccurrenceContext, fitTextBytes } from './error-groups.service';
+import { ErrorGroupsService, ErrorEventInput, OccurrenceContext, fitTextBytes, TX_MAX_ATTEMPTS } from './error-groups.service';
+import { ErrorGroupsRepository } from './error-groups.repository';
 import { computeErrorFingerprint } from './domain/error-fingerprint';
 
 const AHORA = new Date('2026-11-07T15:00:00.000Z');
@@ -15,11 +16,18 @@ const makeService = () => {
   const repo = {
     groups,
     runInTransaction: jest.fn(async (work: (m: any) => Promise<unknown>) => work(manager)),
+    findByFingerprint: jest.fn(async (_m: any, fp: string) => groups.get(fp) ?? null),
     lockByFingerprint: jest.fn(async (_m: any, fp: string) => groups.get(fp) ?? null),
-    insertGroup: jest.fn(async (_m: any, data: any) => {
-      groups.set(data.fingerprint, { ...data, id: String(++seq) });
+    // Como el ON DUPLICATE KEY UPDATE id = id: si ya existe no hace nada.
+    insertGroupIfMissing: jest.fn(async (_m: any, data: any) => {
+      if (!groups.has(data.fingerprint)) groups.set(data.fingerprint, { ...data, id: String(++seq) });
     }),
-    applyBatch: jest.fn().mockResolvedValue(undefined),
+    // Suma de verdad: «nuevo» se decide por total 0 bajo el bloqueo.
+    applyBatch: jest.fn(async (_m: any, id: number, u: any) => {
+      const g = [...groups.values()].find((x) => Number(x.id) === Number(id));
+      if (g) Object.assign(g, { occurrencesTotal: Number(g.occurrencesTotal) + u.count, servers: u.servers, status: u.status });
+    }),
+    findTicketState: jest.fn().mockResolvedValue(null),
     insertOccurrences: jest.fn().mockResolvedValue(undefined),
     trimOccurrences: jest.fn().mockResolvedValue(undefined),
     addDaily: jest.fn().mockResolvedValue(undefined),
@@ -29,11 +37,13 @@ const makeService = () => {
     listOccurrences: jest.fn().mockResolvedValue([]),
     dailySince: jest.fn().mockResolvedValue([]),
   };
-  const tickets = { findById: jest.fn().mockResolvedValue(null) };
   const clients = { findById: jest.fn(async (id: number) => (Number(id) === 7 ? { id: '7', razonSocial: 'ACME SAC' } : null)) };
   const gateway = { notifyErrorNew: jest.fn(), notifyErrorsChanged: jest.fn() };
-  const service = new ErrorGroupsService(repo as any, tickets as any, clients as any, gateway as any);
-  return { service, repo, tickets, clients, gateway, manager };
+  const service = new ErrorGroupsService(repo as any, clients as any, gateway as any);
+  // Sin esperas reales entre reintentos.
+  const sleep = jest.fn().mockResolvedValue(undefined);
+  (service as any).sleep = sleep;
+  return { service, repo, clients, gateway, manager, sleep };
 };
 
 const ctx: OccurrenceContext = {
@@ -78,6 +88,7 @@ const sembrar = (repo: any, over: any) => {
     systemId: '3',
     servers: ['SRV-01'],
     status: 'NUEVO',
+    occurrencesTotal: 5,
     resolvedAt: null,
     ticketId: null,
     ...over,
@@ -98,7 +109,7 @@ describe('ErrorGroupsService.recordOccurrences', () => {
     const { service, repo, gateway } = makeService();
     await service.recordOccurrences(ctx, [ev(), ev({ mensaje: 'No se pudo enviar el comprobante 456' }), ev()]);
 
-    expect(repo.insertGroup).toHaveBeenCalledTimes(1);
+    expect(repo.insertGroupIfMissing).toHaveBeenCalledTimes(1);
     expect(repo.runInTransaction).toHaveBeenCalledTimes(1);
     expect(repo.applyBatch).toHaveBeenCalledWith(expect.anything(), 1, expect.objectContaining({ count: 3 }));
     expect(repo.insertOccurrences.mock.calls[0][1]).toHaveLength(3);
@@ -127,7 +138,7 @@ describe('ErrorGroupsService.recordOccurrences', () => {
 
     await service.recordOccurrences(ctx, [ev()]);
 
-    expect(repo.insertGroup).not.toHaveBeenCalled();
+    expect(repo.insertGroupIfMissing).not.toHaveBeenCalled();
     expect(repo.applyBatch).toHaveBeenCalledWith(
       expect.anything(),
       9,
@@ -142,9 +153,9 @@ describe('ErrorGroupsService.recordOccurrences', () => {
   });
 
   it('un CON_TICKET con el ticket abierto solo suma', async () => {
-    const { service, repo, tickets, gateway } = makeService();
+    const { service, repo, gateway } = makeService();
     sembrar(repo, { status: 'CON_TICKET', ticketId: '12' });
-    tickets.findById.mockResolvedValue({ id: '12', code: 'KB-0012', status: 'EN_ATENCION', resolvedAt: null, closedAt: null });
+    repo.findTicketState.mockResolvedValue({ code: 'KB-0012', status: 'EN_ATENCION', resolvedAt: null, closedAt: null });
 
     await service.recordOccurrences(ctx, [ev(), ev()]);
 
@@ -157,10 +168,9 @@ describe('ErrorGroupsService.recordOccurrences', () => {
   });
 
   it('con el ticket RESUELTO antes de la ocurrencia se reabre con «Reapareció tras el ticket KB-0012»', async () => {
-    const { service, repo, tickets, gateway } = makeService();
+    const { service, repo, gateway, manager } = makeService();
     sembrar(repo, { status: 'CON_TICKET', ticketId: '12' });
-    tickets.findById.mockResolvedValue({
-      id: '12',
+    repo.findTicketState.mockResolvedValue({
       code: 'KB-0012',
       status: 'RESUELTO',
       resolvedAt: new Date('2026-11-07T12:00:00.000Z'),
@@ -169,7 +179,8 @@ describe('ErrorGroupsService.recordOccurrences', () => {
 
     await service.recordOccurrences(ctx, [ev()]);
 
-    expect(tickets.findById).toHaveBeenCalledWith(12);
+    // Con el manager de la transacción: nunca una segunda conexión del pool.
+    expect(repo.findTicketState).toHaveBeenCalledWith(manager, 12);
     expect(repo.applyBatch).toHaveBeenCalledWith(
       expect.anything(),
       9,
@@ -228,7 +239,7 @@ describe('ErrorGroupsService.recordOccurrences', () => {
     const { service, repo, gateway } = makeService();
     const e = ev({ clientId: null, systemId: null });
     await service.recordOccurrences(ctx, [e]);
-    const data = repo.insertGroup.mock.calls[0][1];
+    const data = repo.insertGroupIfMissing.mock.calls[0][1];
     expect(data.fingerprint).toBe(huellaDe(e, 'interno', 'ninguno'));
     expect(data.clientId).toBeNull();
     expect(gateway.notifyErrorNew).toHaveBeenCalledWith(expect.objectContaining({ clienteNombre: null }));
@@ -238,25 +249,92 @@ describe('ErrorGroupsService.recordOccurrences', () => {
     const { service, repo } = makeService();
     const e = ev({ clientId: 7, systemId: 3 });
     await service.recordOccurrences(ctx, [e]);
-    const data = repo.insertGroup.mock.calls[0][1];
+    const data = repo.insertGroupIfMissing.mock.calls[0][1];
     expect(data.fingerprint).toBe(huellaDe(e, '7', '3'));
     expect(data).toMatchObject({ clientId: 7, systemId: 3, installationId: 4 });
   });
 
   it('si el INSERT del grupo choca con la clave única (otro lote lo creó a la vez), recarga y actualiza', async () => {
     const { service, repo, gateway } = makeService();
-    repo.insertGroup.mockImplementationOnce(async (_m: any, data: any) => {
-      // El otro lote ganó la carrera: su fila ya existe cuando este relee.
-      repo.groups.set(data.fingerprint, { ...data, id: '33', status: 'NUEVO', servers: ['SRV-01'] });
-      throw Object.assign(new Error('Duplicate entry'), { code: 'ER_DUP_ENTRY' });
+    repo.insertGroupIfMissing.mockImplementationOnce(async (_m: any, data: any) => {
+      // El otro lote ganó la carrera y ya confirmó (total >= 1): el ON
+      // DUPLICATE KEY no inserta nada y este lote suma sobre su fila.
+      repo.groups.set(data.fingerprint, { ...data, id: '33', status: 'NUEVO', servers: ['SRV-01'], occurrencesTotal: 2 });
     });
 
     await service.recordOccurrences(ctx, [ev()]);
 
-    expect(repo.lockByFingerprint).toHaveBeenCalledTimes(2);
+    expect(repo.insertGroupIfMissing).toHaveBeenCalledTimes(1);
     expect(repo.applyBatch).toHaveBeenCalledWith(expect.anything(), 33, expect.objectContaining({ count: 1 }));
     // El aviso de «nuevo» ya lo dio el lote que lo creó.
     expect(gateway.notifyErrorNew).not.toHaveBeenCalled();
+  });
+
+  it('una huella nueva se crea antes de bloquear (sin FOR UPDATE sobre un hueco)', async () => {
+    const { service, repo } = makeService();
+    await service.recordOccurrences(ctx, [ev()]);
+    const leer = repo.findByFingerprint.mock.invocationCallOrder[0];
+    const crear = repo.insertGroupIfMissing.mock.invocationCallOrder[0];
+    const bloquear = repo.lockByFingerprint.mock.invocationCallOrder[0];
+    expect(leer).toBeLessThan(crear);
+    expect(crear).toBeLessThan(bloquear);
+    expect(repo.lockByFingerprint).toHaveBeenCalledTimes(1);
+
+    // Si ya existe no se intenta crear.
+    await service.recordOccurrences(ctx, [ev()]);
+    expect(repo.insertGroupIfMissing).toHaveBeenCalledTimes(1);
+  });
+
+  it('un deadlock (1213) reintenta la transacción y el grupo se registra sin lanzar', async () => {
+    const { service, repo, gateway, manager, sleep } = makeService();
+    repo.runInTransaction.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('Deadlock found'), { errno: 1213, code: 'ER_LOCK_DEADLOCK' });
+    });
+
+    await expect(service.recordOccurrences(ctx, [ev()])).resolves.toBeUndefined();
+
+    expect(repo.runInTransaction).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(repo.applyBatch).toHaveBeenCalledWith(manager, 1, expect.objectContaining({ count: 1 }));
+    expect(repo.addDaily).toHaveBeenCalledTimes(1);
+    expect(gateway.notifyErrorNew).toHaveBeenCalledTimes(1);
+  });
+
+  it('una espera de bloqueo agotada (1205) también se reintenta', async () => {
+    const { service, repo } = makeService();
+    repo.runInTransaction.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('Lock wait timeout'), { errno: 1205 });
+    });
+    await service.recordOccurrences(ctx, [ev()]);
+    expect(repo.applyBatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('un deadlock persistente se relanza tras el tope de intentos, y las demás huellas se confirman', async () => {
+    const { service, repo, gateway } = makeService();
+    const deadlock = Object.assign(new Error('Deadlock found'), { errno: 1213 });
+    const otro = ev({ mensaje: 'Otro error distinto', excepcion: null, logger: 'Kubo.Otro' });
+    // Las huellas se procesan en orden de aparición: la primera (ev()) choca
+    // siempre, la segunda (otro) pasa.
+    repo.runInTransaction
+      .mockRejectedValueOnce(deadlock)
+      .mockRejectedValueOnce(deadlock)
+      .mockRejectedValueOnce(deadlock);
+
+    await expect(service.recordOccurrences(ctx, [ev(), otro])).rejects.toBe(deadlock);
+
+    // TX_MAX_ATTEMPTS para la que choca + 1 para la otra, que sí se confirma.
+    expect(repo.runInTransaction).toHaveBeenCalledTimes(TX_MAX_ATTEMPTS + 1);
+    expect(repo.applyBatch).toHaveBeenCalledTimes(1);
+    expect(gateway.notifyErrorNew).toHaveBeenCalledTimes(1);
+  });
+
+  it('un error que no es de bloqueo no se reintenta', async () => {
+    const { service, repo } = makeService();
+    repo.runInTransaction.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('Data too long'), { errno: 1406 });
+    });
+    await expect(service.recordOccurrences(ctx, [ev()])).rejects.toThrow('Data too long');
+    expect(repo.runInTransaction).toHaveBeenCalledTimes(1);
   });
 
   it('avisa después del commit y no si la transacción falla', async () => {
@@ -390,5 +468,40 @@ describe('fitTextBytes', () => {
     expect(Buffer.byteLength(r, 'utf8')).toBeLessThanOrEqual(65535);
     expect(r.endsWith('ñ')).toBe(true);
     expect(r).not.toContain('�');
+  });
+});
+
+describe('ErrorGroupsRepository.applyBatch', () => {
+  const run = async (reopen: { at: Date; reason: string } | null) => {
+    const manager = { query: jest.fn().mockResolvedValue(undefined) };
+    const repo = new ErrorGroupsRepository({} as any, {} as any);
+    await repo.applyBatch(manager as any, 9, {
+      firstSeenAt: AHORA,
+      lastSeenAt: AHORA,
+      count: 1,
+      servers: ['S1'],
+      status: 'NUEVO',
+      reopen,
+    });
+    const [sql, params] = manager.query.mock.calls[0];
+    return { sql: sql as string, params: params as unknown[] };
+  };
+
+  it('al reabrir borra la resolución anterior pero conserva ticket_id', async () => {
+    const { sql, params } = await run({ at: AHORA, reason: 'Reapareció tras el ticket KB-0012' });
+    expect(sql).toContain('resolved_at = IF(?, NULL, resolved_at)');
+    expect(sql).toContain('resolved_by = IF(?, NULL, resolved_by)');
+    expect(sql).toContain('resolution_note = IF(?, NULL, resolution_note)');
+    expect(sql).not.toMatch(/ticket_id/);
+    // Banderas de reopened_at, reopen_reason, resolved_at, resolved_by y resolution_note.
+    expect([params[5], params[7], params[9], params[10], params[11]]).toEqual([1, 1, 1, 1, 1]);
+    expect(params[6]).toBe(AHORA);
+    expect(params[8]).toBe('Reapareció tras el ticket KB-0012');
+    expect(params[12]).toBe(9);
+  });
+
+  it('sin reabrir no toca la resolución', async () => {
+    const { params } = await run(null);
+    expect([params[5], params[7], params[9], params[10], params[11]]).toEqual([0, 0, 0, 0, 0]);
   });
 });
