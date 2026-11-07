@@ -11,6 +11,15 @@ export class ClientSystemsRepository {
     return this.repo.find({ where: { clientId }, order: { name: 'ASC' } });
   }
 
+  /**
+   * Cuántas asignaciones apuntan a un producto del catálogo. **Cuenta las
+   * activas y las inactivas**: un producto con historia no se borra, se retira
+   * (decisión 3 del diseño).
+   */
+  countBySystem(systemId: number): Promise<number> {
+    return this.repo.count({ where: { systemId } });
+  }
+
   findById(id: number): Promise<ClientSystem | null> {
     return this.repo.findOne({ where: { id } });
   }

@@ -14,6 +14,7 @@ import { TicketEventsRepository } from './ticket-events.repository';
 import { SlaPoliciesRepository } from './sla-policies.repository';
 import { SupportAgentsRepository } from './support-agents.repository';
 import { ClientSystemsRepository } from './client-systems.repository';
+import { SystemsRepository } from './systems.repository';
 import { TicketEventsService } from './ticket-events.service';
 import { SlaService } from './sla.service';
 import { TicketsService } from './tickets.service';
@@ -21,11 +22,13 @@ import { TicketTransitionsService } from './ticket-transitions.service';
 import { TicketAssignmentService } from './ticket-assignment.service';
 import { TicketAIService } from './ticket-ai.service';
 import { ClientSystemsService } from './client-systems.service';
+import { SystemsService } from './systems.service';
 import { SupportAgentsService } from './support-agents.service';
 import { SlaRiskScheduler } from './sla-risk.scheduler';
 import { TicketsRealtimeGateway } from './tickets-realtime.gateway';
 import { TicketsController } from './tickets.controller';
 import { ClientSystemsController } from './client-systems.controller';
+import { SystemsController } from './systems.controller';
 import { SupportAgentsController } from './support-agents.controller';
 import { ClientsModule } from '../clients/clients.module';
 import { ProjectsModule } from '../projects/projects.module';
@@ -61,11 +64,13 @@ import { DocumentsModule } from '../documents/documents.module';
     TicketAssignmentService,
     TicketAIService,
     ClientSystemsService,
+    SystemsRepository,
+    SystemsService,
     SupportAgentsService,
     SlaRiskScheduler,
     TicketsRealtimeGateway,
   ],
-  controllers: [TicketsController, ClientSystemsController, SupportAgentsController],
+  controllers: [TicketsController, ClientSystemsController, SystemsController, SupportAgentsController],
   exports: [
     TicketsRepository,
     TicketEventsRepository,
@@ -78,6 +83,8 @@ import { DocumentsModule } from '../documents/documents.module';
     TicketTransitionsService,
     TicketAssignmentService,
     ClientSystemsService,
+    SystemsRepository,
+    SystemsService,
     SupportAgentsService,
     TicketsRealtimeGateway,
   ],
