@@ -1,8 +1,10 @@
-import { Controller, Get, Param, ParseIntPipe, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
 
+import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
-import { ErrorListQueryDto } from './dto/error-group.dto';
+import { CreateTicketFromErrorDto, ErrorListQueryDto, ResolveErrorDto } from './dto/error-group.dto';
+import { ErrorActionsService } from './error-actions.service';
 import { ErrorGroupsService } from './error-groups.service';
 
 /**
@@ -14,7 +16,10 @@ import { ErrorGroupsService } from './error-groups.service';
 @Controller('monitoring/errors')
 @UseGuards(JwtAuthGuard, StaffOnlyGuard)
 export class ErrorsController {
-  constructor(private readonly service: ErrorGroupsService) {}
+  constructor(
+    private readonly service: ErrorGroupsService,
+    private readonly actions: ErrorActionsService,
+  ) {}
 
   @Get()
   list(@Query() q: ErrorListQueryDto) {
@@ -29,5 +34,20 @@ export class ErrorsController {
   @Get(':id')
   detail(@Param('id', ParseIntPipe) id: number) {
     return this.service.detail(id);
+  }
+
+  @Post(':id/ticket')
+  createTicket(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: CreateTicketFromErrorDto) {
+    return this.actions.createTicket(id, user.id, dto);
+  }
+
+  @Post(':id/resolve')
+  resolve(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number, @Body() dto: ResolveErrorDto) {
+    return this.actions.resolve(id, user.id, dto.note);
+  }
+
+  @Post(':id/reopen')
+  reopen(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number) {
+    return this.actions.reopen(id, user.id);
   }
 }

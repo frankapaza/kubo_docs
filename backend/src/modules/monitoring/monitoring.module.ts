@@ -8,6 +8,7 @@ import { ErrorGroupDaily } from './entities/error-group-daily.entity';
 import { ErrorOccurrence } from './entities/error-occurrence.entity';
 import { LogInstallation } from './entities/log-installation.entity';
 import { LogInstallationSource } from './entities/log-installation-source.entity';
+import { ErrorActionsService } from './error-actions.service';
 import { ErrorGroupsRepository } from './error-groups.repository';
 import { ErrorGroupsService } from './error-groups.service';
 import { ErrorsController } from './errors.controller';
@@ -22,7 +23,7 @@ import { LokiClient } from './loki/loki.client';
     TicketsModule,
     ClientsModule,
   ],
-  providers: [InstallationsRepository, InstallationsService, LokiClient, ErrorGroupsRepository, ErrorGroupsService],
+  providers: [InstallationsRepository, InstallationsService, LokiClient, ErrorGroupsRepository, ErrorGroupsService, ErrorActionsService],
   controllers: [InstallationsController, ErrorsController],
   // LokiClient, el servicio de instalaciones y el de grupos de error los
   // usarán la ingesta (que registra las ocurrencias) y la lectura de logs.

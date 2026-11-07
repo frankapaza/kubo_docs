@@ -24,6 +24,14 @@ export interface GroupBatchUpdate {
   reopen: { at: Date; reason: string } | null;
 }
 
+/** Lo que la reserva pisa y el fallo del alta debe devolver. */
+export interface ReservationBackup {
+  status: ErrorGroupStatus;
+  ticketId: number | null;
+  ticketLinkedBy: number | null;
+  ticketLinkedAt: Date | null;
+}
+
 export type NewOccurrence = Omit<ErrorOccurrence, 'id'>;
 
 /**
@@ -273,6 +281,83 @@ export class ErrorGroupsRepository {
       where.params,
     );
     return { rows, total: Number(total) };
+  }
+
+  // ------------------------------------------- acciones del personal (una sentencia)
+
+  /** Lo que la reserva va a pisar, para poder devolverlo si el alta falla. */
+  async findReservationState(id: number): Promise<ReservationBackup | null> {
+    const g = await this.groups.findOne({ where: { id } });
+    if (!g) return null;
+    return {
+      status: g.status,
+      ticketId: g.ticketId === null ? null : Number(g.ticketId),
+      ticketLinkedBy: g.ticketLinkedBy === null ? null : Number(g.ticketLinkedBy),
+      ticketLinkedAt: g.ticketLinkedAt,
+    };
+  }
+
+  /**
+   * Reserva el grupo para crear su ticket. El `WHERE status <> 'CON_TICKET'`
+   * es el cerrojo: de dos clics simultáneos solo uno afecta la fila, el otro
+   * recibe 0 y no crea nada (Review Focus 5). Devuelve si ganó la reserva.
+   * No toca `ticket_id`: si el alta falla hay que poder restaurarlo tal cual.
+   */
+  async reserveForTicket(id: number, userId: number, at: Date): Promise<boolean> {
+    const r = await this.groups
+      .createQueryBuilder()
+      .update(ErrorGroup)
+      .set({ status: 'CON_TICKET', ticketLinkedBy: userId, ticketLinkedAt: at })
+      .where('id = :id AND status <> :st', { id, st: 'CON_TICKET' })
+      .execute();
+    return (r.affected ?? 0) > 0;
+  }
+
+  /** Cierra la reserva: enlaza el ticket y borra una resolución anterior que ya no aplica. */
+  async attachTicket(id: number, ticketId: number): Promise<void> {
+    await this.groups
+      .createQueryBuilder()
+      .update(ErrorGroup)
+      .set({ ticketId, resolvedAt: null, resolvedBy: null, resolutionNote: null })
+      .where('id = :id', { id })
+      .execute();
+  }
+
+  /** Deshace la reserva: estado, ticket y autoría de antes. Solo si la reserva sigue en pie. */
+  async restoreReservation(id: number, prev: ReservationBackup): Promise<void> {
+    await this.groups
+      .createQueryBuilder()
+      .update(ErrorGroup)
+      .set({
+        status: prev.status,
+        ticketId: prev.ticketId,
+        ticketLinkedBy: prev.ticketLinkedBy,
+        ticketLinkedAt: prev.ticketLinkedAt,
+      })
+      .where('id = :id AND status = :st', { id, st: 'CON_TICKET' })
+      .execute();
+  }
+
+  /** Condicional: de dos «Resuelto» a la vez, el segundo afecta 0 filas. */
+  async markResolved(id: number, userId: number, note: string | null, at: Date): Promise<boolean> {
+    const r = await this.groups
+      .createQueryBuilder()
+      .update(ErrorGroup)
+      .set({ status: 'RESUELTO', resolvedBy: userId, resolvedAt: at, resolutionNote: note })
+      .where('id = :id AND status <> :st', { id, st: 'RESUELTO' })
+      .execute();
+    return (r.affected ?? 0) > 0;
+  }
+
+  /** Solo desde RESUELTO. Conserva `ticket_id` (como la reapertura automática). */
+  async markReopened(id: number, at: Date, reason: string): Promise<boolean> {
+    const r = await this.groups
+      .createQueryBuilder()
+      .update(ErrorGroup)
+      .set({ status: 'NUEVO', reopenedAt: at, reopenReason: reason, resolvedAt: null, resolvedBy: null, resolutionNote: null })
+      .where('id = :id AND status = :st', { id, st: 'RESUELTO' })
+      .execute();
+    return (r.affected ?? 0) > 0;
   }
 
   async countByStatus(status: ErrorGroupStatus): Promise<number> {

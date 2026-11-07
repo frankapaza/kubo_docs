@@ -46,3 +46,18 @@ export class ErrorListQueryDto {
   @IsOptional() @IsInt() @Min(1) @Max(100)
   pageSize?: number;
 }
+
+/** Cliente y asignación elegidos en el diálogo cuando el error no trae los suyos. */
+export class CreateTicketFromErrorDto {
+  @IsOptional() @IsInt() @Min(1)
+  clientId?: number;
+
+  /** `client_systems.id` (la asignación), como en el alta de tickets del panel. */
+  @IsOptional() @IsInt() @Min(1)
+  systemId?: number;
+}
+
+export class ResolveErrorDto {
+  @IsOptional() @IsString() @MaxLength(2000)
+  note?: string;
+}
