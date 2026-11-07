@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
-import { ticketsApi, supportAgentsApi } from '../api/tickets.api';
+import { ticketsApi, supportAgentsApi, clientSystemsApi } from '../api/tickets.api';
 import { clientsApi } from '../api/clients.api';
-import type { TicketDetail, TicketRequestType, TicketStatus } from '../api/types';
+import type { ClientSystem, TicketDetail, TicketRequestType, TicketStatus } from '../api/types';
+import { systemLabel } from './tickets/system-field';
 import { STATUS_STYLES, PRIORITY_STYLES, STATUS_LABELS, ORIGIN_LABELS } from './tickets/ticket-ui';
 import TicketTimeline from './tickets/TicketTimeline';
 import TicketSlaClock from './tickets/TicketSlaClock';
@@ -64,6 +65,7 @@ export default function TicketDetailPage() {
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [usersById, setUsersById] = useState<Map<number, string>>(new Map());
   const [clientName, setClientName] = useState<string | null>(null);
+  const [systems, setSystems] = useState<ClientSystem[]>([]);
 
   // Resuelve assigneeUserId -> nombre a partir de GET /support-agents, sin
   // restricción de rol (ver TicketsListPage: GET /users sí la tiene y dejaba
@@ -133,7 +135,32 @@ export default function TicketDetailPage() {
     };
   }, [clientId]);
 
-  const reload = () => ticketsApi.findOne(id).then(setDetail);
+  // Las asignaciones del cliente, activas o no, para poder nombrar el sistema
+  // del ticket aunque ya no se pueda elegir. Es un dato de apoyo y no la razón
+  // de la página: un fallo va a consola y la ficha cae al id.
+  useEffect(() => {
+    if (!clientId) {
+      setSystems([]);
+      return;
+    }
+    let cancelled = false;
+    clientSystemsApi
+      .list(clientId)
+      .then((list) => {
+        if (!cancelled) setSystems(list);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          console.warn('[TicketDetailPage] No se pudieron cargar los sistemas del cliente.', e);
+          setSystems([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientId]);
+
+  const reload =() => ticketsApi.findOne(id).then(setDetail);
 
   const act = async (fn: () => Promise<unknown>) => {
     setBusy(true);
@@ -411,6 +438,19 @@ export default function TicketDetailPage() {
             <h2 style={{ margin: '0 0 12px', fontSize: 13, fontWeight: 600 }}>Ficha</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12 }}>
               <Field label="Cliente" value={clientId ? clientName ?? String(clientId) : '—'} />
+              {/*
+                Justo debajo del cliente, porque el sistema cuelga de él. Por
+                valor (`Number`) y no con `===`: los bigint llegan como cadena.
+              */}
+              <Field
+                label="Sistema"
+                value={systemLabel(
+                  systems.find((s) => Number(s.id) === Number(ticket.systemId)),
+                  ticket.systemId === null || ticket.systemId === undefined
+                    ? null
+                    : Number(ticket.systemId),
+                )}
+              />
               <Field label="Origen" value={ORIGIN_LABELS[ticket.origin]} />
               <Field label="Tipo" value={ticket.requestType ? REQUEST_TYPE_LABELS[ticket.requestType] : '—'} />
               <Field label="Categoría" value={ticket.serviceCategory ?? '—'} />

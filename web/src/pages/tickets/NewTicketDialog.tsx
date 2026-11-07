@@ -28,6 +28,8 @@ import { ORIGIN_LABELS, PRIORITY_STYLES, TICKET_IMPACTS, TICKET_URGENCIES, previ
 import { useAuth } from '../../auth/AuthContext';
 import { canManageClientSystems } from '../../auth/permissions';
 import {
+  ELIGE_SISTEMA,
+  ELIGE_SISTEMA_OPCION,
   SIN_SISTEMAS_PANEL,
   SIN_SISTEMAS_PANEL_ENLACE,
   SIN_SISTEMAS_PANEL_SIN_PERMISO,
@@ -183,8 +185,11 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
       .list(clientId)
       .then((list) => {
         if (!cancelled) {
-          setSystems(list.filter((s) => s.isActive === 1));
+          const activos = list.filter((s) => s.isActive === 1);
+          setSystems(activos);
           setSystemsLoaded(true);
+          // Un cliente, un sistema: queda elegido, sin un clic que no informa.
+          if (activos.length === 1) setSystemId(activos[0].id);
         }
       })
       .catch((e) => {
@@ -247,9 +252,16 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
     }
   };
 
+  // Con sistemas, uno elegido: la misma regla que hace cumplir el servidor.
+  const missingSystem = systems.length > 0 && systemId === '';
+
   const create = async () => {
     if (!rawText.trim()) {
       setError('El texto es obligatorio.');
+      return;
+    }
+    if (missingSystem) {
+      setError(ELIGE_SISTEMA);
       return;
     }
 
@@ -404,6 +416,93 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
           />
         )}
 
+        {/*
+          El cliente decide qué sistemas hay, así que es lo primero que se
+          contesta; y el sistema, de lo que trata el ticket, va con él.
+        */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+          <label htmlFor="new-ticket-client">
+            <span style={labelStyle}>Cliente</span>
+            <select
+              id="new-ticket-client"
+              value={clientId}
+              onChange={(e) => {
+                const v = e.target.value ? Number(e.target.value) : '';
+                setClientId(v);
+                setProjectId('');
+                setSystemId('');
+              }}
+              style={inputStyle}
+            >
+              <option value="">(sin cliente)</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.razonSocial}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label htmlFor="new-ticket-project">
+            <span style={labelStyle}>Proyecto</span>
+            <select
+              id="new-ticket-project"
+              value={projectId}
+              onChange={(e) => setProjectId(e.target.value ? Number(e.target.value) : '')}
+              style={inputStyle}
+            >
+              <option value="">(sin proyecto)</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label htmlFor="new-ticket-system">
+            <span style={labelStyle}>{systemField === 'ELEGIBLE' ? 'Sistema *' : 'Sistema'}</span>
+            {systemField === 'SIN_SISTEMAS' ? (
+              /*
+                Sin desplegable de una sola opción muerta. Quien puede asignar
+                sistemas ve el enlace al sitio exacto donde se hace; quien no,
+                a quién pedírselo: un enlace a una grilla de solo lectura
+                prometería una salida que no está.
+              */
+              <span id="new-ticket-system" style={{ display: 'block', fontSize: 12, color: '#6d7577', lineHeight: 1.4 }}>
+                {SIN_SISTEMAS_PANEL}{' '}
+                {canManageClientSystems(user) ? (
+                  <Link to={clientSystemsHref(Number(clientId))} style={{ color: '#15191a', fontWeight: 600 }}>
+                    {SIN_SISTEMAS_PANEL_ENLACE}
+                  </Link>
+                ) : (
+                  SIN_SISTEMAS_PANEL_SIN_PERMISO
+                )}
+              </span>
+            ) : (
+              <select
+                id="new-ticket-system"
+                value={systemId}
+                disabled={systemField !== 'ELEGIBLE'}
+                onChange={(e) => setSystemId(e.target.value ? Number(e.target.value) : '')}
+                style={{ ...inputStyle, cursor: systemField === 'ELEGIBLE' ? 'pointer' : 'not-allowed', background: systemField === 'ELEGIBLE' ? '#fff' : '#f5f6f6' }}
+              >
+                <option value="">{clientId ? ELIGE_SISTEMA_OPCION : 'Elige un cliente primero'}</option>
+                {/*
+                  El valor es `s.id`, el de la ASIGNACIÓN, no `s.systemId` (el
+                  producto del catálogo): es lo que el ticket guarda en su
+                  `systemId` y contra lo que el servidor valida.
+                */}
+                {systems.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </label>
+        </div>
+
         <label htmlFor="new-ticket-rawtext">
           <span style={labelStyle}>Texto de la solicitud *</span>
           <textarea
@@ -455,84 +554,6 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
             style={inputStyle}
           />
         </label>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-          <label htmlFor="new-ticket-client">
-            <span style={labelStyle}>Cliente</span>
-            <select
-              id="new-ticket-client"
-              value={clientId}
-              onChange={(e) => {
-                const v = e.target.value ? Number(e.target.value) : '';
-                setClientId(v);
-                setProjectId('');
-                setSystemId('');
-              }}
-              style={inputStyle}
-            >
-              <option value="">(sin cliente)</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.razonSocial}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label htmlFor="new-ticket-project">
-            <span style={labelStyle}>Proyecto</span>
-            <select
-              id="new-ticket-project"
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value ? Number(e.target.value) : '')}
-              style={inputStyle}
-            >
-              <option value="">(sin proyecto)</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label htmlFor="new-ticket-system">
-            <span style={labelStyle}>Sistema</span>
-            {systemField === 'SIN_SISTEMAS' ? (
-              /*
-                Sin desplegable de una sola opción muerta. Quien puede asignar
-                sistemas ve el enlace al sitio exacto donde se hace; quien no,
-                a quién pedírselo: un enlace a una grilla de solo lectura
-                prometería una salida que no está.
-              */
-              <span id="new-ticket-system" style={{ display: 'block', fontSize: 12, color: '#6d7577', lineHeight: 1.4 }}>
-                {SIN_SISTEMAS_PANEL}{' '}
-                {canManageClientSystems(user) ? (
-                  <Link to={clientSystemsHref(Number(clientId))} style={{ color: '#15191a', fontWeight: 600 }}>
-                    {SIN_SISTEMAS_PANEL_ENLACE}
-                  </Link>
-                ) : (
-                  SIN_SISTEMAS_PANEL_SIN_PERMISO
-                )}
-              </span>
-            ) : (
-              <select
-                id="new-ticket-system"
-                value={systemId}
-                disabled={systemField !== 'ELEGIBLE'}
-                onChange={(e) => setSystemId(e.target.value ? Number(e.target.value) : '')}
-                style={{ ...inputStyle, cursor: systemField === 'ELEGIBLE' ? 'pointer' : 'not-allowed', background: systemField === 'ELEGIBLE' ? '#fff' : '#f5f6f6' }}
-              >
-                <option value="">{clientId ? '(sin sistema)' : 'Elige un cliente primero'}</option>
-                {systems.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            )}
-          </label>
-        </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <label htmlFor="new-ticket-category">
@@ -667,17 +688,17 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
               </button>
               <button
                 type="button"
-                disabled={busy || !rawText.trim()}
+                disabled={busy || !rawText.trim() || missingSystem}
                 onClick={submit}
                 style={{
                   fontSize: 13,
                   fontWeight: 600,
                   padding: '9px 14px',
                   borderRadius: 7,
-                  background: busy || !rawText.trim() ? '#c9cdce' : '#15191a',
+                  background: busy || !rawText.trim() || missingSystem ? '#c9cdce' : '#15191a',
                   color: '#fff',
                   border: 'none',
-                  cursor: busy || !rawText.trim() ? 'not-allowed' : 'pointer',
+                  cursor: busy || !rawText.trim() || missingSystem ? 'not-allowed' : 'pointer',
                 }}
               >
                 {busy ? 'Creando…' : 'Crear ticket'}

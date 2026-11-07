@@ -15,7 +15,7 @@ import {
   type RejectedAttachment,
 } from '../../components/upload';
 import { withTimeout } from '../../lib/with-timeout';
-import { SIN_SISTEMAS_PORTAL, systemFieldState } from '../tickets/system-field';
+import { ELIGE_SISTEMA, ELIGE_SISTEMA_OPCION, SIN_SISTEMAS_PORTAL, systemFieldState } from '../tickets/system-field';
 
 interface Props {
   open: boolean;
@@ -144,6 +144,10 @@ export default function NewPortalTicketDialog({ open, onCancel, onCreated }: Pro
         if (!cancelled) {
           setSystems(list);
           setSystemsLoaded(true);
+          // Una empresa, un sistema arrendado: es el caso más común, y
+          // convertirlo en un clic obligatorio sería cobrarle al cliente una
+          // ceremonia sin información.
+          if (list.length === 1) setSystemId(list[0].id);
         }
       })
       .catch((e) => {
@@ -194,7 +198,13 @@ export default function NewPortalTicketDialog({ open, onCancel, onCreated }: Pro
 
   if (!open) return null;
 
-  const canSubmit = subject.trim().length > 0 && description.trim().length > 0;
+  // Con sistemas, uno elegido. Es la misma regla que el servidor hace cumplir
+  // (`resolveTicketSystem`); aquí solo evita mandar una petición que va a
+  // volver con un 400.
+  const canSubmit =
+    subject.trim().length > 0 &&
+    description.trim().length > 0 &&
+    (systems.length === 0 || systemId !== '');
 
   // El portal siempre tiene cliente: la empresa sale de la sesión.
   const systemField = systemFieldState({
@@ -218,6 +228,10 @@ export default function NewPortalTicketDialog({ open, onCancel, onCreated }: Pro
   };
 
   const create = async () => {
+    if (systems.length > 0 && systemId === '') {
+      setErrors([ELIGE_SISTEMA]);
+      return;
+    }
     if (!canSubmit) {
       setErrors(['El asunto y la descripción son obligatorios.']);
       return;
@@ -350,6 +364,45 @@ export default function NewPortalTicketDialog({ open, onCancel, onCreated }: Pro
         )}
 
         <div className="mt-4 space-y-4">
+          {/*
+            El sistema va primero: es de lo que trata el ticket («se me cayó el
+            de cobranza»), y cuando la empresa tiene alguno es obligatorio.
+          */}
+          <div>
+            <label className="label" htmlFor="portal-ticket-system">
+              {systemField === 'ELEGIBLE'
+                ? 'Sistema *'
+                : systemField === 'SIN_SISTEMAS'
+                  ? 'Sistema (opcional)'
+                  : 'Sistema'}
+            </label>
+            {/*
+              Sin sistemas registrados no se pinta un desplegable con una sola
+              opción muerta: se dice qué pasa, que no es culpa del cliente y que
+              puede seguir.
+            */}
+            {systemField === 'SIN_SISTEMAS' ? (
+              <p id="portal-ticket-system" className="text-sm text-slate-500">
+                {SIN_SISTEMAS_PORTAL}
+              </p>
+            ) : (
+              <select
+                id="portal-ticket-system"
+                className="input"
+                value={systemId}
+                disabled={busy}
+                onChange={(e) => setSystemId(e.target.value ? Number(e.target.value) : '')}
+              >
+                <option value="">{ELIGE_SISTEMA_OPCION}</option>
+                {systems.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
           <div>
             <label className="label" htmlFor="portal-ticket-subject">
               Asunto *
@@ -401,35 +454,6 @@ export default function NewPortalTicketDialog({ open, onCancel, onCreated }: Pro
             />
           </div>
 
-          <div>
-            <label className="label" htmlFor="portal-ticket-system">
-              Sistema (opcional)
-            </label>
-            {/*
-              Sin sistemas registrados no se pinta un desplegable con una sola
-              opción muerta: se dice qué pasa, que no es culpa del cliente y que
-              puede seguir.
-            */}
-            {systemField === 'SIN_SISTEMAS' ? (
-              <p id="portal-ticket-system" className="text-sm text-slate-500">
-                {SIN_SISTEMAS_PORTAL}
-              </p>
-            ) : (
-              <select
-                id="portal-ticket-system"
-                className="input"
-                value={systemId}
-                onChange={(e) => setSystemId(e.target.value ? Number(e.target.value) : '')}
-              >
-                <option value="">(sin sistema)</option>
-                {systems.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
         </div>
 
         {/*

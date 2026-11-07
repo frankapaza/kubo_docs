@@ -41,3 +41,36 @@ export const SIN_SISTEMAS_PANEL_SIN_PERMISO =
 export function clientSystemsHref(clientId: number): string {
   return `/clients/${clientId}?tab=systems`;
 }
+
+/**
+ * El rechazo cuando el cliente tiene sistemas y no se eligió ninguno.
+ *
+ * Es el mismo literal, carácter a carácter, que lanza `resolveTicketSystem` en
+ * el backend (`modules/tickets/domain/system-requirement.ts`). Se repite aquí y
+ * no se le pide al servidor porque esta guarda existe para que la petición
+ * **no** salga; si los dos textos divergieran, el usuario leería dos
+ * redacciones del mismo rechazo, que es peor que leer una sola.
+ */
+export const ELIGE_SISTEMA = 'Elige el sistema afectado.';
+
+/** El `<option>` vacío cuando hay sistemas: no es una elección, es un hueco. */
+export const ELIGE_SISTEMA_OPCION = '(elige un sistema)';
+
+/**
+ * Cómo se enseña el sistema de un ticket en su ficha.
+ *
+ * Un sistema desasignado o desactivado **se sigue viendo**, con la marca,
+ * porque el ticket viejo conserva su `system_id` y borrar el dato del pasado
+ * para que cuadre el presente es falsificar el histórico. Si la lista no trae
+ * ese id --porque no cargó, o porque la asignación se quitó-- se cae al número
+ * antes que a un guion: un guion diría «este ticket no tiene sistema», que es
+ * otra cosa.
+ */
+export function systemLabel(
+  system: { name: string; isActive: number } | undefined,
+  systemId: number | null,
+): string {
+  if (systemId === null) return '—';
+  if (!system) return String(systemId);
+  return system.isActive === 1 ? system.name : `${system.name} (inactivo)`;
+}
