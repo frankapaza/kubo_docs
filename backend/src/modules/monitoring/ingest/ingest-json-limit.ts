@@ -2,6 +2,8 @@ import { INestApplication } from '@nestjs/common';
 import { NextFunction, Request, Response, json } from 'express';
 
 import { MAX_BATCH_BYTES } from '../domain/ingest-batch';
+import { isWellFormedInstallationKey } from '../domain/installation-key';
+import { INSTALLATION_KEY_HEADER, INVALID_KEY_BODY } from './installation-key.guard';
 
 /**
  * El analizador de JSON de `POST /ingest/logs`, con el tope del contrato
@@ -20,6 +22,13 @@ import { MAX_BATCH_BYTES } from '../domain/ingest-batch';
  * expande a cientos de MB se corta al pasar de 2 MB, con el error
  * `entity.too.large` que `HttpExceptionFilter` traduce a 413 `{ code, message }`
  * (y el appender, ante 413, tira el lote en vez de reintentarlo).
+ *
+ * **Sin clave con forma válida no se lee el cuerpo.** El analizador corre
+ * antes que cualquier guarda: sin este corte, cualquiera sin clave podría
+ * obligar a descomprimir 2 MB por petición antes de recibir el 401. Aquí solo
+ * se mira la FORMA (sin base de datos); la guarda sigue haciendo la búsqueda
+ * por huella. El cuerpo de la respuesta es el mismo que el del filtro global
+ * para el 401 de la guarda: quien prueba claves no distingue un caso del otro.
  */
 const RUTA_DE_INGESTA = /\/ingest\/logs\/?$/;
 
@@ -28,6 +37,15 @@ export function registerIngestJsonLimit(app: INestApplication): void {
 
   app.use((req: Request, res: Response, next: NextFunction) => {
     if (req.method === 'POST' && RUTA_DE_INGESTA.test(req.path)) {
+      if (!isWellFormedInstallationKey(req.headers[INSTALLATION_KEY_HEADER])) {
+        res.status(401).json({
+          statusCode: 401,
+          ...INVALID_KEY_BODY,
+          path: req.url,
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
       analizador(req, res, next);
       return;
     }

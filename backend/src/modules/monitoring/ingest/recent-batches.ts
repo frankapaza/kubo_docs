@@ -5,6 +5,12 @@ export const RECENT_BATCHES_TTL_MS = 15 * 60 * 1000;
 /** Tope de memoria: a 600 lotes/min por instalación, cubre de sobra el tráfico real. */
 export const RECENT_BATCHES_MAX = 50_000;
 
+interface Entry {
+  expiresAt: number;
+  /** Reservado por una petición en vuelo, aún sin confirmar. */
+  pending: boolean;
+}
+
 /**
  * Lotes (instalación + `loteId`) cuyos errores ya se registraron.
  *
@@ -22,26 +28,53 @@ export const RECENT_BATCHES_MAX = 50_000;
  */
 @Injectable()
 export class RecentBatches {
-  private readonly entries = new Map<string, number>();
+  private readonly entries = new Map<string, Entry>();
 
   /** Para las pruebas del tope. */
   get size(): number {
     return this.entries.size;
   }
 
+  /** ¿Sus errores ya quedaron registrados? (un lote solo reservado no cuenta) */
   seen(installationId: number, loteId: string, now: number): boolean {
-    const k = this.key(installationId, loteId);
-    const expiresAt = this.entries.get(k);
-    if (expiresAt === undefined) return false;
-    if (expiresAt <= now) {
-      this.entries.delete(k);
-      return false;
-    }
-    return true;
+    return this.state(installationId, loteId, now) === 'done';
   }
 
+  /**
+   * Mira y reserva en un solo paso síncrono: dos peticiones con el mismo lote
+   * no pueden obtener las dos 'new', porque entre mirar y marcar no hay await.
+   * 'new' = esta petición registra los errores; 'pending' = otra lo está
+   * haciendo ahora; 'done' = ya se registraron.
+   */
+  claim(installationId: number, loteId: string, now: number): 'new' | 'pending' | 'done' {
+    const st = this.state(installationId, loteId, now);
+    if (st !== null) return st;
+    this.put(this.key(installationId, loteId), { expiresAt: now + RECENT_BATCHES_TTL_MS, pending: true }, now);
+    return 'new';
+  }
+
+  /** Confirma el lote: sus errores quedaron registrados. */
   remember(installationId: number, loteId: string, now: number): void {
+    this.put(this.key(installationId, loteId), { expiresAt: now + RECENT_BATCHES_TTL_MS, pending: false }, now);
+  }
+
+  /** Suelta una reserva cuyo registro falló: el reintento debe volver a registrar. */
+  forget(installationId: number, loteId: string): void {
+    this.entries.delete(this.key(installationId, loteId));
+  }
+
+  private state(installationId: number, loteId: string, now: number): 'pending' | 'done' | null {
     const k = this.key(installationId, loteId);
+    const e = this.entries.get(k);
+    if (e === undefined) return null;
+    if (e.expiresAt <= now) {
+      this.entries.delete(k);
+      return null;
+    }
+    return e.pending ? 'pending' : 'done';
+  }
+
+  private put(k: string, entry: Entry, now: number): void {
     // Borrar antes de poner lo lleva al final del orden: es ahora el más nuevo.
     this.entries.delete(k);
     this.purgeExpired(now);
@@ -49,13 +82,13 @@ export class RecentBatches {
       const oldest = this.entries.keys().next().value as string;
       this.entries.delete(oldest);
     }
-    this.entries.set(k, now + RECENT_BATCHES_TTL_MS);
+    this.entries.set(k, entry);
   }
 
   /** Las vencidas están al principio (TTL fijo + orden de inserción): se para en la primera viva. */
   private purgeExpired(now: number): void {
-    for (const [k, expiresAt] of this.entries) {
-      if (expiresAt > now) break;
+    for (const [k, e] of this.entries) {
+      if (e.expiresAt > now) break;
       this.entries.delete(k);
     }
   }

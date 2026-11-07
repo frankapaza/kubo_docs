@@ -246,6 +246,54 @@ describe('IngestService', () => {
     expect(errors.recordOccurrences).toHaveBeenCalledTimes(2);
   });
 
+  it('dos envíos simultáneos del mismo loteId registran los errores una sola vez', async () => {
+    const { service, errors, loki } = makeService();
+    let resolveFirst!: () => void;
+    errors.recordOccurrences.mockImplementationOnce(() => new Promise<void>((r) => (resolveFirst = r)));
+    const body = lote({ eventos: [evento({ nivel: 'ERROR' })] });
+    // El primero se queda esperando un bloqueo de fila; el appender corta y reintenta.
+    const first = service.ingest(deCliente(), body, AHORA);
+    const second = statusOf(service.ingest(deCliente(), body, new Date(AHORA.getTime() + 5000)));
+    // El duplicado en vuelo no registra nada: empuja Loki y pide reintentar (503).
+    expect(await second).toBe(503);
+    expect(errors.recordOccurrences).toHaveBeenCalledTimes(1);
+    expect(loki.push).toHaveBeenCalledTimes(2);
+    resolveFirst();
+    await expect(first).resolves.toEqual({ aceptados: 1, descartadosPorNivel: 0 });
+    // Confirmado: el siguiente reintento ya responde 202 sin volver a sumar.
+    await expect(service.ingest(deCliente(), body, AHORA)).resolves.toEqual({ aceptados: 1, descartadosPorNivel: 0 });
+    expect(errors.recordOccurrences).toHaveBeenCalledTimes(1);
+  });
+
+  it('si el original en vuelo falla, libera el lote y un tercer envío los registra', async () => {
+    const { service, errors } = makeService();
+    let rejectFirst!: (e: Error) => void;
+    errors.recordOccurrences.mockImplementationOnce(() => new Promise<void>((_r, j) => (rejectFirst = j)));
+    const body = lote({ eventos: [evento({ nivel: 'ERROR' })] });
+    const first = statusOf(service.ingest(deCliente(), body, AHORA));
+    expect(await statusOf(service.ingest(deCliente(), body, AHORA))).toBe(503);
+    rejectFirst(new Error('ER_LOCK_WAIT_TIMEOUT'));
+    expect(await first).toBe(503);
+    await expect(service.ingest(deCliente(), body, AHORA)).resolves.toEqual({ aceptados: 1, descartadosPorNivel: 0 });
+    expect(errors.recordOccurrences).toHaveBeenCalledTimes(2);
+  });
+
+  it('un fallo inesperado antes de registrar no deja el lote reservado', async () => {
+    const { service, loki, errors } = makeService();
+    loki.push.mockRejectedValueOnce(new Error('inesperado'));
+    const body = lote({ eventos: [evento({ nivel: 'ERROR' })] });
+    await expect(service.ingest(deCliente(), body, AHORA)).rejects.toThrow('inesperado');
+    await service.ingest(deCliente(), body, AHORA);
+    expect(errors.recordOccurrences).toHaveBeenCalledTimes(1);
+  });
+
+  it('más de 1000 eventos → 413, no 400', async () => {
+    const { service, loki } = makeService();
+    const eventos = Array.from({ length: 1001 }, () => evento());
+    expect(await statusOf(service.ingest(deCliente(), lote({ eventos }), AHORA))).toBe(413);
+    expect(loki.push).not.toHaveBeenCalled();
+  });
+
   it('sin loteId (appender antiguo) cada envío se procesa entero', async () => {
     const { service, errors } = makeService();
     const body = lote({ loteId: undefined, eventos: [evento({ nivel: 'ERROR' })] });

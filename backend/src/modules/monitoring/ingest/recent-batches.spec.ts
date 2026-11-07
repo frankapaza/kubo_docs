@@ -26,4 +26,27 @@ describe('RecentBatches', () => {
     expect(r.seen(1, 'l0', T0 + RECENT_BATCHES_MAX + 10)).toBe(false);
     expect(r.seen(1, `l${RECENT_BATCHES_MAX + 9}`, T0 + RECENT_BATCHES_MAX + 10)).toBe(true);
   });
+
+  it('claim reserva en un paso: el segundo ve pending, y tras remember ve done', () => {
+    const r = new RecentBatches();
+    expect(r.claim(1, LOTE, T0)).toBe('new');
+    expect(r.claim(1, LOTE, T0)).toBe('pending');
+    expect(r.seen(1, LOTE, T0)).toBe(false);
+    r.remember(1, LOTE, T0);
+    expect(r.claim(1, LOTE, T0)).toBe('done');
+    expect(r.seen(1, LOTE, T0)).toBe(true);
+  });
+
+  it('forget suelta la reserva y el siguiente claim vuelve a ser new', () => {
+    const r = new RecentBatches();
+    r.claim(1, LOTE, T0);
+    r.forget(1, LOTE);
+    expect(r.claim(1, LOTE, T0)).toBe('new');
+  });
+
+  it('una reserva abandonada caduca con el mismo TTL', () => {
+    const r = new RecentBatches();
+    r.claim(1, LOTE, T0);
+    expect(r.claim(1, LOTE, T0 + RECENT_BATCHES_TTL_MS)).toBe('new');
+  });
 });

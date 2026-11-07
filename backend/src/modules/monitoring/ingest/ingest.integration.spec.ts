@@ -153,6 +153,22 @@ describe('POST /ingest/logs (integración HTTP)', () => {
     expect(plano.status).toBe(413);
   });
 
+  it('más de 1000 eventos → 413 { code: PAYLOAD_TOO_LARGE }', async () => {
+    const eventos = Array.from({ length: 1001 }, () => ({ ts: new Date().toISOString(), nivel: 'INFO', logger: 'X', mensaje: 'm' }));
+    const res = await enviar(JSON.stringify(lote({ loteId: 'mil-1', eventos })), { 'X-Kubo-Log-Key': CLAVE });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ code: 'PAYLOAD_TOO_LARGE' });
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it('clave mal formada y cuerpo enorme → 401 sin leer el cuerpo (no 413)', async () => {
+    const enorme = gzipSync(Buffer.from(JSON.stringify({ eventos: [{ mensaje: 'x'.repeat(3 * 1024 * 1024) }] })));
+    const res = await enviar(enorme, { 'X-Kubo-Log-Key': 'no-es-una-clave', 'Content-Encoding': 'gzip' });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({ code: 'UNAUTHORIZED', message: 'Clave de instalación inválida o revocada.' });
+    expect(findActiveByFingerprint).not.toHaveBeenCalled();
+  });
+
   it('campo desconocido en el cuerpo → 202 (no VALIDATION_ERROR)', async () => {
     const res = await enviar(JSON.stringify({ ...lote({ loteId: 'nuevo-1' }), campoDelFuturo: { x: 1 } }), {
       'X-Kubo-Log-Key': CLAVE,

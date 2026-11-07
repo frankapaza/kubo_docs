@@ -6,6 +6,9 @@ import { InstallationsService, ResolvedInstallation } from '../installations.ser
 
 export const INSTALLATION_KEY_HEADER = 'x-kubo-log-key';
 
+/** El único cuerpo de rechazo, compartido con el corte previo de `registerIngestJsonLimit`. */
+export const INVALID_KEY_BODY = { code: 'UNAUTHORIZED', message: 'Clave de instalación inválida o revocada.' } as const;
+
 /** La petición tras pasar la guarda: la instalación ya resuelta, nunca la clave. */
 export type IngestRequest = Request & { installation?: ResolvedInstallation };
 
@@ -38,5 +41,5 @@ export class InstallationKeyGuard implements CanActivate {
 }
 
 function unauthorized(): UnauthorizedException {
-  return new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'Clave de instalación inválida o revocada.' });
+  return new UnauthorizedException({ ...INVALID_KEY_BODY });
 }

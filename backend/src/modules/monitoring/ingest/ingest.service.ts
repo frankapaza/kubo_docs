@@ -1,9 +1,17 @@
-import { BadRequestException, HttpException, HttpStatus, Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+  PayloadTooLargeException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 
 import { ClientsRepository } from '../../clients/clients.repository';
 import { TicketsRealtimeGateway } from '../../tickets/tickets-realtime.gateway';
 import { resolveEventTime } from '../domain/event-time';
-import { IngestBatch, IngestEvent, parseIngestBatch } from '../domain/ingest-batch';
+import { IngestBatch, IngestEvent, MAX_EVENTS_PER_BATCH, parseIngestBatch } from '../domain/ingest-batch';
 import { LiveLogLine } from '../domain/live-tail';
 import { isErrorLevel, LogLevel, meetsMinLevel } from '../domain/log-level';
 import { ErrorEventInput, ErrorGroupsService, OccurrenceContext } from '../error-groups.service';
@@ -33,6 +41,11 @@ export class IngestRateLimitedException extends HttpException {
       HttpStatus.TOO_MANY_REQUESTS,
     );
   }
+}
+
+function tooManyEvents(raw: unknown): boolean {
+  const eventos = (raw as { eventos?: unknown } | null)?.eventos;
+  return typeof raw === 'object' && raw !== null && Array.isArray(eventos) && eventos.length > MAX_EVENTS_PER_BATCH;
 }
 
 /** Un evento que pasó el nivel mínimo, con hora y cliente ya decididos. */
@@ -76,6 +89,15 @@ export class IngestService {
     const rate = this.limiter.take(inst.id, now);
     if (!rate.ok) throw new IngestRateLimitedException(rate.retryAfterSec);
 
+    // Más de 1000 eventos es «demasiado grande» (413, el appender lo tira y
+    // no lo reintenta), no un cuerpo mal formado: se mira antes que el 400.
+    if (tooManyEvents(raw)) {
+      throw new PayloadTooLargeException({
+        code: 'PAYLOAD_TOO_LARGE',
+        message: `Un lote admite como máximo ${MAX_EVENTS_PER_BATCH} eventos.`,
+      });
+    }
+
     const parsed = parseIngestBatch(raw);
     if (!parsed.ok) {
       // 400: el appender lo tira (reintentar el mismo cuerpo no lo arregla).
@@ -83,6 +105,39 @@ export class IngestService {
     }
     const batch = parsed.batch;
 
+    // Review Focus 1: se reserva el lote AHORA, de forma síncrona y antes de
+    // cualquier await. Si se mirara después (tras el push a Loki o mientras
+    // recordOccurrences espera un bloqueo de fila), un reintento del appender
+    // —que corta a los 5 s— llegaría con el primero aún en vuelo, vería el lote
+    // «no visto» y sumaría las mismas ocurrencias otra vez.
+    const claim = batch.loteId === null ? 'new' : this.recent.claim(inst.id, batch.loteId, now);
+    let settled = claim !== 'new';
+    const reservation = {
+      confirm: () => {
+        if (!settled && batch.loteId !== null) this.recent.remember(inst.id, batch.loteId, now);
+        settled = true;
+      },
+      release: () => {
+        if (!settled && batch.loteId !== null) this.recent.forget(inst.id, batch.loteId);
+        settled = true;
+      },
+    };
+    try {
+      return await this.process(inst, batch, receivedAt, claim, reservation);
+    } finally {
+      // Cualquier salida que no confirmó el lote lo libera: un fallo inesperado
+      // no puede dejarlo reservado y hacer que el reintento se salte los errores.
+      reservation.release();
+    }
+  }
+
+  private async process(
+    inst: ResolvedInstallation,
+    batch: IngestBatch,
+    receivedAt: Date,
+    claim: 'new' | 'pending' | 'done',
+    reservation: { confirm: () => void; release: () => void },
+  ): Promise<{ aceptados: number; descartadosPorNivel: number }> {
     const kept = batch.eventos.filter((e) => meetsMinLevel(e.nivel, inst.minLevel));
     const descartadosPorNivel = batch.eventos.length - kept.length;
 
@@ -109,8 +164,12 @@ export class IngestService {
 
     // ---- Errores y vivo, una sola vez por lote (Review Focus 1)
     let errorsFailed = false;
-    const alreadySeen = batch.loteId !== null && this.recent.seen(inst.id, batch.loteId, now);
-    if (!alreadySeen) {
+    // Un duplicado con el original aún en vuelo no registra nada, pero responde
+    // 503: si el original acaba fallando, el appender (que ya no lo espera)
+    // tiene que volver a mandarlo para que los errores no se pierdan. El
+    // siguiente reintento encontrará el lote confirmado (202) o liberado.
+    const inFlightDuplicate = claim === 'pending';
+    if (claim === 'new') {
       try {
         const errorEvents = accepted.filter((a) => isErrorLevel(a.ev.nivel)).map((a) => this.toErrorEvent(inst, a));
         if (errorEvents.length > 0) {
@@ -122,13 +181,15 @@ export class IngestService {
           };
           await this.errors.recordOccurrences(ctx, errorEvents);
         }
-        // Se recuerda SOLO si los errores quedaron registrados: si fallaron, el
-        // reintento debe volver a intentarlo. Preferimos contar dos veces algún
-        // grupo que ya entró (recordOccurrences confirma cada huella por
-        // separado) a perder errores para siempre.
-        if (batch.loteId !== null) this.recent.remember(inst.id, batch.loteId, now);
+        // Se confirma SOLO si los errores quedaron registrados.
+        reservation.confirm();
       } catch (e) {
         errorsFailed = true;
+        // Fallaron: se libera para que el reintento vuelva a registrarlos.
+        // Preferimos contar dos veces algún grupo que ya entró
+        // (recordOccurrences confirma cada huella por separado) a perder
+        // errores para siempre.
+        reservation.release();
         this.log.error(`No se pudieron registrar los errores de la instalación ${inst.id}: ${(e as Error)?.message ?? e}`);
       }
       // El gateway ya se protege de sus propios fallos; aun así el vivo es un
@@ -149,7 +210,7 @@ export class IngestService {
       this.log.warn(`No se pudo actualizar el origen de la instalación ${inst.id}: ${(e as Error)?.message ?? e}`);
     }
 
-    if (lokiDown || errorsFailed) {
+    if (lokiDown || errorsFailed || inFlightDuplicate) {
       throw new ServiceUnavailableException({
         code: 'INGEST_UNAVAILABLE',
         message: 'El almacenamiento de logs no está disponible; reintente el mismo lote.',
