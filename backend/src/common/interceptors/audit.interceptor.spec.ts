@@ -58,6 +58,16 @@ const asientoDe = async (body: unknown, response: unknown = { id: 42 }) => {
   return saved[0].payloadJson as { request: any; response: any };
 };
 
+describe('AuditInterceptor: la clave de instalacion', () => {
+  it('la clave de instalación recién emitida no llega en claro al audit_log', async () => {
+    const clave = 'klog_' + 'A'.repeat(43);
+    const payload = await asientoDe({ kind: 'INTERNA', name: 'X' }, { installation: { id: 3 }, secret: clave });
+    expect(payload.response.secret).toBe('***');
+    expect(payload.response.installation).toEqual({ id: 3 });
+    expect(JSON.stringify(payload)).not.toContain(clave);
+  });
+});
+
 describe('AuditInterceptor: a quien se atribuye la accion', () => {
   it('una accion del personal va en user_id y deja client_user_id nulo', async () => {
     const entry = await run({ id: 5, email: 'admin@kubo.pe', role: 'ADMIN' });

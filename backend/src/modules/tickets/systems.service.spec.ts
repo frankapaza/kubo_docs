@@ -91,3 +91,14 @@ describe('el catalogo de sistemas', () => {
     expect(repo.remove).not.toHaveBeenCalled();
   });
 });
+
+describe('borrar un sistema con instalación de monitoreo', () => {
+  it('la FK RESTRICT de log_installations (una INTERNA que lo usa) da 409 claro y no un 500', async () => {
+    const { service, repo } = makeService();
+    repo.remove.mockRejectedValue(Object.assign(new Error('Cannot delete'), { errno: 1451, code: 'ER_ROW_IS_REFERENCED_2' }));
+    await expect(service.remove(3)).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'CONFLICT', message: 'Tiene una instalación de monitoreo; revócala o bórrala primero.' },
+    });
+  });
+});

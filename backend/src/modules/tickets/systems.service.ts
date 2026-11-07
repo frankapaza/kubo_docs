@@ -1,4 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { isForeignKeyRestrict } from '../../common/db-errors';
 
 import { sameId } from '../../common/ids';
 import { SystemsRepository } from './systems.repository';
@@ -60,7 +61,20 @@ export class SystemsService {
           'Este sistema está asignado a algún cliente. Retíralo del catálogo en lugar de borrarlo.',
       });
     }
-    await this.repo.remove(id);
+    try {
+      await this.repo.remove(id);
+    } catch (e) {
+      // Una instalación INTERNA puede apuntar al producto sin ninguna
+      // asignación de por medio (FK RESTRICT, migración 030), así que el
+      // conteo de arriba no la ve. Lo decide la base; se traduce a 409.
+      if (isForeignKeyRestrict(e)) {
+        throw new ConflictException({
+          code: 'CONFLICT',
+          message: 'Tiene una instalación de monitoreo; revócala o bórrala primero.',
+        });
+      }
+      throw e;
+    }
   }
 
   private async findByIdOrFail(id: number): Promise<System> {

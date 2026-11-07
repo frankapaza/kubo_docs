@@ -97,3 +97,21 @@ describe('asignar un sistema a un cliente', () => {
     expect(repo.remove).not.toHaveBeenCalled();
   });
 });
+
+describe('borrar una asignación con instalación de monitoreo', () => {
+  it('la FK RESTRICT de log_installations da 409 claro y no un 500', async () => {
+    const { service, repo } = makeService();
+    // Lo que lanza TypeORM/mysql2 cuando la fila está referenciada.
+    repo.remove.mockRejectedValue(Object.assign(new Error('Cannot delete'), { errno: 1451, code: 'ER_ROW_IS_REFERENCED_2' }));
+    await expect(service.remove(50)).rejects.toMatchObject({
+      status: 409,
+      response: { code: 'CONFLICT', message: 'Tiene una instalación de monitoreo; revócala o bórrala primero.' },
+    });
+  });
+
+  it('otro error de la base no se disfraza de 409', async () => {
+    const { service, repo } = makeService();
+    repo.remove.mockRejectedValue(new Error('conexión perdida'));
+    await expect(service.remove(50)).rejects.toThrow('conexión perdida');
+  });
+});

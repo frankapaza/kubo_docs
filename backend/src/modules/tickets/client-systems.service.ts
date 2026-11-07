@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { isForeignKeyRestrict } from '../../common/db-errors';
 
 import { ClientSystemsRepository, ClientSystemView } from './client-systems.repository';
 import { SystemsRepository } from './systems.repository';
@@ -76,7 +77,20 @@ export class ClientSystemsService {
         message: 'Este cliente tiene tickets de este sistema. Desactívalo en lugar de quitarlo.',
       });
     }
-    await this.repo.remove(id);
+    try {
+      await this.repo.remove(id);
+    } catch (e) {
+      // `log_installations` apunta aquí con FK RESTRICT (migración 030). No se
+      // cuenta de antemano para que tickets no dependa de monitoreo: lo decide
+      // la base y se traduce el rechazo a un 409 claro en vez de un 500.
+      if (isForeignKeyRestrict(e)) {
+        throw new ConflictException({
+          code: 'CONFLICT',
+          message: 'Tiene una instalación de monitoreo; revócala o bórrala primero.',
+        });
+      }
+      throw e;
+    }
   }
 
   private async findByIdOrFail(id: number): Promise<ClientSystem> {

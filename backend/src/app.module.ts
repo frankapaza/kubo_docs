@@ -36,6 +36,7 @@ import { EmailModule } from './modules/email/email.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { TicketMessagesModule } from './modules/ticket-messages/ticket-messages.module';
 import { InboundEmailModule } from './modules/inbound-email/inbound-email.module';
+import { MonitoringModule } from './modules/monitoring/monitoring.module';
 
 @Module({
   imports: [
@@ -106,6 +107,7 @@ import { InboundEmailModule } from './modules/inbound-email/inbound-email.module
     NotificationsModule,
     TicketMessagesModule,
     InboundEmailModule,
+    MonitoringModule,
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
