@@ -8,6 +8,7 @@ export interface LogRowData {
   key: string;
   ts: string;
   nivel: LogLevel;
+  clienteId: number | null;
   aplicativo: string;
   servidor: string;
   logger: string;

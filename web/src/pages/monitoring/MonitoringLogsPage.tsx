@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 
+import { clientsApi } from '../../api/clients.api';
 import { LogSearchParams, monitoringApi } from '../../api/monitoring.api';
 import { emitRealtime, LogsLinesEvent, useRealtime, useRealtimeConnect } from '../../lib/realtime';
 import LogLineRow, { LogRowData } from './LogLineRow';
@@ -65,7 +66,7 @@ export default function MonitoringLogsPage() {
     () =>
       (search.data?.pages ?? []).flatMap((p) =>
         p.lines.map((l) => ({
-          key: l.id, ts: l.ts, nivel: l.nivel, aplicativo: l.aplicativo, servidor: l.servidor,
+          key: l.id, ts: l.ts, nivel: l.nivel, clienteId: l.clienteId, aplicativo: l.aplicativo, servidor: l.servidor,
           logger: l.logger, mensaje: l.mensaje, excepcion: l.excepcion, hilo: l.hilo, propiedades: l.propiedades,
         })),
       ),
@@ -122,7 +123,7 @@ export default function MonitoringLogsPage() {
     // Más nueva primero; el lote llega en orden cronológico.
     const incoming: LogRowData[] = ev.lines
       .map((l) => ({
-        key: `live-${++seq.current}`, ts: l.ts, nivel: l.nivel, aplicativo: l.aplicativo, servidor: l.servidor,
+        key: `live-${++seq.current}`, ts: l.ts, nivel: l.nivel, clienteId: l.clienteId, aplicativo: l.aplicativo, servidor: l.servidor,
         logger: l.logger, mensaje: l.mensaje, excepcion: l.excepcion, hilo: l.hilo,
       }))
       .reverse();
@@ -151,6 +152,13 @@ export default function MonitoringLogsPage() {
   };
 
   const changeFilters = (next: MonitoringFilterValue) => setParams(filtersToParams(next, params), { replace: true });
+
+  // Misma clave que MonitoringFilters: la caché ya lo trae. `displayName` de
+  // una instalación de cliente es «Cliente · Sistema», así que el nombre sale
+  // del catálogo de clientes.
+  const clients = useQuery({ queryKey: ['monitoring-filter-clients'], queryFn: () => clientsApi.list(), staleTime: 60_000 });
+  const clientNames = useMemo(() => new Map((clients.data ?? []).map((c) => [Number(c.id), c.razonSocial])), [clients.data]);
+  const clienteNombre = (id: number | null): string => (id === null ? 'Interno' : clientNames.get(id) ?? `Cliente ${id}`);
 
   const rows = live ? liveRows : searchRows;
   const failed = !live && search.isError;
@@ -202,7 +210,7 @@ export default function MonitoringLogsPage() {
       >
         {failed && <div style={{ padding: 16, color: '#b3261e', fontSize: 13 }}>No se pudieron cargar los logs.</div>}
         {!live && search.isLoading && <div style={{ padding: 16, fontSize: 13, color: '#6d7577' }}>Cargando…</div>}
-        {rows.map((r) => <LogLineRow key={r.key} line={r} />)}
+        {rows.map((r) => <LogLineRow key={r.key} line={r} clienteNombre={clienteNombre(r.clienteId)} />)}
         {!failed && !(!live && search.isLoading) && rows.length === 0 && (
           <div style={{ padding: 16, fontSize: 13, color: '#6d7577' }}>
             {live ? 'Esperando líneas nuevas…' : 'No hay logs para estos filtros.'}
