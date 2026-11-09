@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
 import { TicketsRepository } from './tickets.repository';
@@ -6,6 +6,7 @@ import { TicketEventsService } from './ticket-events.service';
 import { SlaService } from './sla.service';
 import { Ticket } from './entities/ticket.entity';
 import { TicketEvent } from './entities/ticket-event.entity';
+import { TicketsRealtimeGateway } from './tickets-realtime.gateway';
 
 /**
  * Regla 04 del prototipo: al consumir el 70% del plazo de resolución sin
@@ -22,6 +23,8 @@ export class SlaRiskScheduler {
     private readonly repo: TicketsRepository,
     private readonly events: TicketEventsService,
     private readonly sla: SlaService,
+    // Opcional, como en `TicketsService`: sin gateway el escaneo marca igual.
+    @Optional() private readonly realtime?: TicketsRealtimeGateway,
   ) {}
 
   @Cron(CronExpression.EVERY_5_MINUTES)
@@ -38,6 +41,30 @@ export class SlaRiskScheduler {
     const candidates = await this.repo.listOpenForRiskScan();
     let marked = 0;
 
+    try {
+      await this.markAll(candidates, now, () => {
+        marked += 1;
+      });
+    } finally {
+      // En `finally`: si un ticket falla a mitad del lote, los ya marcados
+      // (confirmados uno a uno) igual tienen que llegar a las bandejas
+      // abiertas, que muestran la bandera de riesgo. Un aviso por pasada, no
+      // por ticket, y solo si algo cambió.
+      if (marked > 0) this.notifyChanged();
+    }
+    return marked;
+  }
+
+  /** El aviso en vivo nunca tumba el escaneo: las marcas ya están guardadas. */
+  private notifyChanged(): void {
+    try {
+      this.realtime?.notifyChanged();
+    } catch (e) {
+      this.logger.warn(`No se pudo avisar tickets:changed: ${(e as Error).message}`);
+    }
+  }
+
+  private async markAll(candidates: Ticket[], now: Date, onMarked: () => void): Promise<void> {
     for (const ticket of candidates) {
       if (!this.sla.evaluateRisk(ticket, now)) continue;
 
@@ -65,8 +92,7 @@ export class SlaRiskScheduler {
           }),
         );
       });
-      marked += 1;
+      onMarked();
     }
-    return marked;
   }
 }
