@@ -97,4 +97,41 @@ describe('TicketsRepository', () => {
       expectOpenRangeOperator(typeormRepo.count.mock.calls[0][0].where.resolvedAt, from, to);
     });
   });
+
+  /**
+   * El filtro de archivados es tri-estado: el portal no lo pone y debe ver
+   * los tickets de su empresa aunque el equipo los haya archivado.
+   */
+  describe('list: filtro de archivados', () => {
+    const makeListRepo = () => {
+      const qb = {
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      };
+      const typeormRepo = { createQueryBuilder: jest.fn(() => qb) };
+      const repo = new TicketsRepository(typeormRepo as any, {} as any);
+      const condiciones = () => qb.andWhere.mock.calls.map((c) => String(c[0]));
+      return { repo, condiciones };
+    };
+
+    it('sin `archived` no filtra por archived_at (el portal)', async () => {
+      const { repo, condiciones } = makeListRepo();
+      await repo.list({ clientId: 7, excludeInternal: true });
+      expect(condiciones().some((c) => c.includes('archived_at'))).toBe(false);
+    });
+
+    it('`archived: false` oculta los archivados (bandeja por omisión)', async () => {
+      const { repo, condiciones } = makeListRepo();
+      await repo.list({ archived: false });
+      expect(condiciones()).toContain('t.archived_at IS NULL');
+    });
+
+    it('`archived: true` muestra solo los archivados', async () => {
+      const { repo, condiciones } = makeListRepo();
+      await repo.list({ archived: true });
+      expect(condiciones()).toContain('t.archived_at IS NOT NULL');
+    });
+  });
 });

@@ -33,7 +33,12 @@ export interface TicketListFilters {
   q?: string;
   /** Oculta los CERRADO (vista "Todos" de la bandeja). */
   excludeClosed?: boolean;
-  /** `true` = solo archivados; si no, los archivados nunca salen. */
+  /**
+   * Tri-estado: `true` = solo archivados, `false` = sin archivados,
+   * `undefined` = no se filtra. Archivar es una decisión de la bandeja del
+   * equipo; solo `TicketsController.list` lo pone. El portal lo deja sin
+   * poner porque el cliente sigue viendo su ticket aunque el equipo lo archive.
+   */
   archived?: boolean;
 }
 
@@ -74,9 +79,12 @@ export class TicketsRepository {
     }
     if (filters.atRisk) qb.andWhere('t.sla_at_risk = 1');
     if (filters.excludeClosed) qb.andWhere("t.status <> 'CERRADO'");
-    // Archivar es "no lo quiero ver": un archivado no sale en ningún filtro
-    // salvo en el suyo propio.
-    qb.andWhere(filters.archived ? 't.archived_at IS NOT NULL' : 't.archived_at IS NULL');
+    // Archivar es "no lo quiero ver" del equipo: en su bandeja un archivado no
+    // sale salvo en su propio filtro. Pero solo se filtra si quien llama lo
+    // pide; antes se aplicaba siempre y el portal perdía los tickets que el
+    // equipo archivaba.
+    if (filters.archived === true) qb.andWhere('t.archived_at IS NOT NULL');
+    else if (filters.archived === false) qb.andWhere('t.archived_at IS NULL');
     if (filters.q) {
       qb.andWhere('(t.raw_text LIKE :q OR t.subject LIKE :q OR t.code LIKE :q)', {
         q: `%${filters.q}%`,

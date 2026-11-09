@@ -107,6 +107,9 @@ export class TicketsController {
       atRisk: atRisk === 'true',
       q,
       excludeClosed: excludeClosed === 'true',
+      // Siempre booleano aquí, nunca `undefined`: la bandeja del equipo oculta
+      // los archivados por omisión. El repositorio solo filtra si se lo piden
+      // (el portal no lo pide), así que esta es la puerta que lo decide.
       archived: archived === 'true',
     });
   }

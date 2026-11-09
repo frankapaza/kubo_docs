@@ -109,8 +109,16 @@ const makeService = (ticketOver: Record<string, unknown> = {}) => {
    */
   const almacen = [ticket, TICKET_AJENO];
   const repo = {
-    list: jest.fn((filters: { clientId?: number }) =>
-      Promise.resolve(almacen.filter((t) => mismoId(t.clientId, filters?.clientId))),
+    // También imita el filtro tri-estado de archivados del repositorio real:
+    // si el portal lo pidiera, los archivados desaparecerían de la respuesta.
+    list: jest.fn((filters: { clientId?: number; archived?: boolean }) =>
+      Promise.resolve(
+        almacen
+          .filter((t) => mismoId(t.clientId, filters?.clientId))
+          .filter((t: any) =>
+            filters?.archived === undefined ? true : (t.archivedAt != null) === filters.archived,
+          ),
+      ),
     ),
     findById: jest.fn((id: number) =>
       Promise.resolve(almacen.find((t) => mismoId(t.id, id)) ?? null),
@@ -177,6 +185,15 @@ describe('la frontera', () => {
     expect(a).toBeInstanceOf(NotFoundException);
     expect(a.getResponse()).toEqual(b.getResponse());
     expect(interno.events.listByTicket).not.toHaveBeenCalled();
+  });
+
+  // Archivar es una decisión de la bandeja del equipo, no del cliente: su
+  // ticket sigue en su portal aunque el equipo lo haya archivado.
+  it('un ticket archivado por el equipo sigue en el listado del cliente', async () => {
+    const { service, repo } = makeService({ archivedAt: new Date('2026-07-01T00:00:00Z'), archivedBy: 5 });
+    const vistos = await service.list(7);
+    expect(vistos).toHaveLength(1);
+    expect(repo.list.mock.calls[0][0]).not.toHaveProperty('archived');
   });
 
   it('el listado no devuelve ni un ticket de otra empresa', async () => {
