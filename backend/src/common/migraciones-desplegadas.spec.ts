@@ -85,3 +85,21 @@ describe('la migración del monitoreo', () => {
     expect([...TICKET_ORIGINS]).toEqual(ORIGENES);
   });
 });
+
+describe('la migración 002 en una base nueva', () => {
+  // schema.sql ya declara participants.document_number, y los dos docker-compose ejecutan la 002 detrás de
+  // él en initdb: un ALTER sin guarda aborta el arranque de MySQL con «Duplicate column name» y ninguna
+  // migración posterior llega a correr.
+  const sql = () =>
+    readFileSync(join(MIGRACIONES, '002_participants_and_members.sql'), 'utf8').toUpperCase();
+
+  it('añade document_number solo si no existe', () => {
+    const texto = sql();
+    const guarda = texto.search(/IF NOT EXISTS \(\s*SELECT 1 FROM INFORMATION_SCHEMA\.COLUMNS[^)]*'DOCUMENT_NUMBER'/);
+    const alter = texto.search(/ALTER TABLE PARTICIPANTS\s+ADD COLUMN DOCUMENT_NUMBER/);
+    expect(guarda).toBeGreaterThanOrEqual(0);
+    // El ALTER tiene que quedar dentro de la guarda, no antes ni suelto.
+    expect(alter).toBeGreaterThan(guarda);
+    expect(texto.match(/ADD COLUMN DOCUMENT_NUMBER/g)).toHaveLength(1);
+  });
+});

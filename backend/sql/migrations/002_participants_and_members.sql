@@ -12,9 +12,25 @@
 
 USE kubo_devdocs;
 
--- 1) participants.document_number
-ALTER TABLE participants
-  ADD COLUMN document_number VARCHAR(40) NULL AFTER full_name;
+-- 1) participants.document_number (idempotente)
+-- schema.sql ya la declara y en initdb esta migración corre detrás de él: sin
+-- la guarda, «Duplicate column name» abortaba el arranque de una base nueva.
+DROP PROCEDURE IF EXISTS kubo_add_column_002;
+DELIMITER //
+CREATE PROCEDURE kubo_add_column_002()
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = 'kubo_devdocs'
+      AND TABLE_NAME = 'participants' AND COLUMN_NAME = 'document_number'
+  ) THEN
+    ALTER TABLE participants
+      ADD COLUMN document_number VARCHAR(40) NULL AFTER full_name;
+  END IF;
+END //
+DELIMITER ;
+CALL kubo_add_column_002();
+DROP PROCEDURE IF EXISTS kubo_add_column_002;
 
 -- 2) project_members (idempotente)
 CREATE TABLE IF NOT EXISTS project_members (
