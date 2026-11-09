@@ -587,3 +587,42 @@ describe('el proyecto sale del ticket', () => {
     expect(errors.map((e) => e.property)).toContain('projectId');
   });
 });
+
+/**
+ * Un ticket MONITOREO es interno: el cliente no lo ve. Abrirlo a mano (o
+ * convertir uno a ese origen) escondería del portal una solicitud real, así
+ * que los DTO del panel lo rechazan. El monitoreo crea los suyos llamando a
+ * `TicketsService.create` directamente, sin pasar por el `ValidationPipe`.
+ */
+describe('origen MONITOREO solo lo pone el sistema', () => {
+  const opts = { whitelist: true, forbidNonWhitelisted: true };
+
+  it('el alta manual rechaza origin MONITOREO', async () => {
+    const errors = await validate(
+      plainToInstance(CreateTicketDto, { rawText: 'algo', origin: 'MONITOREO' }),
+      opts,
+    );
+    expect(errors.map((e) => e.property)).toEqual(['origin']);
+  });
+
+  it('la edición tampoco permite pasar un ticket a MONITOREO', async () => {
+    const errors = await validate(plainToInstance(UpdateTicketDto, { origin: 'MONITOREO' }), opts);
+    expect(errors.map((e) => e.property)).toEqual(['origin']);
+  });
+
+  it('los orígenes manuales siguen valiendo', async () => {
+    for (const origin of ['NOTE', 'EMAIL', 'WHATSAPP_TEXT', 'PORTAL']) {
+      const errors = await validate(plainToInstance(CreateTicketDto, { rawText: 'algo', origin }), opts);
+      expect(errors).toEqual([]);
+    }
+  });
+
+  it('el servicio sí crea un ticket MONITOREO (camino del monitoreo, sin DTO validado)', async () => {
+    const { service, repo } = makeService();
+    await service.create(
+      { kind: 'STAFF', userId: 5 },
+      { rawText: 'error en producción', clientId: 7, systemId: 5, origin: 'MONITOREO' },
+    );
+    expect(repo.savedTickets[0].origin).toBe('MONITOREO');
+  });
+});

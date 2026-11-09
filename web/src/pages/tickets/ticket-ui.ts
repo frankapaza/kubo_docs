@@ -21,6 +21,15 @@ export const ORIGIN_LABELS: Record<TicketOrigin, string> = {
   MONITOREO: 'Monitoreo',
 };
 
+/**
+ * Orígenes que el personal puede elegir al abrir un ticket a mano. `MONITOREO`
+ * no: esos tickets son internos (el cliente no los ve) y solo los crea el
+ * monitoreo; el backend rechaza ese origen en el alta manual con un 400.
+ */
+export const MANUAL_ORIGINS: TicketOrigin[] = (Object.keys(ORIGIN_LABELS) as TicketOrigin[]).filter(
+  (o) => o !== 'MONITOREO',
+);
+
 export interface Swatch {
   bg: string;
   fg: string;

@@ -17,8 +17,20 @@ import {
   TicketOrigin,
   TicketRequestType,
   ServiceCategory,
+  isInternalTicketOrigin,
 } from '../entities/ticket.entity';
 import { TICKET_IMPACTS, TICKET_URGENCIES, TicketImpact, TicketUrgency } from '../domain/ticket-priority';
+
+/**
+ * Orígenes que el personal puede elegir a mano. Fuera quedan los internos
+ * (`MONITOREO`): un ticket así es invisible para el cliente por decisión del
+ * responsable, y abrirlo a mano escondería del portal una solicitud real. El
+ * monitoreo crea los suyos llamando a `TicketsService.create` directamente,
+ * sin pasar por este DTO ni por el `ValidationPipe`, así que no le afecta.
+ */
+export const MANUAL_TICKET_ORIGINS: readonly TicketOrigin[] = TICKET_ORIGINS.filter(
+  (o) => !isInternalTicketOrigin(o),
+);
 
 /**
  * El alta de un ticket desde el panel (y la base de `UpdateTicketDto`).
@@ -38,7 +50,10 @@ export class CreateTicketDto {
   @IsOptional() @IsString() @MaxLength(240)
   subject?: string;
 
-  @IsOptional() @IsIn(TICKET_ORIGINS)
+  @IsOptional()
+  @IsIn(MANUAL_TICKET_ORIGINS as TicketOrigin[], {
+    message: 'El origen elegido no se puede asignar a mano.',
+  })
   origin?: TicketOrigin;
 
   @IsOptional() @IsIn(TICKET_REQUEST_TYPES)

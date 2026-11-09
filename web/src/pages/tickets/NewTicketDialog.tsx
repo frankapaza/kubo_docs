@@ -22,7 +22,7 @@ import {
   type RejectedAttachment,
 } from '../../components/upload';
 import { withTimeout } from '../../lib/with-timeout';
-import { ORIGIN_LABELS, PRIORITY_STYLES, TICKET_IMPACTS, TICKET_URGENCIES, previewPriority } from './ticket-ui';
+import { MANUAL_ORIGINS, ORIGIN_LABELS, PRIORITY_STYLES, TICKET_IMPACTS, TICKET_URGENCIES, previewPriority } from './ticket-ui';
 import { useAuth } from '../../auth/AuthContext';
 import { canManageClientSystems } from '../../auth/permissions';
 import {
@@ -540,7 +540,8 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
               onChange={(e) => setOrigin(e.target.value as TicketOrigin)}
               style={inputStyle}
             >
-              {(Object.keys(ORIGIN_LABELS) as TicketOrigin[]).map((o) => (
+              {/* Sin "Monitoreo": un ticket interno abierto a mano sería invisible para el cliente. */}
+              {MANUAL_ORIGINS.map((o) => (
                 <option key={o} value={o}>
                   {ORIGIN_LABELS[o]}
                 </option>
