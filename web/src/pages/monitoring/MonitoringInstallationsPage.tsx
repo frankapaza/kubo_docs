@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useAuth } from '../../auth/AuthContext';
@@ -59,6 +59,17 @@ function InstallationsAdmin() {
   const [issued, setIssued] = useState<IssuedKey | null>(null);
   const [creating, setCreating] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  // Filas con una emisión de clave en curso. Sin esto, un doble clic emite dos
+  // claves y el diálogo puede quedarse con la primera, que el servidor ya
+  // invalidó al emitir la segunda. El ref es el candado síncrono (el estado
+  // tarda un render en deshabilitar el botón); el estado es lo que se ve.
+  const keyInFlight = useRef(new Set<number>());
+  const [busyKeyIds, setBusyKeyIds] = useState<ReadonlySet<number>>(new Set());
+  const setKeyBusy = (id: number, busy: boolean) => {
+    if (busy) keyInFlight.current.add(id);
+    else keyInFlight.current.delete(id);
+    setBusyKeyIds(new Set(keyInFlight.current));
+  };
 
   const installations = useQuery({ queryKey: ['monitoring', 'installations'], queryFn: monitoringApi.listInstallations });
   const disk = useQuery({ queryKey: ['monitoring', 'disk'], queryFn: monitoringApi.disk, refetchInterval: 5 * 60_000 });
@@ -77,21 +88,28 @@ function InstallationsAdmin() {
   };
 
   const regenerate = async (i: InstallationView) => {
-    if (i.keyStatus === 'ACTIVA') {
-      const ok = await askConfirm({
-        title: 'Regenerar la clave',
-        message: `La clave actual de «${i.displayName}» dejará de valer y los servidores que la usen tendrán que actualizarla. ¿Continuar?`,
-        tone: 'warning',
-        confirmText: 'Regenerar',
-      });
-      if (!ok) return;
-    }
+    if (keyInFlight.current.has(i.id)) return;
+    // Ocupada desde antes de confirmar: un doble clic tampoco abre dos confirmaciones.
+    setKeyBusy(i.id, true);
     try {
-      setIssued(await monitoringApi.regenerateKey(i.id));
-    } catch (e) {
-      toast.error(apiMessage(e, 'No se pudo generar la clave.'));
+      if (i.keyStatus === 'ACTIVA') {
+        const ok = await askConfirm({
+          title: 'Regenerar la clave',
+          message: `La clave actual de «${i.displayName}» dejará de valer y los servidores que la usen tendrán que actualizarla. ¿Continuar?`,
+          tone: 'warning',
+          confirmText: 'Regenerar',
+        });
+        if (!ok) return;
+      }
+      try {
+        setIssued(await monitoringApi.regenerateKey(i.id));
+      } catch (e) {
+        toast.error(apiMessage(e, 'No se pudo generar la clave.'));
+      }
+      reload();
+    } finally {
+      setKeyBusy(i.id, false);
     }
-    reload();
   };
 
   const revoke = async (i: InstallationView) => {
@@ -211,8 +229,14 @@ function InstallationsAdmin() {
                       </td>
                       <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'flex', gap: 6 }}>
-                          <button type="button" style={btn} onClick={() => regenerate(i)}>
-                            {i.keyStatus === 'ACTIVA' ? 'Regenerar' : 'Generar clave'}
+                          <button
+                            type="button"
+                            style={{ ...btn, ...(busyKeyIds.has(i.id) ? { opacity: 0.6, cursor: 'wait' } : null) }}
+                            onClick={() => regenerate(i)}
+                            disabled={busyKeyIds.has(i.id)}
+                            aria-busy={busyKeyIds.has(i.id)}
+                          >
+                            {busyKeyIds.has(i.id) ? 'Generando…' : i.keyStatus === 'ACTIVA' ? 'Regenerar' : 'Generar clave'}
                           </button>
                           {i.keyStatus === 'ACTIVA' && (
                             <button type="button" style={{ ...btn, color: '#b3261e' }} onClick={() => revoke(i)}>Revocar</button>

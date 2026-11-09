@@ -22,12 +22,16 @@ export default function InstallationKeyDialog({ issued, onClose }: Props) {
     setCopied(false);
   }, [issued]);
 
+  // Escape solo cierra cuando la clave ya se copió con el botón. Antes de eso
+  // se ignora: la clave no se puede volver a mostrar, y un Escape reflejo
+  // (p. ej. para cerrar otra cosa) la perdería y obligaría a regenerarla. Quien
+  // la copió a mano cierra con el botón explícito "Ya la copié, cerrar".
   useEffect(() => {
-    if (!issued) return;
+    if (!issued || !copied) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [issued, onClose]);
+  }, [issued, copied, onClose]);
 
   if (!issued) return null;
 
