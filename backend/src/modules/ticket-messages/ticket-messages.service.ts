@@ -1,4 +1,5 @@
-import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, Optional } from '@nestjs/common';
+import { IsNull, Not } from 'typeorm';
 
 import { TicketMessagesRepository } from './ticket-messages.repository';
 import { TicketMessage, TicketMessageVisibility } from './entities/ticket-message.entity';
@@ -9,6 +10,7 @@ import { SlaService } from '../tickets/sla.service';
 import { Ticket } from '../tickets/entities/ticket.entity';
 import { TicketEvent } from '../tickets/entities/ticket-event.entity';
 import { TicketStatus, assertTransition } from '../tickets/domain/ticket-state-machine';
+import { TicketsRealtimeGateway } from '../tickets/tickets-realtime.gateway';
 
 /**
  * El actor, su ámbito y la carga del ticket visible viven en `./actor-scope`:
@@ -51,11 +53,16 @@ const RESUMED_STATUS: TicketStatus = 'EN_ATENCION';
  */
 @Injectable()
 export class TicketMessagesService {
+  private readonly logger = new Logger(TicketMessagesService.name);
+
   constructor(
     private readonly tickets: TicketsRepository,
     private readonly messages: TicketMessagesRepository,
     private readonly events: TicketEventsService,
     private readonly sla: SlaService,
+    // Opcional, como en `TicketsService`: un módulo o un test sin el gateway
+    // debe poder escribir en el hilo igual; el aviso en vivo es un extra.
+    @Optional() private readonly realtime?: TicketsRealtimeGateway,
   ) {}
 
   /**
@@ -164,7 +171,14 @@ export class TicketMessagesService {
       // tiene puesta; ponerla aquí solo podría falsearla.)
     }
 
-    return this.tickets.runInTransaction(async (manager) => {
+    // Un mensaje del cliente (portal o correo entrante: los dos llegan aquí con
+    // actor CLIENT) desarchiva el ticket. Archivar es un "no lo quiero ver" del
+    // equipo; si el cliente vuelve a escribir, hay trabajo pendiente, y sin
+    // esto el ticket quedaría reactivado pero escondido bajo "Archivados",
+    // justo donde nadie mira. `!= null` cubre también la fila sin la columna.
+    const desarchiva = esCliente && ticket.archivedAt != null;
+
+    const posted = await this.tickets.runInTransaction(async (manager) => {
       const messageRepo = manager.getRepository(TicketMessage);
       const eventRepo = manager.getRepository(TicketEvent);
 
@@ -196,9 +210,41 @@ export class TicketMessagesService {
         }),
       );
 
-      if (!patch) return { message, ticket };
-
       const ticketRepo = manager.getRepository(Ticket);
+      let desarchivado = false;
+
+      if (desarchiva) {
+        // Condicionado a que siga archivado: si el equipo lo desarchivó a la
+        // vez, no se escribe un segundo UNARCHIVED de algo que ya no ocurrió.
+        const liberado = await ticketRepo.update(
+          { id: ticket.id, archivedAt: Not(IsNull()) },
+          { archivedAt: null, archivedBy: null },
+        );
+        if (liberado.affected) {
+          desarchivado = true;
+          // Mismo tipo de evento que el desarchivo manual, con el motivo en el
+          // payload para distinguir en el timeline que lo hizo el sistema.
+          await eventRepo.save(
+            eventRepo.create({
+              ticketId: ticket.id,
+              type: 'UNARCHIVED',
+              actorUserId: author.userId,
+              actorClientUserId: author.clientUserId,
+              fromStatus: null,
+              toStatus: null,
+              reason: null,
+              payload: { reason: 'CLIENT_ACTIVITY', automatic: true, messageId: message.id },
+            }),
+          );
+        }
+      }
+
+      if (!patch) {
+        return {
+          message,
+          ticket: desarchivado ? (await ticketRepo.findOneBy({ id: ticket.id }))! : ticket,
+        };
+      }
 
       // El `UPDATE` va condicionado al estado que se leyó fuera de la
       // transacción, y se comprueba que afectó a una fila.
@@ -235,6 +281,21 @@ export class TicketMessagesService {
 
       return { message, ticket: (await ticketRepo.findOneBy({ id: ticket.id }))! };
     });
+
+    // Después del commit, nunca dentro: cualquier mensaje (portal, correo
+    // entrante o equipo) puede cambiar la bandeja --un ticket que vuelve de la
+    // espera o del archivo-- y las bandejas abiertas tienen que recargar.
+    this.notifyChanged();
+    return posted;
+  }
+
+  /** El aviso en vivo nunca tumba la escritura, que ya está confirmada. */
+  private notifyChanged(): void {
+    try {
+      this.realtime?.notifyChanged();
+    } catch (e) {
+      this.logger.warn(`No se pudo avisar tickets:changed: ${(e as Error).message}`);
+    }
   }
 
   /**

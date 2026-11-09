@@ -75,6 +75,8 @@ const makeHarness = (
     fallaEn?: 'mensaje' | 'evento-mensaje' | 'evento-transicion' | 'estado';
     /** El UPDATE condicionado no encuentra la fila: alguien movió el ticket antes. */
     carreraPerdida?: boolean;
+    /** Doble del gateway en vivo; sin él, el servicio se construye sin aviso. */
+    realtime?: { notifyChanged: jest.Mock };
   } = {},
 ) => {
   let pendiente = vacio();
@@ -155,7 +157,13 @@ const makeHarness = (
   jest.spyOn(sla, 'applyPause');
 
   return {
-    service: new TicketMessagesService(tickets as any, messages as any, events, sla),
+    service: new TicketMessagesService(
+      tickets as any,
+      messages as any,
+      events,
+      sla,
+      opciones.realtime as any,
+    ),
     tickets,
     messages,
     events,
@@ -816,6 +824,134 @@ describe('post: disciplina de la transacción', () => {
 
     expect(salida.message.id).toBe(501);
     expect(salida.ticket.status).toBe('EN_ATENCION');
+  });
+});
+
+/**
+ * Archivar es una decisión de la bandeja del equipo. Si el cliente vuelve a
+ * escribir, el ticket tiene que reaparecer en la bandeja normal: reactivado
+ * pero archivado quedaría escondido justo donde nadie mira.
+ */
+describe('post: un mensaje del cliente desarchiva el ticket', () => {
+  const ARCHIVADO = { archivedAt: new Date('2026-07-31T09:30:00.000Z'), archivedBy: 5 };
+
+  it('limpia archived_at/archived_by y deja un UNARCHIVED automático en la misma transacción', async () => {
+    const { service, confirmado, ticketRepoStub } = makeHarness(enEspera(ARCHIVADO));
+
+    const salida = await service.post(CLIENTE, 7, { bodyMd: 'Sigue fallando.' });
+
+    expect(ticketRepoStub.update).toHaveBeenCalledWith(
+      { id: 7, archivedAt: expect.anything() },
+      { archivedAt: null, archivedBy: null },
+    );
+    expect(confirmado.events.map((e) => e.type)).toEqual([
+      'MESSAGE_POSTED',
+      'UNARCHIVED',
+      'STATUS_CHANGED',
+    ]);
+    const evento = confirmado.events.find((e) => e.type === 'UNARCHIVED')!;
+    expect(evento.actorClientUserId).toBe(11);
+    expect(evento.actorUserId).toBeNull();
+    expect(evento.payload).toEqual(expect.objectContaining({ reason: 'CLIENT_ACTIVITY', automatic: true }));
+    expect(salida.ticket.archivedAt).toBeNull();
+    expect(salida.ticket.status).toBe('EN_ATENCION');
+  });
+
+  it('también sin cambio de estado (p. ej. un ticket RESUELTO archivado)', async () => {
+    const { service, confirmado } = makeHarness(ticketRow({ status: 'RESUELTO', ...ARCHIVADO }));
+
+    const salida = await service.post(CLIENTE, 7, { bodyMd: 'Sigue fallando.' });
+
+    expect(confirmado.events.map((e) => e.type)).toEqual(['MESSAGE_POSTED', 'UNARCHIVED']);
+    expect(salida.ticket.archivedAt).toBeNull();
+  });
+
+  it('el camino del correo entrante (actor CLIENT con bodyFull) desarchiva igual', async () => {
+    const { service, confirmado } = makeHarness(enEspera(ARCHIVADO));
+
+    await service.post(CLIENTE, 7, {
+      bodyMd: 'Respondo por correo.',
+      bodyFull: 'Respondo por correo.\n\n> cita',
+      visibility: 'PUBLICA',
+    });
+
+    expect(confirmado.ticketPatches).toContainEqual({ archivedAt: null, archivedBy: null });
+    expect(confirmado.events.map((e) => e.type)).toContain('UNARCHIVED');
+  });
+
+  it('un mensaje del equipo no desarchiva: archivar es decisión suya', async () => {
+    const { service, confirmado, ticketRepoStub } = makeHarness(ticketRow(ARCHIVADO));
+
+    await service.post(EQUIPO, 7, { bodyMd: 'Nota.' });
+
+    expect(ticketRepoStub.update).not.toHaveBeenCalled();
+    expect(confirmado.events.map((e) => e.type)).toEqual(['MESSAGE_POSTED']);
+  });
+
+  it('si otro ya lo desarchivó, no se escribe un segundo UNARCHIVED', async () => {
+    const { service, confirmado } = makeHarness(ticketRow(ARCHIVADO), { carreraPerdida: true });
+
+    await service.post(CLIENTE, 7, { bodyMd: 'Hola.' });
+
+    expect(confirmado.events.map((e) => e.type)).toEqual(['MESSAGE_POSTED']);
+  });
+
+  it('si falla el evento, el desarchivo se revierte con el mensaje', async () => {
+    const { service, confirmado } = makeHarness(enEspera(ARCHIVADO), { fallaEn: 'evento-transicion' });
+
+    await expect(service.post(CLIENTE, 7, { bodyMd: 'Hola.' })).rejects.toThrow();
+
+    expect(confirmado.messages).toHaveLength(0);
+    expect(confirmado.ticketPatches).toHaveLength(0);
+  });
+});
+
+describe('post: aviso en vivo a las bandejas', () => {
+  it('avisa tickets:changed después del commit, en el camino del cliente', async () => {
+    const realtime = { notifyChanged: jest.fn() };
+    const { service, tickets } = makeHarness(enEspera(), { realtime });
+
+    await service.post(CLIENTE, 7, { bodyMd: 'Respondo.' });
+
+    expect(realtime.notifyChanged).toHaveBeenCalledTimes(1);
+    expect(realtime.notifyChanged.mock.invocationCallOrder[0]).toBeGreaterThan(
+      tickets.runInTransaction.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('avisa también en el camino del equipo', async () => {
+    const realtime = { notifyChanged: jest.fn() };
+    const { service } = makeHarness(ticketRow(), { realtime });
+
+    await service.post(EQUIPO, 7, { bodyMd: 'Nota.' });
+
+    expect(realtime.notifyChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('no avisa si la transacción falla', async () => {
+    const realtime = { notifyChanged: jest.fn() };
+    const { service } = makeHarness(enEspera(), { realtime, fallaEn: 'mensaje' });
+
+    await expect(service.post(CLIENTE, 7, { bodyMd: 'Respondo.' })).rejects.toThrow();
+
+    expect(realtime.notifyChanged).not.toHaveBeenCalled();
+  });
+
+  it('un aviso que revienta no tumba el mensaje ya guardado', async () => {
+    const realtime = {
+      notifyChanged: jest.fn(() => {
+        throw new Error('socket caído');
+      }),
+    };
+    const { service, confirmado } = makeHarness(enEspera(), { realtime });
+
+    await expect(service.post(CLIENTE, 7, { bodyMd: 'Respondo.' })).resolves.toBeDefined();
+    expect(confirmado.messages).toHaveLength(1);
+  });
+
+  it('sin gateway (módulo sin tiempo real) escribe igual', async () => {
+    const { service } = makeHarness(enEspera());
+    await expect(service.post(CLIENTE, 7, { bodyMd: 'Respondo.' })).resolves.toBeDefined();
   });
 });
 
