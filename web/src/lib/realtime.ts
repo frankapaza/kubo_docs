@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { io, Socket } from 'socket.io-client';
 
-import { api, TOKEN_STORAGE_KEY } from '../api/client';
+import { api, isSessionExpiredError, refreshAccessToken, TOKEN_STORAGE_KEY } from '../api/client';
 
 /** Lo que manda el backend cuando entra un ticket (TicketsRealtimeGateway). */
 export interface TicketCreatedEvent {
@@ -59,6 +59,62 @@ interface RealtimeEvents {
 
 let socket: Socket | null = null;
 
+/** Primera espera antes de renovar y reconectar tras un rechazo del servidor. */
+const AUTH_RETRY_BASE_MS = 2_000;
+/** Techo de la espera creciente: con el backend caído no se martillea. */
+const AUTH_RETRY_MAX_MS = 60_000;
+/**
+ * Cuánto tiene que aguantar una conexión para dar por buena la sesión y volver
+ * a la espera inicial. No basta con `connect`: el gateway acepta el socket y lo
+ * corta después de verificar el token, así que un `connect` llega también en
+ * cada rechazo y reiniciar ahí la espera sería un bucle de refresh cada 2 s.
+ */
+const STABLE_CONNECTION_MS = 10_000;
+
+let authRetryTimer: ReturnType<typeof setTimeout> | null = null;
+let stableTimer: ReturnType<typeof setTimeout> | null = null;
+let authRetryAttempt = 0;
+
+function clearTimers(): void {
+  if (authRetryTimer) clearTimeout(authRetryTimer);
+  if (stableTimer) clearTimeout(stableTimer);
+  authRetryTimer = null;
+  stableTimer = null;
+}
+
+/**
+ * El servidor rechazó el socket (token vencido, típico tras reiniciar el
+ * backend con la pestaña en segundo plano: el access token dura 15 minutos y
+ * ninguna petición REST lo ha renovado). Se renueva con el MISMO refresh
+ * single-flight que usa axios y luego se reconecta; `auth` lee el token de
+ * `localStorage` en cada intento, así que la reconexión ya lleva el nuevo.
+ *
+ * Espera creciente (2 s, 4 s, ... hasta 60 s) para no entrar en bucle. Si el
+ * refresh dice que la sesión se acabó de verdad (sin refresh token o 4xx), se
+ * deja de intentar: el cierre de sesión normal llega con la próxima petición
+ * REST, que recibe el 401 y pasa por `doLogout`. Un error de red o un 5xx (el
+ * backend aún arrancando) sí se reintenta.
+ */
+function scheduleAuthRetry(s: Socket): void {
+  if (authRetryTimer) return;
+  const delay = Math.min(AUTH_RETRY_MAX_MS, AUTH_RETRY_BASE_MS * 2 ** authRetryAttempt);
+  authRetryAttempt += 1;
+  authRetryTimer = setTimeout(() => {
+    authRetryTimer = null;
+    // Se cerró sesión (o se rehízo el socket) mientras esperábamos.
+    if (socket !== s) return;
+    refreshAccessToken().then(
+      () => {
+        if (socket === s && !s.connected) s.connect();
+      },
+      (err: unknown) => {
+        if (socket !== s || isSessionExpiredError(err)) return;
+        scheduleAuthRetry(s);
+      },
+    );
+  }, delay);
+}
+
 /**
  * Una sola conexión por pestaña, compartida por todo el panel.
  *
@@ -79,20 +135,36 @@ function getSocket(): Socket {
     transports: ['websocket', 'polling'],
     auth: (cb) => cb({ token: localStorage.getItem(TOKEN_STORAGE_KEY) ?? '' }),
   });
-  // El backend corta a quien llega con token vencido; socket.io no reintenta
-  // un corte del servidor por su cuenta. Se reintenta con el token actual.
-  socket.on('disconnect', (reason) => {
-    if (reason === 'io server disconnect') {
-      setTimeout(() => {
-        if (localStorage.getItem(TOKEN_STORAGE_KEY)) socket?.connect();
-      }, 5000);
-    }
+  const s = socket;
+  s.on('connect', () => {
+    if (stableTimer) clearTimeout(stableTimer);
+    stableTimer = setTimeout(() => {
+      stableTimer = null;
+      authRetryAttempt = 0;
+    }, STABLE_CONNECTION_MS);
   });
-  return socket;
+  // El backend corta a quien llega con token vencido, y socket.io no reintenta
+  // un corte del servidor por su cuenta: se renueva el token y se reconecta.
+  s.on('disconnect', (reason) => {
+    if (stableTimer) clearTimeout(stableTimer);
+    stableTimer = null;
+    if (reason === 'io server disconnect') scheduleAuthRetry(s);
+  });
+  // `connect_error` con `active === false` es un rechazo del servidor (un
+  // middleware que deniega el handshake): socket.io tampoco reintenta solo.
+  // Con `active === true` es un fallo de transporte (backend caído) y
+  // socket.io ya reintenta con su propia espera; el token se renovará si el
+  // servidor, al volver, corta el socket.
+  s.on('connect_error', () => {
+    if (!s.active) scheduleAuthRetry(s);
+  });
+  return s;
 }
 
 /** Cierra la conexión (al cerrar sesión). */
 export function disconnectRealtime(): void {
+  clearTimers();
+  authRetryAttempt = 0;
   socket?.disconnect();
   socket = null;
 }

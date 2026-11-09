@@ -16,6 +16,57 @@ api.interceptors.request.use((config) => {
 // Shared refresh promise — varios 401 simultáneos usan el mismo intento de refresh.
 let refreshPromise: Promise<string> | null = null;
 
+/** No hay refresh token guardado: no hay sesión que renovar. */
+export class NoRefreshTokenError extends Error {
+  constructor() {
+    super('No hay refresh token');
+    this.name = 'NoRefreshTokenError';
+  }
+}
+
+/**
+ * Renueva el access token. Es la única puerta al `/auth/refresh` del panel y
+ * es single-flight: varios 401 a la vez --y la reconexión del socket en vivo
+ * (`lib/realtime.ts`)-- comparten el mismo intento. Dos refresh en paralelo
+ * rotarían el refresh token dos veces y uno de los dos perdería la sesión.
+ *
+ * Guarda los tokens nuevos en `localStorage` y devuelve el access token. Si
+ * falla, lanza: quien llama decide si eso es cerrar sesión.
+ */
+export function refreshAccessToken(): Promise<string> {
+  if (refreshPromise) return refreshPromise;
+  const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+  if (!refreshToken) return Promise.reject(new NoRefreshTokenError());
+
+  const base = api.defaults.baseURL;
+  refreshPromise = axios
+    .post<{ accessToken: string; refreshToken?: string }>(`${base}/auth/refresh`, {
+      refreshToken,
+    })
+    .then((r) => {
+      localStorage.setItem(TOKEN_STORAGE_KEY, r.data.accessToken);
+      if (r.data.refreshToken) {
+        localStorage.setItem(REFRESH_TOKEN_KEY, r.data.refreshToken);
+      }
+      return r.data.accessToken;
+    })
+    .finally(() => {
+      refreshPromise = null;
+    });
+  return refreshPromise;
+}
+
+/**
+ * ¿El fallo del refresh significa que la sesión se acabó de verdad? Sí si no
+ * hay refresh token o el servidor lo rechazó (4xx). Un error de red o un 5xx
+ * --el backend reiniciando-- no: ahí hay que reintentar más tarde.
+ */
+export function isSessionExpiredError(err: unknown): boolean {
+  if (err instanceof NoRefreshTokenError) return true;
+  const status = (err as AxiosError)?.response?.status;
+  return typeof status === 'number' && status >= 400 && status < 500;
+}
+
 /**
  * ¿Estamos dentro del portal de clientes?
  *
@@ -69,25 +120,7 @@ api.interceptors.response.use(
 
     original._retry = true;
     try {
-      if (!refreshPromise) {
-        const base = api.defaults.baseURL;
-        refreshPromise = axios
-          .post<{ accessToken: string; refreshToken?: string }>(`${base}/auth/refresh`, {
-            refreshToken,
-          })
-          .then((r) => {
-            localStorage.setItem(TOKEN_STORAGE_KEY, r.data.accessToken);
-            if (r.data.refreshToken) {
-              localStorage.setItem(REFRESH_TOKEN_KEY, r.data.refreshToken);
-            }
-            return r.data.accessToken;
-          })
-          .finally(() => {
-            refreshPromise = null;
-          });
-      }
-
-      const newToken = await refreshPromise;
+      const newToken = await refreshAccessToken();
       original.headers.Authorization = `Bearer ${newToken}`;
       return api(original);
     } catch {
