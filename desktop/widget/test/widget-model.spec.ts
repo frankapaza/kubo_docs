@@ -61,9 +61,24 @@ describe('deriveModel', () => {
     expect(m.rows.map((r) => [r.tone, r.detail])).toEqual([['amber', 'Perú … · Servidor ✓'], ['amber', 'Perú ~ · Servidor ~']]);
   });
 
-  it('vista nula o vieja se marca –', () => {
-    const m = ok(status([row({ status: 'DOWN', office: null, datacenter: pv('FAILED', '2026-11-24T14:00:00Z'), incidentId: 1 })]));
-    expect(m.rows[0].detail).toBe('Perú – · Servidor –');
+  it('vista nula, sin lastCheckAt o NO_DATA se marca –; una vista antigua se muestra tal cual', () => {
+    const old = '2026-11-24T10:00:00Z';
+    const m = ok(status([
+      row({ serviceId: 1, status: 'DOWN', office: null, datacenter: pv('FAILED'), incidentId: 1 }),
+      row({ serviceId: 2, status: 'DOWN', office: pv('FAILED', null), datacenter: pv('OK'), incidentId: 2 }),
+      row({ serviceId: 3, status: 'DOWN', office: pv('FAILED', old), datacenter: pv('OK', old), incidentId: 3 }),
+    ]));
+    expect(m.rows.map((r) => r.detail)).toEqual(['Perú – · Servidor ✕', 'Perú – · Servidor ✓', 'Perú ✕ · Servidor ✓']);
+    expect(ok(status([row({ status: 'NO_DATA', office: pv('OK'), datacenter: pv('OK') })])).tone).toBe('ok');
+  });
+
+  it('el detalle del servidor usa el peor hijo y el primer ticket no nulo', () => {
+    const m = ok(status([
+      row({ serviceId: 1, serviceName: 'A', status: 'DEGRADED', office: pv('DEGRADED'), datacenter: pv('OK'), incidentId: 11, parentIncidentId: 10, ticketCode: null }),
+      row({ serviceId: 2, serviceName: 'B', status: 'DOWN', office: pv('FAILED'), datacenter: pv('FAILED'), incidentId: 12, parentIncidentId: 10, ticketCode: 'KB-0010' }),
+    ]));
+    expect(m.rows[0].detail).toBe('Perú ✕ · Servidor ✕ · KB-0010');
+    expect(m.rows[0].tone).toBe('red');
   });
 
   it('un servidor con dos servicios es una fila con hijos', () => {

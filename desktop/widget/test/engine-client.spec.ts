@@ -57,9 +57,20 @@ describe('EngineClient', () => {
     expect(await mk('ENOENT').status()).toEqual({ kind: 'down' });
   });
 
-  it('401 -> forbidden; 500 -> down', async () => {
+  it('secreto ausente (ENOENT): connecting en el periodo de gracia, down después', async () => {
+    let t = 100;
+    const enoent = (): string => { throw Object.assign(new Error('x'), { code: 'ENOENT' }); };
+    const c = new EngineClient({ home: 'x', port: 1, fetch: jest.fn() as unknown as typeof fetch, now: () => t, startedAt: 100, readSecret: enoent });
+    t += 5_000;
+    expect(await c.status()).toEqual({ kind: 'connecting' });
+    t += 40_000;
+    expect(await c.status()).toEqual({ kind: 'down' });
+  });
+
+  it('401 y 403 -> forbidden; 500 -> down', async () => {
     const mk = (s: number) => new EngineClient({ home: homeWithSecret(), port: 1, fetch: (async () => json({}, s)) as unknown as typeof fetch, now: () => 9e9, startedAt: 0 });
     expect(await mk(401).status()).toEqual({ kind: 'forbidden' });
+    expect(await mk(403).status()).toEqual({ kind: 'forbidden' });
     expect(await mk(500).status()).toEqual({ kind: 'down' });
   });
 

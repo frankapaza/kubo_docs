@@ -26,8 +26,6 @@ export type EngineReach =
   | { kind: 'down' }
   | { kind: 'forbidden' };
 
-/** Un resultado más viejo que esto ya no cuenta como dato (el silencio de una sonda se vigila a los 10 min). */
-const STALE_MS = 10 * 60 * 1000;
 const LIMA_OFFSET_MS = -5 * 60 * 60 * 1000;
 
 function limaTime(now: Date): string {
@@ -35,10 +33,8 @@ function limaTime(now: Date): string {
   return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
 }
 
-function mark(view: ProbeView | null, now: Date): string {
-  if (!view || !view.lastCheckAt) return '–';
-  const at = Date.parse(view.lastCheckAt);
-  if (Number.isNaN(at) || now.getTime() - at > STALE_MS) return '–';
+function mark(view: ProbeView | null, noData: boolean): string {
+  if (noData || !view || !view.lastCheckAt) return '–';
   switch (view.state) {
     case 'OK': return '✓';
     case 'FAILED': return '✕';
@@ -47,9 +43,13 @@ function mark(view: ProbeView | null, now: Date): string {
   }
 }
 
-function detail(r: CombinedStateRow, now: Date): string {
-  const base = `Perú ${mark(r.office, now)} · Servidor ${mark(r.datacenter, now)}`;
-  return r.ticketCode ? `${base} · ${r.ticketCode}` : base;
+function marks(r: CombinedStateRow): string {
+  const noData = r.status === 'NO_DATA';
+  return `Perú ${mark(r.office, noData)} · Servidor ${mark(r.datacenter, noData)}`;
+}
+
+function withTicket(base: string, ticket: string | null): string {
+  return ticket ? `${base} · ${ticket}` : base;
 }
 
 function rowTone(r: CombinedStateRow): Tone | null {
@@ -66,17 +66,17 @@ function worst(tones: Tone[]): Tone {
   return tones.includes('red') ? 'red' : tones.includes('amber') ? 'amber' : 'ok';
 }
 
-function serviceRow(r: CombinedStateRow, tone: Tone, now: Date): WidgetRow {
-  return { key: `s:${r.serviceId}`, tone, title: r.serviceName, detail: detail(r, now), incidentId: r.incidentId, children: [] };
+function serviceRow(r: CombinedStateRow, tone: Tone): WidgetRow {
+  return { key: `s:${r.serviceId}`, tone, title: r.serviceName, detail: withTicket(marks(r), r.ticketCode), incidentId: r.incidentId, children: [] };
 }
 
-function problemRows(status: EngineStatus, now: Date): WidgetRow[] {
-  const servers = new Map<number, { rows: WidgetRow[]; first: CombinedStateRow }>();
+function problemRows(status: EngineStatus): WidgetRow[] {
+  const servers = new Map<number, { rows: WidgetRow[]; src: CombinedStateRow[] }>();
   const rows: WidgetRow[] = [];
   for (const r of status.services) {
     const tone = rowTone(r);
     if (tone === null) continue;
-    const child = serviceRow(r, tone, now);
+    const child = serviceRow(r, tone);
     if (r.parentIncidentId === null) {
       rows.push(child);
       continue;
@@ -84,9 +84,10 @@ function problemRows(status: EngineStatus, now: Date): WidgetRow[] {
     const group = servers.get(r.parentIncidentId);
     if (group) {
       group.rows.push(child);
+      group.src.push(r);
       continue;
     }
-    const g = { rows: [child], first: r };
+    const g = { rows: [child], src: [r] };
     servers.set(r.parentIncidentId, g);
     rows.push({
       key: `i:${r.parentIncidentId}`,
@@ -100,7 +101,9 @@ function problemRows(status: EngineStatus, now: Date): WidgetRow[] {
   for (const row of rows) {
     if (row.children.length === 0) continue;
     row.tone = worst(row.children.map((c) => c.tone));
-    row.detail = row.children[0].detail;
+    const g = servers.get(row.incidentId as number)!;
+    const lead = g.src.find((r) => rowTone(r) === 'red') ?? g.src[0];
+    row.detail = withTicket(marks(lead), g.src.find((r) => r.ticketCode)?.ticketCode ?? null);
   }
   const extra: WidgetRow[] = [];
   if (!status.central.reachable) {
@@ -123,7 +126,7 @@ export function deriveModel(reach: EngineReach, now: Date): WidgetModel {
     case 'down': return { tone: 'grey', headline: 'El motor no responde', time, rows: [], expanded: false };
     case 'forbidden': return { tone: 'grey', headline: 'Sin permiso para leer el monitor', time, rows: [], expanded: false };
   }
-  const rows = problemRows(reach.status, now);
+  const rows = problemRows(reach.status);
   if (rows.length === 0) return { tone: 'ok', headline: 'KUBO · Todo operativo', time, rows, expanded: false };
   const n = rows.length;
   return { tone: worst(rows.map((r) => r.tone)), headline: `KUBO · ${n} ${n === 1 ? 'problema' : 'problemas'}`, time, rows, expanded: true };
