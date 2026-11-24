@@ -1,5 +1,5 @@
 -- =========================================================================
---  Migración 032 — Disponibilidad: aviso cuando una sonda deja de reportar
+--  Migración 033 — Disponibilidad: aviso cuando una sonda deja de reportar
 -- =========================================================================
 --  `silence_alerted_at` guarda cuándo la central avisó por correo de que una
 --  sonda llevaba 10 minutos sin reportar. NULL = sin aviso pendiente. Se
@@ -13,9 +13,9 @@ USE kubo_devdocs;
 
 SET NAMES utf8mb4;
 
-DROP PROCEDURE IF EXISTS kubo_add_column_032;
+DROP PROCEDURE IF EXISTS kubo_add_column_033;
 DELIMITER //
-CREATE PROCEDURE kubo_add_column_032(
+CREATE PROCEDURE kubo_add_column_033(
   IN p_table VARCHAR(64), IN p_column VARCHAR(64), IN p_ddl VARCHAR(512))
 BEGIN
   IF NOT EXISTS (
@@ -29,9 +29,9 @@ BEGIN
 END //
 DELIMITER ;
 
-CALL kubo_add_column_032('monitor_probes', 'silence_alerted_at',
+CALL kubo_add_column_033('monitor_probes', 'silence_alerted_at',
   "silence_alerted_at DATETIME(3) NULL "
   "COMMENT 'cuando se aviso que la sonda dejo de reportar; NULL = sin aviso' "
   "AFTER clock_skew_ms");
 
-DROP PROCEDURE IF EXISTS kubo_add_column_032;
+DROP PROCEDURE IF EXISTS kubo_add_column_033;

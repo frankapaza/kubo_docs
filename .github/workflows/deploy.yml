@@ -184,7 +184,9 @@ jobs:
                      028_tickets_archivados \
                      029_catalogo_de_sistemas \
                      030_logs_centralizados \
-                     031_conector_repos                      031_disponibilidad_nucleo                      032_disponibilidad_escritorio; do
+                     031_conector_repos \
+                     032_disponibilidad_nucleo \
+                     033_disponibilidad_escritorio; do
               echo "--- $m"
               sql_file "backend/sql/migrations/$m.sql"
             done
@@ -250,7 +252,7 @@ jobs:
 
               echo "===== 7b. Esperar a que la sonda kubo-01 (monitor-worker) arranque ====="
               # El worker solo mide: si no arranca (p. ej. falta la fila kubo-01
-              # de la 031 o no conecta a MySQL), el monitoreo se queda sin la
+              # de la 032 o no conecta a MySQL), el monitoreo se queda sin la
               # sonda del centro de datos sin que el backend lo note. Se exige
               # el contenedor en marcha y su linea de arranque
               # ("Sonda kubo-01 iniciada", DatacenterProbeService).

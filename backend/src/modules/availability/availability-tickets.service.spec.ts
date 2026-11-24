@@ -113,7 +113,7 @@ describe('AvailabilityTicketsService.ensureTicket', () => {
     const { svc, users } = make();
     users.findByEmail.mockResolvedValue(null);
     await expect(svc.ensureTicket(incident, ctx('HIGH'))).rejects.toThrow(
-      'Falta el usuario de monitoreo: aplicar la migración 031',
+      'Falta el usuario de monitoreo: aplicar la migración 032',
     );
   });
 

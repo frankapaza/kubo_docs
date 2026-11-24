@@ -21,10 +21,12 @@ set -e
 # que migracion falta. Procedimiento completo en COMANDOS.txt, "PASO 3-bis".
 # -----------------------------------------------------------------------------
 #
-# Migracion 031 (monitoreo de disponibilidad): aplicarla a mano ANTES de este
-# deploy en una base con datos, igual que las anteriores. Crea la sonda
+# Migraciones 032 y 033 (monitoreo de disponibilidad; la 031 es la del
+# conector): aplicarlas a mano, en orden, ANTES de este deploy en una base
+# con datos, igual que las anteriores. La 032 crea la sonda
 # 'kubo-01' que busca el servicio monitor-worker; sin ella el worker aborta
-# al arrancar ("aplicar la migracion 031"). El worker solo mide; la
+# al arrancar ("aplicar la migracion 032"). La 033 anade
+# monitor_probes.silence_alerted_at (aviso por silencio de una sonda). El worker solo mide; la
 # evaluacion de incidentes y la purga corren en el backend.
 cd /home/kubo/kubo
 git pull

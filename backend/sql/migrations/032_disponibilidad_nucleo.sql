@@ -1,5 +1,5 @@
 -- =========================================================================
---  Migración 031 — Disponibilidad: núcleo del monitoreo de servidores y
+--  Migración 032 — Disponibilidad: núcleo del monitoreo de servidores y
 --  servicios de los clientes
 -- =========================================================================
 --  Las sondas (una en la oficina, otra en el centro de datos) comprueban
@@ -197,15 +197,15 @@ CREATE TABLE IF NOT EXISTS monitor_probe_states (
     REFERENCES monitor_probes (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Si estas tablas ya existían en una base de desarrollo (031 aplicada antes de
+-- Si estas tablas ya existían en una base de desarrollo (esta migración, entonces 031, aplicada antes de
 -- estos cambios), los CREATE TABLE IF NOT EXISTS de arriba no los añaden:
 --   · idx_monitor_checks_started_at  índice de la purga diaria (started_at < corte)
 --   · idx_monitor_checks_order       búsqueda del resultado de un cruce (probe_id, order_id)
 --   · monitor_probe_signals.type     valor STATE_SYNC
 --   · monitor_probe_states.state_changed_at
-DROP PROCEDURE IF EXISTS kubo_upgrade_031;
+DROP PROCEDURE IF EXISTS kubo_upgrade_032;
 DELIMITER //
-CREATE PROCEDURE kubo_upgrade_031()
+CREATE PROCEDURE kubo_upgrade_032()
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.STATISTICS
@@ -244,8 +244,8 @@ BEGIN
   END IF;
 END //
 DELIMITER ;
-CALL kubo_upgrade_031();
-DROP PROCEDURE IF EXISTS kubo_upgrade_031;
+CALL kubo_upgrade_032();
+DROP PROCEDURE IF EXISTS kubo_upgrade_032;
 
 -- -------------------------------------------------------------------------
 -- 4) Incidentes

@@ -42,6 +42,29 @@ describe('la última migración está en las tres listas de despliegue', () => {
   });
 });
 
+/**
+ * Dos ramas que escriben su migración a la vez cogen el mismo número (pasó con
+ * la 031: conector y disponibilidad). Los nombres distintos ocultan el choque
+ * y el orden de aplicación queda al azar del nombre; se renumera al integrar.
+ */
+describe('no hay dos migraciones con el mismo número', () => {
+  it('cada prefijo NNN_ es único', () => {
+    const numeros = readdirSync(MIGRACIONES)
+      .filter((n) => /^\d{3}_.+\.sql$/.test(n))
+      .map((n) => n.slice(0, 3));
+    const repetidos = numeros.filter((n, i) => numeros.indexOf(n) !== i);
+    expect(repetidos).toEqual([]);
+  });
+});
+
+describe('las migraciones de disponibilidad están en las tres listas de despliegue', () => {
+  const NOMBRES = ['032_disponibilidad_nucleo', '033_disponibilidad_escritorio'];
+  it.each(LISTAS_DE_DESPLIEGUE)('%s las nombra', (lista) => {
+    const texto = readFileSync(lista, 'utf8');
+    for (const nombre of NOMBRES) expect(texto).toContain(nombre);
+  });
+});
+
 describe('la migración del catálogo no borra ni una fila', () => {
   const sql = () =>
     readFileSync(join(MIGRACIONES, '029_catalogo_de_sistemas.sql'), 'utf8').toUpperCase();

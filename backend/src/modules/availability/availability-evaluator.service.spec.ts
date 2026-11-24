@@ -16,7 +16,7 @@ import { MonitorService } from './entities/monitor-service.entity';
 /* ------------------------------------------------------------------------ */
 /* Doble en memoria del EntityManager: lo justo de la API de TypeORM que usa */
 /* el evaluador (find/findOne/count/insert/update con FindOperators), con    */
-/* las claves únicas de incidentes abiertos de la migración 031 y rollback   */
+/* las claves únicas de incidentes abiertos de la migración 032 y rollback   */
 /* de la transacción si el callback lanza.                                   */
 /* ------------------------------------------------------------------------ */
 

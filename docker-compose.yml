@@ -86,9 +86,9 @@ services:
       # MONITOREO a tickets.origin. Los logs en si van a Loki, no a MySQL.
       - ./backend/sql/migrations/030_logs_centralizados.sql:/docker-entrypoint-initdb.d/030_logs_centralizados.sql:ro
       - ./backend/sql/migrations/031_conector_repos.sql:/docker-entrypoint-initdb.d/031_conector_repos.sql:ro
-      - ./backend/sql/migrations/031_disponibilidad_nucleo.sql:/docker-entrypoint-initdb.d/031_disponibilidad_nucleo.sql:ro
-      # La 032 anade monitor_probes.silence_alerted_at (aviso por silencio de una sonda).
-      - ./backend/sql/migrations/032_disponibilidad_escritorio.sql:/docker-entrypoint-initdb.d/032_disponibilidad_escritorio.sql:ro
+      - ./backend/sql/migrations/032_disponibilidad_nucleo.sql:/docker-entrypoint-initdb.d/032_disponibilidad_nucleo.sql:ro
+      # La 033 anade monitor_probes.silence_alerted_at (aviso por silencio de una sonda).
+      - ./backend/sql/migrations/033_disponibilidad_escritorio.sql:/docker-entrypoint-initdb.d/033_disponibilidad_escritorio.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s
@@ -112,7 +112,7 @@ services:
   # eso solo necesita MySQL: sin Redis, colas, cron ni volumen de uploads, que
   # duplicarian los consumidores y trabajos programados del backend.
   # Sin puertos ni entrada en el Caddyfile.
-  # Requiere la migracion 031 aplicada (busca la sonda 'kubo-01' al arrancar).
+  # Requiere la migracion 032 aplicada (busca la sonda 'kubo-01' al arrancar).
   monitor-worker:
     build:
       context: ./backend

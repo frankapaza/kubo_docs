@@ -58,7 +58,7 @@ Este diseño se escribió mirando una rama anterior. Al empezar la implementaci�
 - El código de disponibilidad va en `backend/src/modules/availability/` y `web/src/pages/availability/`.
 - La API del personal va bajo `/api/v1/availability/*`; la ingesta de las sondas, bajo `/api/v1/ingest/probe/*`, junto a la `/api/v1/ingest/logs` existente.
 - Las pantallas nuevas se suman al menú «Monitoreo» existente: `/monitoreo/estado`, `/monitoreo/incidentes`, `/monitoreo/inventario`, `/monitoreo/sondas`.
-- Las migraciones empiezan en `031_`.
+- Las migraciones empiezan en `032_`: `main` trajo después el conector de tickets con su `031_conector_repos.sql`, y al integrarlo las de disponibilidad se renumeraron (`032_disponibilidad_nucleo.sql`, antes 031; `033_disponibilidad_escritorio.sql`, antes 032).
 - `monitor_services.system_id` sigue apuntando a `client_systems` (la pareja cliente-producto del catálogo), igual que `tickets.system_id`.
 
 ## Fuera de alcance
@@ -111,7 +111,7 @@ Cómo se empaqueta `monitoring-core` para que lo consuman el backend y el motor 
 
 ## Modelo de datos
 
-Migraciones numeradas desde `031_`, con el mismo cuidado que las anteriores: índices protegidos con el chequeo contra `information_schema.STATISTICS` y aplicación manual antes del despliegue (ver `deploy.sh`). Todos los instantes se guardan en UTC.
+Migraciones numeradas desde `032_` (ver «Encaje con lo que ya existe en main»), con el mismo cuidado que las anteriores: índices protegidos con el chequeo contra `information_schema.STATISTICS` y aplicación manual antes del despliegue (ver `deploy.sh`). Todos los instantes se guardan en UTC.
 
 | Tabla | Para qué | Campos clave |
 |---|---|---|

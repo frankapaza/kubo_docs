@@ -1,5 +1,7 @@
 # Aceptación de la Entrega 1 (Núcleo) — Monitoreo de disponibilidad
 
+> **Renumeración (2026-11-24):** al integrar `main`, que trajo el conector de tickets con su `031_conector_repos.sql`, las migraciones de disponibilidad pasaron a ser `032_disponibilidad_nucleo.sql` (antes 031) y `033_disponibilidad_escritorio.sql` (antes 032). Este documento usa ya los números nuevos; los mensajes de commit citados conservan el número con el que se hicieron.
+
 Fecha de las comprobaciones: **2026-11-24** (pruebas automáticas repetidas tras la ronda final de correcciones, ver «Cambios» punto 6). Rama: `feat/monitoreo-nucleo` (sin publicar, sin fusionar).
 Criterios: sección «Cuándo el piloto está listo» de `docs/superpowers/specs/2026-11-23-monitoreo-disponibilidad-design.md`.
 
@@ -65,7 +67,7 @@ Estados usados:
    - Por qué: si el worker cargaba el módulo de tickets pasaba a ser un segundo consumidor de la cola de transcripciones (sin la carpeta de audios ni Whisper, con riesgo de transcripciones que fallan al azar) y un segundo ejecutor de las tareas programadas de retención de audio y riesgo de SLA. Además, evaluando en el backend los tickets automáticos generan sus notificaciones en vivo.
    - Costo: durante un despliegue del backend la evaluación se detiene unos segundos. Las mediciones no se pierden: el worker y el motor siguen midiendo y las señales esperan en la base de datos hasta que el backend vuelve (se vio en la prueba 4d/4e).
 2. **Los tickets automáticos son siempre internos** (decisión del 2026-11-23). Usan el origen `MONITOREO`, que `main` ya trata como interno: nunca salen en el portal, en el hilo, en el informe del cliente ni generan avisos al cliente. No se modificó esa regla.
-3. **Migración 031** (`backend/sql/migrations/031_disponibilidad_nucleo.sql`): crea las tablas `monitor_*` (sondas, servidores, servicios, mediciones, señales, órdenes, incidentes, eventos, cortes de oficina). Incluye un índice sobre `monitor_checks.started_at` para que la limpieza de 90 días sea rápida y otro sobre `(probe_id, order_id)` para encontrar el resultado de un cruce. Si una base ya tenía una versión anterior de la 031, volver a aplicarla añade lo que falte (índices, el valor `STATE_SYNC` y la columna `monitor_probe_states.state_changed_at`) sin tocar datos. **Debe aplicarse antes de desplegar.** El flujo de despliegue ya la lista.
+3. **Migración 032** (`backend/sql/migrations/032_disponibilidad_nucleo.sql`): crea las tablas `monitor_*` (sondas, servidores, servicios, mediciones, señales, órdenes, incidentes, eventos, cortes de oficina). Incluye un índice sobre `monitor_checks.started_at` para que la limpieza de 90 días sea rápida y otro sobre `(probe_id, order_id)` para encontrar el resultado de un cruce. Si una base ya tenía una versión anterior de la 032 (entonces 031), volver a aplicarla añade lo que falte (índices, el valor `STATE_SYNC` y la columna `monitor_probe_states.state_changed_at`) sin tocar datos. **Debe aplicarse antes de desplegar.** El flujo de despliegue ya la lista.
 4. **Nombres definitivos.**
    - Módulo del backend: `backend/src/modules/availability` (no `monitoring`, que ya existía para los errores de la aplicación).
    - Ingesta (sondas): `POST /api/v1/ingest/probe/batch` y `GET /api/v1/ingest/probe/sync`, con token de sonda `kmp_…`.
@@ -180,11 +182,11 @@ En la PC de la oficina cree una regla de firewall de **salida** que bloquee un d
 
 ### G. Visto bueno antes de producción
 
-La carga de `VMI2571371` en producción solo debe hacerse con su visto bueno, después de revisar este documento. Recuerde aplicar la migración 031 y desplegar tanto el backend como el nuevo servicio `monitor-worker`.
+La carga de `VMI2571371` en producción solo debe hacerse con su visto bueno, después de revisar este documento. Recuerde aplicar las migraciones 032 y 033 (después de la 031 del conector) y desplegar tanto el backend como el nuevo servicio `monitor-worker`.
 
 ## 6. Cómo se hizo la prueba local (para repetirla)
 
-- Contenedores desechables `kubo-mon-t14-mysql` (puerto 33071, MySQL 8.0 con el esquema, las migraciones 001 a 031 y las semillas) y `kubo-mon-t14-redis` (63801). Ambos detenidos al terminar. No se tocó ningún otro contenedor.
+- Contenedores desechables `kubo-mon-t14-mysql` (puerto 33071, MySQL 8.0 con el esquema, las migraciones 001 a 031 —la de disponibilidad, hoy 032— y las semillas) y `kubo-mon-t14-redis` (63801). Ambos detenidos al terminar. No se tocó ningún otro contenedor.
 - Backend `node dist/main.js` (puerto 3921), worker `node dist/monitoring-worker.js` y motor `node dist/main.js` en primer plano (carpeta de datos temporal con `KUBO_MONITOR_HOME`). Variables de entorno solo en la consola, sin archivos `.env`. El hash del token de la sonda de oficina se escribió por SQL.
 - Datos: un cliente, un servidor y cuatro servicios hacia puertos locales controlables (TCP `34001`, HTTPS `34002`, TCP `34002`, TCP `34003`).
 - Todos los procesos y contenedores se detuvieron al terminar.

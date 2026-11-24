@@ -1,5 +1,7 @@
 # Monitoreo · Entrega 1 (Núcleo) Implementation Plan
 
+> **Renumeración (2026-11-24):** al integrar `main`, que trajo el conector de tickets con su `031_conector_repos.sql`, las migraciones de disponibilidad pasaron a ser `032_disponibilidad_nucleo.sql` (antes 031) y `033_disponibilidad_escritorio.sql` (antes 032). Este documento usa ya los números nuevos; los mensajes de commit citados conservan el número con el que se hicieron.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Medir los servicios de cada cliente desde la oficina en Lima y desde el VPS de KUBO, cruzar las dos mediciones, abrir incidentes con ticket automático (siempre interno: el cliente nunca lo ve) y verlos en las pantallas Estado e Incidentes de la web del personal.
@@ -17,7 +19,7 @@
 ## Global Constraints
 
 - Node `>=20 <21` en backend, `packages/monitoring-core` y `desktop/engine`.
-- Migraciones SQL manuales numeradas desde `031_` (la 029 y la 030 ya existen en `main`), idempotentes con procedimientos guardados contra `information_schema` (patrón de `backend/sql/migrations/028_tickets_archivados.sql`); se aplican a mano antes del despliegue (`deploy.sh`).
+- Migraciones SQL manuales numeradas desde `032_` (la 029, la 030 y la 031 del conector ya existen en `main`), idempotentes con procedimientos guardados contra `information_schema` (patrón de `backend/sql/migrations/028_tickets_archivados.sql`); se aplican a mano antes del despliegue (`deploy.sh`).
 - Todos los instantes se guardan en UTC. La hora de Lima es UTC−5 fija (sin horario de verano); en el backend se usan `common/time-zone.ts`, `common/peru-month.ts`, `common/peru-date-time.ts`.
 - Valores por defecto, configurables: cada **5 min de 07:00 a 22:00** y cada **1 min de 22:00 a 07:00** (Lima); reintentos a **+30 s y +60 s** del primer intento; **3 fallos** confirman; **3 ciclos regulares lentos** = degradación; **2 comprobaciones correctas seguidas** = recuperación; retención de `monitor_checks` **90 días**.
 - Concurrencia máxima por sonda **16**; tiempos de espera **TCP 5 s, HTTPS 10 s**, ICMP 5 s.
@@ -36,7 +38,7 @@
 La spec deja estos puntos al constructor o no los nombra; se fijan aquí para que todas las tareas usen lo mismo:
 
 1. **Empaquetado de `monitoring-core`:** fuente única en `packages/monitoring-core/src`. El backend recibe una copia generada y versionada en `backend/src/modules/availability/core/` mediante `backend/scripts/sync-monitoring-core.mjs` (mismo patrón que `web/scripts/sync-attachment-rules.mjs`, con `--check` en `prebuild` y `--skip-if-missing`), porque la imagen Docker del backend solo ve `backend/`. El motor la consume con `"@kubo/monitoring-core": "file:../../packages/monitoring-core"`.
-2. **Autor de los tickets automáticos:** `TicketActor` solo admite `STAFF` o `CLIENT`. La migración 031 crea un usuario de sistema `monitoreo@sistema.kubo` («Monitoreo KUBO», rol `STAKEHOLDER`, `is_active = 0` para que no pueda iniciar sesión, `password_hash = '!'`). El monitoreo escribe como `{ kind: 'STAFF', userId }` de ese usuario. Como el autor no es un usuario de cliente, `plansForEvent` no avisa al cliente.
+2. **Autor de los tickets automáticos:** `TicketActor` solo admite `STAFF` o `CLIENT`. La migración 032 crea un usuario de sistema `monitoreo@sistema.kubo` («Monitoreo KUBO», rol `STAKEHOLDER`, `is_active = 0` para que no pueda iniciar sesión, `password_hash = '!'`). El monitoreo escribe como `{ kind: 'STAFF', userId }` de ese usuario. Como el autor no es un usuario de cliente, `plansForEvent` no avisa al cliente.
 3. **Tablas auxiliares** que la spec no lista: `monitor_probe_signals` (señales recibidas de las sondas), `monitor_probe_orders` («probar ahora» y comprobación cruzada) y `monitor_probe_states` (estado actual por servicio y sonda).
 4. **Ticket idempotente:** cada ticket automático lleva la etiqueta `monitoreo:incidente:<id>`; antes de crear uno, el evaluador busca por esa etiqueta.
 5. **La pantalla Inventario (básica) y la de Sondas** entran en esta entrega aunque la spec solo nombre Estado e Incidentes: sin ellas no se puede cargar `VMI2571371` ni emitir el token de la oficina. La importación CSV queda para la Entrega 3.
@@ -67,7 +69,7 @@ packages/monitoring-core/
   src/runner.ts           ejecutor: franjas, reintentos, concurrencia, sin solapes
   test/*.spec.ts
 backend/scripts/sync-monitoring-core.mjs
-backend/sql/migrations/031_disponibilidad_nucleo.sql
+backend/sql/migrations/032_disponibilidad_nucleo.sql
 backend/src/modules/availability/
   core/                   COPIA GENERADA de packages/monitoring-core/src
   entities/*.entity.ts
@@ -266,10 +268,10 @@ web/src/pages/availability/{AvailabilityStatePage,AvailabilityIncidentsPage,Avai
 
 ---
 
-### Task 5: Copia de `monitoring-core` en el backend, migración 031 y entidades
+### Task 5: Copia de `monitoring-core` en el backend, migración 032 y entidades
 
 **Files:**
-- Create: `backend/scripts/sync-monitoring-core.mjs`, `backend/src/modules/availability/core/**` (generado), `backend/sql/migrations/031_disponibilidad_nucleo.sql`, `backend/src/modules/availability/entities/*.entity.ts`
+- Create: `backend/scripts/sync-monitoring-core.mjs`, `backend/src/modules/availability/core/**` (generado), `backend/sql/migrations/032_disponibilidad_nucleo.sql`, `backend/src/modules/availability/entities/*.entity.ts`
 - Modify: `backend/package.json` (`"prebuild": "node scripts/sync-monitoring-core.mjs --check --skip-if-missing"`), `backend/Dockerfile` (añadir `COPY scripts ./scripts` antes de `RUN npm run build` en la etapa `builder`)
 - Test: `backend/src/modules/availability/entities/entities.spec.ts`
 
@@ -294,7 +296,7 @@ web/src/pages/availability/{AvailabilityStatePage,AvailabilityIncidentsPage,Avai
 - [ ] **Step 3: Write the failing test** `entities.spec.ts`: construye un `DataSource` de TypeORM con las entidades nuevas sin conectar (`new DataSource({ type: 'mysql', entities: [...] }).buildMetadatas()`) y afirma `MonitorCheck` tiene clave primaria `['probeId','id']`, `MonitorProbeSignal` tiene índice único `['probeId','uuid']`.
 - [ ] **Step 4: Run** `npx jest src/modules/availability/entities` → FAIL.
 - [ ] **Step 5: Implement** migración, entidades y constante. El origen `MONITOREO` ya existe (migración 030): no se toca.
-- [ ] **Step 6: Apply the migration twice** contra la base local de desarrollo (`docker compose -f docker-compose.dev.yml up -d mysql`, luego `mysql ... < backend/sql/migrations/031_disponibilidad_nucleo.sql` dos veces) → la segunda vez sin errores ni cambios. Comprobar `SELECT code, kind FROM monitor_probes` → 2 filas y `SELECT is_active FROM users WHERE email='monitoreo@sistema.kubo'` → 0.
+- [ ] **Step 6: Apply the migration twice** contra la base local de desarrollo (`docker compose -f docker-compose.dev.yml up -d mysql`, luego `mysql ... < backend/sql/migrations/032_disponibilidad_nucleo.sql` dos veces) → la segunda vez sin errores ni cambios. Comprobar `SELECT code, kind FROM monitor_probes` → 2 filas y `SELECT is_active FROM users WHERE email='monitoreo@sistema.kubo'` → 0.
 - [ ] **Step 7: Run** `npx jest src/modules/availability/entities && npm run build` → PASS y build sin errores.
 - [ ] **Step 8: Commit** `feat(disponibilidad): migración 031 y entidades`
 
@@ -389,7 +391,7 @@ web/src/pages/availability/{AvailabilityStatePage,AvailabilityIncidentsPage,Avai
   - `raisePriority(ticketId, criticality)`: usa `TicketAssignmentService.overridePriority` (leer su firma) con el usuario de monitoreo y el motivo «Se sumó un servicio más crítico al incidente de servidor». Solo sube, nunca baja.
   - `reopenOrReplace(incident, ticketId, ctx): Promise<Ticket>`: `RESUELTO` → `TicketTransitionsService.transition({ toStatus: 'EN_ATENCION', reason: 'El servicio volvió a caer antes de 30 minutos de recuperado.', actorUserId })`; `CERRADO` o transición no permitida (`canTransition` falso) → ticket nuevo vía `ensureTicket` cuyo `rawText` empieza por «Continúa el incidente del ticket <código anterior>»; abierto → solo comentario.
   - `comment(ticketId, text, payload)`: `TicketEventsService.record({ type: 'COMMENT', actorUserId: monitoringUserId, reason: text, payload: { source: 'DISPONIBILIDAD', ...payload } })`.
-  - `monitoringUserId` se resuelve una vez por email (`MONITORING_ACTOR_EMAIL`) y falla al arrancar si no existe («Falta el usuario de monitoreo: aplicar la migración 031»).
+  - `monitoringUserId` se resuelve una vez por email (`MONITORING_ACTOR_EMAIL`) y falla al arrancar si no existe («Falta el usuario de monitoreo: aplicar la migración 032»).
 
 - [ ] **Step 1: Write the failing tests:**
   - `ticket-text`: un caso DOWN, uno ROUTE y uno de servidor con 3 servicios; las horas en Lima
@@ -465,7 +467,7 @@ web/src/pages/availability/{AvailabilityStatePage,AvailabilityIncidentsPage,Avai
 
 **Files:**
 - Create: `backend/src/monitoring-worker.ts`, `backend/src/modules/availability/availability-worker.module.ts`, `backend/src/modules/availability/datacenter-probe.service.ts`, `backend/src/modules/availability/availability-purge.service.ts`, `backend/src/config/typeorm.options.ts`
-- Modify: `backend/src/app.module.ts` (usar `typeorm.options.ts`), `docker-compose.yml` y `docker-compose.dev.yml` (servicio `monitor-worker`), `deploy.sh` y `README.md` (migración 031 y el servicio nuevo)
+- Modify: `backend/src/app.module.ts` (usar `typeorm.options.ts`), `docker-compose.yml` y `docker-compose.dev.yml` (servicio `monitor-worker`), `deploy.sh` y `README.md` (migración 032 y el servicio nuevo)
 - Test: `datacenter-probe.service.spec.ts`, `availability-purge.service.spec.ts`
 
 **Interfaces:**
@@ -482,7 +484,7 @@ web/src/pages/availability/{AvailabilityStatePage,AvailabilityIncidentsPage,Avai
   - `DatacenterProbeService`: con `ProbeRunner` y reloj falsos, un resultado se entrega a `acceptBatch` con la sonda `kubo-01`; `crossCheck(7)` llama `runNow(7, 'CROSS', null)`; una orden `MANUAL` pendiente de `kubo-01` se toma una sola vez y llama `runNow(id, 'MANUAL', orderId)`; un tick lento no se solapa con el siguiente
   - `AvailabilityPurgeService`: con un doble que devuelve 5000, 5000 y 12 filas borradas, ejecuta tres lotes y para
 - [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement** lo anterior y actualizar compose, `deploy.sh` (paso «aplicar 031» en la lista de migraciones manuales y levantar `monitor-worker`) y `README.md` (una sección corta «Monitoreo de disponibilidad»).
+- [ ] **Step 3: Implement** lo anterior y actualizar compose, `deploy.sh` (paso «aplicar 032» en la lista de migraciones manuales y levantar `monitor-worker`) y `README.md` (una sección corta «Monitoreo de disponibilidad»).
 - [ ] **Step 4: Run** `npx jest` → PASS; `npm run build` → OK, y `ls dist/monitoring-worker.js` existe.
 - [ ] **Step 5: Smoke local:** `docker compose -f docker-compose.dev.yml up -d --build monitor-worker`, cargar por la API del personal (Task 6) un servidor de prueba con un servicio TCP a `127.0.0.1:9` (puerto cerrado), esperar 3 min → `SELECT kind, ok FROM monitor_checks ORDER BY started_at DESC LIMIT 5` muestra REGULAR y RETRY fallidos de `kubo-01`, y `docker compose logs monitor-worker` no tiene errores. Borrar el servidor de prueba (archivarlo).
 - [ ] **Step 6: Commit** `feat(disponibilidad): contenedor monitor-worker con sonda kubo-01 y purga`

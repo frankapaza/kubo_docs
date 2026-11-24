@@ -1,5 +1,7 @@
 # Aceptación de la Entrega 2 (Escritorio) — Monitoreo de disponibilidad
 
+> **Renumeración (2026-11-24):** al integrar `main`, que trajo el conector de tickets con su `031_conector_repos.sql`, las migraciones de disponibilidad pasaron a ser `032_disponibilidad_nucleo.sql` (antes 031) y `033_disponibilidad_escritorio.sql` (antes 032). Este documento usa ya los números nuevos; los mensajes de commit citados conservan el número con el que se hicieron.
+
 Fecha de las comprobaciones: **2026-11-24**. Rama: `feat/monitoreo-escritorio` (sin publicar, sin fusionar).
 Criterios: secciones «El widget», «Notificaciones de Windows» y «Vigilancia de las propias sondas» de `docs/superpowers/specs/2026-11-23-monitoreo-disponibilidad-design.md`.
 
@@ -76,7 +78,7 @@ El instalador NSIS se compiló una vez solo para comprobar que acepta el script 
 
 | # | Requisito de la spec | Estado | Evidencia |
 |---|---|---|---|
-| V1 | La central avisa por correo al personal si `oficina-01` calla 10 minutos | **CUBIERTO POR PRUEBAS** + PENDIENTE DEL USUARIO | `probe-silence.spec.ts` y `probe-silence.watch.spec.ts` (alerta a los 10 min, un solo correo, aviso de recuperación, escape de HTML, 2 min de gracia al arrancar el backend, sin administradores activos, y sin reenvío cada minuto si la marca no se puede guardar). Migración 032 aplicada dos veces en una base desechable. Correo real: ver D10 |
+| V1 | La central avisa por correo al personal si `oficina-01` calla 10 minutos | **CUBIERTO POR PRUEBAS** + PENDIENTE DEL USUARIO | `probe-silence.spec.ts` y `probe-silence.watch.spec.ts` (alerta a los 10 min, un solo correo, aviso de recuperación, escape de HTML, 2 min de gracia al arrancar el backend, sin administradores activos, y sin reenvío cada minuto si la marca no se puede guardar). Migración 033 (entonces 032) aplicada dos veces en una base desechable. Correo real: ver D10 |
 | V2 | La vigilancia cubre ambas sondas | **CUBIERTO POR PRUEBAS** | Las mismas pruebas recorren todas las sondas con token, no solo la de la oficina |
 | V3 | La oficina vigila a la central: 3 sondeos seguidos fallidos muestran «La central no responde» y un aviso; el motor sigue midiendo | **CUBIERTO POR PRUEBAS** | Motor (`central.reachable` falso tras 3 sondeos con fallos de red; el corte por rechazo no cuenta y se muestra «La central rechaza los envíos»), `widget-model.spec.ts` (ámbar «La central no responde»; «rechaza» tiene prioridad; con caída de oficina solo la fila de oficina). Aviso: ver N7. El corte real de la central con el motor corriendo, cola creciente y vaciado al volver se verificó en la Entrega 1 (4d) |
 | V4 | El widget vigila al motor: sin respuesta de la API local, gris y aviso | **CUBIERTO POR PRUEBAS** + PENDIENTE DEL USUARIO | Ver N8 y W6. Ver D7 |

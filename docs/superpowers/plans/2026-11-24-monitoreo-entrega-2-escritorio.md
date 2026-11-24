@@ -1,5 +1,7 @@
 # Monitoreo · Entrega 2 (Escritorio) Implementation Plan
 
+> **Renumeración (2026-11-24):** al integrar `main`, que trajo el conector de tickets con su `031_conector_repos.sql`, las migraciones de disponibilidad pasaron a ser `032_disponibilidad_nucleo.sql` (antes 031) y `033_disponibilidad_escritorio.sql` (antes 032). Este documento usa ya los números nuevos; los mensajes de commit citados conservan el número con el que se hicieron.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Un widget de escritorio pequeño y siempre visible en la PC de la oficina que muestra el estado de los servicios, avisa con notificaciones de Windows solo lo crítico, tiene icono en la bandeja y resume al iniciar sesión lo ocurrido; y la central avisa por correo si una sonda deja de reportar.
@@ -55,7 +57,7 @@ backend/src/modules/availability/
   availability-ingest.service.ts           (sync rellena ticketCode)
   probe-silence.watch.ts                   (vigilante de sondas mudas)
   domain/probe-silence.ts                  (regla pura)
-backend/sql/migrations/032_disponibilidad_escritorio.sql
+backend/sql/migrations/033_disponibilidad_escritorio.sql
 desktop/engine/src/
   events/diff-states.ts                    (transiciones → eventos, puro)
   events/event-journal.ts                  (tabla events en el Outbox)
@@ -142,12 +144,12 @@ desktop/widget/
 ### Task 3: La central avisa cuando una sonda deja de reportar
 
 **Files:**
-- Create: `backend/src/modules/availability/domain/probe-silence.ts`, `backend/src/modules/availability/probe-silence.watch.ts`, `backend/sql/migrations/032_disponibilidad_escritorio.sql`
+- Create: `backend/src/modules/availability/domain/probe-silence.ts`, `backend/src/modules/availability/probe-silence.watch.ts`, `backend/sql/migrations/033_disponibilidad_escritorio.sql`
 - Modify: entidad `MonitorProbe` (columna nueva), `availability.module.ts` (proveedor; importa `EmailModule` y `UsersModule`), las tres listas de migraciones que exige `src/common/migraciones-desplegadas.spec.ts` (deploy.yml, docker-compose.yml, docker-compose.dev.yml)
 - Test: `domain/probe-silence.spec.ts`, `probe-silence.watch.spec.ts`
 
 **Interfaces:**
-- Migración 032: `ALTER TABLE monitor_probes ADD COLUMN silence_alerted_at DATETIME(3) NULL` (protegida con `information_schema`, patrón de la 028).
+- Migración 033: `ALTER TABLE monitor_probes ADD COLUMN silence_alerted_at DATETIME(3) NULL` (protegida con `information_schema`, patrón de la 028).
 - Produces:
   ```ts
   export const PROBE_SILENCE_MS = 600_000;
@@ -158,7 +160,7 @@ desktop/widget/
 
 - [ ] **Step 1: Write the failing tests:** una prueba por rama de `silenceDecision` (9 min → NONE; 10 min → ALERT; ya avisada → NONE; vuelve → RECOVERED; oficina sin token y sin `lastSeenAt` → NONE); el vigilante envía un solo correo aunque corra dos veces seguidas; sin ADMIN activos registra un aviso y no falla; si el correo falla no fija la columna.
 - [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement**, y validar la 032 dos veces en un contenedor desechable (`kubo-mon-e2-mysql`, receta de la Entrega 1), deteniéndolo al final.
+- [ ] **Step 3: Implement**, y validar la 033 dos veces en un contenedor desechable (`kubo-mon-e2-mysql`, receta de la Entrega 1), deteniéndolo al final.
 - [ ] **Step 4: Run** `cd backend && npx jest && npm run build` → PASS.
 - [ ] **Step 5: Commit** `feat(disponibilidad): aviso por correo cuando una sonda deja de reportar`
 
