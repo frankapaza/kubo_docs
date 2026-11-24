@@ -1,7 +1,7 @@
 import { HttpException, Logger } from '@nestjs/common';
 import { DataSource, In, IsNull } from 'typeorm';
 import type { AvailabilityTicketsService, IncidentTicketContext } from '../availability-tickets.service';
-import { labelForKind } from '../domain/diagnose';
+import { diagnosisFromEvent } from '../domain/diagnose';
 import { MonitorIncidentEvent } from '../entities/monitor-incident-event.entity';
 import { MonitorIncident } from '../entities/monitor-incident.entity';
 import { MonitorServer } from '../entities/monitor-server.entity';
@@ -143,14 +143,11 @@ export class TicketSync {
    * (incidente de servidor), se usa el texto del tipo.
    */
   private async storedDiagnosis(inc: MonitorIncident): Promise<string> {
-    const kind = inc.kind === 'ROUTE' ? 'ROUTE' : 'DOWN';
     const last = await this.ds.manager.getRepository(MonitorIncidentEvent).findOne({
       where: { incidentId: num(inc.id), type: In(['OPENED', 'REOPENED', 'UPGRADED_TO_DOWN']) },
       order: { id: 'DESC' },
     });
-    const detail = last?.detail as { kind?: unknown; diagnosis?: unknown } | null | undefined;
-    if (detail && detail.kind === kind && typeof detail.diagnosis === 'string') return detail.diagnosis;
-    return labelForKind(kind);
+    return diagnosisFromEvent(inc.kind, last);
   }
 
   async context(inc: MonitorIncident, diagnosis?: string): Promise<IncidentTicketContext> {

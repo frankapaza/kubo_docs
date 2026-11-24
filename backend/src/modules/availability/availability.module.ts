@@ -10,6 +10,8 @@ import { AvailabilityIngestService } from './availability-ingest.service';
 import { AvailabilityInventoryController } from './availability-inventory.controller';
 import { AvailabilityInventoryService } from './availability-inventory.service';
 import { AvailabilityEvaluatorScheduler } from './availability-evaluator.scheduler';
+import { AvailabilityStateController } from './availability-state.controller';
+import { AvailabilityStateService } from './availability-state.service';
 import { AvailabilityPurgeService } from './availability-purge.service';
 import { MonitorCheck } from './entities/monitor-check.entity';
 import { MonitorIncidentEvent } from './entities/monitor-incident-event.entity';
@@ -43,10 +45,11 @@ import { ProbeTokenGuard } from './probe-token.guard';
     TicketsModule,
     UsersModule,
   ],
-  controllers: [AvailabilityInventoryController, AvailabilityIngestController],
+  controllers: [AvailabilityInventoryController, AvailabilityIngestController, AvailabilityStateController],
   providers: [
     AvailabilityInventoryService,
     AvailabilityIngestService,
+    AvailabilityStateService,
     ProbeTokenGuard,
     ProbeRateLimiter,
     AvailabilityTicketsService,

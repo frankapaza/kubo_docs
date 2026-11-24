@@ -4,7 +4,8 @@ import { createHash } from 'node:crypto';
 import { In, IsNull, ObjectLiteral, Repository } from 'typeorm';
 import { PROBE_REFERENCES } from './availability.constants';
 import { CheckResult, DEFAULT_SCHEDULE, intervalMsAt, ProbeSignal, ScheduleConfig, ServiceTarget } from './core';
-import { CombinedStateRow, combineStatus, ProbeView } from './domain/combined-state';
+import { CombinedStateRow } from './domain/combined-state';
+import { buildCombinedRows } from './domain/combined-state-builder';
 import { MonitorCheck } from './entities/monitor-check.entity';
 import { MonitorIncident } from './entities/monitor-incident.entity';
 import { MonitorProbeOrder } from './entities/monitor-probe-order.entity';
@@ -174,47 +175,8 @@ export class AvailabilityIngestService {
       this.states.find(),
       this.incidents.find({ where: { recoveredAt: IsNull() } }),
     ]);
-    const serverById = new Map(servers.map((s) => [Number(s.id), s]));
-    const kindByProbe = new Map(probes.map((p) => [Number(p.id), p.kind]));
-    const viewOf = new Map<string, ProbeView>();
-    for (const st of states) {
-      const kind = kindByProbe.get(Number(st.probeId));
-      if (!kind) continue;
-      viewOf.set(`${kind}|${Number(st.serviceId)}`, {
-        state: st.state,
-        lastCheckAt: st.lastCheckAt ?? null,
-        lastLatencyMs: st.lastLatencyMs === null || st.lastLatencyMs === undefined ? null : Number(st.lastLatencyMs),
-      });
-    }
-    const incidentByService = new Map<number, MonitorIncident>();
-    for (const inc of incidents) if (inc.serviceId !== null) incidentByService.set(Number(inc.serviceId), inc);
-
-    const intervalMs = intervalMsAt(now, schedule);
-    const rows: CombinedStateRow[] = [];
-    for (const svc of activeServices) {
-      const server = serverById.get(Number(svc.serverId));
-      if (!server) continue;
-      const id = Number(svc.id);
-      const office = viewOf.get(`OFFICE|${id}`) ?? null;
-      const datacenter = viewOf.get(`DATACENTER|${id}`) ?? null;
-      const incident = incidentByService.get(id) ?? null;
-      rows.push({
-        serviceId: id,
-        serverId: Number(server.id),
-        clientId: Number(server.clientId),
-        serviceName: svc.name,
-        serverName: server.name,
-        criticality: svc.criticality,
-        office,
-        datacenter,
-        status: combineStatus(office, datacenter, incident?.kind ?? null, now, intervalMs),
-        incidentId: incident ? Number(incident.id) : null,
-        parentIncidentId: incident?.parentId != null ? Number(incident.parentId) : null,
-        // Task 12 lo completa en la API del personal: la sonda no necesita el ticket.
-        ticketCode: null,
-      });
-    }
-    return rows;
+    // `ticketCode` lo completa la API del personal: la sonda no necesita el ticket.
+    return buildCombinedRows({ services: activeServices, servers, probes, states, openIncidents: incidents, schedule, now });
   }
 
   private async insertIgnore(repo: Repository<any>, entity: new () => ObjectLiteral, rows: ObjectLiteral[]): Promise<number> {

@@ -37,3 +37,18 @@ export function diagnose(input: DiagnoseInput): Diagnosis {
 export function labelForKind(kind: 'DOWN' | 'ROUTE'): string {
   return kind === 'DOWN' ? DIAGNOSIS_LABELS.DOWN : DIAGNOSIS_LABELS.ROUTE;
 }
+
+/**
+ * Diagnóstico guardado de un incidente: el del último evento OPENED/REOPENED/
+ * UPGRADED_TO_DOWN, solo si sigue valiendo para el tipo actual (tras un cambio
+ * de tipo, o sin evento, se usa el texto del tipo).
+ */
+export function diagnosisFromEvent(
+  incidentKind: 'DOWN' | 'ROUTE' | 'DEGRADED',
+  last: { detail: Record<string, unknown> | null } | null | undefined,
+): string {
+  const kind = incidentKind === 'ROUTE' ? 'ROUTE' : 'DOWN';
+  const detail = last?.detail as { kind?: unknown; diagnosis?: unknown } | null | undefined;
+  if (detail && detail.kind === kind && typeof detail.diagnosis === 'string') return detail.diagnosis;
+  return labelForKind(kind);
+}
