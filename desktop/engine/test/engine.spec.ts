@@ -423,6 +423,10 @@ describe('Engine', () => {
       expect(errors.length - errs).toBe(1);
       expect(outbox.deadLetters()).toHaveLength(3);
       expect(engine.status().pending).toBe(7 + measured.produced.length);
+      // Un solo CENTRAL_REJECTING (con aviso) por la apertura del corte.
+      const rejecting = engine.events(0, 500).events.filter((e) => e.kind === 'CENTRAL_REJECTING');
+      expect(rejecting).toHaveLength(1);
+      expect(rejecting[0].notify).toBe(true);
 
       central.rejectAll = false;
       await clock.advance(15000);
@@ -568,5 +572,101 @@ describe('Engine', () => {
     expect(engine.status().officeOutage).toBe(true);
     const office = central.signals.filter((x) => x.type.startsWith('OFFICE')).map((x) => x.type);
     expect(office).toEqual(['OFFICE_OUTAGE_START', 'OFFICE_OUTAGE_START']);
+  });
+
+  describe('diario de eventos', () => {
+    const kinds = (e: Engine) => e.events(0, 500).events.map((x) => x.kind);
+
+    it('status incluye centralUrl de la configuración', async () => {
+      const engine = make(fakeCheck(() => true).fn);
+      engine.start();
+      await clock.advance(1);
+      expect(engine.status().centralUrl).toBe('https://central.test');
+    });
+
+    it('el primer estado tras arrancar no genera eventos; un incidente nuevo en un sync → INCIDENT_OPENED', async () => {
+      central.state = [{ ...row(1), status: 'DOWN', incidentId: 5 }];
+      const engine = make(fakeCheck(() => true).fn);
+      engine.start();
+      await clock.advance(1);
+      expect(kinds(engine)).toEqual([]);
+      central.state = [{ ...row(1), status: 'DOWN', incidentId: 5 }, { ...row(2), status: 'ROUTE', incidentId: 6 }];
+      await clock.advance(15000);
+      const evs = engine.events(0, 500).events;
+      expect(evs.map((e) => [e.kind, e.incidentKey, e.notify])).toEqual([['INCIDENT_OPENED', 6, true]]);
+      expect(evs[0].at).toBe('2026-11-23T15:00:15.000Z');
+    });
+
+    it('central caída con un incidente abierto: el estado local cambia y no hay RECOVERED; al volver con el incidente cerrado, un RECOVERED y un CENTRAL_BACK', async () => {
+      let ok = false;
+      const engine = make(fakeCheck(() => ok).fn);
+      engine.start();
+      await clock.advance(1);
+      central.state = [{ ...row(1), status: 'DOWN', incidentId: 5 }];
+      await clock.advance(15000);
+      expect(kinds(engine)).toEqual(['INCIDENT_OPENED']);
+
+      central.down = true;
+      await clock.advance(45_000);
+      expect(engine.status().central.reachable).toBe(false);
+      expect(kinds(engine)).toEqual(['INCIDENT_OPENED', 'CENTRAL_UNREACHABLE']);
+      // Mientras tanto, la oficina vuelve a ver el servicio sano (estado local superpuesto).
+      ok = true;
+      await clock.advance(10 * 60_000);
+      expect(engine.status().services[0].office?.state).toBe('OK');
+      expect(kinds(engine)).toEqual(['INCIDENT_OPENED', 'CENTRAL_UNREACHABLE']);
+
+      central.state = [row(1)];
+      central.down = false;
+      await clock.advance(15000);
+      const evs = engine.events(0, 500).events;
+      expect(evs.map((e) => e.kind)).toEqual(['INCIDENT_OPENED', 'CENTRAL_UNREACHABLE', 'INCIDENT_RECOVERED', 'CENTRAL_BACK']);
+      expect(evs.find((e) => e.kind === 'CENTRAL_UNREACHABLE')?.notify).toBe(true);
+      expect(evs.find((e) => e.kind === 'CENTRAL_BACK')?.notify).toBe(false);
+      expect(evs.find((e) => e.kind === 'INCIDENT_RECOVERED')).toMatchObject({ incidentKey: 5, notify: true });
+
+      // Más sondeos sin cambios: nada nuevo.
+      await clock.advance(60_000);
+      expect(engine.events(0, 500).events).toHaveLength(4);
+    });
+
+    it('caída de oficina → un OFFICE_OUTAGE_STARTED (aunque el runner se sustituya y repita START) y al terminar un OFFICE_OUTAGE_ENDED', async () => {
+      let internet = false;
+      central.config = { services: [svc(1), svc(2)], schedule: DEFAULT_SCHEDULE, references: [svc(1001)] };
+      const engine = make(fakeCheck(() => internet).fn);
+      engine.start();
+      await clock.advance(11 * 60_000);
+      expect(engine.status().officeOutage).toBe(true);
+      expect(kinds(engine)).toEqual(['OFFICE_OUTAGE_STARTED']);
+
+      // Runner nuevo con la caída en curso: vuelve a declarar START; el diario no se repite.
+      central.configVersion = 'v2';
+      central.config = { ...central.config, schedule: { ...DEFAULT_SCHEDULE, dayIntervalMin: 10 } };
+      await clock.advance(25 * 60_000);
+      expect(central.signals.filter((x) => x.type === 'OFFICE_OUTAGE_START')).toHaveLength(2);
+      expect(kinds(engine)).toEqual(['OFFICE_OUTAGE_STARTED']);
+
+      internet = true;
+      await clock.advance(25 * 60_000);
+      expect(engine.status().officeOutage).toBe(false);
+      const evs = engine.events(0, 500).events;
+      expect(evs.map((e) => [e.kind, e.notify])).toEqual([
+        ['OFFICE_OUTAGE_STARTED', true],
+        ['OFFICE_OUTAGE_ENDED', true],
+      ]);
+    });
+
+    it('los eventos se guardan en la base del Outbox y sobreviven a un reinicio', async () => {
+      const engine = make(fakeCheck(() => true).fn);
+      engine.start();
+      await clock.advance(1);
+      central.state = [{ ...row(1), status: 'DOWN', incidentId: 5 }];
+      await clock.advance(15000);
+      engine.stop();
+      outbox.close();
+      outbox = new Outbox(join(dir, 'engine.db'));
+      const e2 = make(fakeCheck(() => true).fn, outbox);
+      expect(e2.events(0, 10)).toEqual({ lastId: 1, events: [expect.objectContaining({ id: 1, kind: 'INCIDENT_OPENED' })] });
+    });
   });
 });

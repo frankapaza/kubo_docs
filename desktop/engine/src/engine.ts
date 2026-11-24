@@ -8,10 +8,13 @@ import {
 } from '@kubo/monitoring-core';
 import { CentralHttpError, type CentralApi, type CombinedStateRow, type ProbeConfig, type ProbeView } from './central-client';
 import type { EngineConfig } from './config';
+import { diffStates, type EngineEvent, type EngineEventDraft } from './events/diff-states';
 import { splitItems, type Outbox, type OutboxItem } from './outbox';
 
 export interface EngineStatus {
   engine: { version: string; startedAt: string };
+  /** Origen de la central (sin barra final): el widget construye con él los enlaces a la web. */
+  centralUrl: string;
   central: {
     reachable: boolean;
     lastSyncAt: string | null;
@@ -114,6 +117,13 @@ export class Engine {
   private rejecting = false;
   private lastState: CombinedStateRow[] = [];
   private lastStateJson: string | null = null;
+  /**
+   * Último estado FRESCO (de un sync correcto) de esta ejecución, contra el que se derivan
+   * los eventos (decisión 2). Null hasta el primer sync: el primer estado no genera eventos.
+   */
+  private freshState: CombinedStateRow[] | null = null;
+  /** Caída de oficina según el diario (una entrada por transición, aunque el runner se sustituya). */
+  private outageJournaled = false;
   private readonly local = new Map<number, LocalView>();
   /** Última prueba lanzada por id de destino (de cualquier runner), para no solaparlas. */
   private readonly inFlight = new Map<number, Promise<unknown>>();
@@ -194,11 +204,39 @@ export class Engine {
         });
     return {
       engine: { version: this.version, startedAt: this.startedAt ?? this.clock.now().toISOString() },
+      centralUrl: this.config.centralUrl,
       central: { reachable, lastSyncAt: this.lastSyncAt, consecutiveFailures: this.consecutiveFailures, rejecting: this.rejecting },
       officeOutage: this.runner?.officeOutage() ?? false,
       pending: this.outbox.pendingCount(),
       services,
     };
+  }
+
+  /** Eventos del diario con id > `afterId` (como mucho `limit`) y el último id emitido. */
+  events(afterId: number, limit: number): { lastId: number; events: EngineEvent[] } {
+    return { lastId: this.outbox.events.lastId(), events: this.outbox.events.after(afterId, limit) };
+  }
+
+  /** Anota un evento en el diario con la hora de la PC. Un fallo del diario no detiene el motor. */
+  private journal(e: EngineEventDraft): void {
+    try {
+      this.outbox.events.append({ ...e, at: this.clock.now().toISOString() });
+    } catch (err) {
+      this.log.error(`No se pudo anotar el evento ${e.kind} en el diario: ${errMsg(err)}`);
+    }
+  }
+
+  private journalEngine(kind: EngineEvent['kind'], notify: boolean): void {
+    this.journal({
+      kind,
+      incidentKey: null,
+      incidentKind: null,
+      serverName: null,
+      serviceNames: [],
+      criticality: null,
+      ticketCode: null,
+      notify,
+    });
   }
 
   // --- sondeo ----------------------------------------------------------------
@@ -244,6 +282,9 @@ export class Engine {
         }
         this.runner.runNow(o.serviceId, o.kind, o.id);
       }
+      // Solo contra el último estado fresco, nunca contra el superpuesto con el local (decisión 2).
+      for (const e of diffStates(this.freshState, res.state)) this.journal(e);
+      this.freshState = res.state;
       this.lastState = res.state;
       const stateJson = JSON.stringify(res.state);
       if (stateJson !== this.lastStateJson) {
@@ -257,11 +298,15 @@ export class Engine {
     }
 
     if (errors.length === 0 && !rejected) {
-      if (this.consecutiveFailures >= UNREACHABLE_AFTER_FAILURES) this.log.info('La central vuelve a responder.');
+      if (this.consecutiveFailures >= UNREACHABLE_AFTER_FAILURES) {
+        this.log.info('La central vuelve a responder.');
+        this.journalEngine('CENTRAL_BACK', false);
+      }
       this.consecutiveFailures = 0;
       return;
     }
     this.consecutiveFailures++;
+    if (this.consecutiveFailures === UNREACHABLE_AFTER_FAILURES) this.journalEngine('CENTRAL_UNREACHABLE', true);
     if (errors.length === 0) return; // solo el rechazo: ya registrado por flush()
     const n = this.consecutiveFailures;
     const msg = `Sondeo fallido (${n} seguidos): ${errors.join('; ')}`;
@@ -327,6 +372,7 @@ export class Engine {
           );
           if (this.deadStreak >= DEAD_LETTER_BREAKER) {
             this.rejecting = true;
+            this.journalEngine('CENTRAL_REJECTING', true);
             this.log.error(
               `${this.deadStreak} descartes seguidos: la central parece rechazar todo. Se dejan de descartar elementos; el resto queda en cola.`,
             );
@@ -397,6 +443,14 @@ export class Engine {
     });
     for (const s of signals) {
       this.log.info(`Señal ${s.type}${s.serviceId === null ? '' : ` servicio ${s.serviceId}`} (${s.at}).`);
+      // Un runner nuevo repite START (o declara END sin caída previa): el diario anota solo transiciones.
+      if (s.type === 'OFFICE_OUTAGE_START' && !this.outageJournaled) {
+        this.outageJournaled = true;
+        this.journalEngine('OFFICE_OUTAGE_STARTED', true);
+      } else if (s.type === 'OFFICE_OUTAGE_END' && this.outageJournaled) {
+        this.outageJournaled = false;
+        this.journalEngine('OFFICE_OUTAGE_ENDED', true);
+      }
     }
   }
 }

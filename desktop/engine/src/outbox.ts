@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import type { CheckResult, ProbeSignal } from '@kubo/monitoring-core';
+import { EVENTS_TABLE_SQL, EventJournal } from './events/event-journal';
 
 export type Kind = 'CHECK' | 'SIGNAL';
 
@@ -19,7 +20,7 @@ export function splitItems(items: OutboxItem[]): { checks: CheckResult[]; signal
 }
 
 /**
- * Cola de envío persistente (SQLite) y última configuración conocida.
+ * Cola de envío persistente (SQLite), última configuración conocida y diario de eventos.
  *
  * Checks y señales comparten una sola tabla con una secuencia autoincremental:
  * `peekBatch` devuelve siempre un PREFIJO de la cola en orden de inserción, de
@@ -31,6 +32,8 @@ export class Outbox {
   private readonly db: Database.Database;
   private readonly insertStmt: Database.Statement;
   private readonly deleteStmt: Database.Statement;
+  /** Diario de eventos del motor (tabla `events` de esta misma base). */
+  readonly events: EventJournal;
 
   constructor(file: string) {
     this.db = new Database(file);
@@ -62,9 +65,11 @@ export class Outbox {
         k TEXT PRIMARY KEY,
         v TEXT NOT NULL
       );
+      ${EVENTS_TABLE_SQL}
     `);
     this.insertStmt = this.db.prepare('INSERT OR IGNORE INTO outbox (kind, id, payload) VALUES (?, ?, ?)');
     this.deleteStmt = this.db.prepare('DELETE FROM outbox WHERE kind = ? AND id = ?');
+    this.events = new EventJournal(this.db);
   }
 
   enqueueCheck(r: CheckResult): void {
