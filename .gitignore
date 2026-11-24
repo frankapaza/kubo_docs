@@ -10,6 +10,7 @@ node_modules/
 
 # Build outputs
 backend/dist/
+packages/*/dist/
 backend/uploads/
 
 # Artefactos de deploy
