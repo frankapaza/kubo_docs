@@ -19,14 +19,20 @@ Widget de escritorio (Electron + React) que habla solo con el motor local por `1
   central alcanzable, último sync, pendientes, rechazo) y «Salir». Alt+F4 solo oculta la ventana.
 - **Bucle de 5 s**: `status` → modelo de pantalla y bandeja; `events` desde el cursor → avisos
   de Windows (solo lo que el motor marca `notify`, con deduplicación de 2 min) y aviso «El motor
-  no responde» al pasar de activo a caído.
+  no responde» tras 3 lecturas caídas seguidas (≈15 s) después de haberlo visto activo.
+  Con «Sin internet en la oficina» no se muestra además la fila de la central (es el mismo
+  corte); «La central rechaza los envíos» tiene prioridad sobre «no responde».
 - **Resumen al iniciar sesión**: al arrancar lee el diario del motor (hasta 5000 eventos) y
   resume lo ocurrido desde la última vez que corrió el widget (`lastSeenAt`, que avanza cada
   minuto y al salir) y lo que sigue activo. Se queda hasta pulsar «Entendido». En el primer
-  arranque no hay resumen.
+  arranque no hay resumen. Incidentes abiertos y recuperados se cuentan por incidente; un
+  «la central no responde» dentro de un corte de internet de la oficina no se cuenta aparte.
 - **Arranque con la sesión**: la app empaquetada se registra una sola vez con
-  `app.setLoginItemSettings({ openAtLogin: true })` (por usuario, sin elevación). En desarrollo
-  nunca. Una sola instancia: abrir otra muestra la existente.
+  `app.setLoginItemSettings({ openAtLogin: true, name: 'com.kubo.monitor.widget' })` (valor en
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, por usuario, sin elevación). En
+  desarrollo nunca. El desinstalador borra ese valor (`installer/uninstall.nsh`, incluido con
+  `nsis.include`; en una actualización se conserva). Una sola instancia: abrir otra muestra la
+  existente.
 
 Seguridad del renderer: `contextIsolation`, `sandbox`, sin `nodeIntegration`, CSP estricta en
 `index.html`, sin navegación ni ventanas nuevas. El preload expone solo `window.kubo`

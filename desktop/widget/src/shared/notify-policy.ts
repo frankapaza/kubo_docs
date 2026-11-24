@@ -70,12 +70,18 @@ export function engineDownToast(centralUrl: string): Toast {
   return { title: 'El motor no responde', body: 'KUBO Monitor dejó de vigilar. Revisa el servicio.', url: boardUrl(centralUrl), dedupeKey: 'ENGINE_DOWN:' };
 }
 
-/** Misma origen que la central y ruta bajo /monitoreo/. */
+/** Misma origen que la central, sin credenciales en la URL y ruta bajo /monitoreo/. */
 export function isAllowedUrl(url: string, centralUrl: string): boolean {
   try {
     const u = new URL(url);
     const c = new URL(centralUrl);
-    return (u.protocol === 'https:' || u.protocol === 'http:') && u.origin === c.origin && u.pathname.startsWith('/monitoreo/');
+    return (
+      (u.protocol === 'https:' || u.protocol === 'http:') &&
+      u.username === '' &&
+      u.password === '' &&
+      u.origin === c.origin &&
+      u.pathname.startsWith('/monitoreo/')
+    );
   } catch {
     return false;
   }
@@ -98,13 +104,34 @@ export function nextCursorState(cursor: number, res: { lastId: number; events: E
   return { cursor: next, toast };
 }
 
-/** Dispara una sola vez en el paso ok -> down (nunca desde connecting); se rearma al volver ok. */
+/** 'down' seguidos (cada 5 s, ≈15 s) tras un 'ok' antes de avisar: un tropiezo puntual no avisa. */
+export const ENGINE_DOWN_AFTER = 3;
+
+/**
+ * Dispara una sola vez tras `ENGINE_DOWN_AFTER` 'down' seguidos después de un 'ok' (nunca desde
+ * connecting); se rearma al volver ok. Cualquier otro estado en medio corta la racha.
+ */
 export class EngineDownTracker {
-  private last: 'ok' | 'connecting' | 'down' | 'forbidden' | null = null;
+  /** Hubo un 'ok' desde el último aviso. */
+  private armed = false;
+  private downs = 0;
 
   update(kind: 'ok' | 'connecting' | 'down' | 'forbidden'): boolean {
-    const fire = kind === 'down' && this.last === 'ok';
-    this.last = kind;
-    return fire;
+    if (kind === 'ok') {
+      this.armed = true;
+      this.downs = 0;
+      return false;
+    }
+    if (kind !== 'down') {
+      this.armed = false;
+      this.downs = 0;
+      return false;
+    }
+    if (!this.armed) return false;
+    this.downs++;
+    if (this.downs < ENGINE_DOWN_AFTER) return false;
+    this.armed = false;
+    this.downs = 0;
+    return true;
   }
 }

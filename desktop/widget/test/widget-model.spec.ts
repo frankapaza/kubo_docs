@@ -104,6 +104,17 @@ describe('deriveModel', () => {
     expect(c.rows[0].title).toBe('Sin internet en la oficina');
   });
 
+  it('rechazando con muchos fallos seguidos sigue diciendo «rechaza» aunque reachable venga en false', () => {
+    const m = ok(status([], { central: { reachable: false, lastSyncAt: null, consecutiveFailures: 6, rejecting: true } }));
+    expect(m.rows.map((r) => r.title)).toEqual(['La central rechaza los envíos']);
+  });
+
+  it('con caída de oficina no se muestra la fila de la central (un corte, una fila)', () => {
+    const m = ok(status([], { officeOutage: true, central: { reachable: false, lastSyncAt: null, consecutiveFailures: 9, rejecting: false } }));
+    expect(m.rows.map((r) => r.title)).toEqual(['Sin internet en la oficina']);
+    expect(m.headline).toBe('KUBO · 1 problema');
+  });
+
   it('el tono global es el peor: rojo sobre ámbar', () => {
     const m = ok(status([row({ status: 'DOWN', incidentId: 1, office: pv('FAILED') })], { officeOutage: true }));
     expect(m.tone).toBe('red');

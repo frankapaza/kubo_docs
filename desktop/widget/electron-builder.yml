@@ -17,8 +17,10 @@ win:
   target: nsis
   icon: assets/icon.png
   executableName: KUBO Monitor
-# Instalador por usuario, sin elevación; el arranque con la sesión lo registra la app al primer inicio.
+# Instalador por usuario, sin elevación; el arranque con la sesión lo registra la app al primer inicio
+# y el desinstalador lo quita (installer/uninstall.nsh; no en las actualizaciones).
 nsis:
+  include: installer/uninstall.nsh
   oneClick: true
   perMachine: false
   allowElevation: false

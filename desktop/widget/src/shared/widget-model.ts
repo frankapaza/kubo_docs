@@ -106,11 +106,16 @@ function problemRows(status: EngineStatus): WidgetRow[] {
     row.detail = withTicket(marks(lead), g.src.find((r) => r.ticketCode)?.ticketCode ?? null);
   }
   const extra: WidgetRow[] = [];
-  if (!status.central.reachable) {
-    extra.push({ key: 'central', tone: 'amber', title: 'La central no responde', detail: '', incidentId: null, children: [] });
-  } else if (status.central.rejecting) {
-    extra.push({ key: 'central', tone: 'amber', title: 'La central rechaza los envíos', detail: '', incidentId: null, children: [] });
-  }
+  // Sin internet en la oficina tampoco hay central: es el mismo corte, solo la fila de oficina.
+  // «Rechaza» va antes que «no responde»: con el corte de rechazo la central responde.
+  const centralTitle = status.officeOutage
+    ? null
+    : status.central.rejecting
+      ? 'La central rechaza los envíos'
+      : !status.central.reachable
+        ? 'La central no responde'
+        : null;
+  if (centralTitle) extra.push({ key: 'central', tone: 'amber', title: centralTitle, detail: '', incidentId: null, children: [] });
   if (status.officeOutage) {
     extra.push({ key: 'office', tone: 'amber', title: 'Sin internet en la oficina', detail: '', incidentId: null, children: [] });
   }

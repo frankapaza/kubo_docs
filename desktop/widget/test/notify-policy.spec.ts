@@ -48,6 +48,16 @@ describe('toastsFor', () => {
     expect(t({ kind: 'CENTRAL_REJECTING', incidentKey: null, incidentKind: null, serviceNames: [] }).title).toBe('La central rechaza los envíos');
   });
 
+  it('no toast for the engine-side notify:false of OFFICE_OUTAGE_ENDED, CENTRAL_BACK and a silent CENTRAL_UNREACHABLE', () => {
+    const base: Partial<EngineEvent> = { incidentKey: null, incidentKind: null, serverName: null, serviceNames: [], criticality: null, notify: false };
+    const events = [
+      ev({ ...base, id: 1, kind: 'OFFICE_OUTAGE_ENDED' }),
+      ev({ ...base, id: 2, kind: 'CENTRAL_BACK' }),
+      ev({ ...base, id: 3, kind: 'CENTRAL_UNREACHABLE' }),
+    ];
+    expect(toastsFor(events, CENTRAL, new Map(), T0)).toEqual([]);
+  });
+
   it('OFFICE_OUTAGE_STARTED gives one grouped toast pointing to the board', () => {
     const e = ev({ kind: 'OFFICE_OUTAGE_STARTED', incidentKey: null, incidentKind: null, serverName: null, serviceNames: ['A', 'B', 'C'], criticality: null });
     const t = toastsFor([e], CENTRAL, new Map(), T0);
@@ -72,6 +82,13 @@ describe('isAllowedUrl', () => {
     expect(isAllowedUrl('nope', CENTRAL)).toBe(false);
     expect(isAllowedUrl(`${CENTRAL}/monitoreo/x`, 'nope')).toBe(false);
   });
+  it('rejects javascript: and URLs with userinfo', () => {
+    expect(isAllowedUrl('javascript:alert(1)//monitoreo/', CENTRAL)).toBe(false);
+    expect(isAllowedUrl('javascript://central.example.com/monitoreo/%0aalert(1)', CENTRAL)).toBe(false);
+    expect(isAllowedUrl('https://user:pass@central.example.com/monitoreo/estado', CENTRAL)).toBe(false);
+    expect(isAllowedUrl('https://user@central.example.com/monitoreo/estado', CENTRAL)).toBe(false);
+    expect(isAllowedUrl('https://central.example.com@evil.com/monitoreo/estado', CENTRAL)).toBe(false);
+  });
 });
 
 describe('nextCursorState', () => {
@@ -93,15 +110,29 @@ describe('nextCursorState', () => {
 });
 
 describe('EngineDownTracker', () => {
-  it('fires once on ok -> down, not from connecting, resets after ok', () => {
+  it('fires once after 3 consecutive down following ok (≈15 s), not from connecting, re-arms after ok', () => {
     const t = new EngineDownTracker();
     expect(t.update('connecting')).toBe(false);
     expect(t.update('down')).toBe(false);
-    expect(t.update('ok')).toBe(false);
-    expect(t.update('down')).toBe(true);
+    expect(t.update('down')).toBe(false);
     expect(t.update('down')).toBe(false);
     expect(t.update('ok')).toBe(false);
+    expect(t.update('down')).toBe(false);
+    expect(t.update('down')).toBe(false);
     expect(t.update('down')).toBe(true);
+    expect(t.update('down')).toBe(false);
+    expect(t.update('down')).toBe(false);
+    expect(t.update('down')).toBe(false);
+    expect(t.update('ok')).toBe(false);
+    expect(t.update('down')).toBe(false);
+    expect(t.update('down')).toBe(false);
+    expect(t.update('down')).toBe(true);
+  });
+
+  it('a short blip (1–2 down between ok) never fires', () => {
+    const t = new EngineDownTracker();
+    const seq = ['ok', 'down', 'ok', 'down', 'down', 'ok', 'down', 'down', 'ok'] as const;
+    expect(seq.map((k) => t.update(k))).toEqual(seq.map(() => false));
   });
   it('engineDownToast opens the board', () => {
     const x = engineDownToast(CENTRAL);

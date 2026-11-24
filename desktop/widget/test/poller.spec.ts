@@ -103,9 +103,12 @@ describe('Poller.tick', () => {
     expect(s.models).toEqual(['El motor no responde']);
   });
 
-  it('toasts engine down once on ok -> down', async () => {
-    const s = setup([{ kind: 'ok', status: status() }, { kind: 'down' }, { kind: 'down' }], [{ lastId: 0, events: [] }]);
+  it('toasts engine down once after 3 consecutive down following ok', async () => {
+    const s = setup([{ kind: 'ok', status: status() }, { kind: 'down' }, { kind: 'down' }, { kind: 'down' }], [{ lastId: 0, events: [] }]);
     await s.poller.tick();
+    await s.poller.tick();
+    await s.poller.tick();
+    expect(s.toasts).toEqual([]);
     await s.poller.tick();
     await s.poller.tick();
     expect(s.toasts.map((x) => x.t.title)).toEqual(['El motor no responde']);

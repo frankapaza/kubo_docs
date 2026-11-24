@@ -8,7 +8,7 @@ import { isCorner, sanitizeUnfolded, visibleRows } from '../shared/window-positi
 import type { WidgetModel } from '../shared/widget-model';
 import { EngineClient, monitorHome } from './engine-client';
 import { enginePort } from './engine-port';
-import { initNotifier, showToast } from './notifier';
+import { APP_ID, initNotifier, showToast } from './notifier';
 import { fetchAllEvents, Poller, POLL_INTERVAL_MS } from './poller';
 import { WidgetStore } from './store';
 import { WidgetTray } from './tray';
@@ -35,7 +35,8 @@ function start(): void {
   const store = new WidgetStore(app.getPath('userData'));
   // Arranque con la sesión, sin elevación, una sola vez; nunca en desarrollo.
   if (app.isPackaged && !store.loginItemConfigured) {
-    app.setLoginItemSettings({ openAtLogin: true });
+    // Nombre del valor en HKCU\...\Run explícito: el desinstalador lo borra por este nombre.
+    app.setLoginItemSettings({ openAtLogin: true, name: APP_ID });
     store.loginItemConfigured = true;
   }
 
