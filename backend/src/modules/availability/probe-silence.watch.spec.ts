@@ -110,6 +110,59 @@ describe('ProbeSilenceWatch', () => {
     expect(email.send).toHaveBeenCalledTimes(1);
   });
 
+  it('si la marca no se escribe (affected 0) tras avisar, lo registra y no reenvía el minuto siguiente', async () => {
+    const { watch, repo, email } = make({ affected: 0 });
+    const warn = jest.spyOn((watch as any).logger, 'warn').mockImplementation(() => undefined);
+    await watch.check(NOW);
+    await watch.check(new Date(NOW.getTime() + 60_000));
+    await watch.check(new Date(NOW.getTime() + 120_000));
+    expect(email.send).toHaveBeenCalledTimes(1);
+    expect(repo.update).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain('oficina-01');
+  });
+
+  it('recuperación sin escribir (affected 0): no reenvía; si vuelve a callar, avisa una vez', async () => {
+    const alertedAt = new Date(NOW.getTime() - 20 * 60_000);
+    const p = { ...silent(), lastSeenAt: new Date(NOW.getTime() - 5000), silenceAlertedAt: alertedAt };
+    const { watch, email } = make({ probes: [p], affected: 0 });
+    jest.spyOn((watch as any).logger, 'warn').mockImplementation(() => undefined);
+    await watch.check(NOW);
+    await watch.check(new Date(NOW.getTime() + 60_000));
+    expect(email.send).toHaveBeenCalledTimes(1);
+    expect(email.send.mock.calls[0][0].subject).toContain('volvió a reportar');
+    // Vuelve a callar (la base sigue con la marca vieja): se avisa del nuevo silencio una sola vez.
+    const later = new Date(NOW.getTime() + 15 * 60_000);
+    await watch.check(later);
+    await watch.check(new Date(later.getTime() + 60_000));
+    expect(email.send).toHaveBeenCalledTimes(2);
+    expect(email.send.mock.calls[1][0].subject).toContain('dejó de reportar');
+  });
+
+  it('una escritura de otro proceso descarta lo de memoria: vuelve a mandar la base', async () => {
+    const probe = silent();
+    const { watch, repo, email } = make({ probes: [probe], affected: 0 });
+    jest.spyOn((watch as any).logger, 'warn').mockImplementation(() => undefined);
+    await watch.check(NOW);
+    expect(email.send).toHaveBeenCalledTimes(1);
+    probe.silenceAlertedAt = new Date(NOW.getTime() + 30_000);
+    probe.lastSeenAt = new Date(NOW.getTime() + 90_000);
+    repo.update.mockResolvedValue({ affected: 1 });
+    await watch.check(new Date(NOW.getTime() + 120_000));
+    expect(email.send).toHaveBeenCalledTimes(2);
+    expect(email.send.mock.calls[1][0].subject).toContain('volvió a reportar');
+  });
+
+  it('sin administradores, la recuperación tampoco repite la advertencia cada minuto', async () => {
+    const p = { ...silent(), lastSeenAt: new Date(NOW.getTime() - 5000), silenceAlertedAt: new Date(NOW.getTime() - 20 * 60_000) };
+    const { watch } = make({ probes: [p], admins: [] });
+    const warn = jest.spyOn((watch as any).logger, 'warn').mockImplementation(() => undefined);
+    await watch.check(NOW);
+    await watch.check(new Date(NOW.getTime() + 60_000));
+    await watch.check(new Date(NOW.getTime() + 120_000));
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
   it('sin administradores advierte una sola vez por sonda y silencio', async () => {
     const { watch } = make({ admins: [] });
     const warn = jest.spyOn((watch as any).logger, 'warn').mockImplementation(() => undefined);
