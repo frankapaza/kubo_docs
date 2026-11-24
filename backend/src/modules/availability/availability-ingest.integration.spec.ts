@@ -5,6 +5,7 @@ import { sign } from 'jsonwebtoken';
 import { startTestHttpApp, TestHttpApp } from '../../test-utils/test-http-app';
 import { AvailabilityIngestController } from './availability-ingest.controller';
 import { AvailabilityIngestService } from './availability-ingest.service';
+import { AvailabilitySyncService } from './availability-sync.service';
 import { MonitorProbe } from './entities/monitor-probe.entity';
 import { ProbeRateLimiter } from './probe-rate-limiter';
 import { ProbeTokenGuard } from './probe-token.guard';
@@ -36,7 +37,8 @@ describe('/ingest/probe (integración HTTP)', () => {
       providers: [
         ProbeTokenGuard,
         ProbeRateLimiter,
-        { provide: AvailabilityIngestService, useValue: { acceptBatch, sync } },
+        { provide: AvailabilityIngestService, useValue: { acceptBatch } },
+        { provide: AvailabilitySyncService, useValue: { sync } },
         {
           provide: getRepositoryToken(MonitorProbe),
           useValue: { findOne: async ({ where }: any) => (where.tokenHash === PROBE.tokenHash ? PROBE : null) },

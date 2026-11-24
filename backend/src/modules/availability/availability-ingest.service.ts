@@ -1,13 +1,11 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
 import { In, IsNull, ObjectLiteral, Repository } from 'typeorm';
-import { TicketsRepository } from '../tickets/tickets.repository';
 import { PROBE_REFERENCES } from './availability.constants';
 import { CheckResult, DEFAULT_SCHEDULE, intervalMsAt, ProbeSignal, ScheduleConfig, ServiceTarget } from './core';
 import { CombinedStateRow } from './domain/combined-state';
 import { buildCombinedRows } from './domain/combined-state-builder';
-import { ticketCodesForIncidents } from './incident-ticket-codes';
 import { MonitorCheck } from './entities/monitor-check.entity';
 import { MonitorIncident } from './entities/monitor-incident.entity';
 import { MonitorProbeOrder } from './entities/monitor-probe-order.entity';
@@ -62,8 +60,6 @@ export class AvailabilityIngestService {
     @InjectRepository(MonitorService) private readonly services: Repository<MonitorService>,
     @InjectRepository(MonitorServer) private readonly servers: Repository<MonitorServer>,
     @InjectRepository(MonitorIncident) private readonly incidents: Repository<MonitorIncident>,
-    // El contenedor monitor-worker no tiene TicketsModule y nunca llama a `sync`: allí queda sin ticket.
-    @Optional() private readonly tickets?: TicketsRepository,
   ) {}
 
   /**
@@ -179,14 +175,8 @@ export class AvailabilityIngestService {
       this.states.find(),
       this.incidents.find({ where: { recoveredAt: IsNull() } }),
     ]);
-    const rows = buildCombinedRows({ services: activeServices, servers, probes, states, openIncidents: incidents, schedule, now });
-    // La PC de la oficina es del personal: recibe el código del ticket (misma regla que la API del personal).
-    if (this.tickets) {
-      const shown = incidents.filter((i) => rows.some((r) => r.incidentId === Number(i.id)));
-      const codes = await ticketCodesForIncidents(this.incidents, this.tickets, shown);
-      for (const r of rows) r.ticketCode = r.incidentId === null ? null : (codes.get(r.incidentId) ?? null);
-    }
-    return rows;
+    // `ticketCode` lo completa `AvailabilitySyncService` (solo backend; el worker no tiene tickets).
+    return buildCombinedRows({ services: activeServices, servers, probes, states, openIncidents: incidents, schedule, now });
   }
 
   private async insertIgnore(repo: Repository<any>, entity: new () => ObjectLiteral, rows: ObjectLiteral[]): Promise<number> {

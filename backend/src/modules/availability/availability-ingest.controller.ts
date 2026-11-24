@@ -1,6 +1,7 @@
 import { Body, Controller, Get, HttpCode, HttpException, HttpStatus, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { AcceptBatchResult, AvailabilityIngestService, SyncResponse } from './availability-ingest.service';
+import { AvailabilitySyncService } from './availability-sync.service';
 import { ProbeBatchDto } from './dto/ingest.dto';
 import { ProbeRateLimiter } from './probe-rate-limiter';
 import { ProbeRequest, ProbeTokenGuard } from './probe-token.guard';
@@ -15,6 +16,7 @@ import { ProbeRequest, ProbeTokenGuard } from './probe-token.guard';
 export class AvailabilityIngestController {
   constructor(
     private readonly ingest: AvailabilityIngestService,
+    private readonly syncService: AvailabilitySyncService,
     private readonly limiter: ProbeRateLimiter,
   ) {}
 
@@ -39,6 +41,6 @@ export class AvailabilityIngestController {
 
   @Get('sync')
   sync(@Req() req: ProbeRequest, @Query('configVersion') configVersion?: string): Promise<SyncResponse> {
-    return this.ingest.sync(req.probe!, configVersion || null);
+    return this.syncService.sync(req.probe!, configVersion || null);
   }
 }

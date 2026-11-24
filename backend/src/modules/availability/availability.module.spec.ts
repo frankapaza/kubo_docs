@@ -3,6 +3,9 @@ import { DataSource } from 'typeorm';
 import { AvailabilityEvaluatorScheduler } from './availability-evaluator.scheduler';
 import { AvailabilityEvaluatorService } from './availability-evaluator.service';
 import { AvailabilityPurgeService } from './availability-purge.service';
+import { AvailabilityIngestController } from './availability-ingest.controller';
+import { AvailabilitySyncService } from './availability-sync.service';
+import { TicketsRepository } from '../tickets/tickets.repository';
 import { AvailabilityTicketsService } from './availability-tickets.service';
 import { AvailabilityModule } from './availability.module';
 import { IncidentCloser } from './incident-closer';
@@ -32,5 +35,24 @@ describe('AvailabilityModule', () => {
       ],
     }).compile();
     expect(moduleRef.get(IncidentCloser)).toBe(moduleRef.get(AvailabilityEvaluatorService));
+  });
+
+  it('sync con ticket: el controlador de ingesta depende de AvailabilitySyncService, que exige TicketsRepository', () => {
+    expect(providers).toContain(AvailabilitySyncService);
+    expect(Reflect.getMetadata('design:paramtypes', AvailabilityIngestController)).toContain(AvailabilitySyncService);
+    expect(Reflect.getMetadata('design:paramtypes', AvailabilitySyncService)).toContain(TicketsRepository);
+    expect(Reflect.getMetadata('optional:paramtypes', AvailabilitySyncService)).toBeUndefined();
+  });
+
+  it('sin TicketsRepository AvailabilitySyncService no se resuelve (el arranque falla)', async () => {
+    await expect(
+      Test.createTestingModule({
+        providers: [
+          AvailabilitySyncService,
+          { provide: 'MonitorIncidentRepository', useValue: {} },
+          { provide: 'AvailabilityIngestService', useValue: {} },
+        ],
+      }).compile(),
+    ).rejects.toThrow();
   });
 });

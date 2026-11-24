@@ -6,6 +6,7 @@ import { UsersModule } from '../users/users.module';
 import { AvailabilityEvaluatorService } from './availability-evaluator.service';
 import { AvailabilityTicketsService } from './availability-tickets.service';
 import { AvailabilityIngestController } from './availability-ingest.controller';
+import { AvailabilitySyncService } from './availability-sync.service';
 import { AvailabilityIngestService } from './availability-ingest.service';
 import { AvailabilityInventoryController } from './availability-inventory.controller';
 import { AvailabilityInventoryService } from './availability-inventory.service';
@@ -49,6 +50,7 @@ import { ProbeTokenGuard } from './probe-token.guard';
   providers: [
     AvailabilityInventoryService,
     AvailabilityIngestService,
+    AvailabilitySyncService,
     AvailabilityStateService,
     ProbeTokenGuard,
     ProbeRateLimiter,
