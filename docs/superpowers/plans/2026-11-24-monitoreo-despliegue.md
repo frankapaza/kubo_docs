@@ -126,13 +126,13 @@ Solo con su visto bueno tras leer `2026-11-23-monitoreo-entrega-1-aceptacion.md`
 - A mano: el bucle se detiene en la que falla (`|| break`); no levante el backend nuevo. Las ya aplicadas no estorban a la versión vieja (solo añaden tablas y columnas nulables).
 - Si una ejecución se cortó a medias puede quedar un procedimiento auxiliar (`kubo_add_column_031`, `kubo_add_index_031`, `kubo_upgrade_032`, `kubo_add_column_033`): cada migración hace `DROP PROCEDURE IF EXISTS` al empezar, así que basta con reaplicarla.
 - La 033 depende de la 032: no la aplique sola.
-- Restaurar el respaldo solo hace falta si algo tocó datos existentes, que no es el caso de estas migraciones. Si aun así se decide:
+- Restaurar el respaldo solo hace falta si algo tocó datos existentes, que no es el caso de estas migraciones. Si aun así se decide, pare antes el backend y el worker para que nada escriba mientras se restaura (`docker compose stop backend monitor-worker`) y levántelos al terminar. Restaurar el volcado no elimina las tablas que crearon las migraciones nuevas (`monitor_*`, `dev_*`): quedan ahí, lo cual es inofensivo.
 
   ```bash
   docker compose exec -T mysql sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' < $HOME/respaldo-pre-deploy-<fecha>.sql
   ```
 
-**El backend no arranca (paso 4).** `deploy.yml` imprime el log y el nombre del respaldo. Las migraciones son aditivas: la versión anterior vuelve con `git checkout <commit-anterior> && docker compose up -d --build`. La versión anterior no tiene el servicio `monitor-worker` en el compose: añada `--remove-orphans` (o `docker compose stop monitor-worker`) para no dejarlo corriendo suelto.
+**El backend no arranca (paso 4).** `deploy.yml` imprime el log y el nombre del respaldo. Las migraciones son aditivas: la versión anterior vuelve con `git checkout <commit-anterior> && docker compose up -d --build`. La versión anterior no tiene el servicio `monitor-worker` en el compose: añada `--remove-orphans` (o `docker compose stop monitor-worker`) para no dejarlo corriendo suelto. Antes del siguiente despliegue vuelva a la rama con `git checkout main`: ese checkout deja el VPS en HEAD desacoplado y el `git pull` con el que empieza `deploy.yml` fallaría bajo `set -e`.
 
 **El backend arranca pero `monitor-worker` no («Sonda kubo-01 iniciada» no aparece).** El despliegue se marca fallido, pero la web funciona. Mire `docker compose logs --tail 120 monitor-worker`: lo habitual es que falte la 032 (no existe `kubo-01`) o que no conecte a MySQL. Aplique la 032 y `docker compose up -d monitor-worker`. Mientras tanto solo falta la medición desde el centro de datos.
 
