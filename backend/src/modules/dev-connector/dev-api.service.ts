@@ -17,6 +17,10 @@ import { DevLinkKind } from './entities/dev-link.entity';
 export const MAX_PENDIENTES = 50;
 
 const NOT_FOUND = { code: 'NOT_FOUND', message: 'No existe en este cliente y sistema.' } as const;
+const ADJUNTO_NOT_FOUND = { code: 'NOT_FOUND', message: 'Ese adjunto no existe en este ticket.' } as const;
+
+/** Tope para pasar un adjunto a Claude (el JSON en base64 pesa un tercio más). */
+export const MAX_ADJUNTO_BYTES = 5 * 1024 * 1024;
 
 export interface PendienteView {
   tipo: 'TICKET' | 'REQUERIMIENTO';
@@ -47,7 +51,7 @@ export interface ItemView {
   criteriosAceptacion: string[];
   vence: string | null;
   conversacion: MensajeView[];
-  adjuntos: Array<{ nombre: string; tamanoBytes: number }>;
+  adjuntos: Array<{ id: number; nombre: string; tipo: string; tamanoBytes: number }>;
   codigoVinculado: Array<{ tipo: DevLinkKind; ref: string; titulo: string | null; url: string | null; estado: string | null }>;
   /** Solo tickets. */
   modulo?: string | null;
@@ -136,7 +140,7 @@ export class DevApiService {
           visibilidad: m.visibility,
           texto: m.bodyMd,
         })),
-        adjuntos: files.map((f) => ({ nombre: f.filename, tamanoBytes: f.size })),
+        adjuntos: files.map((f) => ({ id: Number(f.id), nombre: f.filename, tipo: f.mimeType, tamanoBytes: f.size })),
         codigoVinculado: links.map(linkView),
       };
     }
@@ -167,6 +171,34 @@ export class DevApiService {
       adjuntos: [],
       codigoVinculado: links.map(linkView),
     };
+  }
+
+  /**
+   * Un adjunto del ticket, en base64, para que Claude lo vea. Solo los de un
+   * ticket del alcance de la clave; el id tiene que estar en la lista de ese
+   * ticket (la descarga del servicio no comprueba a qué ticket pertenece).
+   */
+  async adjunto(
+    p: DevPrincipal,
+    rawCode: string,
+    attachmentId: number,
+  ): Promise<{ id: number; nombre: string; tipo: string; tamanoBytes: number; base64: string }> {
+    const r = await this.resolve(p, rawCode);
+    if (r.kind !== 'KB') throw new NotFoundException({ ...ADJUNTO_NOT_FOUND });
+    const staff = { kind: 'STAFF' as const, userId: p.userId };
+    const meta = (await this.attachments.list(staff, r.ticket.id)).find((f) => Number(f.id) === Number(attachmentId));
+    if (!meta) throw new NotFoundException({ ...ADJUNTO_NOT_FOUND });
+    if (meta.size > MAX_ADJUNTO_BYTES) {
+      throw new BadRequestException({
+        code: 'BAD_INPUT',
+        message: `El adjunto pasa de ${MAX_ADJUNTO_BYTES / (1024 * 1024)} MB: descárgalo desde DevDocs.`,
+      });
+    }
+    const d = await this.attachments.download(staff, meta.id);
+    const chunks: Buffer[] = [];
+    for await (const c of d.stream as AsyncIterable<Buffer | string>) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
+    const buf = Buffer.concat(chunks);
+    return { id: Number(meta.id), nombre: d.filename, tipo: d.mimeType, tamanoBytes: buf.length, base64: buf.toString('base64') };
   }
 
   /** Nota que el cliente no ve. Se permite en cualquier ítem del alcance, sea de quien sea. */

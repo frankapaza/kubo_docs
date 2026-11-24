@@ -1,4 +1,5 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { Readable } from 'stream';
 
 import { DevApiService } from './dev-api.service';
 import { DevPrincipal } from './dev-keys.service';
@@ -27,7 +28,7 @@ const RQ = {
   assigneeUserId: 9, title: 'Exportar a Excel', descriptionMd: 'detalle', acceptanceCriteria: null, dueDate: null,
 };
 
-function build(over: { ticket?: object | null; rq?: object | null; open?: object[] } = {}) {
+function build(over: { ticket?: object | null; rq?: object | null; open?: object[]; files?: object[] } = {}) {
   const data = {
     findTicketByCode: jest.fn().mockResolvedValue(over.ticket === undefined ? TICKET : over.ticket),
     findWorkItemByCode: jest.fn().mockResolvedValue(over.rq === undefined ? RQ : over.rq),
@@ -39,7 +40,12 @@ function build(over: { ticket?: object | null; rq?: object | null; open?: object
     post: jest.fn().mockResolvedValue({ message: { id: 1 } }),
     listThread: jest.fn().mockResolvedValue([]),
   };
-  const attachments = { list: jest.fn().mockResolvedValue([]) };
+  const attachments = {
+    list: jest.fn().mockResolvedValue(over.files ?? []),
+    download: jest.fn().mockImplementation(async () => ({
+      stream: Readable.from([Buffer.from('PNGDATA')]), filename: 'captura.png', mimeType: 'image/png', size: 7,
+    })),
+  };
   const transitions = { transition: jest.fn().mockResolvedValue({ ...TICKET, status: 'EN_ATENCION' }) };
   const board = { move: jest.fn().mockResolvedValue({ ...RQ, status: 'EN_PROCESO' }) };
   const wiEvents = {
@@ -49,7 +55,7 @@ function build(over: { ticket?: object | null; rq?: object | null; open?: object
   const service = new DevApiService(
     data as never, messages as never, attachments as never, transitions as never, board as never, wiEvents as never,
   );
-  return { service, data, messages, transitions, board, wiEvents };
+  return { service, data, messages, attachments, transitions, board, wiEvents };
 }
 
 describe('DevApiService', () => {
@@ -163,5 +169,47 @@ describe('vincular desde el MCP no pisa el estado de un PR', () => {
     const { service, data } = build();
     await service.vincular(P, 'KB-0210', { kind: 'PR', ref: '12' });
     expect(data.upsertLink).toHaveBeenCalledWith(expect.objectContaining({ kind: 'PR', state: null }));
+  });
+});
+
+describe('adjuntos', () => {
+  const FILE = { id: 77, messageId: 1, filename: 'captura.png', mimeType: 'image/png', size: 7, createdAt: new Date() };
+
+  it('el detalle lista cada adjunto con su id y su tipo', async () => {
+    const { service } = build({ files: [FILE] });
+    const t = await service.item(P, 'KB-0210');
+    expect(t.adjuntos).toEqual([{ id: 77, nombre: 'captura.png', tipo: 'image/png', tamanoBytes: 7 }]);
+  });
+
+  it('devuelve el contenido en base64 de un adjunto del ticket', async () => {
+    const { service, attachments } = build({ files: [FILE] });
+    const out = await service.adjunto(P, 'KB-0210', 77);
+    expect(attachments.download).toHaveBeenCalledWith({ kind: 'STAFF', userId: 9 }, 77);
+    expect(out).toEqual({
+      id: 77, nombre: 'captura.png', tipo: 'image/png', tamanoBytes: 7, base64: Buffer.from('PNGDATA').toString('base64'),
+    });
+  });
+
+  it('un adjunto que no es de ese ticket responde 404 sin descargar', async () => {
+    const { service, attachments } = build({ files: [FILE] });
+    await expect(service.adjunto(P, 'KB-0210', 78)).rejects.toBeInstanceOf(NotFoundException);
+    expect(attachments.download).not.toHaveBeenCalled();
+  });
+
+  it('un ticket de otra asignación responde 404', async () => {
+    const { service, attachments } = build({ ticket: { ...TICKET, systemId: 99 }, files: [FILE] });
+    await expect(service.adjunto(P, 'KB-0210', 77)).rejects.toBeInstanceOf(NotFoundException);
+    expect(attachments.download).not.toHaveBeenCalled();
+  });
+
+  it('un requerimiento no tiene adjuntos: 404', async () => {
+    const { service } = build();
+    await expect(service.adjunto(P, 'RQ-0045', 77)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('más de 5 MB responde 400 y no lo lee', async () => {
+    const { service, attachments } = build({ files: [{ ...FILE, size: 6 * 1024 * 1024 }] });
+    await expect(service.adjunto(P, 'KB-0210', 77)).rejects.toBeInstanceOf(BadRequestException);
+    expect(attachments.download).not.toHaveBeenCalled();
   });
 });

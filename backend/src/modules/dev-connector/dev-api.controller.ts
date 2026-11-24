@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Post, Req, UseGuards } from '@nestjs/common';
 
 import { DevApiService } from './dev-api.service';
 import { DevKeyGuard, DevRequest } from './dev-key.guard';
@@ -26,6 +26,11 @@ export class DevApiController {
   @Get('items/:code')
   item(@Req() req: DevRequest, @Param('code') code: string) {
     return this.api.item(req.dev!, code);
+  }
+
+  @Get('items/:code/adjuntos/:id')
+  adjunto(@Req() req: DevRequest, @Param('code') code: string, @Param('id', ParseIntPipe) id: number) {
+    return this.api.adjunto(req.dev!, code, id);
   }
 
   @Post('items/:code/nota')
