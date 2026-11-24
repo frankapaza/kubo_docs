@@ -891,6 +891,170 @@ describe('AvailabilityEvaluatorService', () => {
       expect(t.db.rows<MonitorOfficeOutage>(MonitorOfficeOutage)[0].endedAt).toEqual(at(700));
       expect(t.incidents()).toHaveLength(0);
     });
+
+    it('DEGRADED: dos correctas rápidas MANUAL/CROSS no lo cierran; dos REGULAR sí', async () => {
+      const t = setup();
+      t.signal(OFFICE, 'DEGRADED', 100, T0);
+      await t.evaluator.tick(at(1));
+      t.check(OFFICE, 100, true, at(300), { kind: 'MANUAL', durationMs: 50 });
+      t.check(OFFICE, 100, true, at(600), { kind: 'MANUAL', durationMs: 50 });
+      await t.evaluator.tick(at(605));
+      expect(stateOf(t, OFFICE, 100)).toBe('DEGRADED');
+      expect(t.incidents()[0].recoveredAt).toBeNull();
+      t.check(OFFICE, 100, true, at(900), { kind: 'REGULAR', durationMs: 50 });
+      t.check(OFFICE, 100, true, at(1000), { kind: 'CROSS', durationMs: 50 });
+      await t.evaluator.tick(at(1005));
+      expect(stateOf(t, OFFICE, 100)).toBe('DEGRADED');
+      t.check(OFFICE, 100, true, at(1200), { kind: 'REGULAR', durationMs: 50 });
+      await t.evaluator.tick(at(1205));
+      expect(stateOf(t, OFFICE, 100)).toBe('OK');
+      expect(t.incidents()[0]).toMatchObject({ kind: 'DEGRADED', recoveredAt: at(1200) });
+    });
+  });
+
+  describe('cerrar una caída de oficina reevalúa la recuperación', () => {
+    const stateRow = (t: ReturnType<typeof setup>, probeId: number, serviceId: number) =>
+      t.db.rows<MonitorProbeState>(MonitorProbeState).filter((r) => r.probeId === probeId && r.serviceId === serviceId).pop()!;
+    const recoveredEvents = (t: ReturnType<typeof setup>) => t.events().filter((e) => e.type === 'RECOVERED');
+
+    /** ROUTE abierto (oficina FAILED, servidor OK por el cruce) y caída de oficina abierta desde at(300). */
+    const routeDuringOutage = async () => {
+      const t = setup();
+      await t.officeDownWithCross(100, T0, true);
+      t.state(DC, 100, 'OK');
+      expect(t.incidents()[0]).toMatchObject({ kind: 'ROUTE', recoveredAt: null });
+      t.signal(OFFICE, 'OFFICE_OUTAGE_START', null, at(300));
+      await t.evaluator.tick(at(301));
+      t.tickets.comment.mockClear();
+      return t;
+    };
+
+    it('STATE_SYNC(OK) de la oficina procesado antes de OFFICE_OUTAGE_END: al cerrar la caída el ROUTE se cierra una vez, con un comentario', async () => {
+      const t = await routeDuringOutage();
+      // El runner entrega [...señales, ...pendientes de oficina]: la STATE_SYNC llega antes que el END.
+      t.signal(OFFICE, 'STATE_SYNC', 100, at(400));
+      t.signal(OFFICE, 'OFFICE_OUTAGE_END', null, at(500));
+      await t.evaluator.tick(at(501));
+      const inc = t.incidents()[0];
+      expect(inc).toMatchObject({ kind: 'ROUTE', recoveredAt: at(500), closeReason: 'RECOVERED' });
+      expect(recoveredEvents(t)).toHaveLength(1);
+      expect(t.tickets.comment).toHaveBeenCalledTimes(1);
+      await t.evaluator.tick(at(700));
+      expect(recoveredEvents(t)).toHaveLength(1);
+      expect(t.tickets.comment).toHaveBeenCalledTimes(1);
+    });
+
+    it('lo mismo cuando la caída la cierra la reconciliación sin END', async () => {
+      const t = await routeDuringOutage();
+      t.signal(OFFICE, 'STATE_SYNC', 100, at(400));
+      await t.evaluator.tick(at(401));
+      expect(t.incidents()[0].recoveredAt).toBeNull(); // la caída sigue abierta
+      t.check(OFFICE, 100, true, at(650), { kind: 'REGULAR' });
+      t.check(OFFICE, 101, true, at(660), { kind: 'REGULAR' });
+      await t.evaluator.tick(at(670));
+      expect(t.db.rows<MonitorOfficeOutage>(MonitorOfficeOutage)[0].endedAt).toEqual(at(660));
+      expect(t.incidents()[0]).toMatchObject({ recoveredAt: at(660), closeReason: 'RECOVERED' });
+      expect(recoveredEvents(t)).toHaveLength(1);
+      expect(t.tickets.comment).toHaveBeenCalledTimes(1);
+    });
+
+    it('con la caída aún abierta el ROUTE sigue abierto aunque la oficina esté OK (tampoco lo cierra el barrido)', async () => {
+      const t = await routeDuringOutage();
+      t.signal(OFFICE, 'STATE_SYNC', 100, at(400));
+      await t.evaluator.tick(at(401));
+      await t.evaluator.tick(at(402));
+      expect(t.incidents()[0].recoveredAt).toBeNull();
+      expect(t.tickets.comment).not.toHaveBeenCalled();
+    });
+
+    it('DOWN con el servidor aún FAILED: cerrar la caída no lo cierra (ni el barrido)', async () => {
+      const t = setup();
+      await t.officeDownWithCross(100, T0, false);
+      t.state(DC, 100, 'FAILED');
+      t.signal(OFFICE, 'OFFICE_OUTAGE_START', null, at(300));
+      await t.evaluator.tick(at(301));
+      t.signal(OFFICE, 'STATE_SYNC', 100, at(400));
+      t.signal(OFFICE, 'OFFICE_OUTAGE_END', null, at(500));
+      await t.evaluator.tick(at(501));
+      await t.evaluator.tick(at(600));
+      expect(t.incidents()[0]).toMatchObject({ kind: 'DOWN', recoveredAt: null });
+      expect(recoveredEvents(t)).toHaveLength(0);
+    });
+
+    it('barrido: un ROUTE colgado con la oficina OK y sin caída abierta se cierra una vez', async () => {
+      const t = setup();
+      await t.officeDownWithCross(100, T0, true);
+      t.tickets.comment.mockClear();
+      // Estado que dejó un orden de señales desfavorable: la oficina ya está OK y nadie reevaluó.
+      Object.assign(stateRow(t, OFFICE, 100), { state: 'OK', stateChangedAt: at(450) });
+      t.db.add(MonitorOfficeOutage, { probeId: OFFICE, startedAt: at(300), endedAt: at(500), affectedServices: 3 });
+      await t.evaluator.tick(at(600));
+      expect(t.incidents()[0]).toMatchObject({ kind: 'ROUTE', recoveredAt: at(500), closeReason: 'RECOVERED' });
+      expect(recoveredEvents(t)).toHaveLength(1);
+      expect(t.tickets.comment).toHaveBeenCalledTimes(1);
+      await t.evaluator.tick(at(700));
+      expect(t.tickets.comment).toHaveBeenCalledTimes(1);
+    });
+
+    it('barrido: un DOWN colgado con las dos sondas OK se cierra; con el último resultado del servidor fallido, no', async () => {
+      const t = setup();
+      await t.officeDownWithCross(100, T0, false);
+      t.tickets.comment.mockClear();
+      Object.assign(stateRow(t, OFFICE, 100), { state: 'OK', stateChangedAt: at(400) });
+      t.state(DC, 100, 'OK');
+      Object.assign(stateRow(t, DC, 100), { stateChangedAt: at(450), lastOk: false });
+      await t.evaluator.tick(at(600));
+      expect(t.incidents()[0].recoveredAt).toBeNull();
+      stateRow(t, DC, 100).lastOk = true;
+      await t.evaluator.tick(at(610));
+      expect(t.incidents()[0]).toMatchObject({ kind: 'DOWN', recoveredAt: at(450), closeReason: 'RECOVERED' });
+      expect(t.tickets.comment).toHaveBeenCalledTimes(1);
+    });
+
+    it('barrido: no cierra mientras haya señales pendientes del servicio', async () => {
+      const t = setup();
+      await t.officeDownWithCross(100, T0, true);
+      Object.assign(stateRow(t, OFFICE, 100), { state: 'OK', stateChangedAt: at(450) });
+      // Una señal de la oficina que no se puede procesar (error transitorio) queda pendiente: el estado no es fiable.
+      const getRepository = t.db.manager.getRepository;
+      (t.db.manager as any).getRepository = (e: any) => {
+        const repo = getRepository(e);
+        if (e !== MonitorProbeState) return repo;
+        return {
+          ...repo,
+          update: async (where: any, patch: any) => {
+            if (patch.state === 'VERIFYING') throw new Error('Lock wait timeout exceeded');
+            return repo.update(where, patch);
+          },
+        };
+      };
+      jest.spyOn((t.evaluator as any).logger, 'error').mockImplementation(() => undefined);
+      const pending = t.signal(OFFICE, 'VERIFYING', 100, at(460));
+      await t.evaluator.tick(at(600));
+      expect(t.sig(pending.id).processedAt).toBeNull();
+      expect(t.incidents()[0].recoveredAt).toBeNull();
+    });
+
+    it('al cerrar la caída, dos servicios de un mismo padre se cierran y solo el padre comenta', async () => {
+      const t = setup();
+      await t.officeDownWithCross(100, T0, true);
+      await t.officeDownWithCross(101, at(30), true);
+      const parent = t.incidents().find((i) => i.serviceId === null)!;
+      expect(parent).toBeDefined();
+      t.state(DC, 100, 'OK');
+      t.state(DC, 101, 'OK');
+      t.signal(OFFICE, 'OFFICE_OUTAGE_START', null, at(300));
+      await t.evaluator.tick(at(301));
+      t.tickets.comment.mockClear();
+      t.signal(OFFICE, 'STATE_SYNC', 100, at(400));
+      t.signal(OFFICE, 'STATE_SYNC', 101, at(400));
+      t.signal(OFFICE, 'OFFICE_OUTAGE_END', null, at(500));
+      await t.evaluator.tick(at(501));
+      expect(t.incidents().every((i) => i.recoveredAt !== null && i.closeReason === 'RECOVERED')).toBe(true);
+      expect(recoveredEvents(t)).toHaveLength(3);
+      expect(t.tickets.comment).toHaveBeenCalledTimes(1);
+      expect(t.tickets.comment).toHaveBeenCalledWith(parent.ticketId, expect.stringContaining('Servidor recuperado'), expect.anything());
+    });
   });
 
   it('una señal que falla siempre se descarta tras 5 intentos y libera su clave', async () => {

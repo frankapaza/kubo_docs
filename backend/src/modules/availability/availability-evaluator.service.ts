@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { DataSource, EntityManager, In, IsNull, LessThanOrEqual, MoreThan, MoreThanOrEqual, Between } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, LessThanOrEqual, MoreThan, MoreThanOrEqual, Between, Not } from 'typeorm';
 import { formatPeruDateTime } from '../../common/peru-date-time';
 import { isDuplicateEntry } from '../../common/db-errors';
 import { AvailabilityTicketsService } from './availability-tickets.service';
@@ -72,7 +72,9 @@ const SERVICE_PAUSED_TEXT = 'Servicio pausado';
  * el tracker recién creado) fija OK, cierra la degradación y reevalúa la
  * recuperación; OFFICE_OUTAGE_START/END son idempotentes. Y como red de
  * seguridad, al final de cada tick se reconcilia lo que quedó colgado sin
- * señal (ver `reconcileStates` y `reconcileOutages`).
+ * señal (ver `reconcileStates`, `reconcileOutages` y `sweepRecoveries`). Cerrar
+ * una caída de oficina (END o reconciliación) reevalúa la recuperación de los
+ * DOWN/ROUTE abiertos: el OK de la oficina pudo procesarse con la caída abierta.
  *
  * Una señal cuyo procesamiento lanza se reintenta en los ticks siguientes
  * reteniendo su clave; tras `MAX_SIGNAL_ATTEMPTS` intentos se marca procesada
@@ -130,6 +132,7 @@ export class AvailabilityEvaluatorService extends IncidentCloser {
     }
     await this.reconcileStates(ctx);
     await this.reconcileOutages(ctx);
+    await this.sweepRecoveries(ctx);
     await this.ticketSync.sweep(now, ctx.attempted);
   }
 
@@ -182,8 +185,11 @@ export class AvailabilityEvaluatorService extends IncidentCloser {
     const pending = await m.getRepository(MonitorProbeSignal).count({ where: { probeId, serviceId, processedAt: IsNull() } });
     if (pending > 0) return [];
     const since = row.stateChangedAt ?? row.updatedAt;
+    // El tracker solo cierra la degradación con resultados REGULAR rápidos; un FAILED lo
+    // recupera cualquier resultado correcto (y un VERIFYING colgado se trata igual).
+    const where = { probeId, serviceId, receivedAt: MoreThan(since) };
     const checks = await m.getRepository(MonitorCheck).find({
-      where: { probeId, serviceId, receivedAt: MoreThan(since) },
+      where: row.state === 'DEGRADED' ? { ...where, kind: 'REGULAR' as const } : where,
       order: { startedAt: 'DESC' },
       take: RECONCILE_OK_COUNT,
     });
@@ -216,17 +222,23 @@ export class AvailabilityEvaluatorService extends IncidentCloser {
       const probe = ctx.probes.get(num(outage.probeId));
       if (!probe || probe.kind !== 'OFFICE') continue;
       try {
-        await this.ds.transaction((m) => this.reconcileOutage(m, outage, probe, ctx));
+        const actions = await this.ds.transaction((m) => this.reconcileOutage(m, outage, probe, ctx));
+        await this.runActions(actions, ctx);
       } catch (e) {
         this.logger.error(`No se pudo reconciliar la caída de oficina ${outage.id}: ${(e as Error).message}`);
       }
     }
   }
 
-  private async reconcileOutage(m: EntityManager, outage: MonitorOfficeOutage, probe: MonitorProbe, ctx: TickContext): Promise<void> {
+  private async reconcileOutage(
+    m: EntityManager,
+    outage: MonitorOfficeOutage,
+    probe: MonitorProbe,
+    ctx: TickContext,
+  ): Promise<PostCommitAction[]> {
     const probeId = num(probe.id);
     const pending = await m.getRepository(MonitorProbeSignal).count({ where: { probeId, serviceId: IsNull(), processedAt: IsNull() } });
-    if (pending > 0) return;
+    if (pending > 0) return [];
     const after = outage.startedAt.getTime() + intervalMsAt(outage.startedAt, DEFAULT_SCHEDULE);
     // Solo lo reciente (índice por started_at): dos intervalos hacia atrás bastan para una por servicio.
     const from = Math.max(after, ctx.now.getTime() - 2 * intervalMsAt(ctx.now, DEFAULT_SCHEDULE));
@@ -243,14 +255,63 @@ export class AvailabilityEvaluatorService extends IncidentCloser {
       latest.set(sid, c);
     }
     const n = latest.size;
-    if (n === 0) return;
+    if (n === 0) return [];
     const failed = [...latest.values()].filter((c) => !c.ok).length;
-    if (failed >= Math.ceil(n / 2)) return;
+    if (failed >= Math.ceil(n / 2)) return [];
     const newest = [...latest.values()].reduce((a, b) => (b.startedAt.getTime() > a.startedAt.getTime() ? b : a));
     const endedAt = this.toCentral(newest.startedAt, newest.receivedAt, probe);
     const res = await m.getRepository(MonitorOfficeOutage).update({ id: num(outage.id), endedAt: IsNull() }, { endedAt });
-    if (res.affected) {
-      this.logger.warn(`Caída de oficina ${outage.id} cerrada sin señal: ${n - failed} de ${n} servicios responden`);
+    if (!res.affected) return [];
+    this.logger.warn(`Caída de oficina ${outage.id} cerrada sin señal: ${n - failed} de ${n} servicios responden`);
+    return this.recoverAfterOutage(m, endedAt, ctx);
+  }
+
+  /**
+   * Al cerrarse una caída de oficina la oficina vuelve a contar: los DOWN/ROUTE
+   * abiertos cuyo estado actual ya basta se cierran con el camino normal de
+   * recuperación (p. ej. el STATE_SYNC/RECOVERED de la oficina se procesó con la
+   * caída aún abierta y nadie lo reevaluó).
+   */
+  private async recoverAfterOutage(m: EntityManager, at: Date, ctx: TickContext): Promise<PostCommitAction[]> {
+    const open = await m.getRepository(MonitorIncident).find({
+      where: { serviceId: Not(IsNull()), recoveredAt: IsNull(), kind: In(['DOWN', 'ROUTE']) },
+      order: { id: 'ASC' },
+    });
+    const actions: PostCommitAction[] = [];
+    for (const inc of open) {
+      actions.push(...(await this.recover(m, num(inc.serviceId), at, ctx, 'REEVALUATE')));
+    }
+    return actions;
+  }
+
+  /**
+   * Red de seguridad: un DOWN/ROUTE abierto cuyo estado actual de las sondas ya
+   * cumple la regla de recuperación (con la regla de la caída de oficina abierta)
+   * se cierra aunque ninguna señal lo haya reevaluado. No toca servicios con
+   * señales pendientes ni actúa con señales de caída de oficina pendientes.
+   */
+  private async sweepRecoveries(ctx: TickContext): Promise<void> {
+    const signals = this.ds.manager.getRepository(MonitorProbeSignal);
+    if (ctx.office) {
+      const pendingOutage = await signals.count({ where: { probeId: num(ctx.office.id), serviceId: IsNull(), processedAt: IsNull() } });
+      if (pendingOutage > 0) return;
+    }
+    const open = await this.ds.manager.getRepository(MonitorIncident).find({
+      where: { serviceId: Not(IsNull()), recoveredAt: IsNull(), kind: In(['DOWN', 'ROUTE']) },
+      order: { id: 'ASC' },
+    });
+    for (const inc of open) {
+      const serviceId = num(inc.serviceId);
+      try {
+        const actions = await this.ds.transaction(async (m) => {
+          const pending = await m.getRepository(MonitorProbeSignal).count({ where: { serviceId, processedAt: IsNull() } });
+          if (pending > 0) return [];
+          return this.recover(m, serviceId, null, ctx, 'REEVALUATE');
+        });
+        await this.runActions(actions, ctx);
+      } catch (e) {
+        this.logger.error(`No se pudo reevaluar la recuperación del servicio ${serviceId}: ${(e as Error).message}`);
+      }
     }
   }
 
@@ -306,8 +367,10 @@ export class AvailabilityEvaluatorService extends IncidentCloser {
     const at = this.centralAt(s.at, s, probe);
 
     if (s.type === 'OFFICE_OUTAGE_START' || s.type === 'OFFICE_OUTAGE_END') {
-      if (probe.kind === 'OFFICE') await this.officeOutage(m, num(probe.id), s.type === 'OFFICE_OUTAGE_START', at);
-      return done();
+      if (probe.kind !== 'OFFICE') return done();
+      const closed = await this.officeOutage(m, num(probe.id), s.type === 'OFFICE_OUTAGE_START', at);
+      // Con la oficina de vuelta, su OK pudo haberse procesado con la caída abierta.
+      return done(closed ? await this.recoverAfterOutage(m, at, ctx) : []);
     }
     if (s.serviceId === null) return done();
     const serviceId = num(s.serviceId);
@@ -441,12 +504,36 @@ export class AvailabilityEvaluatorService extends IncidentCloser {
     return check ? Boolean(check.ok) : undefined;
   }
 
-  private async recover(m: EntityManager, serviceId: number, at: Date, ctx: TickContext): Promise<PostCommitAction[]> {
+  /**
+   * Cierra el DOWN/ROUTE abierto del servicio si el estado actual de las sondas
+   * basta (`recoveryCloses`).
+   *
+   * - `SIGNAL`: una sonda volvió a OK en `at`; la oficina no cuenta si había caída en `at`.
+   * - `REEVALUATE` (al cerrar una caída de oficina, o el barrido del tick): la
+   *   oficina no cuenta si hay una caída abierta ahora, y además se exige que
+   *   ninguna sonda que cuenta tenga su último resultado fallido ni que el
+   *   servidor esté FAILED. Con `at` null (barrido) la recuperación se fecha en
+   *   el último cambio que la hizo posible.
+   */
+  private async recover(
+    m: EntityManager,
+    serviceId: number,
+    at: Date | null,
+    ctx: TickContext,
+    mode: 'SIGNAL' | 'REEVALUATE' = 'SIGNAL',
+  ): Promise<PostCommitAction[]> {
     const inc = await openIncidentOf(m, serviceId);
     if (!inc || !isFailureKind(inc.kind)) return [];
-    const office = (await this.officeOutageAt(m, at, ctx)) ? null : await this.stateOf(m, ctx.office, serviceId);
-    const dc = await this.stateOf(m, ctx.dc, serviceId);
-    if (!recoveryCloses(inc.kind, office, dc)) return [];
+    const outage = mode === 'SIGNAL' ? await this.officeOutageAt(m, at ?? ctx.now, ctx) : await this.officeOutageOpen(m, ctx);
+    const officeRow = outage ? null : await this.stateRowOf(m, ctx.office, serviceId);
+    const dcRow = await this.stateRowOf(m, ctx.dc, serviceId);
+    if (!recoveryCloses(inc.kind, officeRow?.state ?? null, dcRow?.state ?? null)) return [];
+    if (mode === 'REEVALUATE') {
+      if (dcRow?.state === 'FAILED' || officeRow?.lastOk === false || dcRow?.lastOk === false) return [];
+      at ??= await this.reevaluatedAt(m, inc, officeRow, dcRow, ctx);
+      this.logger.warn(`Incidente ${inc.id} (${inc.kind}) del servicio ${serviceId} cerrado al reevaluar la recuperación`);
+    }
+    if (!at) at = ctx.now;
 
     const id = num(inc.id);
     await closeIncident(m, id, at, 'RECOVERED');
@@ -489,14 +576,16 @@ export class AvailabilityEvaluatorService extends IncidentCloser {
     await addEvent(m, num(open.id), now, 'DEGRADATION_CLEARED', null);
   }
 
-  private async officeOutage(m: EntityManager, probeId: number, start: boolean, at: Date): Promise<void> {
+  /** Abre o cierra la caída de oficina; true si cerró una. */
+  private async officeOutage(m: EntityManager, probeId: number, start: boolean, at: Date): Promise<boolean> {
     const repo = m.getRepository(MonitorOfficeOutage);
     const open = await repo.findOne({ where: { probeId, endedAt: IsNull() }, order: { startedAt: 'DESC' } });
     if (!start) {
-      if (open) await repo.update({ id: num(open.id) }, { endedAt: at });
-      return;
+      if (!open) return false;
+      const res = await repo.update({ id: num(open.id), endedAt: IsNull() }, { endedAt: at });
+      return Boolean(res.affected);
     }
-    if (open) return;
+    if (open) return false;
     // Destinos que fallaron en la franja que declaró la caída.
     const failed = await m.getRepository(MonitorCheck).find({
       where: {
@@ -508,6 +597,7 @@ export class AvailabilityEvaluatorService extends IncidentCloser {
     });
     const affected = new Set(failed.map((c) => num(c.serviceId)).filter((id) => id > 0)).size;
     await repo.insert({ probeId, startedAt: at, endedAt: null, affectedServices: affected });
+    return false;
   }
 
   /**
@@ -528,10 +618,42 @@ export class AvailabilityEvaluatorService extends IncidentCloser {
     return count > 0;
   }
 
-  private async stateOf(m: EntityManager, probe: MonitorProbe | null, serviceId: number): Promise<TrackerState | null> {
+  /** ¿Hay ahora una caída de oficina abierta? */
+  private async officeOutageOpen(m: EntityManager, ctx: TickContext): Promise<boolean> {
+    if (!ctx.office) return false;
+    const count = await m.getRepository(MonitorOfficeOutage).count({ where: { probeId: num(ctx.office.id), endedAt: IsNull() } });
+    return count > 0;
+  }
+
+  /**
+   * Fecha de una recuperación hallada por el barrido: el último cambio que la hizo
+   * posible (estado de las sondas que cuentan y, si la oficina cuenta, el fin de su
+   * última caída), nunca antes de la confirmación ni después de ahora.
+   */
+  private async reevaluatedAt(
+    m: EntityManager,
+    inc: MonitorIncident,
+    officeRow: MonitorProbeState | null,
+    dcRow: MonitorProbeState | null,
+    ctx: TickContext,
+  ): Promise<Date> {
+    const times = [inc.confirmedAt.getTime()];
+    const changed = (r: MonitorProbeState) => (r.stateChangedAt ?? r.updatedAt).getTime();
+    if (officeRow) times.push(changed(officeRow));
+    if (dcRow && inc.kind === 'DOWN') times.push(changed(dcRow));
+    if (officeRow && ctx.office) {
+      const last = await m.getRepository(MonitorOfficeOutage).findOne({
+        where: { probeId: num(ctx.office.id), endedAt: Not(IsNull()) },
+        order: { endedAt: 'DESC' },
+      });
+      if (last?.endedAt) times.push(last.endedAt.getTime());
+    }
+    return new Date(Math.min(Math.max(...times), ctx.now.getTime()));
+  }
+
+  private async stateRowOf(m: EntityManager, probe: MonitorProbe | null, serviceId: number): Promise<MonitorProbeState | null> {
     if (!probe) return null;
-    const row = await m.getRepository(MonitorProbeState).findOne({ where: { probeId: num(probe.id), serviceId } });
-    return row ? row.state : null;
+    return m.getRepository(MonitorProbeState).findOne({ where: { probeId: num(probe.id), serviceId } });
   }
 
   private async setState(m: EntityManager, probeId: number, serviceId: number, state: TrackerState, now: Date): Promise<void> {
