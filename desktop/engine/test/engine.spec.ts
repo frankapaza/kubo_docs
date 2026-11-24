@@ -708,6 +708,45 @@ describe('Engine', () => {
       expect(kinds(engine)).toEqual(['CENTRAL_REJECTING']);
     });
 
+    it('con el corte abierto, un error real aislado no anota CENTRAL_UNREACHABLE; tres seguidos sí', async () => {
+      for (let i = 0; i < 10; i++) {
+        outbox.enqueueCheck({
+          id: randomUUID(),
+          serviceId: 1,
+          kind: 'REGULAR',
+          cycleAt: START,
+          startedAt: START,
+          durationMs: 10,
+          ok: true,
+          errorCode: null,
+          httpStatus: null,
+          orderId: null,
+        });
+      }
+      central.rejectAll = true;
+      const engine = make(fakeCheck(() => true).fn);
+      engine.start();
+      await clock.advance(1);
+      await clock.advance(6 * 15000);
+      expect(engine.status().central.consecutiveFailures).toBeGreaterThanOrEqual(3);
+      expect(kinds(engine)).toEqual(['CENTRAL_REJECTING']);
+
+      central.down = true; // un sondeo con error real
+      await clock.advance(15000);
+      central.down = false;
+      await clock.advance(15000);
+      expect(kinds(engine)).toEqual(['CENTRAL_REJECTING']);
+
+      central.down = true; // tres seguidos
+      await clock.advance(2 * 15000);
+      expect(kinds(engine)).toEqual(['CENTRAL_REJECTING']);
+      await clock.advance(15000);
+      expect(kinds(engine)).toEqual(['CENTRAL_REJECTING', 'CENTRAL_UNREACHABLE']);
+      central.down = false;
+      await clock.advance(15000);
+      expect(kinds(engine)).toEqual(['CENTRAL_REJECTING', 'CENTRAL_UNREACHABLE', 'CENTRAL_BACK']);
+    });
+
     it('tras sustituir el runner con la caída de oficina en curso, status().officeOutage sigue en true hasta que el runner nuevo da veredicto', async () => {
       let internet = false;
       central.config = { services: [svc(1), svc(2)], schedule: DEFAULT_SCHEDULE, references: [svc(1001)] };

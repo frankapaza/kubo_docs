@@ -110,10 +110,11 @@ function incidentServices(groups: Map<string, Group>): Map<number, string> {
  *
  * Absorción (decisión 19): cuando la central reagrupa el incidente de un servicio bajo
  * uno de servidor, la clave cambia pero el servicio sigue caído. La clave vieja no se
- * da por recuperada si todos sus servicios siguen caídos bajo otra clave; la nueva se
- * anota como OPENED, que solo avisa si es Alta y ninguno de los grupos heredados (que no
- * se recuperan ahora) era Alta, porque esos ya avisaron; o como UPGRADED si todo lo heredado
- * era ROUTE y ahora es DOWN, que avisa como el ROUTE→DOWN de la misma clave (si es Alta).
+ * da por recuperada si todos sus servicios siguen caídos bajo otra clave, y si se recupera
+ * solo en parte, el RECOVERED nombra (y avisa según) solo lo recuperado. La nueva se anota
+ * como OPENED, que solo avisa si es Alta y ninguno de los grupos heredados era Alta (esos ya
+ * avisaron); o como UPGRADED si todo lo heredado era ROUTE y ahora es DOWN, que avisa como
+ * el ROUTE→DOWN de la misma clave (si es Alta).
  */
 export function diffStates(prev: CombinedStateRow[] | null, next: CombinedStateRow[]): EngineEventDraft[] {
   if (prev === null) return [];
@@ -140,7 +141,12 @@ export function diffStates(prev: CombinedStateRow[] | null, next: CombinedStateR
     const nc = category(n);
     if (pc === nc) continue;
 
-    if (isIncident(pc) && recovered.has(key)) out.push(toDraft('INCIDENT_RECOVERED', p!, pc));
+    if (isIncident(pc) && recovered.has(key)) {
+      // Solo lo que de verdad se recuperó: lo que sigue caído bajo otra clave no se nombra
+      // (ni cuenta para la criticidad y el aviso).
+      const done: Group = { incidentKey: p!.incidentKey, rows: incidentRows(p!).filter((r) => !nextSvc.has(r.serviceId)) };
+      out.push(toDraft('INCIDENT_RECOVERED', done, category(done) as 'DOWN' | 'ROUTE'));
+    }
     if (pc === 'DEGRADED') out.push(toDraft('DEGRADED_CLEARED', p!, 'DEGRADED'));
 
     if (isIncident(nc) && !isIncident(pc)) {
@@ -153,8 +159,9 @@ export function diffStates(prev: CombinedStateRow[] | null, next: CombinedStateR
         out.push(toDraft('INCIDENT_OPENED', n!, nc));
       } else {
         const carried = [...carriedKeys].map((k) => ({ k, g: before.get(k)! }));
-        // Solo cuenta el aviso de un grupo heredado que no se anuncia ahora como recuperado.
-        const carriedHadHigh = carried.some(({ k, g }) => !recovered.has(k) && incidentRows(g).some((r) => r.criticality === 'HIGH'));
+        // Un grupo heredado Alta ya avisó; su RECOVERED (si lo hay) no nombra a los servicios
+        // heredados, así que ese aviso sigue vigente para ellos.
+        const carriedHadHigh = carried.some(({ g }) => incidentRows(g).some((r) => r.criticality === 'HIGH'));
         const allRoute = carried.every(({ g }) => category(g) === 'ROUTE');
         if (allRoute && nc === 'DOWN') {
           // Se agravó (solo se había avisado «sin acceso»): avisa igual que el ROUTE→DOWN de la misma clave.

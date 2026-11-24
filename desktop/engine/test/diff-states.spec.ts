@@ -159,13 +159,28 @@ describe('diffStates', () => {
       expect(diffStates(prev, next).map((e) => [e.kind, e.incidentKey, e.notify])).toEqual([['INCIDENT_UPGRADED', 9, true]]);
     });
 
-    it('si solo parte de los servicios sigue caída bajo otra clave, la vieja sí se recupera y la nueva avisa (el aviso viejo quedó cerrado)', () => {
+    it('si solo parte de los servicios sigue caída bajo otra clave, la vieja se recupera solo con lo recuperado y la nueva no repite el aviso', () => {
       const prev = [row(1, { status: 'DOWN', incidentId: 7, parentIncidentId: 5 }), row(2, { status: 'DOWN', incidentId: 8, parentIncidentId: 5 })];
       const next = [row(1, { status: 'DOWN', incidentId: 9 }), row(2)];
-      expect(diffStates(prev, next).map((e) => [e.kind, e.incidentKey, e.notify])).toEqual([
-        ['INCIDENT_RECOVERED', 5, true],
-        ['INCIDENT_OPENED', 9, true],
+      const ev = diffStates(prev, next);
+      expect(ev.map((e) => [e.kind, e.incidentKey, e.serviceNames, e.notify])).toEqual([
+        ['INCIDENT_RECOVERED', 5, ['svc-2'], true],
+        ['INCIDENT_OPENED', 9, ['svc-1'], false],
       ]);
+    });
+
+    it('recuperación parcial: el padre 9 = {svc1 HIGH, svc2 MEDIUM}; svc1 sigue caído como clave 7 y svc2 se recupera → RECOVERED(9) solo con svc2, MEDIUM, sin aviso', () => {
+      const prev = [
+        row(1, { status: 'DOWN', incidentId: 7, parentIncidentId: 9 }),
+        row(2, { status: 'DOWN', incidentId: 8, parentIncidentId: 9, criticality: 'MEDIUM' }),
+      ];
+      const next = [row(1, { status: 'DOWN', incidentId: 7 }), row(2, { criticality: 'MEDIUM' })];
+      const ev = diffStates(prev, next);
+      const rec = ev.filter((e) => e.kind === 'INCIDENT_RECOVERED');
+      expect(rec).toHaveLength(1);
+      expect(rec[0]).toMatchObject({ incidentKey: 9, serviceNames: ['svc-2'], criticality: 'MEDIUM', notify: false });
+      // svc1 ya avisó su caída (HIGH) y el RECOVERED no lo nombra: la clave 7 se anota sin repetir el aviso.
+      expect(ev.filter((e) => e.kind !== 'INCIDENT_RECOVERED').map((e) => [e.kind, e.incidentKey, e.notify])).toEqual([['INCIDENT_OPENED', 7, false]]);
     });
   });
 });

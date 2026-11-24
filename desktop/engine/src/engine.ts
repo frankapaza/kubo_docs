@@ -129,6 +129,8 @@ export class Engine {
   private runnerHasOutageVerdict = false;
   /** CENTRAL_UNREACHABLE anotado (por fallos reales de red/sync); se cierra con CENTRAL_BACK. */
   private unreachableJournaled = false;
+  /** Sondeos seguidos con fallos reales de red/sync (sin contar los del corte de rechazo). */
+  private realFailures = 0;
   private readonly local = new Map<number, LocalView>();
   /** Última prueba lanzada por id de destino (de cualquier runner), para no solaparlas. */
   private readonly inFlight = new Map<number, Promise<unknown>>();
@@ -306,11 +308,20 @@ export class Engine {
       errors.push(`sync: ${errMsg(err)}`);
     }
 
-    // Diario: «no responde» solo por fallos reales de red/sync, no por el corte de rechazo
-    // (ese ya tiene su CENTRAL_REJECTING y el sync sigue respondiendo).
-    if (errors.length === 0 && this.unreachableJournaled) {
-      this.unreachableJournaled = false;
-      this.journalEngine('CENTRAL_BACK', false);
+    // Diario: «no responde» solo tras 3 sondeos seguidos con fallos reales de red/sync; los
+    // sondeos del corte de rechazo no cuentan (ese ya tiene su CENTRAL_REJECTING y el sync responde).
+    if (errors.length === 0) {
+      this.realFailures = 0;
+      if (this.unreachableJournaled) {
+        this.unreachableJournaled = false;
+        this.journalEngine('CENTRAL_BACK', false);
+      }
+    } else {
+      this.realFailures++;
+      if (this.realFailures >= UNREACHABLE_AFTER_FAILURES && !this.unreachableJournaled) {
+        this.unreachableJournaled = true;
+        this.journalEngine('CENTRAL_UNREACHABLE', true);
+      }
     }
     if (errors.length === 0 && !rejected) {
       if (this.consecutiveFailures >= UNREACHABLE_AFTER_FAILURES) this.log.info('La central vuelve a responder.');
@@ -318,10 +329,6 @@ export class Engine {
       return;
     }
     this.consecutiveFailures++;
-    if (errors.length > 0 && this.consecutiveFailures >= UNREACHABLE_AFTER_FAILURES && !this.unreachableJournaled) {
-      this.unreachableJournaled = true;
-      this.journalEngine('CENTRAL_UNREACHABLE', true);
-    }
     if (errors.length === 0) return; // solo el rechazo: ya registrado por flush()
     const n = this.consecutiveFailures;
     const msg = `Sondeo fallido (${n} seguidos): ${errors.join('; ')}`;
