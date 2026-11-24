@@ -2,6 +2,9 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
+import { OPEN_STATUSES } from '../tickets/domain/ticket-state-machine';
+import { Ticket } from '../tickets/entities/ticket.entity';
+import { WorkItem } from '../work-items/entities/work-item.entity';
 import { DevKey } from './entities/dev-key.entity';
 import { DevLink, DevLinkKind, DevLinkSource } from './entities/dev-link.entity';
 import { DevRepo } from './entities/dev-repo.entity';
@@ -30,6 +33,19 @@ export interface DevKeyRow {
   lastUsedAt: Date | null;
   revokedAt: Date | null;
   createdAt: Date;
+}
+
+export interface OpenItemRow {
+  tipo: 'TICKET' | 'REQUERIMIENTO';
+  id: number;
+  codigo: string;
+  titulo: string;
+  estado: string;
+  prioridad: string;
+  assigneeUserId: number | null;
+  asignado: string | null;
+  /** Vencimiento del SLA de resolución (ticket) o fecha objetivo (RQ), ISO. */
+  vence: string | null;
 }
 
 export interface UpsertLinkInput {
@@ -198,6 +214,62 @@ export class DevConnectorRepository {
         l.authorLogin ? l.authorLogin.slice(0, 100) : null, l.state, l.source, l.occurredAt,
       ],
     );
+  }
+
+  // ── Lectura de tickets y requerimientos ────────────────────────────────
+  //  Sin filtro de alcance a propósito: el servicio compara el resultado con
+  //  la asignación de la clave y responde 404 si no coincide, para que «ajeno»
+  //  e «inexistente» sean indistinguibles en un solo sitio.
+
+  findTicketByCode(code: string): Promise<Ticket | null> {
+    return this.keys.manager.getRepository(Ticket).findOne({ where: { code } });
+  }
+
+  findTicketById(id: number): Promise<Ticket | null> {
+    return this.keys.manager.getRepository(Ticket).findOne({ where: { id } });
+  }
+
+  findWorkItemByCode(code: string): Promise<WorkItem | null> {
+    return this.keys.manager.getRepository(WorkItem).findOne({ where: { code } });
+  }
+
+  findWorkItemById(id: number): Promise<WorkItem | null> {
+    return this.keys.manager.getRepository(WorkItem).findOne({ where: { id } });
+  }
+
+  /** Abiertos de una asignación: tickets sin archivar en `OPEN_STATUSES` + RQ del tablero activos. */
+  async listOpenItems(clientSystemId: number): Promise<OpenItemRow[]> {
+    const ticketStatuses = OPEN_STATUSES.map(() => '?').join(',');
+    const rows: Array<Record<string, unknown>> = await this.keys.query(
+      `SELECT 'TICKET' AS tipo, t.id, t.code AS codigo,
+              COALESCE(t.subject, LEFT(t.raw_text, 120)) AS titulo,
+              t.status AS estado, t.priority AS prioridad, t.assignee_user_id AS assigneeUserId,
+              u.full_name AS asignado, t.sla_resolution_due_at AS vence
+         FROM tickets t
+         LEFT JOIN users u ON u.id = t.assignee_user_id
+        WHERE t.system_id = ? AND t.archived_at IS NULL AND t.code IS NOT NULL
+          AND t.status IN (${ticketStatuses})
+       UNION ALL
+       SELECT 'REQUERIMIENTO' AS tipo, w.id, w.code AS codigo, w.title AS titulo,
+              w.status AS estado, w.priority AS prioridad, w.assignee_user_id AS assigneeUserId,
+              u.full_name AS asignado, w.due_date AS vence
+         FROM work_items w
+         LEFT JOIN users u ON u.id = w.assignee_user_id
+        WHERE w.client_system_id = ? AND w.code IS NOT NULL
+          AND w.status IN ('PENDIENTE','EN_PROCESO','PRUEBAS','BLOQUEADO')`,
+      [clientSystemId, ...OPEN_STATUSES, clientSystemId],
+    );
+    return rows.map((r) => ({
+      tipo: r.tipo as OpenItemRow['tipo'],
+      id: Number(r.id),
+      codigo: String(r.codigo),
+      titulo: String(r.titulo ?? ''),
+      estado: String(r.estado),
+      prioridad: String(r.prioridad),
+      assigneeUserId: r.assigneeUserId == null ? null : Number(r.assigneeUserId),
+      asignado: r.asignado == null ? null : String(r.asignado),
+      vence: r.vence == null ? null : new Date(r.vence as string).toISOString(),
+    }));
   }
 
   listLinks(filter: { ticketId?: number; workItemId?: number }): Promise<DevLink[]> {
