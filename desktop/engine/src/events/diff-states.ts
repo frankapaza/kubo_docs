@@ -112,8 +112,8 @@ function incidentServices(groups: Map<string, Group>): Map<number, string> {
  * uno de servidor, la clave cambia pero el servicio sigue caído. La clave vieja no se
  * da por recuperada si todos sus servicios siguen caídos bajo otra clave, y si se recupera
  * solo en parte, el RECOVERED nombra (y avisa según) solo lo recuperado. La nueva se anota
- * como OPENED, que solo avisa si trae algún servicio Alta que acaba de caer (los heredados ya
- * avisaron); o como UPGRADED si todo lo heredado era ROUTE y ahora es DOWN, que avisa como
+ * como OPENED, que solo avisa si es Alta y ninguno de los servicios heredados que están en ella
+ * era Alta (esos ya avisaron: una caída de servidor avisa una sola vez); o como UPGRADED si todo lo heredado era ROUTE y ahora es DOWN, que avisa como
  * el ROUTE→DOWN de la misma clave (si es Alta).
  */
 export function diffStates(prev: CombinedStateRow[] | null, next: CombinedStateRow[]): EngineEventDraft[] {
@@ -159,16 +159,18 @@ export function diffStates(prev: CombinedStateRow[] | null, next: CombinedStateR
         out.push(toDraft('INCIDENT_OPENED', n!, nc));
       } else {
         const carried = [...carriedKeys].map((k) => before.get(k)!);
-        // Avisa solo si hay un servicio Alta que acaba de caer (no estaba caído en `prev`): los
-        // heredados ya avisaron su caída, y un RECOVERED no los nombra, así que ese aviso sigue vigente.
-        const newHigh = incidentRows(n!).some((r) => r.criticality === 'HIGH' && !prevSvc.has(r.serviceId));
+        // Una caída de servidor avisa una sola vez: si alguno de los servicios heredados que están en
+        // este grupo era Alta en `prev`, ese aviso ya se dio (un RECOVERED no los nombra) y no se repite.
+        const carriedHighHere = carried.some((g) =>
+          incidentRows(g).some((r) => r.criticality === 'HIGH' && nextSvc.get(r.serviceId) === key),
+        );
         const allRoute = carried.every((g) => category(g) === 'ROUTE');
         if (allRoute && nc === 'DOWN') {
           // Se agravó (solo se había avisado «sin acceso»): avisa igual que el ROUTE→DOWN de la misma clave.
           out.push(toDraft('INCIDENT_UPGRADED', n!, 'DOWN'));
         } else {
           const e = toDraft('INCIDENT_OPENED', n!, nc);
-          out.push({ ...e, notify: newHigh });
+          out.push({ ...e, notify: e.criticality === 'HIGH' && !carriedHighHere });
         }
       }
     } else if (pc === 'ROUTE' && nc === 'DOWN') out.push(toDraft('INCIDENT_UPGRADED', n!, 'DOWN'));

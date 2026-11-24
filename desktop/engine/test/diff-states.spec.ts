@@ -113,7 +113,7 @@ describe('diffStates', () => {
   });
 
   describe('absorción en un incidente de servidor (decisión 19)', () => {
-    it('svc1 DOWN HIGH (clave 7) → svc1+svc2 (HIGH, nuevo) bajo el padre 9: un solo OPENED(9) con aviso (svc2 acaba de caer) y ningún RECOVERED', () => {
+    it('svc1 DOWN HIGH (clave 7) → svc1+svc2 bajo el padre 9: un solo OPENED(9) sin aviso y ningún RECOVERED', () => {
       const prev = [row(1, { status: 'DOWN', incidentId: 7 }), row(2)];
       const next = [
         row(1, { status: 'DOWN', incidentId: 7, parentIncidentId: 9 }),
@@ -121,7 +121,7 @@ describe('diffStates', () => {
       ];
       const ev = diffStates(prev, next);
       expect(ev).toHaveLength(1);
-      expect(ev[0]).toMatchObject({ kind: 'INCIDENT_OPENED', incidentKey: 9, serviceNames: ['svc-1', 'svc-2'], criticality: 'HIGH', notify: true });
+      expect(ev[0]).toMatchObject({ kind: 'INCIDENT_OPENED', incidentKey: 9, serviceNames: ['svc-1', 'svc-2'], criticality: 'HIGH', notify: false });
     });
 
     it('svc1 MEDIUM heredado + svc2 HIGH nuevo → OPENED(9) con aviso', () => {
