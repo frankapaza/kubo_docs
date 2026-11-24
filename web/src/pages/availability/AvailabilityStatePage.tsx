@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 
@@ -36,10 +36,21 @@ export default function AvailabilityStatePage() {
 
   const clientName = useMemo(() => new Map((clients.data ?? []).map((c) => [c.id, c.razonSocial])), [clients.data]);
   const serverOptions = (servers.data ?? []).filter((s) => clientId === '' || s.clientId === clientId);
+  // Temporizadores vivos (pausa de 15 s y refresco tras la prueba): se cancelan al salir de la página.
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const inFlight = useRef(new Set<number>());
+  useEffect(() => {
+    const t = timers.current;
+    return () => { t.forEach(clearTimeout); t.clear(); };
+  }, []);
+  const later = (fn: () => void, ms: number) => {
+    const h = setTimeout(() => { timers.current.delete(h); fn(); }, ms);
+    timers.current.add(h);
+  };
 
   const startCooldown = (id: number) => {
     setCooling((prev) => new Set(prev).add(id));
-    setTimeout(() => {
+    later(() => {
       setCooling((prev) => {
         const next = new Set(prev);
         next.delete(id);
@@ -49,14 +60,22 @@ export default function AvailabilityStatePage() {
   };
 
   const checkNow = async (serviceId: number) => {
-    if (cooling.has(serviceId)) return;
-    startCooldown(serviceId);
+    if (cooling.has(serviceId) || inFlight.current.has(serviceId)) return;
+    inFlight.current.add(serviceId);
     try {
       await availabilityApi.checkNow(serviceId);
+      startCooldown(serviceId); // 202: el servidor también aplica la pausa
       toast.success('Comprobación solicitada a las dos sondas.');
-      setTimeout(() => queryClient.invalidateQueries({ queryKey: ['availability', 'state'] }), 5_000);
+      later(() => queryClient.invalidateQueries({ queryKey: ['availability', 'state'] }), 5_000);
     } catch (e) {
-      toast.error(apiStatus(e) === 429 ? 'Espera unos segundos' : apiMessage(e, 'No se pudo solicitar la comprobación.'));
+      if (apiStatus(e) === 429) {
+        startCooldown(serviceId);
+        toast.error('Espera unos segundos');
+      } else {
+        toast.error(apiMessage(e, 'No se pudo solicitar la comprobación.'));
+      }
+    } finally {
+      inFlight.current.delete(serviceId);
     }
   };
 

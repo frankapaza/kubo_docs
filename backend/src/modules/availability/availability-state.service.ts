@@ -68,6 +68,8 @@ export interface IncidentListRow {
   ticketId: number | null;
   ticketCode: string | null;
   childCount: number;
+  parentId: number | null;
+  serverId: number;
 }
 
 export interface CheckRow {
@@ -327,6 +329,8 @@ export class AvailabilityStateService {
         ticketId: nOrNull(i.ticketId),
         ticketCode: codes.get(n(i.id)) ?? null,
         childCount: childCount.get(n(i.id)) ?? 0,
+        parentId: nOrNull(i.parentId),
+        serverId: n(i.serverId),
       };
     });
   }

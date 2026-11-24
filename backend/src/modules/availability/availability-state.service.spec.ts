@@ -224,6 +224,9 @@ describe('AvailabilityStateService incidentes', () => {
     const parent = closed.find((i) => i.id === 510)!;
     expect(parent).toMatchObject({ kind: 'DOWN', serviceName: null, serverName: 'srv-b', clientName: 'Beta', childCount: 2, ticketCode: 'TK-901', durationMinutes: 90 });
     expect(closed.find((i) => i.id === 511)!.ticketCode).toBe('TK-901');
+    expect(parent.parentId).toBeNull();
+    expect(closed.find((i) => i.id === 511)).toMatchObject({ parentId: 510, serverId: parent.serverId });
+    expect(typeof parent.serverId).toBe('number');
     const none = await svc.listIncidents({ clientId: 1, from: new Date(T0.getTime() + 1000) });
     expect(none).toEqual({ items: [], truncated: false });
   });

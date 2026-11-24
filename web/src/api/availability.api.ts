@@ -50,6 +50,8 @@ export interface IncidentRow {
   ticketId: number | null;
   ticketCode: string | null;
   childCount: number;
+  parentId: number | null;
+  serverId: number;
 }
 
 export interface IncidentList {

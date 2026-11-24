@@ -27,20 +27,7 @@ export default function AvailabilityIncidentsPage() {
     });
 
   const items = list.data?.items ?? [];
-  const childrenOf = (id: number) => items.filter((i) => parentOf(i) === id);
-  // La lista no trae parentId: un hijo es un incidente de servicio que se solapa en el tiempo con un
-  // incidente de servidor (serviceName null, con hijos) del mismo servidor; si hay varios, el más cercano.
-  const parentOf = (i: IncidentRow): number | null => {
-    if (i.serviceName === null) return null;
-    const end = (x: IncidentRow) => (x.recoveredAt ? Date.parse(x.recoveredAt) : Infinity);
-    const candidates = items.filter(
-      (p) => p.serviceName === null && p.childCount > 0 && p.serverName === i.serverName && p.clientName === i.clientName
-        && Date.parse(i.firstFailureAt) <= end(p) && end(i) >= Date.parse(p.firstFailureAt),
-    );
-    candidates.sort((x, y) => Math.abs(Date.parse(x.confirmedAt) - Date.parse(i.confirmedAt)) - Math.abs(Date.parse(y.confirmedAt) - Date.parse(i.confirmedAt)));
-    return candidates[0]?.id ?? null;
-  };
-  const topLevel = items.filter((i) => parentOf(i) === null);
+// Un hijo se agrupa bajo su padre por parentId; si el padre no está en la lista (otra pestaña o recorte), va suelto.  const ids = new Set(items.map((i) => i.id));  const topLevel = items.filter((i) => i.parentId === null || !ids.has(i.parentId));
 
   const tabBtn = (t: Tab, label: string) => (
     <button
@@ -121,7 +108,7 @@ export default function AvailabilityIncidentsPage() {
               <tbody>
                 {topLevel.flatMap((i) => [
                   row(i, false),
-                  ...(expanded.has(i.id) ? childrenOf(i.id).map((k) => row(k, true)) : []),
+                  ...(expanded.has(i.id) ? [<ChildRows key={`children-${i.id}`} parentId={i.id} render={(k) => row(k, true)} />] : []),
                 ])}
               </tbody>
             </table>
@@ -130,4 +117,19 @@ export default function AvailabilityIncidentsPage() {
       )}
     </div>
   );
+}
+
+/** Los servicios de un incidente de servidor, del detalle: incluye los ya recuperados, así cuadran con childCount. */
+function ChildRows({ parentId, render }: { parentId: number; render: (k: IncidentRow) => JSX.Element }) {
+  const detail = useQuery({
+    queryKey: ['availability', 'incident', parentId],
+    queryFn: () => availabilityApi.incidentDetail(parentId),
+  });
+  if (detail.isLoading) {
+    return <tr><td colSpan={7} style={{ ...td, paddingLeft: 30, color: '#6d7577' }}>Cargando servicios…</td></tr>;
+  }
+  if (detail.error || !detail.data) {
+    return <tr><td colSpan={7} style={{ ...td, paddingLeft: 30, color: '#b3261e' }}>No se pudieron cargar los servicios.</td></tr>;
+  }
+  return <>{detail.data.children.map(render)}</>;
 }
