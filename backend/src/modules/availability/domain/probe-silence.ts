@@ -6,8 +6,6 @@ export type SilenceDecision = 'ALERT' | 'RECOVERED' | 'NONE';
 export interface SilenceProbeView {
   lastSeenAt: Date | null;
   silenceAlertedAt: Date | null;
-  hasToken: boolean;
-  kind: 'OFFICE' | 'DATACENTER';
 }
 
 /**

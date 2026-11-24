@@ -2,7 +2,7 @@ import { PROBE_SILENCE_MS, silenceDecision } from './probe-silence';
 
 const NOW = new Date('2026-11-24T15:00:00.000Z');
 const ago = (ms: number) => new Date(NOW.getTime() - ms);
-const base = { lastSeenAt: ago(0), silenceAlertedAt: null, hasToken: true, kind: 'OFFICE' as const };
+const base = { lastSeenAt: ago(0), silenceAlertedAt: null };
 
 describe('silenceDecision', () => {
   it('9 minutos sin reportar: NONE', () => {
@@ -25,11 +25,7 @@ describe('silenceDecision', () => {
     ).toBe('RECOVERED');
   });
 
-  it('oficina sin token y sin lastSeenAt: NONE', () => {
-    expect(silenceDecision({ ...base, lastSeenAt: null, hasToken: false }, NOW)).toBe('NONE');
-  });
-
-  it('sonda que nunca reportó (lastSeenAt nulo): NONE', () => {
-    expect(silenceDecision({ ...base, lastSeenAt: null, kind: 'DATACENTER' }, NOW)).toBe('NONE');
+    it('sonda que nunca reportó (lastSeenAt nulo): NONE', () => {
+    expect(silenceDecision({ ...base, lastSeenAt: null }, NOW)).toBe('NONE');
   });
 });

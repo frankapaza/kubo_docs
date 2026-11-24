@@ -24,6 +24,8 @@ const make = (opts: { probes?: any[]; admins?: any[]; sendFails?: boolean; affec
   };
   const config = { get: jest.fn().mockReturnValue('https://app.kubo.test') };
   const watch = new ProbeSilenceWatch(repo as any, users as any, email as any, config as any);
+  // Pasado el periodo de gracia de arranque, salvo que la prueba diga otra cosa.
+  watch.startedAt = new Date(NOW.getTime() - 10 * 60_000);
   return { watch, repo, users, email };
 };
 
@@ -82,5 +84,37 @@ describe('ProbeSilenceWatch', () => {
     await watch.check(NOW);
     expect(email.send.mock.calls[0][0].subject).toBe('Monitoreo: la sonda oficina-01 volvió a reportar');
     expect(repo.update).toHaveBeenCalledWith({ id: 7, silenceAlertedAt: p.silenceAlertedAt }, { silenceAlertedAt: null });
+  });
+
+  it('escapa el código de la sonda en el cuerpo HTML', async () => {
+    const p = { ...silent(), code: '<b>x</b>' };
+    const { watch, email } = make({ probes: [p] });
+    await watch.check(NOW);
+    const arg = email.send.mock.calls[0][0];
+    expect(arg.html).not.toContain('<b>x</b>');
+    expect(arg.html).toContain('&lt;b&gt;x&lt;/b&gt;');
+  });
+
+  it('no alerta durante los 2 primeros minutos tras arrancar', async () => {
+    const { watch, email } = make();
+    watch.startedAt = new Date(NOW.getTime() - 60_000);
+    await watch.check(NOW);
+    expect(email.send).not.toHaveBeenCalled();
+  });
+
+  it('en el periodo de gracia la recuperación sí se procesa', async () => {
+    const p = { ...silent(), lastSeenAt: new Date(NOW.getTime() - 5000), silenceAlertedAt: new Date(NOW.getTime() - 20 * 60_000) };
+    const { watch, email } = make({ probes: [p] });
+    watch.startedAt = new Date(NOW.getTime() - 60_000);
+    await watch.check(NOW);
+    expect(email.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('sin administradores advierte una sola vez por sonda y silencio', async () => {
+    const { watch } = make({ admins: [] });
+    const warn = jest.spyOn((watch as any).logger, 'warn').mockImplementation(() => undefined);
+    await watch.check(NOW);
+    await watch.check(new Date(NOW.getTime() + 60_000));
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 });

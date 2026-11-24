@@ -5,22 +5,31 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { formatPeruDateTime } from '../../common/peru-date-time';
 import { EmailService } from '../email/email.service';
+import { escapeHtml } from '../notifications/domain/template-renderer';
 import { UsersRepository } from '../users/users.repository';
 import { silenceDecision } from './domain/probe-silence';
 import { MonitorProbe } from './entities/monitor-probe.entity';
 
 const DEFAULT_FRONTEND_URL = 'http://localhost:5173';
+/** Tras arrancar, las sondas necesitan un momento para volver a reportar: no se alerta antes. */
+export const STARTUP_GRACE_MS = 120_000;
 
 /**
  * Cada minuto revisa las sondas: si una lleva 10 minutos sin reportar avisa por
  * correo a los administradores activos, y avisa otra vez cuando vuelve. La
  * columna `silence_alerted_at` se fija solo tras enviar (un fallo se reintenta
- * al minuto siguiente) y con una actualización condicional para no duplicar.
+ * al minuto siguiente). Que el aviso no se duplique lo garantiza el indicador
+ * `running` (una sola pasada a la vez, una sola instancia del backend); la
+ * actualización condicional solo protege el valor que se escribe.
  */
 @Injectable()
 export class ProbeSilenceWatch {
   private readonly logger = new Logger(ProbeSilenceWatch.name);
   private running = false;
+  /** Instante de arranque; las alertas se posponen durante `STARTUP_GRACE_MS`. */
+  startedAt = new Date();
+  /** Sondas ya advertidas de «sin administradores» en este silencio. */
+  private readonly warnedNoAdmins = new Set<number>();
 
   constructor(
     @InjectRepository(MonitorProbe) private readonly probes: Repository<MonitorProbe>,
@@ -47,15 +56,12 @@ export class ProbeSilenceWatch {
     for (const probe of probes) {
       try {
         const decision = silenceDecision(
-          {
-            lastSeenAt: probe.lastSeenAt,
-            silenceAlertedAt: probe.silenceAlertedAt,
-            hasToken: probe.tokenHash != null,
-            kind: probe.kind,
-          },
+          { lastSeenAt: probe.lastSeenAt, silenceAlertedAt: probe.silenceAlertedAt },
           now,
         );
+        if (decision !== 'ALERT') this.warnedNoAdmins.delete(probe.id);
         if (decision === 'NONE') continue;
+        if (decision === 'ALERT' && now.getTime() - this.startedAt.getTime() < STARTUP_GRACE_MS) continue;
         await this.notify(probe, decision, now);
       } catch (e) {
         this.logger.error(`Aviso de la sonda ${probe.code} fallido: ${(e as Error).message}`);
@@ -67,7 +73,10 @@ export class ProbeSilenceWatch {
     const admins = await this.users.listActiveAdmins();
     const to = admins.map((a) => a.email).filter(Boolean);
     if (to.length === 0) {
-      this.logger.warn(`La sonda ${probe.code} requiere aviso pero no hay administradores activos`);
+      if (!this.warnedNoAdmins.has(probe.id)) {
+        this.warnedNoAdmins.add(probe.id);
+        this.logger.warn(`La sonda ${probe.code} requiere aviso pero no hay administradores activos`);
+      }
       return;
     }
     const alert = decision === 'ALERT';
@@ -76,16 +85,17 @@ export class ProbeSilenceWatch {
     const subject = alert
       ? `Monitoreo: la sonda ${probe.code} dejó de reportar`
       : `Monitoreo: la sonda ${probe.code} volvió a reportar`;
-    const line = alert
-      ? `La sonda ${probe.code} lleva más de 10 minutos sin reportar. Último contacto: ${last} (hora de Lima).`
-      : `La sonda ${probe.code} volvió a reportar. Último contacto: ${last} (hora de Lima).`;
+    const line = (code: string) =>
+      alert
+        ? `La sonda ${code} lleva más de 10 minutos sin reportar. Último contacto: ${last} (hora de Lima).`
+        : `La sonda ${code} volvió a reportar. Último contacto: ${last} (hora de Lima).`;
     await this.email.send({
       to,
       subject,
-      text: `${line}\nSondas: ${link}`,
-      html: `<p>${line}</p><p><a href="${link}">Ver sondas</a></p>`,
+      text: `${line(probe.code)}\nSondas: ${link}`,
+      html: `<p>${line(escapeHtml(probe.code))}</p><p><a href="${escapeHtml(link)}">Ver sondas</a></p>`,
     });
-    // Condicional: solo gana quien ve el valor que leyó; evita duplicar si dos pasadas se cruzan.
+    // Condicional: solo escribe si la columna sigue como se leyó.
     await this.probes.update(
       { id: probe.id, silenceAlertedAt: alert ? IsNull() : (probe.silenceAlertedAt as Date) },
       { silenceAlertedAt: alert ? now : null },
