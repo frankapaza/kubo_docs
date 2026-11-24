@@ -88,10 +88,12 @@ services:
       - redis_dev_data:/data
 
   # Sonda kubo-01 (monitoreo de disponibilidad): solo mide, el evaluador corre
-  # en el backend. Opcional en desarrollo; se
-  # levanta con:
-  #   docker compose -f docker-compose.dev.yml up -d --build monitor-worker
+  # en el backend. Opcional en desarrollo: va en el perfil `monitoreo`, así que
+  # un `up -d` normal NO la levanta (sin la migración 031 abortaría en bucle).
+  # Se levanta con:
+  #   docker compose -f docker-compose.dev.yml --profile monitoreo up -d --build
   monitor-worker:
+    profiles: ["monitoreo"]
     build:
       context: ./backend
     container_name: kubo-monitor-worker-dev

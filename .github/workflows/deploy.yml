@@ -247,8 +247,34 @@ jobs:
               echo "Backend en pie."
               docker compose ps
               docker compose logs --tail 40 backend
-              echo "Deploy completado."
-              exit 0
+
+              echo "===== 7b. Esperar a que la sonda kubo-01 (monitor-worker) arranque ====="
+              # El worker solo mide: si no arranca (p. ej. falta la fila kubo-01
+              # de la 031 o no conecta a MySQL), el monitoreo se queda sin la
+              # sonda del centro de datos sin que el backend lo note. Se exige
+              # el contenedor en marcha y su linea de arranque
+              # ("Sonda kubo-01 iniciada", DatacenterProbeService).
+              SONDA=0
+              for i in $(seq 1 30); do
+                WLOG=$(docker compose logs --tail 200 monitor-worker 2>&1 || true)
+                if docker compose ps --status running --services 2>/dev/null | grep -qx monitor-worker \
+                   && echo "$WLOG" | grep -q "Sonda kubo-01 iniciada"; then
+                  SONDA=1
+                  break
+                fi
+                sleep 5
+              done
+              if [ "$SONDA" = "1" ]; then
+                docker compose logs --tail 20 monitor-worker
+                echo "Deploy completado."
+                exit 0
+              fi
+              echo "LA SONDA kubo-01 (monitor-worker) NO ARRANCO. Log:"
+              docker compose ps monitor-worker || true
+              docker compose logs --tail 120 monitor-worker || true
+              echo "El backend nuevo SI esta en pie; el despliegue se marca fallido"
+              echo "para que se revise el worker (el monitoreo del centro de datos esta parado)."
+              exit 1
             fi
 
             echo "EL BACKEND NO ARRANCO. Log completo:"

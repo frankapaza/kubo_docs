@@ -67,7 +67,7 @@ flutter run
 
 ## Monitoreo de disponibilidad
 
-Además del backend, el stack levanta el contenedor `monitor-worker` (`node dist/monitoring-worker.js`, mismo código y mismas variables de base de datos que `backend`, sin puertos). Es una sonda: ejecuta las pruebas del centro de datos `kubo-01` y recoge sus órdenes (manuales y de cruce); solo necesita MySQL. La evaluación de incidentes (tick cada 5 s) y la purga diaria de las 03:00 (Lima, checks y señales de más de 90 días) corren en el `backend`, no en el worker. Requiere la migración `031_disponibilidad_nucleo.sql`: en una base con datos hay que aplicarla a mano antes del deploy (ver `deploy.sh`); sin ella el worker aborta al arrancar. En desarrollo: `docker compose -f docker-compose.dev.yml up -d --build monitor-worker`.
+Además del backend, el stack levanta el contenedor `monitor-worker` (`node dist/monitoring-worker.js`, mismo código y mismas variables de base de datos que `backend`, sin puertos). Es una sonda: ejecuta las pruebas del centro de datos `kubo-01` y recoge sus órdenes (manuales y de cruce); solo necesita MySQL. La evaluación de incidentes (tick cada 5 s) y la purga diaria de las 03:00 (Lima, checks y señales de más de 90 días) corren en el `backend`, no en el worker. Requiere la migración `031_disponibilidad_nucleo.sql`: en una base con datos hay que aplicarla a mano antes del deploy (ver `deploy.sh`); sin ella el worker aborta al arrancar. En desarrollo el worker va en el perfil `monitoreo` (un `up -d` normal no lo levanta): `docker compose -f docker-compose.dev.yml --profile monitoreo up -d --build`.
 
 ## Estado del MVP
 
