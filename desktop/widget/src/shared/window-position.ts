@@ -1,4 +1,5 @@
 import type { Corner } from './types';
+import type { WidgetRow } from './widget-model';
 
 export type { Corner };
 
@@ -43,9 +44,28 @@ export function nearestCorner(bounds: Rect, workArea: Rect): Corner {
   return `${vertical}-${horizontal}` as Corner;
 }
 
+export const MAX_UNFOLDED = 20;
+
+/** Filas a la vista: las de primer nivel más los servicios de las filas de servidor desplegadas. */
+export function visibleRows(rows: WidgetRow[], unfolded: readonly string[]): number {
+  return rows.reduce((n, r) => n + 1 + (r.children.length > 0 && unfolded.includes(r.key) ? r.children.length : 0), 0);
+}
+
+/**
+ * Valida lo que manda el renderer: un array (máx. 20) de claves de filas desplegables del modelo
+ * actual. Devuelve las conocidas sin repetir, o null si la forma no es válida.
+ */
+export function sanitizeUnfolded(value: unknown, rows: WidgetRow[]): string[] | null {
+  if (!Array.isArray(value) || value.length > MAX_UNFOLDED) return null;
+  const known = new Set(rows.filter((r) => r.children.length > 0).map((r) => r.key));
+  const out: string[] = [];
+  for (const k of value) if (typeof k === 'string' && known.has(k) && !out.includes(k)) out.push(k);
+  return out;
+}
+
 export interface Layout {
   expanded: boolean;
-  /** Filas de primer nivel del modelo. */
+  /** Filas a la vista (`visibleRows`). */
   rows: number;
   summary: boolean;
   health: boolean;

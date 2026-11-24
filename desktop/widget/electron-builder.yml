@@ -10,6 +10,9 @@ files:
   - assets/**/*
   - package.json
 asar: true
+# El ejecutable empaquetado ignora ELECTRON_RUN_AS_NODE (no se puede usar como un Node cualquiera).
+electronFuses:
+  runAsNode: false
 win:
   target: nsis
   icon: assets/icon.png

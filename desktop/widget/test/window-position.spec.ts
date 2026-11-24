@@ -1,4 +1,5 @@
-import { nearestCorner, positionFor, windowHeight, BAR_HEIGHT, ROW_HEIGHT, WIDTH } from '../src/shared/window-position';
+import { nearestCorner, positionFor, sanitizeUnfolded, visibleRows, windowHeight, BAR_HEIGHT, ROW_HEIGHT, WIDTH } from '../src/shared/window-position';
+import type { WidgetRow } from '../src/shared/widget-model';
 
 const WA = { x: 0, y: 0, width: 1920, height: 1040 };
 const SIZE = { width: 320, height: 40 };
@@ -43,5 +44,42 @@ describe('windowHeight', () => {
     const base = windowHeight({ expanded: false, rows: 0, summary: false, health: false });
     expect(windowHeight({ expanded: false, rows: 0, summary: true, health: false })).toBeGreaterThan(base);
     expect(windowHeight({ expanded: false, rows: 0, summary: false, health: true })).toBeGreaterThan(base);
+  });
+});
+
+describe('visibleRows', () => {
+  const svc = (k: string): WidgetRow => ({ key: k, tone: 'red', title: k, detail: '', incidentId: null, children: [] });
+  const server: WidgetRow = { key: 'i:9', tone: 'red', title: 'srv', detail: '', incidentId: 9, children: [svc('s:1'), svc('s:2'), svc('s:3')] };
+
+  it('counts a folded server row as one row', () => {
+    expect(visibleRows([server], [])).toBe(1);
+    expect(windowHeight({ expanded: true, rows: visibleRows([server], []), summary: false, health: false })).toBe(40 + 56);
+  });
+
+  it('adds the services of an unfolded server row', () => {
+    expect(visibleRows([server], ['i:9'])).toBe(4);
+    expect(windowHeight({ expanded: true, rows: visibleRows([server], ['i:9']), summary: false, health: false })).toBe(40 + 4 * 56);
+  });
+
+  it('ignores unknown keys and still caps the height at 6 rows', () => {
+    const big: WidgetRow = { ...server, children: Array.from({ length: 8 }, (_, i) => svc(`s:${i}`)) };
+    expect(visibleRows([server], ['nope', 's:1'])).toBe(1);
+    expect(windowHeight({ expanded: true, rows: visibleRows([big], ['i:9']), summary: false, health: false })).toBe(40 + 6 * 56);
+  });
+});
+
+describe('sanitizeUnfolded', () => {
+  const rows: WidgetRow[] = [
+    { key: 'i:9', tone: 'red', title: 'srv', detail: '', incidentId: 9, children: [{ key: 's:1', tone: 'red', title: 'a', detail: '', incidentId: null, children: [] }] },
+    { key: 's:5', tone: 'red', title: 'b', detail: '', incidentId: 5, children: [] },
+  ];
+
+  it('keeps only known unfoldable keys, without duplicates', () => {
+    expect(sanitizeUnfolded(['i:9', 'i:9', 's:5', 'x', 3], rows)).toEqual(['i:9']);
+  });
+
+  it('rejects non-arrays and more than 20 entries', () => {
+    expect(sanitizeUnfolded('i:9', rows)).toBeNull();
+    expect(sanitizeUnfolded(Array.from({ length: 21 }, () => 'i:9'), rows)).toBeNull();
   });
 });

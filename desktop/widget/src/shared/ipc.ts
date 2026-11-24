@@ -15,7 +15,8 @@ export type IpcChannel =
   | 'widget:open-dashboard'
   | 'widget:dismiss-summary'
   | 'widget:close-health'
-  | 'widget:set-corner';
+  | 'widget:set-corner'
+  | 'widget:set-unfolded';
 
 /** Única API que el preload expone en `window.kubo`. */
 export interface WidgetApi {
@@ -27,4 +28,6 @@ export interface WidgetApi {
   dismissSummary(): void;
   closeHealth(): void;
   setCorner(corner: Corner): void;
+  /** Claves de las filas de servidor desplegadas (la ventana crece con sus servicios). */
+  setUnfolded(keys: string[]): void;
 }

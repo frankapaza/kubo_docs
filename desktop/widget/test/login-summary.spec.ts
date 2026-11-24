@@ -54,4 +54,15 @@ describe('summarize', () => {
     const events = [ev({ kind: 'DEGRADED_STARTED', incidentKind: 'DEGRADED', notify: false })];
     expect(summarize(events, SINCE, model([]))).toBeNull();
   });
+
+  it('counts a reopened incident once', () => {
+    const events = [
+      ev({ id: 1, incidentKey: 7 }),
+      ev({ id: 2, kind: 'INCIDENT_RECOVERED', incidentKey: 7, at: '2026-11-24T06:00:00Z' }),
+      ev({ id: 3, incidentKey: 7, at: '2026-11-24T07:00:00Z' }),
+    ];
+    const s = summarize(events, SINCE, model([ROW]))!;
+    expect([s.opened, s.recovered]).toEqual([1, 1]);
+    expect(s.lines[0]).toBe('1 incidente abierto: API');
+  });
 });

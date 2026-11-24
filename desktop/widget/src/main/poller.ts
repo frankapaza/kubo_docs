@@ -19,6 +19,8 @@ export interface PollerDeps {
   now(): number;
   /** Instante de arranque del widget: nunca se avisa de eventos anteriores. */
   startedAt: number;
+  /** Errores inesperados (p. ej. al pintar); por defecto `console.error`. */
+  log?(error: unknown): void;
 }
 
 export function normalizeCentralUrl(url: string): string {
@@ -44,13 +46,29 @@ export class Poller {
     }
     this.lastReach = reach;
     if (reach.kind === 'ok') this.centralUrl = normalizeCentralUrl(reach.status.centralUrl);
-    deps.onModel(deriveModel(reach, new Date(deps.now())), reach);
-    if (this.tracker.update(reach.kind) && this.centralUrl) deps.notify(engineDownToast(this.centralUrl), this.centralUrl);
+    try {
+      deps.onModel(deriveModel(reach, new Date(deps.now())), reach);
+    } catch (e) {
+      this.log(e); // Un fallo al pintar no debe parar los avisos.
+    }
+    try {
+      if (this.tracker.update(reach.kind) && this.centralUrl) deps.notify(engineDownToast(this.centralUrl), this.centralUrl);
+    } catch (e) {
+      this.log(e);
+    }
     if (reach.kind !== 'ok' || !this.centralUrl) return;
     try {
       await this.drainEvents(this.centralUrl);
     } catch {
       // Motor ocupado, sin permiso o respuesta inválida: se reintenta en el siguiente paso.
+    }
+  }
+
+  private log(e: unknown): void {
+    try {
+      (this.deps.log ?? console.error)(e);
+    } catch {
+      // Sin consola: nada más que hacer.
     }
   }
 

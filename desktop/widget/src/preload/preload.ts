@@ -21,6 +21,7 @@ const api: WidgetApi = {
   dismissSummary: () => send('widget:dismiss-summary'),
   closeHealth: () => send('widget:close-health'),
   setCorner: (corner) => send('widget:set-corner', corner),
+  setUnfolded: (keys) => send('widget:set-unfolded', keys),
 };
 
 contextBridge.exposeInMainWorld('kubo', api);

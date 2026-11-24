@@ -4,7 +4,7 @@ import { healthFrom } from '../shared/health';
 import type { IpcChannel } from '../shared/ipc';
 import { summarize, type LoginSummary } from '../shared/login-summary';
 import { isAllowedUrl, type Toast } from '../shared/notify-policy';
-import { isCorner } from '../shared/window-position';
+import { isCorner, sanitizeUnfolded, visibleRows } from '../shared/window-position';
 import type { WidgetModel } from '../shared/widget-model';
 import { EngineClient, monitorHome } from './engine-client';
 import { enginePort } from './engine-port';
@@ -52,9 +52,13 @@ function start(): void {
   let summary: LoginSummary | null = null;
   let healthOpen = false;
   let quitting = false;
+  /** Filas de servidor desplegadas en el renderer (validadas contra el modelo). */
+  let unfolded: string[] = [];
 
   const relayout = (): void => {
-    win.setLayout({ expanded: model?.expanded ?? false, rows: model?.rows.length ?? 0, summary: summary !== null, health: healthOpen });
+    const rows = model?.rows ?? [];
+    unfolded = sanitizeUnfolded(unfolded, rows) ?? [];
+    win.setLayout({ expanded: model?.expanded ?? false, rows: visibleRows(rows, unfolded), summary: summary !== null, health: healthOpen });
   };
 
   const poller = new Poller({
@@ -125,6 +129,12 @@ function start(): void {
   on('widget:set-corner', (c) => {
     if (isCorner(c)) win.setCorner(c);
   });
+  on('widget:set-unfolded', (keys) => {
+    const valid = sanitizeUnfolded(keys, model?.rows ?? []);
+    if (valid === null) return;
+    unfolded = valid;
+    relayout();
+  });
 
   // Resumen al iniciar sesión: lo ocurrido desde la última vez que corrió el widget.
   const since = store.lastSeenAt;
@@ -148,10 +158,16 @@ function start(): void {
     lastSeenTimer = setInterval(() => { store.lastSeenAt = new Date().toISOString(); }, LAST_SEEN_INTERVAL_MS);
   };
 
+  // El siguiente paso se programa siempre, aunque este falle.
   const loop = async (): Promise<void> => {
-    await poller.tick();
-    await loadSummary();
-    if (!quitting) setTimeout(() => { void loop(); }, POLL_INTERVAL_MS);
+    try {
+      await poller.tick();
+      await loadSummary();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      if (!quitting) setTimeout(() => { void loop(); }, POLL_INTERVAL_MS);
+    }
   };
 
   // Un renderer recargado recibe el estado actual.

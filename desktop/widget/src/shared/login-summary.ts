@@ -45,15 +45,17 @@ export function summarize(events: EngineEvent[], since: string | null, model: Wi
   const officeOutages = recent.filter((e) => e.kind === 'OFFICE_OUTAGE_STARTED').length;
   const centralOutages = recent.filter((e) => e.kind === 'CENTRAL_UNREACHABLE').length;
   if (opened.length + recovered.length + officeOutages + centralOutages === 0) return null;
+  // Un incidente reabierto o escalado sigue siendo el mismo: se cuenta por `incidentKey`.
+  const openedCount = new Set(opened.map((e) => e.incidentKey ?? `e:${e.id}`)).size;
 
   const stillActive = model.rows;
   const lines: string[] = [];
-  if (opened.length) lines.push(withNames(plural(opened.length, 'incidente abierto', 'incidentes abiertos'), opened));
+  if (openedCount) lines.push(withNames(plural(openedCount, 'incidente abierto', 'incidentes abiertos'), opened));
   if (recovered.length) lines.push(withNames(plural(recovered.length, 'recuperado', 'recuperados'), recovered));
   if (officeOutages) lines.push(plural(officeOutages, 'corte de internet en la oficina', 'cortes de internet en la oficina'));
   if (centralOutages) lines.push(`La central dejó de responder ${plural(centralOutages, 'vez', 'veces')}`);
   lines.push(stillActive.length
     ? `${stillActive.length === 1 ? 'Sigue activo' : 'Siguen activos'}: ${stillActive.map((r) => r.title).join(', ')}`
     : 'Ahora todo está operativo');
-  return { opened: opened.length, recovered: recovered.length, officeOutages, centralOutages, stillActive, lines };
+  return { opened: openedCount, recovered: recovered.length, officeOutages, centralOutages, stillActive, lines };
 }

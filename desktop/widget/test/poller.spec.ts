@@ -28,11 +28,12 @@ class FakeStore {
   set cursor(v: number) { this.c = v; this.writes++; }
 }
 
-function setup(reach: EngineReach[], pages: Array<{ lastId: number; events: EngineEvent[] } | Error>) {
+function setup(reach: EngineReach[], pages: Array<{ lastId: number; events: EngineEvent[] } | Error>, failOnModel = false) {
   const store = new FakeStore();
   const toasts: Array<{ t: Toast; central: string }> = [];
   const models: string[] = [];
   const calls: number[] = [];
+  const errors: unknown[] = [];
   const client = {
     status: async () => reach.length > 1 ? reach.shift()! : reach[0],
     events: async (after: number) => {
@@ -45,10 +46,24 @@ function setup(reach: EngineReach[], pages: Array<{ lastId: number; events: Engi
   const poller = new Poller({
     client, store, now: () => T0 + 60_000, startedAt: T0,
     notify: (t, central) => toasts.push({ t, central }),
-    onModel: (m) => models.push(m.headline),
+    onModel: (m) => {
+      if (failOnModel) throw new Error('render');
+      models.push(m.headline);
+    },
+    log: (e) => errors.push(e),
   });
-  return { poller, store, toasts, models, calls };
+  return { poller, store, toasts, models, calls, errors };
 }
+
+describe('Poller.tick exception safety', () => {
+  it('survives a throwing onModel, logs it and still reads events', async () => {
+    const s = setup([{ kind: 'ok', status: status() }], [{ lastId: 3, events: [ev({ id: 3 })] }], true);
+    await expect(s.poller.tick()).resolves.toBeUndefined();
+    expect(s.errors).toHaveLength(1);
+    expect(s.toasts).toHaveLength(1);
+    expect(s.store.cursor).toBe(3);
+  });
+});
 
 describe('normalizeCentralUrl', () => {
   it('strips trailing slashes', () => {

@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import type { WidgetRow } from '../../shared/widget-model';
 import { TONE_COLORS } from '../palette';
 
@@ -7,8 +6,14 @@ function open(row: WidgetRow): void {
   else window.kubo.openDashboard();
 }
 
-function Row({ row, child = false }: { row: WidgetRow; child?: boolean }) {
-  const [unfolded, setUnfolded] = useState(false);
+interface RowProps {
+  row: WidgetRow;
+  child?: boolean;
+  unfolded?: boolean;
+  onToggle?: () => void;
+}
+
+function Row({ row, child = false, unfolded = false, onToggle }: RowProps) {
   const c = TONE_COLORS[row.tone];
   const hasChildren = row.children.length > 0;
   return (
@@ -20,7 +25,7 @@ function Row({ row, child = false }: { row: WidgetRow; child?: boolean }) {
           <span className="row-detail">{row.detail || (hasChildren ? `${row.children.length} servicios` : '')}</span>
         </button>
         {hasChildren && (
-          <button type="button" className="unfold" onClick={() => setUnfolded(!unfolded)}
+          <button type="button" className="unfold" onClick={onToggle}
             aria-label={unfolded ? 'Ocultar servicios' : 'Ver servicios'} title={unfolded ? 'Ocultar servicios' : 'Ver servicios'}>
             {unfolded ? '▾' : '▸'}
           </button>
@@ -31,11 +36,14 @@ function Row({ row, child = false }: { row: WidgetRow; child?: boolean }) {
   );
 }
 
-/** Una fila por problema (una por servidor caído, desplegable en sus servicios); máx. 6 a la vista. */
-export function Rows({ rows }: { rows: WidgetRow[] }) {
+/**
+ * Una fila por problema (una por servidor caído, desplegable en sus servicios); máx. 6 a la vista.
+ * Las filas desplegadas las conoce el proceso principal, que dimensiona la ventana con ellas.
+ */
+export function Rows({ rows, unfolded, onToggle }: { rows: WidgetRow[]; unfolded: string[]; onToggle: (key: string) => void }) {
   return (
     <div className="rows">
-      {rows.map((r) => <Row key={r.key} row={r} />)}
+      {rows.map((r) => <Row key={r.key} row={r} unfolded={unfolded.includes(r.key)} onToggle={() => onToggle(r.key)} />)}
     </div>
   );
 }
