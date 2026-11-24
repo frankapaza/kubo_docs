@@ -1,8 +1,9 @@
 import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
 import { ticketsApi, supportAgentsApi } from '../api/tickets.api';
-import type { Ticket, TicketStatus } from '../api/types';
+import type { Client, Ticket, TicketStatus } from '../api/types';
+import { clientsApi } from '../api/clients.api';
 import { useRealtime } from '../lib/realtime';
 import { toast } from '../ui/Toast';
 import { STATUS_STYLES, PRIORITY_STYLES, STATUS_LABELS, slaBarColor } from './tickets/ticket-ui';
@@ -33,6 +34,23 @@ export default function TicketsListPage() {
   const [error, setError] = useState<string | null>(null);
   const [usersById, setUsersById] = useState<Map<number, string>>(new Map());
   const [newTicketOpen, setNewTicketOpen] = useState(false);
+  // El cliente va en la URL (?cliente=9) para poder compartir o guardar la bandeja filtrada.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const clientFilter = Number(searchParams.get('cliente')) || null;
+  const [clients, setClients] = useState<Client[]>([]);
+  const setClientFilter = (id: number | null) => {
+    const next = new URLSearchParams(searchParams);
+    if (id) next.set('cliente', String(id));
+    else next.delete('cliente');
+    setSearchParams(next, { replace: true });
+  };
+
+  useEffect(() => {
+    clientsApi
+      .list()
+      .then((list) => setClients([...list].sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, 'es'))))
+      .catch((e) => console.warn('[TicketsListPage] No se pudo cargar la lista de clientes para el filtro.', e));
+  }, []);
 
   // Resuelve assigneeUserId -> nombre a partir de GET /support-agents, que
   // no tiene restricción de rol (a diferencia de GET /users, reservado a
@@ -88,6 +106,7 @@ export default function TicketsListPage() {
         excludeClosed: filter === 'Todos' ? true : undefined,
         archived: filter === 'Archivados' ? true : undefined,
         q: q || undefined,
+        clientId: clientFilter ?? undefined,
       })
       .then((data) => {
         if (!cancelled) setTickets(data);
@@ -101,7 +120,7 @@ export default function TicketsListPage() {
     return () => {
       cancelled = true;
     };
-  }, [filter, q, reloadTick]);
+  }, [filter, q, clientFilter, reloadTick]);
 
   const count = useMemo(() => tickets.length, [tickets]);
 
@@ -153,12 +172,26 @@ export default function TicketsListPage() {
               {chipLabel(c)}
             </button>
           ))}
+          <select
+            value={clientFilter ?? ''}
+            onChange={(e) => setClientFilter(e.target.value ? Number(e.target.value) : null)}
+            aria-label="Filtrar por cliente"
+            style={{
+              marginLeft: 'auto', fontSize: 12, padding: '6px 10px', borderRadius: 6, maxWidth: 220,
+              border: `1px solid ${clientFilter ? '#15191a' : '#dfe3e4'}`, background: '#fff', color: '#3a4041',
+            }}
+          >
+            <option value="">Todos los clientes</option>
+            {clients.map((c) => (
+              <option key={c.id} value={c.id}>{c.razonSocial}</option>
+            ))}
+          </select>
           <input
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
             placeholder="Buscar por código, asunto o texto"
             aria-label="Buscar tickets por código, asunto o texto"
-            style={{ marginLeft: 'auto', fontSize: 12, padding: '6px 10px', border: '1px solid #dfe3e4', borderRadius: 6, minWidth: 240 }}
+            style={{ fontSize: 12, padding: '6px 10px', border: '1px solid #dfe3e4', borderRadius: 6, minWidth: 240 }}
           />
           <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: '#6d7577' }}>
             {count} tickets
