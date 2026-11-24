@@ -32,4 +32,12 @@ describe('WidgetStore', () => {
     s.cursor = 2;
     expect(JSON.parse(readFileSync(join(d, 'widget-state.json'), 'utf8')).cursor).toBe(2);
   });
+
+  it('remembers that the login item was configured', () => {
+    const d = dir();
+    const s = new WidgetStore(d);
+    expect(s.loginItemConfigured).toBe(false);
+    s.loginItemConfigured = true;
+    expect(new WidgetStore(d).loginItemConfigured).toBe(true);
+  });
 });
