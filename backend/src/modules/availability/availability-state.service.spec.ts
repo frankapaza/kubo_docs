@@ -104,14 +104,30 @@ const make = () => {
   }
   const checks = repoOf(checkRows);
   const orders = repoOf([]);
+  // Transacción de juguete: si el callback falla, se restauran las filas de servicios y órdenes.
+  (services as any).manager = {
+    getRepository: (e: any) => (e.name === 'MonitorService' ? services : orders),
+    transaction: async (cb: any) => {
+      const snap = [services.rows.map((r: any) => ({ ...r })), [...orders.rows]];
+      try {
+        return await cb((services as any).manager);
+      } catch (err) {
+        services.rows.splice(0, services.rows.length, ...(snap[0] as any[]));
+        orders.rows.splice(0, orders.rows.length, ...(snap[1] as any[]));
+        throw err;
+      }
+    },
+  };
   const clients = { list: jest.fn(async () => [{ id: 1, razonSocial: 'Acme' }, { id: 2, razonSocial: 'Beta' }]) };
-  const tickets = { findById: jest.fn(async (id: number) => ({ id, code: `TK-${id}` })) };
+  const tickets = {
+    findCodesByIds: jest.fn(async (ids: number[]) => new Map([...new Set(ids)].map((id) => [id, `TK-${id}`] as [number, string]))),
+  };
   const svc = new AvailabilityStateService(
     servers as any, services as any, probes as any, states as any, incidents as any, events as any, checks as any, orders as any,
     clients as any, tickets as any,
   );
   jest.useFakeTimers().setSystemTime(now);
-  return { svc, services, orders, incidents, events };
+  return { svc, services, orders, incidents, events, tickets };
 };
 
 afterEach(() => jest.useRealTimers());
@@ -183,6 +199,14 @@ describe('AvailabilityStateService.checkNow', () => {
     expect(orders.rows).toHaveLength(4);
   });
 
+  it('si falla la inserción de una orden, el enfriamiento se deshace', async () => {
+    const { svc, orders, services } = make();
+    orders.insert.mockRejectedValueOnce(new Error('db'));
+    await expect(svc.checkNow(100)).rejects.toThrow('db');
+    expect(services.rows[0].lastManualCheckAt).toBeNull();
+    await expect(svc.checkNow(100)).resolves.toMatchObject({ orders: 2 });
+  });
+
   it('servicio inactivo -> 400 BAD_INPUT; inexistente -> 404', async () => {
     const { svc } = make();
     await expect(svc.checkNow(104)).rejects.toMatchObject({ response: { code: 'BAD_INPUT', message: 'El servicio no está activo' } });
@@ -193,15 +217,34 @@ describe('AvailabilityStateService.checkNow', () => {
 describe('AvailabilityStateService incidentes', () => {
   it('lista con filtros open/cliente y trae childCount, ticketCode y duración', async () => {
     const { svc } = make();
-    const open = await svc.listIncidents({ open: true });
+    const open = (await svc.listIncidents({ open: true })).items;
     expect(open.map((i) => i.id)).toEqual([500]);
-    const closed = await svc.listIncidents({ open: false, clientId: 2 });
+    const closed = (await svc.listIncidents({ open: false, clientId: 2 })).items;
     expect(closed.map((i) => i.id).sort()).toEqual([510, 511, 512]);
     const parent = closed.find((i) => i.id === 510)!;
     expect(parent).toMatchObject({ kind: 'DOWN', serviceName: null, serverName: 'srv-b', clientName: 'Beta', childCount: 2, ticketCode: 'TK-901', durationMinutes: 90 });
     expect(closed.find((i) => i.id === 511)!.ticketCode).toBe('TK-901');
     const none = await svc.listIncidents({ clientId: 1, from: new Date(T0.getTime() + 1000) });
-    expect(none).toEqual([]);
+    expect(none).toEqual({ items: [], truncated: false });
+  });
+
+  it('limit acota la lista, devuelve los más recientes y marca truncated', async () => {
+    const { svc } = make();
+    const r = await svc.listIncidents({ limit: 2 });
+    expect(r.items).toHaveLength(2);
+    expect(r.truncated).toBe(true);
+    expect(r.items[0].id).toBe(500);
+    const all = await svc.listIncidents({ limit: 4 });
+    expect(all.truncated).toBe(false);
+    expect((await svc.listIncidents({ limit: 99999 })).items).toHaveLength(4);
+  });
+
+  it('los códigos de ticket se piden en una sola consulta', async () => {
+    const { svc, tickets } = make();
+    await svc.listIncidents({});
+    expect(tickets.findCodesByIds).toHaveBeenCalledTimes(1);
+    await svc.state({});
+    expect(tickets.findCodesByIds).toHaveBeenCalledTimes(2);
   });
 
   it('detalle: hijos, eventos cronológicos, diagnóstico guardado, host y últimas 30 comprobaciones por sonda', async () => {

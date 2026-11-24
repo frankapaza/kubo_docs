@@ -148,3 +148,23 @@ describe('TicketsRepository.findByLabel', () => {
     expect(getOne).toHaveBeenCalled();
   });
 });
+
+describe('TicketsRepository.findCodesByIds', () => {
+  it('una sola consulta con los ids sin repetir y devuelve id -> code', async () => {
+    const { repo, typeormRepo } = makeRepo();
+    typeormRepo.find.mockResolvedValue([{ id: 1, code: 'TK-1' }, { id: 2, code: null }]);
+    const map = await repo.findCodesByIds([1, 2, 1]);
+    expect(typeormRepo.find).toHaveBeenCalledTimes(1);
+    const arg = typeormRepo.find.mock.calls[0][0];
+    expect(arg.where.id.value).toEqual([1, 2]);
+    expect(arg.select).toEqual(['id', 'code']);
+    expect(map.get(1)).toBe('TK-1');
+    expect(map.get(2)).toBeNull();
+  });
+
+  it('sin ids no consulta', async () => {
+    const { repo, typeormRepo } = makeRepo();
+    expect((await repo.findCodesByIds([])).size).toBe(0);
+    expect(typeormRepo.find).not.toHaveBeenCalled();
+  });
+});

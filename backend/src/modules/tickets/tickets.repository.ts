@@ -99,6 +99,14 @@ export class TicketsRepository {
     return this.repo.findOne({ where: { id } });
   }
 
+  /** Códigos de varios tickets en una sola consulta (sin repetir ids ni traer columnas de más). */
+  async findCodesByIds(ids: number[]): Promise<Map<number, string | null>> {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return new Map();
+    const rows = await this.repo.find({ where: { id: In(unique) }, select: ['id', 'code'] });
+    return new Map(rows.map((t) => [Number(t.id), t.code ?? null]));
+  }
+
   findByCode(code: string): Promise<Ticket | null> {
     return this.repo.findOne({ where: { code } });
   }

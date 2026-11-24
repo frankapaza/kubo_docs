@@ -44,8 +44,9 @@ export class AvailabilityStateController {
     @Query('clientId', new ParseIntPipe({ optional: true })) clientId?: number,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
   ) {
-    return this.stateService.listIncidents({ open, clientId, from: parseDate(from, 'from'), to: parseDate(to, 'to') });
+    return this.stateService.listIncidents({ limit, open, clientId, from: parseDate(from, 'from'), to: parseDate(to, 'to') });
   }
 
   @Get('incidents/:id')

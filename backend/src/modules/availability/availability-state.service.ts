@@ -37,7 +37,18 @@ export interface StateFilter {
   serverId?: number;
 }
 
+/** Tope de filas de la lista de incidentes: por defecto y máximo. */
+export const INCIDENT_LIMIT_DEFAULT = 200;
+export const INCIDENT_LIMIT_MAX = 500;
+
+export interface IncidentList {
+  items: IncidentListRow[];
+  /** true si había más incidentes que `limit` (se devuelven los más recientes). */
+  truncated: boolean;
+}
+
 export interface IncidentFilter {
+  limit?: number;
   open?: boolean;
   clientId?: number;
   from?: Date;
@@ -172,24 +183,23 @@ export class AvailabilityStateService {
       );
     const last = svc.lastManualCheckAt ?? null;
     if (last && now.getTime() - last.getTime() < MANUAL_CHECK_COOLDOWN_MS) throw tooMany();
-    // Compare-and-swap: de dos peticiones simultáneas solo una gana.
-    const res = await this.services.update({ id: serviceId, lastManualCheckAt: last ?? IsNull() }, { lastManualCheckAt: now });
-    if (res.affected === 0) throw tooMany();
-
-    const probes = await this.probes.find();
-    let created = 0;
-    for (const kind of ['OFFICE', 'DATACENTER'] as const) {
-      const probe = probes.find((p) => p.kind === kind);
-      if (!probe) continue;
-      await this.orders.insert({ probeId: n(probe.id), serviceId, kind: 'MANUAL', createdAt: now, takenAt: null, doneAt: null });
-      created++;
-    }
-    return { serviceId, orders: created };
+    const probes = (await this.probes.find()).filter((p) => p.kind === 'OFFICE' || p.kind === 'DATACENTER');
+    // Una transacción: si falla una orden, el enfriamiento se deshace y se puede reintentar.
+    return this.services.manager.transaction(async (m) => {
+      // Compare-and-swap: de dos peticiones simultáneas solo una gana.
+      const res = await m.getRepository(MonitorService).update({ id: serviceId, lastManualCheckAt: last ?? IsNull() }, { lastManualCheckAt: now });
+      if (res.affected === 0) throw tooMany();
+      for (const probe of probes) {
+        await m.getRepository(MonitorProbeOrder).insert({ probeId: n(probe.id), serviceId, kind: 'MANUAL', createdAt: now, takenAt: null, doneAt: null });
+      }
+      return { serviceId, orders: probes.length };
+    });
   }
 
   // ---------------------------------------------------------- incidentes
 
-  async listIncidents(filter: IncidentFilter): Promise<IncidentListRow[]> {
+  async listIncidents(filter: IncidentFilter): Promise<IncidentList> {
+    const limit = Math.min(Math.max(Math.trunc(filter.limit ?? INCIDENT_LIMIT_DEFAULT), 1), INCIDENT_LIMIT_MAX);
     const where: Record<string, unknown> = {};
     if (filter.open !== undefined) where.recoveredAt = filter.open ? IsNull() : Not(IsNull());
     if (filter.from && filter.to) where.firstFailureAt = Between(filter.from, filter.to);
@@ -197,11 +207,13 @@ export class AvailabilityStateService {
     else if (filter.to) where.firstFailureAt = LessThanOrEqual(filter.to);
     if (filter.clientId !== undefined) {
       const serverIds = (await this.servers.find({ where: { clientId: filter.clientId } })).map((s) => n(s.id));
-      if (serverIds.length === 0) return [];
+      if (serverIds.length === 0) return { items: [], truncated: false };
       where.serverId = In(serverIds);
     }
-    const found = await this.incidents.find({ where, order: { firstFailureAt: 'DESC' } });
-    return this.toRows(found);
+    // Se pide una de más para saber si la lista quedó recortada.
+    const found = await this.incidents.find({ where, order: { firstFailureAt: 'DESC' }, take: limit + 1 });
+    const truncated = found.length > limit;
+    return { items: await this.toRows(found.slice(0, limit)), truncated };
   }
 
   async incidentDetail(id: number): Promise<IncidentDetail> {
@@ -280,10 +292,7 @@ export class AvailabilityStateService {
       const pid = nOrNull(i.parentId);
       return pid === null ? nOrNull(i.ticketId) : nOrNull(parentById.get(pid)?.ticketId ?? null);
     };
-    const codeByTicket = new Map<number, string | null>();
-    for (const tid of new Set(incidents.map(ticketOf).filter((t): t is number => t !== null))) {
-      codeByTicket.set(tid, (await this.tickets.findById(tid))?.code ?? null);
-    }
+    const codeByTicket = await this.tickets.findCodesByIds(incidents.map(ticketOf).filter((t): t is number => t !== null));
     return new Map(incidents.map((i) => [n(i.id), ticketOf(i) === null ? null : (codeByTicket.get(ticketOf(i) as number) ?? null)]));
   }
 
