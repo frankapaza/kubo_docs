@@ -103,6 +103,19 @@ export class TicketsRepository {
     return this.repo.findOne({ where: { code } });
   }
 
+  /**
+   * Ticket cuya lista labels (columna JSON) contiene exactamente esa
+   * etiqueta (la más reciente si hay varias, p. ej. tras reemplazar un ticket cerrado): JSON_CONTAINS compara elementos completos, así que
+   * monitoreo:incidente:1 no encuentra monitoreo:incidente:12.
+   */
+  findByLabel(label: string): Promise<Ticket | null> {
+    return this.repo
+      .createQueryBuilder('t')
+      .where('JSON_CONTAINS(t.labels, :label)', { label: JSON.stringify(label) })
+      .orderBy('t.id', 'DESC')
+      .getOne();
+  }
+
   create(data: Partial<Ticket>): Promise<Ticket> {
     return this.repo.save(this.repo.create(data));
   }

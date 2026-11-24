@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ClientsModule } from '../clients/clients.module';
 import { TicketsModule } from '../tickets/tickets.module';
+import { UsersModule } from '../users/users.module';
+import { AvailabilityTicketsService } from './availability-tickets.service';
 import { AvailabilityIngestController } from './availability-ingest.controller';
 import { AvailabilityIngestService } from './availability-ingest.service';
 import { AvailabilityInventoryController } from './availability-inventory.controller';
@@ -32,6 +34,7 @@ import { ProbeTokenGuard } from './probe-token.guard';
     ]),
     ClientsModule,
     TicketsModule,
+    UsersModule,
   ],
   controllers: [AvailabilityInventoryController, AvailabilityIngestController],
   providers: [
@@ -39,9 +42,10 @@ import { ProbeTokenGuard } from './probe-token.guard';
     AvailabilityIngestService,
     ProbeTokenGuard,
     ProbeRateLimiter,
+    AvailabilityTicketsService,
     // Task 9 lo reemplaza por AvailabilityEvaluatorService
     { provide: IncidentCloser, useClass: NoopIncidentCloser },
   ],
-  exports: [AvailabilityInventoryService, AvailabilityIngestService, IncidentCloser],
+  exports: [AvailabilityInventoryService, AvailabilityIngestService, AvailabilityTicketsService, IncidentCloser],
 })
 export class AvailabilityModule {}

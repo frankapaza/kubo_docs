@@ -135,3 +135,16 @@ describe('TicketsRepository', () => {
     });
   });
 });
+
+describe('TicketsRepository.findByLabel', () => {
+  it('consulta con JSON_CONTAINS y la etiqueta exacta codificada como JSON', async () => {
+    const getOne = jest.fn().mockResolvedValue(null);
+    const qb: any = { where: jest.fn().mockReturnThis(), orderBy: jest.fn().mockReturnThis(), getOne };
+    const repo = new TicketsRepository({ createQueryBuilder: jest.fn().mockReturnValue(qb) } as any, {} as any);
+    await repo.findByLabel('monitoreo:incidente:1');
+    expect(qb.where).toHaveBeenCalledWith('JSON_CONTAINS(t.labels, :label)', {
+      label: JSON.stringify('monitoreo:incidente:1'),
+    });
+    expect(getOne).toHaveBeenCalled();
+  });
+});
