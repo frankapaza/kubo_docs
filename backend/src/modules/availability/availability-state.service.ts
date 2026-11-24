@@ -8,6 +8,7 @@ import { CombinedStateRow, CombinedStatus } from './domain/combined-state';
 import { buildCombinedRows } from './domain/combined-state-builder';
 import { toCsv } from './domain/csv';
 import { diagnosisFromEvent } from './domain/diagnose';
+import { ticketCodesForIncidents } from './incident-ticket-codes';
 import { MonitorCheck } from './entities/monitor-check.entity';
 import { MonitorIncidentEvent } from './entities/monitor-incident-event.entity';
 import { MonitorIncident } from './entities/monitor-incident.entity';
@@ -286,16 +287,8 @@ export class AvailabilityStateService {
   }
 
   /** Código del ticket de cada incidente: el del padre si es un hijo. */
-  private async ticketCodesFor(incidents: MonitorIncident[]): Promise<Map<number, string | null>> {
-    const parentIds = [...new Set(incidents.map((i) => nOrNull(i.parentId)).filter((p): p is number => p !== null))];
-    const parents = parentIds.length ? await this.incidents.find({ where: { id: In(parentIds) } }) : [];
-    const parentById = new Map(parents.map((p) => [n(p.id), p]));
-    const ticketOf = (i: MonitorIncident): number | null => {
-      const pid = nOrNull(i.parentId);
-      return pid === null ? nOrNull(i.ticketId) : nOrNull(parentById.get(pid)?.ticketId ?? null);
-    };
-    const codeByTicket = await this.tickets.findCodesByIds(incidents.map(ticketOf).filter((t): t is number => t !== null));
-    return new Map(incidents.map((i) => [n(i.id), ticketOf(i) === null ? null : (codeByTicket.get(ticketOf(i) as number) ?? null)]));
+  private ticketCodesFor(incidents: MonitorIncident[]): Promise<Map<number, string | null>> {
+    return ticketCodesForIncidents(this.incidents, this.tickets, incidents);
   }
 
   private async toRows(found: MonitorIncident[]): Promise<IncidentListRow[]> {

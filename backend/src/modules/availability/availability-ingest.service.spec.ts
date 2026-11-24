@@ -73,7 +73,7 @@ const SERVICE = {
   latencyThresholdMs: 1500, criticality: 'HIGH', status: 'ACTIVE',
 };
 
-const makeSvc = (seed: { services?: any[]; orders?: any[]; incidents?: any[]; states?: any[] } = {}) => {
+const makeSvc = (seed: { services?: any[]; orders?: any[]; incidents?: any[]; states?: any[]; ticketCodes?: Record<number, string> } = {}) => {
   const probe: any = { id: 1, code: 'oficina-01', kind: 'OFFICE', tokenHash: 'x', lastSeenAt: null, version: null, clockSkewMs: null };
   const probes = repoOf([probe, { id: 2, code: 'kubo-01', kind: 'DATACENTER' }]);
   const checks = repoOf([], (r) => `${r.probeId}|${r.id}`);
@@ -83,10 +83,13 @@ const makeSvc = (seed: { services?: any[]; orders?: any[]; incidents?: any[]; st
   const services = repoOf(seed.services ?? [{ ...SERVICE }]);
   const servers = repoOf([{ id: 10, clientId: 7, name: 'srv-1', host: 'h', status: 'ACTIVE' }]);
   const incidents = repoOf(seed.incidents ?? []);
+  const tickets = {
+    findCodesByIds: jest.fn(async (ids: number[]) => new Map(ids.filter((i) => seed.ticketCodes?.[i]).map((i) => [i, seed.ticketCodes![i]]))),
+  };
   const svc = new AvailabilityIngestService(
-    probes as any, checks as any, signals as any, orders as any, states as any, services as any, servers as any, incidents as any,
+    probes as any, checks as any, signals as any, orders as any, states as any, services as any, servers as any, incidents as any, tickets as any,
   );
-  return { svc, probe, probes, checks, signals, orders, states, services };
+  return { svc, probe, probes, checks, signals, orders, states, services, tickets };
 };
 
 describe('AvailabilityIngestService.acceptBatch', () => {
@@ -265,5 +268,27 @@ describe('AvailabilityIngestService.sync', () => {
       status: 'DOWN', incidentId: 50, parentIncidentId: 40, ticketCode: null, datacenter: null,
     });
     expect(res.state[0].office).toMatchObject({ state: 'OK', lastLatencyMs: 10 });
+  });
+
+  it('ticketCode: el del incidente, el del padre para un hijo, null sin incidente; una sola consulta de códigos', async () => {
+    const { svc, probe, tickets } = makeSvc({
+      services: [
+        { ...SERVICE },
+        { ...SERVICE, id: 101, name: 'api' },
+        { ...SERVICE, id: 102, name: 'ftp' },
+      ],
+      ticketCodes: { 7: 'KB-0007' },
+      incidents: [
+        { id: 40, serviceId: null, serverId: 10, parentId: null, ticketId: 7, kind: 'DOWN', recoveredAt: null },
+        { id: 50, serviceId: 100, serverId: 10, parentId: 40, ticketId: null, kind: 'DOWN', recoveredAt: null },
+        { id: 51, serviceId: 101, serverId: 10, parentId: null, ticketId: 7, kind: 'ROUTE', recoveredAt: null },
+      ],
+    });
+    const res = await svc.sync(probe, null);
+    const byService = (id: number) => res.state.find((r) => r.serviceId === id)!;
+    expect(byService(100).ticketCode).toBe('KB-0007');
+    expect(byService(101).ticketCode).toBe('KB-0007');
+    expect(byService(102).ticketCode).toBeNull();
+    expect(tickets.findCodesByIds).toHaveBeenCalledTimes(1);
   });
 });

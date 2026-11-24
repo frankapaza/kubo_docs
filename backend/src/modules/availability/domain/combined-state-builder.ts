@@ -17,7 +17,7 @@ export interface CombinedStateInput {
   now: Date;
 }
 
-/** Estado combinado por servicio (`ticketCode` queda en null: lo rellena la API del personal). Lo comparten `sync` y la API del personal. */
+/** Estado combinado por servicio (`ticketCode` queda en null: lo rellenan quienes lo entregan, la API del personal y `sync`, con `ticketCodesForIncidents`). Lo comparten `sync` y la API del personal. */
 export function buildCombinedRows(input: CombinedStateInput): CombinedStateRow[] {
   const serverById = new Map(input.servers.map((s) => [Number(s.id), s]));
   const kindByProbe = new Map(input.probes.map((p) => [Number(p.id), p.kind]));
