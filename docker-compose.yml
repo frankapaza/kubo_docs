@@ -85,6 +85,7 @@ services:
       # grupos de error, ocurrencias y conteo diario) y anade el origen
       # MONITOREO a tickets.origin. Los logs en si van a Loki, no a MySQL.
       - ./backend/sql/migrations/030_logs_centralizados.sql:/docker-entrypoint-initdb.d/030_logs_centralizados.sql:ro
+      - ./backend/sql/migrations/031_conector_repos.sql:/docker-entrypoint-initdb.d/031_conector_repos.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s

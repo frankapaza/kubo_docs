@@ -34,6 +34,14 @@ export class WorkItem {
   clientId!: number;
 
   /**
+   * Asignación cliente-sistema (`client_systems.id`), migración 031. Es el
+   * alcance del conector de Claude: un requerimiento sin sistema no lo ve
+   * ningún repo.
+   */
+  @Column({ name: 'client_system_id', type: 'bigint', unsigned: true, nullable: true })
+  clientSystemId!: number | null;
+
+  /**
    * `INTERNO` para todo lo que nace dentro de casa (actas, reuniones, Jira, el
    * tablero); `PORTAL` para lo que pidió el cliente.
    *
