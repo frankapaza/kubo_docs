@@ -96,6 +96,14 @@ describe('AuditInterceptor: la ingesta de logs', () => {
     await new Promise((r) => setImmediate(r));
     expect(repo.save).toHaveBeenCalledTimes(1);
   });
+
+  it('el webhook de GitHub no se audita (JSON de GitHub con correos, sin actor)', async () => {
+    const { interceptor, repo } = makeInterceptor();
+    const ctx = ctxPost('/api/v1/dev/github/webhook', { commits: [{ author: { email: 'x@y.z' } }] });
+    await firstValueFrom(interceptor.intercept(ctx, next));
+    await new Promise((r) => setImmediate(r));
+    expect(repo.save).not.toHaveBeenCalled();
+  });
 });
 
 describe('AuditInterceptor: a quien se atribuye la accion', () => {

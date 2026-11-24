@@ -126,7 +126,13 @@ export class WorkItemsService {
       await this.assertClientSystem(dto.clientId ?? current.clientId, dto.clientSystemId);
     }
 
-    const updated = await this.repo.update(id, { ...dto } as Partial<WorkItem>);
+    const patch = { ...dto } as Partial<WorkItem>;
+    // Cambiar de cliente sin elegir sistema: el del cliente anterior ya no
+    // vale. Dejarlo haría que el repo de la otra empresa viera este requerimiento.
+    const clientChanged = dto.clientId !== undefined && Number(dto.clientId) !== Number(current.clientId);
+    if (clientChanged && dto.clientSystemId === undefined) patch.clientSystemId = null;
+
+    const updated = await this.repo.update(id, patch);
     return updated!;
   }
 

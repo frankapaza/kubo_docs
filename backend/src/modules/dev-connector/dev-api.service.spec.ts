@@ -157,3 +157,11 @@ describe('DevApiService', () => {
     );
   });
 });
+
+describe('vincular desde el MCP no pisa el estado de un PR', () => {
+  it('manda state null para que el upsert conserve merged/closed del webhook', async () => {
+    const { service, data } = build();
+    await service.vincular(P, 'KB-0210', { kind: 'PR', ref: '12' });
+    expect(data.upsertLink).toHaveBeenCalledWith(expect.objectContaining({ kind: 'PR', state: null }));
+  });
+});

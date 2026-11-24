@@ -188,3 +188,13 @@ describe('el sistema del requerimiento (conector de Claude)', () => {
     expect(await validate(dto, { whitelist: true, forbidNonWhitelisted: true })).toHaveLength(0);
   });
 });
+
+describe('cambiar el cliente de un requerimiento', () => {
+  it('quita el sistema del cliente anterior si no se manda otro', async () => {
+    const m = makeService();
+    (m.repo as any).findById = jest.fn().mockResolvedValue({ id: 45, clientId: 7, clientSystemId: 11 });
+    (m.repo as any).update = jest.fn().mockResolvedValue({ id: 45 });
+    await m.service.update(45, { clientId: 8 } as any);
+    expect((m.repo as any).update).toHaveBeenCalledWith(45, expect.objectContaining({ clientId: 8, clientSystemId: null }));
+  });
+});

@@ -107,3 +107,19 @@ describe('GithubWebhookService', () => {
     expect(data.upsertLink).not.toHaveBeenCalled();
   });
 });
+
+describe('commits traídos por un merge', () => {
+  it('un commit no nuevo (distinct=false) solo se enlaza si su mensaje nombra el código', async () => {
+    const { service, data } = build();
+    await call(service, 'push', {
+      ...push,
+      commits: [
+        { id: 'ccc333', distinct: false, message: 'cambio de main sin código', url: 'u', timestamp: '2026-11-24T10:00:00Z', author: {} },
+        { id: 'ddd444', distinct: true, message: 'merge main en la rama', url: 'u', timestamp: '2026-11-24T10:01:00Z', author: {} },
+        { id: 'eee555', distinct: false, message: 'KB-0210 viejo pero nombrado', url: 'u', timestamp: '2026-11-24T10:02:00Z', author: {} },
+      ],
+    });
+    const refs = data.upsertLink.mock.calls.map((c) => c[0].ref).sort();
+    expect(refs).toEqual(['ddd444', 'eee555', 'fix/KB-0210-filtro-fecha']);
+  });
+});

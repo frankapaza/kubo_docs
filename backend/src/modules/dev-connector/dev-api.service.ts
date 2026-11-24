@@ -244,7 +244,8 @@ export class DevApiService {
       title: v.title?.trim() || null,
       url: v.url?.trim() || null,
       authorLogin: null,
-      state: v.kind === 'PR' ? 'open' : null,
+      // El estado del PR lo sabe el webhook; null deja el que ya hubiera (merged/closed).
+      state: null,
       source: 'MCP',
       occurredAt: new Date(),
     });

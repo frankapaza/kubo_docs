@@ -129,8 +129,10 @@ export class GithubWebhookService {
           authorLogin: c.author?.username ?? c.author?.name ?? null,
           state: null,
           occurredAt: date(c.timestamp, now),
-          // Un commit en la rama de un ticket es de ese ticket aunque su mensaje no lo nombre.
-          text: `${message}\n${name}`,
+          // Un commit NUEVO en la rama de un ticket es de ese ticket aunque su
+          // mensaje no lo nombre. Los que llegan a la rama por un merge (p. ej.
+          // de main) traen `distinct: false`: solo cuentan si nombran el código.
+          text: c.distinct === false ? message : `${message}\n${name}`,
         });
       }
       return out;
