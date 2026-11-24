@@ -35,7 +35,7 @@ export class TicketSync {
   ) {}
 
   /** `attempted`: incidentes cuyo ticket ya se intentó en este tick (el barrido no repite). */
-  async apply(a: Exclude<PostCommitAction, { type: 'CROSS_CHECK_DC' }>, now: Date, attempted: Set<number>): Promise<void> {
+  async apply(a: PostCommitAction, now: Date, attempted: Set<number>): Promise<void> {
     try {
       switch (a.type) {
         case 'ENSURE_TICKET':

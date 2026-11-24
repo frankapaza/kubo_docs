@@ -8,7 +8,7 @@ import { MonitorProbeSignal } from './entities/monitor-probe-signal.entity';
 export const PURGE_RETENTION_DAYS = 90;
 export const PURGE_BATCH_SIZE = 5000;
 
-/** Purga diaria (03:00 Lima) de checks y señales procesadas con más de 90 días. Solo la registra el worker. */
+/** Purga diaria (03:00 Lima) de checks y señales procesadas con más de 90 días. Corre en el backend. */
 @Injectable()
 export class AvailabilityPurgeService {
   private readonly logger = new Logger(AvailabilityPurgeService.name);
@@ -33,7 +33,7 @@ export class AvailabilityPurgeService {
     const checks = await this.deleteInBatches(this.checks, 'started_at < ?', cutoff);
     const signals = await this.deleteInBatches(
       this.signals,
-      'processed_at IS NOT NULL AND received_at < ?',
+      'processed_at IS NOT NULL AND processed_at < ?',
       cutoff,
     );
     return { checks, signals };

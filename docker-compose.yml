@@ -104,8 +104,11 @@ services:
       - internal
 
   # Sonda kubo-01 del monitoreo de disponibilidad: el mismo codigo del backend,
-  # otro punto de entrada. Sin puertos ni entrada en el Caddyfile: no atiende
-  # HTTP. Es el unico proceso que ejecuta el tick del evaluador y la purga.
+  # otro punto de entrada. SOLO mide (escribe checks y senales en MySQL y recoge
+  # sus ordenes MANUAL/CROSS); el evaluador y la purga corren en `backend`. Por
+  # eso solo necesita MySQL: sin Redis, colas, cron ni volumen de uploads, que
+  # duplicarian los consumidores y trabajos programados del backend.
+  # Sin puertos ni entrada en el Caddyfile.
   # Requiere la migracion 031 aplicada (busca la sonda 'kubo-01' al arrancar).
   monitor-worker:
     build:
@@ -116,8 +119,6 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
-      redis:
-        condition: service_started
     environment:
       NODE_ENV: production
       DB_HOST: mysql
@@ -125,10 +126,6 @@ services:
       DB_USER: root
       DB_PASSWORD: ${DB_ROOT_PASSWORD}
       DB_NAME: ${DB_NAME}
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      CRYPTO_SECRET: ${CRYPTO_SECRET}
-      FRONTEND_URL: ${FRONTEND_URL}
     networks:
       - internal
 

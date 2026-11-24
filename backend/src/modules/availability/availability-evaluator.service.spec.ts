@@ -184,8 +184,10 @@ const setup = () => {
     reopenOrReplace: jest.fn(async (_inc: any, ticketId: number) => ({ id: ticketId, status: 'EN_ATENCION' })),
     comment: jest.fn(async () => undefined),
   };
-  const crossChecker = { request: jest.fn() };
-  const evaluator = new AvailabilityEvaluatorService(db.dataSource as any, tickets as any, crossChecker as any);
+  const evaluator = new AvailabilityEvaluatorService(db.dataSource as any, tickets as any);
+  /** Última orden CROSS dirigida a kubo-01 para `serviceId` (la crea el evaluador). */
+  const dcOrder = (serviceId: number) =>
+    db.rows<MonitorProbeOrder>(MonitorProbeOrder).filter((o) => o.probeId === DC && o.serviceId === serviceId && o.kind === 'CROSS').pop()!;
 
   const signal = (probeId: number, type: string, serviceId: number | null, when: Date, over: Row = {}) =>
     db.add(MonitorProbeSignal, {
@@ -230,11 +232,11 @@ const setup = () => {
   const officeDownWithCross = async (serviceId: number, when: Date, crossOk: boolean) => {
     signal(OFFICE, 'CONFIRMED_FAILURE', serviceId, when);
     await evaluator.tick(at((when.getTime() - T0.getTime()) / 1000 + 1));
-    check(DC, serviceId, crossOk, new Date(when.getTime() + 10_000));
+    check(DC, serviceId, crossOk, new Date(when.getTime() + 10_000), { orderId: dcOrder(serviceId)?.id ?? null });
     await evaluator.tick(new Date(when.getTime() + 20_000));
   };
 
-  return { db, evaluator, tickets, crossChecker, signal, check, state, incidents, events, sig, officeDownWithCross };
+  return { db, evaluator, tickets, dcOrder, signal, check, state, incidents, events, sig, officeDownWithCross };
 };
 
 describe('AvailabilityEvaluatorService', () => {
@@ -244,13 +246,13 @@ describe('AvailabilityEvaluatorService', () => {
     t.check(OFFICE, 101, true, T0, { kind: 'REGULAR' });
     await t.evaluator.tick(at(1));
 
-    expect(t.crossChecker.request).toHaveBeenCalledWith(100);
+    expect(t.dcOrder(100)).toMatchObject({ probeId: DC, serviceId: 100, kind: 'CROSS', takenAt: null });
     expect(t.incidents()).toHaveLength(0);
     const s = t.db.rows<MonitorProbeSignal>(MonitorProbeSignal)[0];
     expect(s.processedAt).toBeNull();
     expect(s.awaitingCrossUntil).toEqual(at(121));
 
-    t.check(DC, 100, false, at(10));
+    t.check(DC, 100, false, at(10), { orderId: t.dcOrder(100).id });
     await t.evaluator.tick(at(20));
 
     expect(t.incidents()).toHaveLength(1);
@@ -289,8 +291,7 @@ describe('AvailabilityEvaluatorService', () => {
     expect(t.events(id).map((e) => e.type)).toContain('UPGRADED_TO_DOWN');
     expect(t.tickets.ensureTicket).toHaveBeenCalledTimes(1);
     expect(t.tickets.comment).toHaveBeenCalledWith(901, expect.stringContaining('DOWN'), expect.objectContaining({ incidentId: id }));
-    expect(t.crossChecker.request).toHaveBeenCalledTimes(1);
-    expect(t.db.rows(MonitorProbeOrder)).toHaveLength(0);
+    expect(t.db.rows(MonitorProbeOrder)).toHaveLength(1); // solo la del primer cruce
   });
 
   it('cruce que no llega: a los 2 min se abre ROUTE con la información disponible', async () => {
@@ -317,7 +318,6 @@ describe('AvailabilityEvaluatorService', () => {
     expect(orders).toHaveLength(1);
     expect(orders[0]).toMatchObject({ probeId: OFFICE, serviceId: 100, kind: 'CROSS' });
     expect(t.sig(s.id).crossOrderId).toBe(orders[0].id);
-    expect(t.crossChecker.request).not.toHaveBeenCalled();
 
     t.check(OFFICE, 100, true, at(20), { orderId: orders[0].id });
     await t.evaluator.tick(at(30));
@@ -350,7 +350,7 @@ describe('AvailabilityEvaluatorService', () => {
     const outages = t.db.rows<MonitorOfficeOutage>(MonitorOfficeOutage);
     expect(outages).toHaveLength(1);
     expect(outages[0]).toMatchObject({ probeId: OFFICE, startedAt: T0, endedAt: null, affectedServices: 5 });
-    expect(t.crossChecker.request).not.toHaveBeenCalled();
+    expect(t.db.rows(MonitorProbeOrder)).toHaveLength(0);
     expect(t.db.rows<MonitorProbeSignal>(MonitorProbeSignal).every((s) => s.processedAt !== null)).toBe(true);
     expect(t.tickets.ensureTicket).not.toHaveBeenCalled();
 
@@ -667,7 +667,7 @@ describe('AvailabilityEvaluatorService', () => {
     await t.evaluator.tick(at(6));
     expect(t.sig(rec.id).processedAt).toBeNull();
     expect(t.sig(other.id).processedAt).toEqual(at(6));
-    t.check(DC, 100, false, at(10));
+    t.check(DC, 100, false, at(10), { orderId: t.dcOrder(100).id });
     t.state(DC, 100, 'OK');
     await t.evaluator.tick(at(20));
     // Primero abre, luego la recuperación lo cierra, en orden de id.

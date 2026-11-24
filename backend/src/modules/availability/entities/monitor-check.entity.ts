@@ -3,6 +3,7 @@ import { Column, Entity, Index, PrimaryColumn } from 'typeorm';
 /** Una comprobación hecha por una sonda. El `id` (UUID) lo genera la sonda: la PK es (sonda, id). */
 @Entity('monitor_checks')
 @Index('idx_monitor_checks_service', ['serviceId', 'probeId', 'startedAt'])
+@Index('idx_monitor_checks_started_at', ['startedAt'])
 export class MonitorCheck {
   @PrimaryColumn({ name: 'probe_id', type: 'bigint', unsigned: true })
   probeId!: number;

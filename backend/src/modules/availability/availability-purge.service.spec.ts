@@ -25,7 +25,7 @@ describe('AvailabilityPurgeService', () => {
     expect(c.query).toHaveBeenCalledTimes(1);
     expect(s.query).toHaveBeenCalledTimes(2);
     expect(s.query.mock.calls[0][0]).toBe(
-      'DELETE FROM `monitor_probe_signals` WHERE processed_at IS NOT NULL AND received_at < ? LIMIT 5000',
+      'DELETE FROM `monitor_probe_signals` WHERE processed_at IS NOT NULL AND processed_at < ? LIMIT 5000',
     );
     expect(r).toEqual({ checks: 0, signals: 5003 });
   });

@@ -13,8 +13,7 @@ export type PostCommitAction =
   | { type: 'ENSURE_TICKET'; incidentId: number; diagnosis?: string }
   | { type: 'REOPEN_TICKET'; incidentId: number }
   | { type: 'COMMENT'; incidentId: number; text: string }
-  | { type: 'RAISE_PRIORITY'; incidentId: number; criticality: Criticality }
-  | { type: 'CROSS_CHECK_DC'; serviceId: number };
+  | { type: 'RAISE_PRIORITY'; incidentId: number; criticality: Criticality };
 
 export type FailureKind = 'DOWN' | 'ROUTE';
 

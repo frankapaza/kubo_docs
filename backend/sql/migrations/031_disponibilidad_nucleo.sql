@@ -136,9 +136,28 @@ CREATE TABLE IF NOT EXISTS monitor_checks (
   received_at  DATETIME(3)     NOT NULL,
   PRIMARY KEY (probe_id, id),
   KEY idx_monitor_checks_service (service_id, probe_id, started_at),
+  KEY idx_monitor_checks_started_at (started_at),
   CONSTRAINT fk_monitor_checks_probe FOREIGN KEY (probe_id)
     REFERENCES monitor_probes (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Índice de la purga diaria (started_at < corte). Si la tabla ya existía en una
+-- base de desarrollo, el CREATE TABLE IF NOT EXISTS de arriba no lo añade.
+DROP PROCEDURE IF EXISTS kubo_add_index_031;
+DELIMITER //
+CREATE PROCEDURE kubo_add_index_031()
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'monitor_checks' AND INDEX_NAME = 'idx_monitor_checks_started_at'
+  ) THEN
+    ALTER TABLE monitor_checks ADD INDEX idx_monitor_checks_started_at (started_at);
+  END IF;
+END //
+DELIMITER ;
+CALL kubo_add_index_031();
+DROP PROCEDURE IF EXISTS kubo_add_index_031;
 
 CREATE TABLE IF NOT EXISTS monitor_probe_signals (
   id                    BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,

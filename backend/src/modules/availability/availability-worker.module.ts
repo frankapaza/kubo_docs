@@ -1,38 +1,40 @@
-import { DynamicModule, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { BullModule } from '@nestjs/bullmq';
-import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { bullOptionsFactory, typeOrmOptionsFactory } from '../../config/typeorm.options';
-import { AvailabilityModule } from './availability.module';
-import { AvailabilityPurgeService } from './availability-purge.service';
-import { DatacenterCrossChecker } from './datacenter-cross-checker';
+import { typeOrmOptionsFactory } from '../../config/typeorm.options';
+import { AvailabilityIngestService } from './availability-ingest.service';
 import { DatacenterProbeService } from './datacenter-probe.service';
+import { MonitorCheck } from './entities/monitor-check.entity';
+import { MonitorIncident } from './entities/monitor-incident.entity';
+import { MonitorProbeOrder } from './entities/monitor-probe-order.entity';
+import { MonitorProbeSignal } from './entities/monitor-probe-signal.entity';
+import { MonitorProbeState } from './entities/monitor-probe-state.entity';
+import { MonitorProbe } from './entities/monitor-probe.entity';
+import { MonitorServer } from './entities/monitor-server.entity';
+import { MonitorService } from './entities/monitor-service.entity';
 
 /**
- * AvailabilityModule con la sonda kubo-01 en proceso. Un proveedor sobrescrito
- * desde fuera no llegaría al evaluador (que vive dentro de AvailabilityModule),
- * así que el worker añade el suyo al mismo módulo: Nest da prioridad al último
- * proveedor con el mismo token, y `DatacenterCrossChecker` pasa a ser la sonda.
+ * Raíz del contenedor monitor-worker: SOLO mide. Sin TicketsModule, BullMQ ni
+ * ScheduleModule (arrastrarían los consumidores de colas y los cron del backend);
+ * el evaluador y la purga corren en el backend.
  */
-export const availabilityWithProbe: DynamicModule = {
-  module: AvailabilityModule,
-  providers: [
-    DatacenterProbeService,
-    AvailabilityPurgeService,
-    { provide: DatacenterCrossChecker, useExisting: DatacenterProbeService },
-  ],
-};
+export const WORKER_ENTITIES = [
+  MonitorProbe,
+  MonitorService,
+  MonitorServer,
+  MonitorCheck,
+  MonitorProbeSignal,
+  MonitorProbeOrder,
+  MonitorProbeState,
+  MonitorIncident,
+];
 
-/** Raíz del contenedor monitor-worker: sin HTTP, solo sonda, tick del evaluador y purga. */
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }),
-    ScheduleModule.forRoot(),
     TypeOrmModule.forRootAsync({ inject: [ConfigService], useFactory: typeOrmOptionsFactory }),
-    // TicketsModule (vía AvailabilityModule) registra colas BullMQ.
-    BullModule.forRootAsync({ inject: [ConfigService], useFactory: bullOptionsFactory }),
-    availabilityWithProbe,
+    TypeOrmModule.forFeature(WORKER_ENTITIES),
   ],
+  providers: [AvailabilityIngestService, DatacenterProbeService],
 })
 export class AvailabilityWorkerModule {}

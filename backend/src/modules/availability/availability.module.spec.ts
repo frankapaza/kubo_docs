@@ -1,9 +1,10 @@
 import { Test } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
+import { AvailabilityEvaluatorScheduler } from './availability-evaluator.scheduler';
 import { AvailabilityEvaluatorService } from './availability-evaluator.service';
+import { AvailabilityPurgeService } from './availability-purge.service';
 import { AvailabilityTicketsService } from './availability-tickets.service';
 import { AvailabilityModule } from './availability.module';
-import { DatacenterCrossChecker, NoopDatacenterCrossChecker } from './datacenter-cross-checker';
 import { IncidentCloser } from './incident-closer';
 
 describe('AvailabilityModule', () => {
@@ -15,18 +16,17 @@ describe('AvailabilityModule', () => {
     expect(providers).toContain(AvailabilityEvaluatorService);
   });
 
-  it('DatacenterCrossChecker tiene un proveedor por defecto que el worker sobrescribe', () => {
-    const binding = providers.find((p) => p && p.provide === DatacenterCrossChecker);
-    expect(binding).toEqual({ provide: DatacenterCrossChecker, useClass: NoopDatacenterCrossChecker });
+  it('el tick del evaluador y la purga se registran en el backend (AvailabilityModule)', () => {
+    expect(providers).toContain(AvailabilityEvaluatorScheduler);
+    expect(providers).toContain(AvailabilityPurgeService);
   });
 
-  it('con esas mismas definiciones, IncidentCloser resuelve a la instancia del evaluador', async () => {
+  it('el evaluador se resuelve sin sonda local (el cruce va por monitor_probe_orders)', async () => {
     const binding = providers.find((p) => p && p.provide === IncidentCloser);
     const moduleRef = await Test.createTestingModule({
       providers: [
         AvailabilityEvaluatorService,
         binding,
-        { provide: DatacenterCrossChecker, useClass: NoopDatacenterCrossChecker },
         { provide: DataSource, useValue: { manager: {}, transaction: jest.fn() } },
         { provide: AvailabilityTicketsService, useValue: {} },
       ],

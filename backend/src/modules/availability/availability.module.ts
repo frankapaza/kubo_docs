@@ -9,7 +9,8 @@ import { AvailabilityIngestController } from './availability-ingest.controller';
 import { AvailabilityIngestService } from './availability-ingest.service';
 import { AvailabilityInventoryController } from './availability-inventory.controller';
 import { AvailabilityInventoryService } from './availability-inventory.service';
-import { DatacenterCrossChecker, NoopDatacenterCrossChecker } from './datacenter-cross-checker';
+import { AvailabilityEvaluatorScheduler } from './availability-evaluator.scheduler';
+import { AvailabilityPurgeService } from './availability-purge.service';
 import { MonitorCheck } from './entities/monitor-check.entity';
 import { MonitorIncidentEvent } from './entities/monitor-incident-event.entity';
 import { MonitorIncident } from './entities/monitor-incident.entity';
@@ -51,8 +52,9 @@ import { ProbeTokenGuard } from './probe-token.guard';
     AvailabilityTicketsService,
     AvailabilityEvaluatorService,
     { provide: IncidentCloser, useExisting: AvailabilityEvaluatorService },
-    // El worker (Task 10) lo sobrescribe con la sonda kubo-01 en proceso.
-    { provide: DatacenterCrossChecker, useClass: NoopDatacenterCrossChecker },
+    // Evaluación y purga corren en el backend; el worker (kubo-01) solo mide.
+    AvailabilityEvaluatorScheduler,
+    AvailabilityPurgeService,
   ],
   exports: [
     AvailabilityInventoryService,
@@ -60,7 +62,6 @@ import { ProbeTokenGuard } from './probe-token.guard';
     AvailabilityTicketsService,
     AvailabilityEvaluatorService,
     IncidentCloser,
-    DatacenterCrossChecker,
   ],
 })
 export class AvailabilityModule {}

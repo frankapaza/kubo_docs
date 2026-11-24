@@ -24,7 +24,8 @@ set -e
 # Migracion 031 (monitoreo de disponibilidad): aplicarla a mano ANTES de este
 # deploy en una base con datos, igual que las anteriores. Crea la sonda
 # 'kubo-01' que busca el servicio monitor-worker; sin ella el worker aborta
-# al arrancar ("aplicar la migracion 031").
+# al arrancar ("aplicar la migracion 031"). El worker solo mide; la
+# evaluacion de incidentes y la purga corren en el backend.
 cd /home/kubo/kubo
 git pull
 docker compose build backend monitor-worker web

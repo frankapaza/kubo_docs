@@ -4,7 +4,6 @@ import { formatPeruDateTime } from '../../common/peru-date-time';
 import { isDuplicateEntry } from '../../common/db-errors';
 import { AvailabilityTicketsService } from './availability-tickets.service';
 import { DEFAULT_SCHEDULE, intervalMsAt, TrackerState } from './core';
-import { DatacenterCrossChecker } from './datacenter-cross-checker';
 import { diagnose } from './domain/diagnose';
 import { CROSS_TIMEOUT_MS, formatDuration, recoveryCloses } from './domain/incident-rules';
 import { MonitorCheck } from './entities/monitor-check.entity';
@@ -71,7 +70,6 @@ export class AvailabilityEvaluatorService extends IncidentCloser {
   constructor(
     private readonly ds: DataSource,
     tickets: AvailabilityTicketsService,
-    private readonly crossChecker: DatacenterCrossChecker,
   ) {
     super();
     this.ticketSync = new TicketSync(ds, tickets, this.logger);
@@ -147,14 +145,6 @@ export class AvailabilityEvaluatorService extends IncidentCloser {
 
   private async runActions(actions: PostCommitAction[], ctx: Pick<TickContext, 'now' | 'attempted'>): Promise<void> {
     for (const a of actions) {
-      if (a.type === 'CROSS_CHECK_DC') {
-        try {
-          this.crossChecker.request(a.serviceId);
-        } catch (e) {
-          this.logger.warn(`Cruce del servicio ${a.serviceId} no pedido: ${(e as Error).message}`);
-        }
-        continue;
-      }
       await this.ticketSync.apply(a, ctx.now, ctx.attempted);
     }
   }
@@ -257,7 +247,11 @@ export class AvailabilityEvaluatorService extends IncidentCloser {
     );
   }
 
-  /** Pide el cruce a la otra sonda y deja la señal esperando 2 min. */
+  /**
+   * Pide el cruce a la OTRA sonda con una orden CROSS en monitor_probe_orders (la
+   * recoge la oficina por su sync, o el worker kubo-01 por sondeo) y deja la señal
+   * esperando 2 min. El resultado se reconoce por order_id = cross_order_id.
+   */
   private async requestCross(
     m: EntityManager,
     s: MonitorProbeSignal,
@@ -267,14 +261,11 @@ export class AvailabilityEvaluatorService extends IncidentCloser {
   ): Promise<Outcome> {
     const awaitingCrossUntil = new Date(ctx.now.getTime() + CROSS_TIMEOUT_MS);
     const signals = m.getRepository(MonitorProbeSignal);
-    if (reporter === 'OFFICE') {
-      await signals.update({ id: num(s.id) }, { awaitingCrossUntil });
-      return { processed: false, actions: [{ type: 'CROSS_CHECK_DC', serviceId }] };
-    }
+    const target = reporter === 'OFFICE' ? ctx.dc : ctx.office;
     let crossOrderId: number | null = null;
-    if (ctx.office) {
+    if (target) {
       const res = await m.getRepository(MonitorProbeOrder).insert({
-        probeId: num(ctx.office.id),
+        probeId: num(target.id),
         serviceId,
         kind: 'CROSS',
         createdAt: ctx.now,
@@ -295,19 +286,9 @@ export class AvailabilityEvaluatorService extends IncidentCloser {
     serviceId: number,
     ctx: TickContext,
   ): Promise<boolean | undefined> {
-    const checks = m.getRepository(MonitorCheck);
-    let check: MonitorCheck | null = null;
-    if (reporter === 'OFFICE') {
-      if (!ctx.dc || !s.awaitingCrossUntil) return undefined;
-      const requestedAt = new Date(s.awaitingCrossUntil.getTime() - CROSS_TIMEOUT_MS);
-      check = await checks.findOne({
-        where: { probeId: num(ctx.dc.id), serviceId, kind: 'CROSS', receivedAt: MoreThanOrEqual(requestedAt) },
-        order: { receivedAt: 'ASC' },
-      });
-    } else {
-      if (!ctx.office || s.crossOrderId === null) return undefined;
-      check = await checks.findOne({ where: { probeId: num(ctx.office.id), orderId: num(s.crossOrderId) } });
-    }
+    const target = reporter === 'OFFICE' ? ctx.dc : ctx.office;
+    if (!target || s.crossOrderId === null) return undefined;
+    const check = await m.getRepository(MonitorCheck).findOne({ where: { probeId: num(target.id), orderId: num(s.crossOrderId) } });
     return check ? Boolean(check.ok) : undefined;
   }
 

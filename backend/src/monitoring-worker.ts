@@ -4,9 +4,13 @@ import { AvailabilityWorkerModule } from './modules/availability/availability-wo
 
 const logger = new Logger('MonitoringWorker');
 
-// Una excepción suelta no debe tumbar la sonda 24/7: se registra y se sigue.
+// Un rechazo suelto no debe tumbar la sonda 24/7: se registra y se sigue.
 process.on('unhandledRejection', (e) => logger.error(`Rechazo no gestionado: ${String(e)}`));
-process.on('uncaughtException', (e) => logger.error(`Excepción no capturada: ${e.stack ?? e}`));
+// Estado indefinido tras una excepción no capturada: se registra y se sale; `restart: unless-stopped` lo levanta.
+process.on('uncaughtException', (e) => {
+  logger.error(`Excepción no capturada: ${e.stack ?? e}`);
+  process.exit(1);
+});
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.createApplicationContext(AvailabilityWorkerModule);
