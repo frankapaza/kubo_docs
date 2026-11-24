@@ -166,7 +166,9 @@ describe('Engine', () => {
     await clock.advance(20 * 60_000);
     expect(produced.length).toBeGreaterThanOrEqual(4);
     expect(central.checks).toHaveLength(0);
-    expect(engine.status().pending).toBe(produced.length);
+    // Cola = las comprobaciones + la STATE_SYNC de arranque del servicio 1.
+    expect(engine.status().pending).toBe(produced.length + 1);
+    expect(outbox.peekBatch(100_000, 100_000).signals.map((x) => x.type)).toEqual(['STATE_SYNC']);
 
     central.down = false;
     await clock.advance(15000);
@@ -263,7 +265,9 @@ describe('Engine', () => {
     await clock.advance(6 * 60_000);
     expect(produced.length).toBeGreaterThanOrEqual(1);
     expect(produced.every((c) => c.serviceId === 3)).toBe(true);
-    expect(engine.status().pending).toBe(produced.length);
+    const queued = outbox.peekBatch(100_000, 100_000);
+    expect(queued.checks).toHaveLength(produced.length);
+    expect(engine.status().pending).toBe(produced.length + queued.signals.length);
     expect(engine.status().central.reachable).toBe(false);
 
     central.down = false;
@@ -507,5 +511,62 @@ describe('Engine', () => {
     expect(manual).toBeDefined();
     expect(manual!.at).toBeGreaterThanOrEqual(Date.parse('2026-11-23T15:00:57.000Z'));
     expect(central.checks.some((c) => c.kind === 'MANUAL' && c.orderId === 9)).toBe(true);
+  });
+
+  it('reinicio con el servicio FAILED que se recupera mientras el motor estaba parado: el motor nuevo emite STATE_SYNC', async () => {
+    const file = join(dir, 'engine.db');
+    const first = fakeCheck(() => false);
+    const e1 = make(first.fn);
+    e1.start();
+    await clock.advance(2 * 60_000); // regular 15:00:37 + reintentos a +30/+60 s → CONFIRMED_FAILURE
+    expect([...central.signals, ...outbox.peekBatch(500).signals].map((x) => x.type)).toEqual(['VERIFYING', 'CONFIRMED_FAILURE']);
+    e1.stop();
+    outbox.close();
+
+    // El servicio vuelve mientras el motor está parado; el tracker nuevo no sabe que estaba FAILED.
+    outbox = new Outbox(file);
+    const second = fakeCheck(() => true);
+    const e2 = make(second.fn, outbox);
+    e2.start();
+    await clock.advance(11 * 60_000); // dos franjas de 5 min
+    const types = central.signals.map((x) => x.type);
+    expect(types).toEqual(['VERIFYING', 'CONFIRMED_FAILURE', 'STATE_SYNC']);
+    expect(central.signals[2].serviceId).toBe(1);
+  });
+
+  it('sustitución del runner durante una caída de oficina que termina antes de la primera franja del nuevo: llega OFFICE_OUTAGE_END', async () => {
+    let internet = false;
+    central.config = { services: [svc(1), svc(2)], schedule: DEFAULT_SCHEDULE, references: [svc(1001), svc(1002)] };
+    const { fn } = fakeCheck(() => internet);
+    const engine = make(fn);
+    engine.start();
+    await clock.advance(11 * 60_000);
+    expect(engine.status().officeOutage).toBe(true);
+    expect(central.signals.filter((x) => x.type.startsWith('OFFICE')).map((x) => x.type)).toEqual(['OFFICE_OUTAGE_START']);
+
+    // Cambia el horario (runner nuevo) y vuelve internet.
+    internet = true;
+    central.configVersion = 'v2';
+    central.config = { ...central.config, schedule: { ...DEFAULT_SCHEDULE, dayIntervalMin: 10 } };
+    await clock.advance(25 * 60_000);
+    expect(engine.status().officeOutage).toBe(false);
+    expect(central.signals.filter((x) => x.type.startsWith('OFFICE')).map((x) => x.type)).toEqual([
+      'OFFICE_OUTAGE_START',
+      'OFFICE_OUTAGE_END',
+    ]);
+  });
+
+  it('sustitución del runner con la caída de oficina en curso: el runner nuevo vuelve a declarar START (idempotente en la central)', async () => {
+    central.config = { services: [svc(1), svc(2)], schedule: DEFAULT_SCHEDULE, references: [svc(1001)] };
+    const { fn } = fakeCheck(() => false);
+    const engine = make(fn);
+    engine.start();
+    await clock.advance(11 * 60_000);
+    central.configVersion = 'v2';
+    central.config = { ...central.config, schedule: { ...DEFAULT_SCHEDULE, dayIntervalMin: 10 } };
+    await clock.advance(25 * 60_000);
+    expect(engine.status().officeOutage).toBe(true);
+    const office = central.signals.filter((x) => x.type.startsWith('OFFICE')).map((x) => x.type);
+    expect(office).toEqual(['OFFICE_OUTAGE_START', 'OFFICE_OUTAGE_START']);
   });
 });

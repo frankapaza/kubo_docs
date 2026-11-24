@@ -98,7 +98,8 @@ describe('ProbeRunner', () => {
       // empieza en su cycleAt
       for (const st of h.starts.filter((x) => x.id === s.id)) expect(st.at).toBe(st.cycleAt);
     }
-    expect(h.signals()).toEqual([]);
+    // Solo la sincronización de arranque de cada servicio (dos correctos seguidos).
+    expect(h.signals().map((s) => `${s.type}:${s.serviceId}`).sort()).toEqual(services.map((s) => `STATE_SYNC:${s.id}`));
   });
 
   it('un reintento que cae en la franja siguiente sustituye a la regular: en ningún instante hay dos pruebas del mismo servicio en vuelo', async () => {
@@ -132,7 +133,7 @@ describe('ProbeRunner', () => {
     expect(r1.filter((r) => r.kind === 'REGULAR' && Date.parse(r.cycleAt) === s1)).toEqual([]);
 
     const sig1 = h.signals().filter((s) => s.serviceId === 1).map((s) => s.type);
-    expect(sig1).toEqual(['VERIFYING', 'CONFIRMED_FAILURE', 'RECOVERED']);
+    expect(sig1).toEqual(['STATE_SYNC', 'VERIFYING', 'CONFIRMED_FAILURE', 'RECOVERED']);
     for (const s of h.signals()) expect(s.id).toMatch(UUID);
 
     // ninguna franja de ningún servicio queda sin resultado (REGULAR o RETRY sustituto)
@@ -261,7 +262,8 @@ describe('ProbeRunner', () => {
     expect(h.runner.officeOutage()).toBe(false);
 
     const office = h.signals().filter((s) => s.type === 'OFFICE_OUTAGE_START' || s.type === 'OFFICE_OUTAGE_END');
-    expect(office.map((s) => s.type)).toEqual(['OFFICE_OUTAGE_START', 'OFFICE_OUTAGE_END']);
+    // La primera franja juzgada sincroniza (END: no hay caída); luego una START y una END.
+    expect(office.map((s) => s.type)).toEqual(['OFFICE_OUTAGE_END', 'OFFICE_OUTAGE_START', 'OFFICE_OUTAGE_END']);
     for (const s of office) {
       expect(s.serviceId).toBeNull();
       expect(s.id).toMatch(UUID);
@@ -272,6 +274,47 @@ describe('ProbeRunner', () => {
     expect(h.delivered.some((d) => d.result.serviceId >= 1000)).toBe(false);
     expect([...h.runner.states().keys()].sort()).toEqual([1, 2, 3, 4]);
     expect(h.signals().some((s) => s.serviceId !== null && s.serviceId >= 1000)).toBe(false);
+  });
+
+  it('arranque durante una caída de oficina: la primera franja juzgada emite START aunque no hubo transición', async () => {
+    let down = true;
+    const h = setup({
+      start: LIMA_23H,
+      services: [svc(1), svc(2)],
+      references: [svc(1001), svc(1002)],
+      behavior: (t) => ({ ms: 500, ok: !down }),
+    });
+    expect(h.runner.officeOutage()).toBe(false); // desconocido todavía
+    h.runner.start();
+    await h.clock.advance(3 * MIN);
+    expect(h.runner.officeOutage()).toBe(true);
+    down = false;
+    await h.clock.advance(4 * MIN);
+    h.runner.stop();
+    const office = h.signals().filter((s) => s.type.startsWith('OFFICE'));
+    expect(office.map((s) => s.type)).toEqual(['OFFICE_OUTAGE_START', 'OFFICE_OUTAGE_END']);
+  });
+
+  it('reinicio con la caída ya resuelta (la central aún la cree abierta): la primera franja emite OFFICE_OUTAGE_END', async () => {
+    const h = setup({ start: LIMA_23H, services: [svc(1), svc(2)], references: [svc(1001)] });
+    h.runner.start();
+    await h.clock.advance(3 * MIN);
+    h.runner.stop();
+    const office = h.signals().filter((s) => s.type.startsWith('OFFICE'));
+    expect(office.map((s) => s.type)).toEqual(['OFFICE_OUTAGE_END']);
+  });
+
+  it('servicio que se recuperó con la sonda parada: el runner nuevo emite STATE_SYNC tras dos franjas correctas', async () => {
+    const h = setup({ start: LIMA_23H, services: [svc(7)] });
+    h.runner.start();
+    await h.clock.advance(3 * MIN);
+    h.runner.stop();
+    const sig = h.delivered.filter((d) => d.signals.length > 0);
+    expect(sig).toHaveLength(1);
+    expect(sig[0].signals.map((s) => s.type)).toEqual(['STATE_SYNC']);
+    // la segunda REGULAR correcta es la que sincroniza
+    const regs = h.delivered.filter((d) => d.result.kind === 'REGULAR');
+    expect(sig[0].result.id).toBe(regs[1].result.id);
   });
 
   it('sin referencias nunca emite señales de oficina', async () => {

@@ -82,7 +82,10 @@ interface LocalView {
  * espera a que termine la que el viejo tuviera en vuelo.
  *
  * Nada del estado del `ProbeRunner` sobrevive a un reinicio: al arrancar se crea uno
- * nuevo con la configuración guardada (trackers en OK). Lo único persistente es la cola.
+ * nuevo con la configuración guardada (trackers en OK, caída de oficina desconocida). Lo
+ * único persistente es la cola. Para que la central no se quede con un estado que ya no es
+ * cierto, el runner nuevo (también al sustituirlo por cambio de horario o referencias) se
+ * resincroniza: STATE_SYNC por servicio sano y la señal de caída de la primera franja.
  */
 export class Engine {
   private readonly config: EngineConfig;

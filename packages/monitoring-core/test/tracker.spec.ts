@@ -89,7 +89,9 @@ describe('ServiceProbeTracker', () => {
 
   it('sin trackDegradation nunca degrada', () => {
     const t = new ServiceProbeTracker(svc, { trackDegradation: false });
-    for (let i = 0; i < 5; i++) expect(t.onResult(res('REGULAR', true, T0, 500))).toEqual([]);
+    const all = [];
+    for (let i = 0; i < 5; i++) all.push(...t.onResult(res('REGULAR', true, T0, 500)));
+    expect(types(all)).toEqual(['STATE_SYNC']); // solo la sincronización de arranque
     expect(t.state()).toBe('OK');
   });
 
@@ -133,5 +135,45 @@ describe('ServiceProbeTracker', () => {
       ...t.onResult(res('REGULAR', true)),
     ];
     expect(types(all)).toEqual(['DEGRADATION_CLEARED', 'VERIFYING', 'CONFIRMED_FAILURE', 'RECOVERED']);
+  });
+
+  describe('sincronización de arranque (STATE_SYNC)', () => {
+    it('tras arrancar, dos correctos rápidos seguidos emiten un único STATE_SYNC con serviceId y at', () => {
+      const t = new ServiceProbeTracker(svc);
+      expect(t.onResult(res('REGULAR', true, T0))).toEqual([]);
+      const s = t.onResult(res('REGULAR', true, T0 + 300000));
+      expect(types(s)).toEqual(['STATE_SYNC']);
+      expect(s[0]).toMatchObject({ serviceId: 1, at: new Date(T0 + 300000).toISOString(), firstFailureAt: null });
+      for (let i = 0; i < 4; i++) expect(t.onResult(res('REGULAR', true))).toEqual([]);
+    });
+
+    it('MANUAL, CROSS y fallos no cuentan; un fallo regular sincroniza por la vía normal (VERIFYING)', () => {
+      const t = new ServiceProbeTracker(svc);
+      expect(t.onResult(res('MANUAL', true))).toEqual([]);
+      expect(t.onResult(res('CROSS', true))).toEqual([]);
+      expect(t.onResult(res('REGULAR', true))).toEqual([]);
+      expect(types(t.onResult(res('REGULAR', false, T0)))).toEqual(['VERIFYING']);
+      expect(types(t.onResult(res('RETRY', true, T0 + 30000)))).toEqual(['TRANSIENT_FAILURE']);
+      // Ya sincronizado: los correctos siguientes no emiten nada.
+      expect([...t.onResult(res('REGULAR', true)), ...t.onResult(res('REGULAR', true))]).toEqual([]);
+    });
+
+    it('con degradación: los lentos no sincronizan como OK; tres lentos emiten DEGRADED (que sincroniza)', () => {
+      const t = new ServiceProbeTracker(svc, { trackDegradation: true });
+      expect(t.onResult(res('REGULAR', true, T0, 10))).toEqual([]);
+      expect(t.onResult(res('REGULAR', true, T0, 500))).toEqual([]);
+      expect(t.onResult(res('REGULAR', true, T0, 10))).toEqual([]);
+      expect(t.onResult(res('REGULAR', true, T0, 500))).toEqual([]);
+      expect(t.onResult(res('REGULAR', true, T0, 500))).toEqual([]);
+      expect(types(t.onResult(res('REGULAR', true, T0, 500)))).toEqual(['DEGRADED']);
+      expect(t.onResult(res('REGULAR', true, T0, 10))).toEqual([]);
+      expect(types(t.onResult(res('REGULAR', true, T0, 10)))).toEqual(['DEGRADATION_CLEARED']);
+    });
+
+    it('sin trackDegradation un correcto lento cuenta para la sincronización', () => {
+      const t = new ServiceProbeTracker(svc, { trackDegradation: false });
+      t.onResult(res('REGULAR', true, T0, 500));
+      expect(types(t.onResult(res('REGULAR', true, T0, 500)))).toEqual(['STATE_SYNC']);
+    });
   });
 });
