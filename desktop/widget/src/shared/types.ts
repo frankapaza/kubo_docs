@@ -74,3 +74,5 @@ export interface EngineEvent {
   ticketCode: string | null;
   notify: boolean;
 }
+
+export type Corner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';

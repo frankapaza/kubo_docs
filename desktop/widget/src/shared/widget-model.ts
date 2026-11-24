@@ -28,7 +28,7 @@ export type EngineReach =
 
 const LIMA_OFFSET_MS = -5 * 60 * 60 * 1000;
 
-function limaTime(now: Date): string {
+export function limaTime(now: Date): string {
   const d = new Date(now.getTime() + LIMA_OFFSET_MS);
   return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
 }
