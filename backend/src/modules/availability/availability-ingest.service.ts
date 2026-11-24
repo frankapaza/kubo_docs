@@ -1,0 +1,245 @@
+import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { createHash } from 'node:crypto';
+import { In, IsNull, ObjectLiteral, Repository } from 'typeorm';
+import { PROBE_REFERENCES } from './availability.constants';
+import { CheckResult, DEFAULT_SCHEDULE, intervalMsAt, ProbeSignal, ScheduleConfig, ServiceTarget } from './core';
+import { CombinedStateRow, combineStatus, ProbeView } from './domain/combined-state';
+import { MonitorCheck } from './entities/monitor-check.entity';
+import { MonitorIncident } from './entities/monitor-incident.entity';
+import { MonitorProbeOrder } from './entities/monitor-probe-order.entity';
+import { MonitorProbeSignal } from './entities/monitor-probe-signal.entity';
+import { MonitorProbeState } from './entities/monitor-probe-state.entity';
+import { MonitorProbe } from './entities/monitor-probe.entity';
+import { MonitorServer } from './entities/monitor-server.entity';
+import { MonitorService } from './entities/monitor-service.entity';
+
+export interface ProbeBatch {
+  checks: CheckResult[];
+  signals: ProbeSignal[];
+  version: string;
+}
+
+export interface AcceptBatchResult {
+  acceptedChecks: number;
+  duplicateChecks: number;
+  acceptedSignals: number;
+  duplicateSignals: number;
+}
+
+export interface SyncResponse {
+  configVersion: string;
+  /** null si la `configVersion` que mandó la sonda sigue vigente. */
+  config: { services: ServiceTarget[]; schedule: ScheduleConfig; references: ServiceTarget[] } | null;
+  orders: { id: number; serviceId: number; kind: 'MANUAL' | 'CROSS' }[];
+  state: CombinedStateRow[];
+}
+
+const toTarget = (s: MonitorService): ServiceTarget => ({
+  id: Number(s.id),
+  protocol: s.protocol,
+  target: s.target,
+  port: s.port === null || s.port === undefined ? null : Number(s.port),
+  latencyThresholdMs: Number(s.latencyThresholdMs),
+});
+
+/** JSON canónico: claves en orden fijo, para que la huella no dependa del orden de las columnas. */
+const canonicalTarget = (t: ServiceTarget) => [t.id, t.protocol, t.target, t.port, t.latencyThresholdMs];
+const canonicalSchedule = (s: ScheduleConfig) => [s.dayStartHour, s.nightStartHour, s.dayIntervalMin, s.nightIntervalMin];
+
+/** Recibe lo que mandan las sondas y les entrega configuración, órdenes y estado. */
+@Injectable()
+export class AvailabilityIngestService {
+  constructor(
+    @InjectRepository(MonitorProbe) private readonly probes: Repository<MonitorProbe>,
+    @InjectRepository(MonitorCheck) private readonly checks: Repository<MonitorCheck>,
+    @InjectRepository(MonitorProbeSignal) private readonly signals: Repository<MonitorProbeSignal>,
+    @InjectRepository(MonitorProbeOrder) private readonly orders: Repository<MonitorProbeOrder>,
+    @InjectRepository(MonitorProbeState) private readonly states: Repository<MonitorProbeState>,
+    @InjectRepository(MonitorService) private readonly services: Repository<MonitorService>,
+    @InjectRepository(MonitorServer) private readonly servers: Repository<MonitorServer>,
+    @InjectRepository(MonitorIncident) private readonly incidents: Repository<MonitorIncident>,
+  ) {}
+
+  /**
+   * Idempotente por `(probe_id, id)` y `(probe_id, uuid)` (`INSERT IGNORE`);
+   * los aceptados salen de `affectedRows`, que en MySQL no cuenta los
+   * ignorados. `received_at` es la hora de la central: el reloj de la sonda
+   * solo se usa para estimar `clock_skew_ms`. También la llama el worker, en
+   * proceso, para la sonda `kubo-01`.
+   */
+  async acceptBatch(probe: MonitorProbe, batch: ProbeBatch, receivedAt: Date): Promise<AcceptBatchResult> {
+    const probeId = Number(probe.id);
+
+    const checkRows = batch.checks.map((c) => ({
+      probeId,
+      id: c.id,
+      serviceId: c.serviceId,
+      kind: c.kind,
+      cycleAt: new Date(c.cycleAt),
+      startedAt: new Date(c.startedAt),
+      durationMs: c.durationMs,
+      ok: c.ok,
+      errorCode: c.errorCode,
+      httpStatus: c.httpStatus,
+      orderId: c.orderId,
+      receivedAt,
+    }));
+    const signalRows = batch.signals.map((s) => ({
+      uuid: s.id,
+      probeId,
+      serviceId: s.serviceId,
+      type: s.type,
+      at: new Date(s.at),
+      firstFailureAt: s.firstFailureAt ? new Date(s.firstFailureAt) : null,
+      receivedAt,
+      processedAt: null,
+      awaitingCrossUntil: null,
+      crossOrderId: null,
+    }));
+
+    const acceptedChecks = await this.insertIgnore(this.checks, MonitorCheck, checkRows);
+    const acceptedSignals = await this.insertIgnore(this.signals, MonitorProbeSignal, signalRows);
+
+    const patch: Partial<MonitorProbe> = { lastSeenAt: receivedAt, version: batch.version };
+    const skew = this.clockSkewMs(checkRows, receivedAt);
+    if (skew !== null) patch.clockSkewMs = skew;
+    await this.probes.update(probeId, patch);
+    Object.assign(probe, patch);
+
+    await this.updateProbeStates(probeId, checkRows, receivedAt);
+
+    const orderIds = [...new Set(checkRows.map((c) => c.orderId).filter((id): id is number => id !== null))];
+    if (orderIds.length > 0) {
+      await this.orders.update({ id: In(orderIds), probeId, doneAt: IsNull() }, { doneAt: receivedAt });
+    }
+
+    return {
+      acceptedChecks,
+      duplicateChecks: checkRows.length - acceptedChecks,
+      acceptedSignals,
+      duplicateSignals: signalRows.length - acceptedSignals,
+    };
+  }
+
+  async sync(probe: MonitorProbe, configVersion: string | null): Promise<SyncResponse> {
+    const now = new Date();
+    const activeServices = await this.services.find({ where: { status: 'ACTIVE' } });
+    const targets = activeServices.map(toTarget).sort((a, b) => a.id - b.id);
+    const schedule = DEFAULT_SCHEDULE;
+    const references = PROBE_REFERENCES.map((r) => ({ ...r }));
+
+    const current = createHash('sha256')
+      .update(JSON.stringify({ s: targets.map(canonicalTarget), c: canonicalSchedule(schedule), r: references.map(canonicalTarget) }))
+      .digest('hex');
+
+    return {
+      configVersion: current,
+      config: configVersion === current ? null : { services: targets, schedule, references },
+      orders: await this.takeOrders(Number(probe.id), now),
+      state: await this.combinedState(activeServices, schedule, now),
+    };
+  }
+
+  /** Las órdenes pendientes de la sonda, marcadas como entregadas: cada una sale una sola vez. */
+  private async takeOrders(probeId: number, now: Date): Promise<SyncResponse['orders']> {
+    const pending = await this.orders.find({ where: { probeId, takenAt: IsNull() }, order: { id: 'ASC' } });
+    if (pending.length === 0) return [];
+    const res = await this.orders.update({ id: In(pending.map((o) => o.id)), takenAt: IsNull() }, { takenAt: now });
+    // Si otra petición ya las tomó entre medias, no se entregan dos veces.
+    if (res.affected !== undefined && res.affected !== pending.length) {
+      const stillMine = await this.orders.find({ where: { id: In(pending.map((o) => o.id)), takenAt: now } });
+      const mine = new Set(stillMine.map((o) => Number(o.id)));
+      return this.toOrders(pending.filter((o) => mine.has(Number(o.id))));
+    }
+    return this.toOrders(pending);
+  }
+
+  private toOrders(rows: MonitorProbeOrder[]): SyncResponse['orders'] {
+    return rows.map((o) => ({ id: Number(o.id), serviceId: Number(o.serviceId), kind: o.kind }));
+  }
+
+  private async combinedState(activeServices: MonitorService[], schedule: ScheduleConfig, now: Date): Promise<CombinedStateRow[]> {
+    if (activeServices.length === 0) return [];
+    const [servers, probes, states, incidents] = await Promise.all([
+      this.servers.find(),
+      this.probes.find(),
+      this.states.find(),
+      this.incidents.find({ where: { recoveredAt: IsNull() } }),
+    ]);
+    const serverById = new Map(servers.map((s) => [Number(s.id), s]));
+    const kindByProbe = new Map(probes.map((p) => [Number(p.id), p.kind]));
+    const viewOf = new Map<string, ProbeView>();
+    for (const st of states) {
+      const kind = kindByProbe.get(Number(st.probeId));
+      if (!kind) continue;
+      viewOf.set(`${kind}|${Number(st.serviceId)}`, {
+        state: st.state,
+        lastCheckAt: st.lastCheckAt ?? null,
+        lastLatencyMs: st.lastLatencyMs === null || st.lastLatencyMs === undefined ? null : Number(st.lastLatencyMs),
+      });
+    }
+    const incidentByService = new Map<number, MonitorIncident>();
+    for (const inc of incidents) if (inc.serviceId !== null) incidentByService.set(Number(inc.serviceId), inc);
+
+    const intervalMs = intervalMsAt(now, schedule);
+    const rows: CombinedStateRow[] = [];
+    for (const svc of activeServices) {
+      const server = serverById.get(Number(svc.serverId));
+      if (!server) continue;
+      const id = Number(svc.id);
+      const office = viewOf.get(`OFFICE|${id}`) ?? null;
+      const datacenter = viewOf.get(`DATACENTER|${id}`) ?? null;
+      const incident = incidentByService.get(id) ?? null;
+      rows.push({
+        serviceId: id,
+        serverId: Number(server.id),
+        clientId: Number(server.clientId),
+        serviceName: svc.name,
+        serverName: server.name,
+        criticality: svc.criticality,
+        office,
+        datacenter,
+        status: combineStatus(office, datacenter, incident?.kind ?? null, now, intervalMs),
+        incidentId: incident ? Number(incident.id) : null,
+        parentIncidentId: incident?.parentId != null ? Number(incident.parentId) : null,
+        // Task 12 lo completa en la API del personal: la sonda no necesita el ticket.
+        ticketCode: null,
+      });
+    }
+    return rows;
+  }
+
+  private async insertIgnore(repo: Repository<any>, entity: new () => ObjectLiteral, rows: ObjectLiteral[]): Promise<number> {
+    if (rows.length === 0) return 0;
+    const res = await repo.createQueryBuilder().insert().into(entity).values(rows).orIgnore().execute();
+    return Number((res.raw as { affectedRows?: number })?.affectedRows ?? 0);
+  }
+
+  /** Mediana de `(received_at − started_at) − duration_ms`; negativa si la sonda va adelantada. */
+  private clockSkewMs(rows: { startedAt: Date; durationMs: number }[], receivedAt: Date): number | null {
+    if (rows.length === 0) return null;
+    const diffs = rows.map((r) => receivedAt.getTime() - r.startedAt.getTime() - r.durationMs).sort((a, b) => a - b);
+    const mid = Math.floor(diffs.length / 2);
+    return Math.round(diffs.length % 2 ? diffs[mid] : (diffs[mid - 1] + diffs[mid]) / 2);
+  }
+
+  /** Último resultado por servicio; un lote reenviado y viejo no retrocede `last_check_at`. */
+  private async updateProbeStates(probeId: number, rows: MonitorCheck[] | any[], receivedAt: Date): Promise<void> {
+    const latest = new Map<number, MonitorCheck>();
+    for (const c of rows as MonitorCheck[]) {
+      const prev = latest.get(c.serviceId);
+      if (!prev || c.startedAt.getTime() >= prev.startedAt.getTime()) latest.set(c.serviceId, c);
+    }
+    for (const [serviceId, c] of latest) {
+      const fields = { lastCheckAt: c.startedAt, lastOk: c.ok, lastLatencyMs: c.durationMs };
+      const existing = await this.states.findOne({ where: { serviceId, probeId } });
+      if (!existing) {
+        // `state` lo gobierna el evaluador (Task 9) con las señales; hasta entonces, OK.
+        await this.insertIgnore(this.states, MonitorProbeState, [{ serviceId, probeId, state: 'OK', ...fields, updatedAt: receivedAt }]);
+      } else if (!existing.lastCheckAt || existing.lastCheckAt.getTime() < c.startedAt.getTime()) {
+        await this.states.update({ serviceId, probeId }, { ...fields, updatedAt: receivedAt });
+      }
+    }
+  }
+}
