@@ -1,7 +1,19 @@
 import Database from 'better-sqlite3';
 import type { CheckResult, ProbeSignal } from '@kubo/monitoring-core';
 
-type Kind = 'CHECK' | 'SIGNAL';
+export type Kind = 'CHECK' | 'SIGNAL';
+
+export type OutboxItem = { kind: 'CHECK'; item: CheckResult } | { kind: 'SIGNAL'; item: ProbeSignal };
+
+export function splitItems(items: OutboxItem[]): { checks: CheckResult[]; signals: ProbeSignal[] } {
+  const checks: CheckResult[] = [];
+  const signals: ProbeSignal[] = [];
+  for (const x of items) {
+    if (x.kind === 'CHECK') checks.push(x.item);
+    else signals.push(x.item);
+  }
+  return { checks, signals };
+}
 
 /**
  * Cola de envío persistente (SQLite) y última configuración conocida.
@@ -34,6 +46,15 @@ export class Outbox {
         version TEXT NOT NULL,
         json    TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS dead_letter (
+        seq     INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind    TEXT NOT NULL,
+        id      TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        status  INTEGER NOT NULL,
+        error   TEXT NOT NULL,
+        at      TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS kv (
         k TEXT PRIMARY KEY,
         v TEXT NOT NULL
@@ -65,21 +86,55 @@ export class Outbox {
    * primer elemento que no cabe, para no adelantar los posteriores.
    */
   peekBatch(max: number, maxSignals: number = max): { checks: CheckResult[]; signals: ProbeSignal[] } {
-    const checks: CheckResult[] = [];
-    const signals: ProbeSignal[] = [];
+    return splitItems(this.peekItems(max, maxSignals));
+  }
+
+  /** Igual que `peekBatch`, pero con checks y señales intercalados en su orden real. */
+  peekItems(max: number, maxSignals: number = max): OutboxItem[] {
+    const out: OutboxItem[] = [];
+    let nChecks = 0;
+    let nSignals = 0;
     const rows = this.db
       .prepare('SELECT kind, payload FROM outbox ORDER BY seq LIMIT ?')
       .all(Math.max(0, max) + Math.max(0, maxSignals)) as { kind: Kind; payload: string }[];
     for (const row of rows) {
       if (row.kind === 'CHECK') {
-        if (checks.length >= max) break;
-        checks.push(JSON.parse(row.payload) as CheckResult);
+        if (nChecks >= max) break;
+        nChecks++;
+        out.push({ kind: 'CHECK', item: JSON.parse(row.payload) as CheckResult });
       } else {
-        if (signals.length >= maxSignals) break;
-        signals.push(JSON.parse(row.payload) as ProbeSignal);
+        if (nSignals >= maxSignals) break;
+        nSignals++;
+        out.push({ kind: 'SIGNAL', item: JSON.parse(row.payload) as ProbeSignal });
       }
     }
-    return { checks, signals };
+    return out;
+  }
+
+  /**
+   * Saca un elemento de la cola y lo guarda en `dead_letter` con el motivo: la central
+   * lo rechaza por sí solo (400/413) y reintentarlo bloquearía todo lo posterior.
+   */
+  deadLetter(kind: Kind, id: string, status: number, error: string): void {
+    this.db.transaction(() => {
+      const moved = this.db
+        .prepare(
+          'INSERT INTO dead_letter (kind, id, payload, status, error, at) SELECT kind, id, payload, ?, ?, ? FROM outbox WHERE kind = ? AND id = ?',
+        )
+        .run(status, error.slice(0, 1000), new Date().toISOString(), kind, id);
+      if (moved.changes > 0) this.deleteStmt.run(kind, id);
+    })();
+  }
+
+  deadLetters(): { kind: Kind; id: string; payload: string; status: number; error: string; at: string }[] {
+    return this.db.prepare('SELECT kind, id, payload, status, error, at FROM dead_letter ORDER BY seq').all() as {
+      kind: Kind;
+      id: string;
+      payload: string;
+      status: number;
+      error: string;
+      at: string;
+    }[];
   }
 
   ack(checkIds: string[], signalIds: string[]): void {

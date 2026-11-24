@@ -100,8 +100,13 @@ export function buildScCommands(): Command[] {
   ];
 }
 
+/**
+ * Primero Administradores pasa a ser dueño de la carpeta (y de lo que ya contenga): así
+ * quien la hubiera creado antes no conserva el derecho implícito de cambiar su ACL.
+ */
 export function buildAclCommands(home: string, user: string): Command[] {
   return [
+    ['icacls.exe', [home, '/setowner', SID_ADMINS, '/T', '/C']],
     [
       'icacls.exe',
       [home, '/inheritance:r', '/grant:r', `${SID_SYSTEM}:(OI)(CI)F`, `${SID_ADMINS}:(OI)(CI)F`, `${SID_LOCAL_SERVICE}:(OI)(CI)M`, `${user}:(RX)`],
@@ -119,6 +124,19 @@ function run([cmd, args]: Command, dryRun: boolean, allowFail = false): boolean 
   } catch (err) {
     if (allowFail) return false;
     throw err;
+  }
+}
+
+/**
+ * La cuenta LocalService ejecuta `process.execPath`: debe ser un Node 20 instalado para todo
+ * el equipo, no uno por usuario (nvm, %LOCALAPPDATA%, perfil), que LocalService no puede leer.
+ */
+export function assertSystemNode(execPath: string, version: string): void {
+  if (!/^v20\./.test(version)) {
+    throw new Error(`Se necesita Node 20 LTS (este instalador corre con ${version}). Ejecútelo con el node.exe de Node 20 instalado para todo el equipo.`);
+  }
+  if (/[\\/](Users|AppData|nvm|\.nvm|scoop)[\\/]/i.test(execPath)) {
+    throw new Error(`${execPath} es un Node por usuario: instale Node 20 para todo el equipo (p. ej. C:\\Program Files\\nodejs) y ejecute el instalador con él.`);
   }
 }
 
@@ -147,6 +165,15 @@ function readStdin(): string {
 export function install(args: InstallArgs): void {
   if (process.platform !== 'win32') throw new Error('El instalador solo funciona en Windows.');
   if (!args.dryRun && !isAdmin()) throw new Error('Ejecute el instalador como administrador.');
+  if (args.dryRun) {
+    try {
+      assertSystemNode(process.execPath, process.version);
+    } catch (err) {
+      console.warn(`AVISO: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  } else {
+    assertSystemNode(process.execPath, process.version);
+  }
 
   const home = monitorHome();
   const packageRoot = resolve(__dirname, '..', '..');
@@ -156,7 +183,8 @@ export function install(args: InstallArgs): void {
 
   // 1. Carpeta de datos y su ACL.
   if (!args.dryRun) mkdirSync(join(home, LOGS_DIR), { recursive: true });
-  const [aclHome, aclSecret] = buildAclCommands(home, args.user);
+  const [aclOwner, aclHome, aclSecret] = buildAclCommands(home, args.user);
+  run(aclOwner, args.dryRun);
   run(aclHome, args.dryRun);
 
   // 2. engine.json (se conserva lo que ya hubiera; --central/--port lo actualizan).

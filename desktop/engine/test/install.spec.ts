@@ -1,4 +1,4 @@
-import { buildAclCommands, buildScCommands, buildServiceXml, parseInstallArgs, SERVICE_ID, SERVICE_NAME } from '../src/service/install';
+import { assertSystemNode, buildAclCommands, buildScCommands, buildServiceXml, parseInstallArgs, SERVICE_ID, SERVICE_NAME } from '../src/service/install';
 
 describe('service/install (plan, sin registrar nada)', () => {
   it('parseInstallArgs exige --user y acepta --central, --port y --token-stdin', () => {
@@ -44,7 +44,10 @@ describe('service/install (plan, sin registrar nada)', () => {
 
   it('ACL: SYSTEM y Administradores total, el servicio modifica, el usuario solo atraviesa la carpeta y lee el secreto', () => {
     const cmds = buildAclCommands('C:\\ProgramData\\KUBO\\Monitor', 'OFICINA\\ana');
-    expect(cmds[0]).toEqual([
+    expect(cmds).toHaveLength(3);
+    // Primero Administradores toma posesión (antes de quitar la herencia y aplicar la ACL).
+    expect(cmds[0]).toEqual(['icacls.exe', ['C:\\ProgramData\\KUBO\\Monitor', '/setowner', '*S-1-5-32-544', '/T', '/C']]);
+    expect(cmds[1]).toEqual([
       'icacls.exe',
       [
         'C:\\ProgramData\\KUBO\\Monitor',
@@ -56,6 +59,13 @@ describe('service/install (plan, sin registrar nada)', () => {
         'OFICINA\\ana:(RX)',
       ],
     ]);
-    expect(cmds[1]).toEqual(['icacls.exe', ['C:\\ProgramData\\KUBO\\Monitor\\local-api.secret', '/grant:r', 'OFICINA\\ana:(R)']]);
+    expect(cmds[2]).toEqual(['icacls.exe', ['C:\\ProgramData\\KUBO\\Monitor\\local-api.secret', '/grant:r', 'OFICINA\\ana:(R)']]);
+  });
+
+  it('assertSystemNode: exige Node 20 instalado para todo el equipo', () => {
+    expect(() => assertSystemNode('C:\\Program Files\\nodejs\\node.exe', 'v20.18.1')).not.toThrow();
+    expect(() => assertSystemNode('C:\\Program Files\\nodejs\\node.exe', 'v24.18.0')).toThrow(/Node 20/);
+    expect(() => assertSystemNode('C:\\Users\\ana\\AppData\\Roaming\\nvm\\v20.18.1\\node.exe', 'v20.18.1')).toThrow(/por usuario/);
+    expect(() => assertSystemNode('C:\\Users\\ana\\scoop\\apps\\nodejs\\node.exe', 'v20.18.1')).toThrow(/por usuario/);
   });
 });

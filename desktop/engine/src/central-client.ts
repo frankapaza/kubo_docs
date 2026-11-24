@@ -64,6 +64,8 @@ export class CentralHttpError extends Error {
     readonly status: number,
     readonly retryAfterSec: number | null,
     message: string,
+    /** Extracto del cuerpo de la respuesta (≤ 200 caracteres). */
+    readonly body: string = '',
   ) {
     super(message);
     this.name = 'CentralHttpError';
@@ -113,6 +115,7 @@ export class CentralClient implements CentralApi {
         res.status,
         res.status === 429 && Number.isFinite(ra) && ra > 0 ? ra : res.status === 429 ? 60 : null,
         `Central ${method} ${path} → HTTP ${res.status} ${text.slice(0, 200)}`,
+        text.slice(0, 200),
       );
     }
     return res.json();

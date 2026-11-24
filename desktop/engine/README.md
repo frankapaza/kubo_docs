@@ -12,6 +12,13 @@ Si la central no responde sigue midiendo y acumulando; tras 3 sondeos fallidos s
 local informa `central.reachable: false`. Al arrancar sin red usa la última configuración y el
 último estado guardados.
 
+El `sync` se hace en cada sondeo aunque el envío falle. Si la central rechaza un lote por su
+contenido (400 o 413), el motor lo parte por la mitad (siempre un prefijo, sin alterar el orden)
+hasta que lo acepte; un único check o señal que siga rechazado sale de la cola a la tabla
+`dead_letter` de `engine.db` (con el estado HTTP y un extracto de la respuesta) y queda en el
+registro como ERROR. Para revisarlos:
+`sqlite3 engine.db "select kind,id,status,error,at from dead_letter"`.
+
 ## Compilar
 
 Orden: primero el paquete compartido, luego el motor.
@@ -25,13 +32,19 @@ npx jest                                                    # pruebas del motor
 `@kubo/monitoring-core` se instala como `file:../../packages/monitoring-core` (enlace al
 paquete): si cambia el núcleo hay que volver a compilarlo.
 
-Requisitos: **Node 20 LTS** de 64 bits en la PC de la oficina (en el desarrollo también funciona
-con Node 24). `better-sqlite3` 12.x trae binarios precompilados para Node 20 a 26 en Windows x64:
-no hace falta Visual Studio ni Python.
+Requisitos de la PC de la oficina: **Node 20 LTS de 64 bits instalado para todo el equipo** con
+el instalador oficial (`C:\Program Files\nodejs\node.exe`). **No** sirve un Node por usuario
+(nvm, nvm-windows, scoop, fnm, uno dentro de `C:\Users\…`): el servicio corre como
+`NT AUTHORITY\LocalService` y ejecuta el mismo `node.exe` con el que se lanzó el instalador
+(`process.execPath`), que debe ser legible por esa cuenta. El instalador se niega si no es
+Node 20 o si el `node.exe` está bajo un perfil de usuario (`package.json`: `engines.node`
+`>=20 <21`). Compile también con Node 20 (`npm install` baja el binario de `better-sqlite3` de la
+versión de Node con que se ejecuta; 12.x trae binarios precompilados para Windows x64: no hace
+falta Visual Studio ni Python).
 
 ## Instalar (como administrador)
 
-1. Copie la carpeta del motor ya compilada (con `node_modules` y `dist`) a una ruta legible por
+1. Instale Node 20 LTS para todo el equipo (ver Requisitos). Copie la carpeta del motor ya compilada (con `node_modules` y `dist`) a una ruta legible por
    la cuenta del servicio, p. ej. `C:\Program Files\KUBO\engine`.
 2. Emita el token de la sonda en la web: **Monitoreo → Sondas → oficina-01 → Emitir token**
    (llama a `POST /api/v1/availability/probes/:id/token`, solo ADMIN). El token `kmp_…` se
@@ -73,7 +86,7 @@ Todo en `%ProgramData%\KUBO\Monitor\` (o en `KUBO_MONITOR_HOME`, si está defini
 | `engine.json` | `{ centralUrl, probeCode: "oficina-01", localPort: 47800, syncIntervalMs: 15000 }` |
 | `token.dat` | token de la sonda cifrado con **DPAPI, ámbito máquina** |
 | `local-api.secret` | secreto compartido con el widget (cabecera `X-Kubo-Secret`) |
-| `engine.db` | SQLite: cola de envío, última configuración y último estado combinado |
+| `engine.db` | SQLite: cola de envío, `dead_letter`, última configuración y último estado combinado |
 | `logs\engine-AAAA-MM-DD.log` | registro del motor (rota a diario y a los 10 MB; 14 días) |
 | `logs\KuboMonitorEngine.*.log` | salida capturada por WinSW |
 

@@ -19,7 +19,7 @@
     "winston-daily-rotate-file": "^5.0.0"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20 <21"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",

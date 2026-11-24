@@ -118,6 +118,45 @@ describe('Outbox', () => {
     again.close();
   });
 
+  it('peekItems devuelve checks y señales intercalados en su orden real', () => {
+    const ob = new Outbox(':memory:');
+    const s1 = signal();
+    const c1 = check();
+    const s2 = signal();
+    ob.enqueueSignal(s1);
+    ob.enqueueCheck(c1);
+    ob.enqueueSignal(s2);
+    expect(ob.peekItems(500, 200)).toEqual([
+      { kind: 'SIGNAL', item: s1 },
+      { kind: 'CHECK', item: c1 },
+      { kind: 'SIGNAL', item: s2 },
+    ]);
+    ob.close();
+  });
+
+  it('deadLetter saca el elemento de la cola y lo guarda con el motivo; los demás siguen en orden', () => {
+    const file = join(dir, 'engine.db');
+    const ob = new Outbox(file);
+    const c1 = check();
+    const c2 = check();
+    const s1 = signal();
+    ob.enqueueCheck(c1);
+    ob.enqueueCheck(c2);
+    ob.enqueueSignal(s1);
+    ob.deadLetter('CHECK', c2.id, 400, '{"message":"durationMs"}');
+    ob.deadLetter('CHECK', 'desconocido', 400, 'x'); // no falla ni inventa filas
+    expect(ob.pendingCount()).toBe(2);
+    expect(ob.peekBatch(500)).toEqual({ checks: [c1], signals: [s1] });
+    ob.close();
+
+    const again = new Outbox(file);
+    const dead = again.deadLetters();
+    expect(dead).toHaveLength(1);
+    expect(dead[0]).toMatchObject({ kind: 'CHECK', id: c2.id, status: 400, error: '{"message":"durationMs"}' });
+    expect(JSON.parse(dead[0].payload)).toEqual(c2);
+    again.close();
+  });
+
   it('saveConfig reemplaza la anterior; sin config devuelve null', () => {
     const ob = new Outbox(':memory:');
     expect(ob.loadConfig()).toBeNull();

@@ -8,7 +8,7 @@ import {
 } from '@kubo/monitoring-core';
 import { CentralHttpError, type CentralApi, type CombinedStateRow, type ProbeConfig, type ProbeView } from './central-client';
 import type { EngineConfig } from './config';
-import type { Outbox } from './outbox';
+import { splitItems, type Outbox, type OutboxItem } from './outbox';
 
 export interface EngineStatus {
   engine: { version: string; startedAt: string };
@@ -40,8 +40,13 @@ export const MAX_CHECKS_PER_BATCH = 500;
 export const MAX_SIGNALS_PER_BATCH = 200;
 /** Sondeos fallidos seguidos tras los que la central se da por caída. */
 export const UNREACHABLE_AFTER_FAILURES = 3;
-/** Lotes por sondeo: con 15 s entre sondeos, ≤ 40/min, por debajo del límite de 60/min. */
+/**
+ * Envíos de lote por sondeo (incluidos los de la bisección): con 15 s entre sondeos,
+ * ≤ 40/min, por debajo del límite de 60/min de la central.
+ */
 export const MAX_BATCHES_PER_TICK = 10;
+/** Respuestas que dependen del contenido del lote: se parte el lote en lugar de reintentarlo igual. */
+const CONTENT_REJECTED = new Set([400, 413]);
 
 const silent: EngineLogger = { info: () => undefined, warn: () => undefined, error: () => undefined };
 
@@ -56,8 +61,17 @@ interface LocalView {
  * 1. envía la cola en lotes (prefijos en orden de inserción) mientras la central responda;
  * 2. `sync`: aplica la configuración nueva (y la guarda), ejecuta las órdenes y
  *    guarda el estado combinado para el widget.
- * Un sondeo falla si falla el envío o el `sync`; tras 3 seguidos, `central.reachable`
- * es false. Un 429 no cuenta como fallo: se respeta `Retry-After` antes de volver a enviar.
+ * El `sync` se hace SIEMPRE, aunque el envío falle: la configuración, las órdenes, el
+ * estado y el `last_seen_at` no dependen de que la cola avance. Un sondeo cuenta como
+ * fallido si falla el envío o el `sync`; tras 3 seguidos, `central.reachable` es false.
+ * Un 429 no cuenta como fallo: se respeta `Retry-After` antes de volver a enviar.
+ * Un 400/413 (el contenido del lote) parte el lote por la mitad, siempre como prefijo
+ * ordenado, hasta que la central lo acepte; un único elemento rechazado va a
+ * `dead_letter` y sale de la cola, para no bloquear todo lo posterior.
+ *
+ * Las pruebas de un mismo destino nunca se solapan, tampoco entre el runner viejo y el
+ * nuevo cuando se sustituye (cambio de horario o referencias): la prueba del nuevo
+ * espera a que termine la que el viejo tuviera en vuelo.
  *
  * Nada del estado del `ProbeRunner` sobrevive a un reinicio: al arrancar se crea uno
  * nuevo con la configuración guardada (trackers en OK). Lo único persistente es la cola.
@@ -84,13 +98,26 @@ export class Engine {
   private lastState: CombinedStateRow[] = [];
   private lastStateJson: string | null = null;
   private readonly local = new Map<number, LocalView>();
+  /** Última prueba lanzada por id de destino (de cualquier runner), para no solaparlas. */
+  private readonly inFlight = new Map<number, Promise<unknown>>();
 
   constructor(opts: EngineOptions) {
     this.config = opts.config;
     this.outbox = opts.outbox;
     this.central = opts.central;
     this.clock = opts.clock;
-    this.check = opts.check;
+    const check = opts.check;
+    this.check = ((target, kind, cycleAt, opts2) => {
+      const prev = this.inFlight.get(target.id);
+      const run = () => check(target, kind, cycleAt, opts2);
+      const p = prev ? prev.then(run, run) : run();
+      const tail = p.catch(() => undefined);
+      this.inFlight.set(target.id, tail);
+      void tail.then(() => {
+        if (this.inFlight.get(target.id) === tail) this.inFlight.delete(target.id);
+      });
+      return p;
+    }) as CheckFn;
     this.version = (opts.version ?? 'dev').slice(0, 40);
     this.log = opts.logger ?? silent;
   }
@@ -118,6 +145,8 @@ export class Engine {
         this.log.warn('Estado combinado guardado ilegible: se ignora.');
       }
     }
+    // Tras stop(): el runner se conserva (trackers y pruebas en vuelo) y se reanuda.
+    this.runner?.start();
     this.schedule(0);
   }
 
@@ -177,9 +206,14 @@ export class Engine {
   }
 
   private async poll(gen: number): Promise<void> {
+    const errors: string[] = [];
     try {
       await this.flush(gen);
-      if (gen !== this.generation) return;
+    } catch (err) {
+      errors.push(`envío: ${errMsg(err)}`);
+    }
+    if (gen !== this.generation) return;
+    try {
       const res = await this.central.sync(this.configVersion);
       if (gen !== this.generation) return;
       if (res.config) this.applyConfig(res.configVersion, res.config, true);
@@ -197,25 +231,37 @@ export class Engine {
         this.lastStateJson = stateJson;
       }
       this.lastSyncAt = this.clock.now().toISOString();
-      if (this.consecutiveFailures >= UNREACHABLE_AFTER_FAILURES) this.log.info('La central vuelve a responder.');
-      this.consecutiveFailures = 0;
     } catch (err) {
       if (gen !== this.generation) return;
-      this.consecutiveFailures++;
-      const msg = `Sondeo fallido (${this.consecutiveFailures} seguidos): ${errMsg(err)}`;
-      const n = this.consecutiveFailures;
-      if (n === UNREACHABLE_AFTER_FAILURES) this.log.error(`${msg} — la central no responde.`);
-      // Durante una caída larga, un recordatorio cada ~10 min en lugar de una línea por sondeo.
-      else if (n < UNREACHABLE_AFTER_FAILURES || n % 40 === 0) this.log.warn(msg);
+      errors.push(`sync: ${errMsg(err)}`);
     }
+
+    if (errors.length === 0) {
+      if (this.consecutiveFailures >= UNREACHABLE_AFTER_FAILURES) this.log.info('La central vuelve a responder.');
+      this.consecutiveFailures = 0;
+      return;
+    }
+    this.consecutiveFailures++;
+    const n = this.consecutiveFailures;
+    const msg = `Sondeo fallido (${n} seguidos): ${errors.join('; ')}`;
+    if (n === UNREACHABLE_AFTER_FAILURES) this.log.error(`${msg} — la central no responde.`);
+    // Durante una caída larga, un recordatorio cada ~10 min en lugar de una línea por sondeo.
+    else if (n < UNREACHABLE_AFTER_FAILURES || n % 40 === 0) this.log.warn(msg);
   }
 
-  /** Envía la cola en lotes mientras quede algo y la central acepte. Lanza si la central falla. */
+  /**
+   * Envía la cola en lotes mientras quede algo y la central acepte. Lanza si la central
+   * falla (red, 5xx, 401…). Con 400/413 parte el lote (prefijo de la mitad) y, si un
+   * único elemento sigue rechazado, lo pasa a `dead_letter`.
+   */
   private async flush(gen: number): Promise<void> {
-    for (let i = 0; i < MAX_BATCHES_PER_TICK; i++) {
+    let size = Infinity; // tope del próximo intento (se reduce al bisecar)
+    for (let sends = 0; sends < MAX_BATCHES_PER_TICK; sends++) {
       if (this.clock.now().getTime() < this.sendNotBefore) return;
-      const { checks, signals } = this.outbox.peekBatch(MAX_CHECKS_PER_BATCH, MAX_SIGNALS_PER_BATCH);
-      if (checks.length === 0 && signals.length === 0) return;
+      const all = this.outbox.peekItems(MAX_CHECKS_PER_BATCH, MAX_SIGNALS_PER_BATCH);
+      if (all.length === 0) return;
+      const items: OutboxItem[] = all.slice(0, Math.min(all.length, size));
+      const { checks, signals } = splitItems(items);
       try {
         const res = await this.central.sendBatch({ checks, signals, version: this.version });
         if (res.duplicateChecks > 0 || res.duplicateSignals > 0) {
@@ -227,6 +273,22 @@ export class Engine {
           this.log.warn(`La central limita el envío (429): reintento en ${err.retryAfterSec ?? 60} s.`);
           return;
         }
+        if (err instanceof CentralHttpError && CONTENT_REJECTED.has(err.status)) {
+          if (items.length > 1) {
+            size = Math.ceil(items.length / 2);
+            this.log.warn(`La central rechaza un lote de ${items.length} (HTTP ${err.status}): se reintenta con ${size}.`);
+            continue;
+          }
+          const bad = items[0];
+          const reason = err.body || err.message;
+          this.outbox.deadLetter(bad.kind, bad.item.id, err.status, reason);
+          this.log.error(
+            `La central rechaza ${bad.kind === 'CHECK' ? 'el check' : 'la señal'} ${bad.item.id} (HTTP ${err.status}: ${reason.slice(0, 200)}): pasa a dead_letter.`,
+          );
+          size = Infinity;
+          if (gen !== this.generation) return;
+          continue;
+        }
         throw err;
       }
       // Lo aceptado (nuevo o duplicado) ya está en la central: aunque se haya detenido el motor.
@@ -234,6 +296,7 @@ export class Engine {
         checks.map((c) => c.id),
         signals.map((s) => s.id),
       );
+      size = Infinity;
       if (gen !== this.generation) return;
     }
   }

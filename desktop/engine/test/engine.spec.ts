@@ -10,7 +10,7 @@ import {
   type ProbeSignal,
   type ServiceTarget,
 } from '@kubo/monitoring-core';
-import type { CentralApi, ProbeBatch, ProbeConfig, SyncResponse, CombinedStateRow } from '../src/central-client';
+import { CentralHttpError, type CentralApi, type ProbeBatch, type ProbeConfig, type SyncResponse, type CombinedStateRow } from '../src/central-client';
 import { Engine } from '../src/engine';
 import type { EngineConfig } from '../src/config';
 import { Outbox } from '../src/outbox';
@@ -42,6 +42,13 @@ const row = (serviceId: number): CombinedStateRow => ({
 
 class FakeCentral implements CentralApi {
   down = false;
+  /** Solo falla el envío (p. ej. un 500 persistente), el sync responde. */
+  batchDown = false;
+  /** Ids que la central rechaza con 400 (validación). */
+  readonly poison = new Set<string>();
+  /** Tope de elementos por lote: por encima, 413. */
+  maxItems = Infinity;
+  sendAttempts = 0;
   configVersion = 'v1';
   config: ProbeConfig = { services: [svc(1)], schedule: DEFAULT_SCHEDULE, references: [] };
   orders: SyncResponse['orders'] = [];
@@ -65,7 +72,14 @@ class FakeCentral implements CentralApi {
   }
 
   async sendBatch(batch: ProbeBatch) {
+    this.sendAttempts++;
     if (this.down) throw new Error('connect ECONNREFUSED');
+    if (this.batchDown) throw new CentralHttpError(500, null, 'HTTP 500', 'boom');
+    if (batch.checks.length + batch.signals.length > this.maxItems) {
+      throw new CentralHttpError(413, null, 'HTTP 413', '{"message":"request entity too large"}');
+    }
+    const bad = [...batch.checks, ...batch.signals].find((x) => this.poison.has(x.id));
+    if (bad) throw new CentralHttpError(400, null, 'HTTP 400', `{"message":["${bad.id}: durationMs must be an integer"]}`);
     this.batches.push(batch);
     this.checks.push(...batch.checks);
     this.signals.push(...batch.signals);
@@ -291,5 +305,156 @@ describe('Engine', () => {
     const sigIds = central.signals.map((s) => s.id);
     expect(new Set(sigIds).size).toBe(sigIds.length);
     expect(central.signals[0].type).toBe('VERIFYING');
+  });
+
+  describe('un lote rechazado no detiene el motor', () => {
+    const ck = (n: number): CheckResult => ({
+      id: randomUUID(),
+      serviceId: 1,
+      kind: 'REGULAR',
+      cycleAt: `2026-11-23T14:5${n}:37.000Z`,
+      startedAt: `2026-11-23T14:5${n}:37.000Z`,
+      durationMs: 10,
+      ok: true,
+      errorCode: null,
+      httpStatus: null,
+      orderId: null,
+    });
+    const sg = (n: number): ProbeSignal => ({
+      id: randomUUID(),
+      type: 'VERIFYING',
+      serviceId: 1,
+      at: `2026-11-23T14:5${n}:37.000Z`,
+      firstFailureAt: `2026-11-23T14:5${n}:37.000Z`,
+    });
+
+    it('400 por un elemento: se biseca, ese elemento va a dead_letter y el resto llega en orden; el sync sigue', async () => {
+      const c1 = ck(1);
+      const s1 = sg(1);
+      const c2 = ck(2);
+      const c3 = ck(3);
+      const s2 = sg(3);
+      outbox.enqueueCheck(c1);
+      outbox.enqueueSignal(s1);
+      outbox.enqueueCheck(c2);
+      outbox.enqueueCheck(c3);
+      outbox.enqueueSignal(s2);
+      central.poison.add(c2.id);
+
+      const engine = make(fakeCheck(() => true).fn);
+      engine.start();
+      await clock.advance(1);
+
+      expect(central.checks.map((c) => c.id)).toEqual([c1.id, c3.id]);
+      expect(central.signals.map((s) => s.id)).toEqual([s1.id, s2.id]);
+      // s1 (anterior a c2) sale antes que c3 (posterior): los lotes son prefijos.
+      const firstWithC3 = central.batches.findIndex((b) => b.checks.some((c) => c.id === c3.id));
+      const firstWithS1 = central.batches.findIndex((b) => b.signals.some((s) => s.id === s1.id));
+      expect(firstWithS1).toBeLessThan(firstWithC3);
+
+      const dead = outbox.deadLetters();
+      expect(dead).toHaveLength(1);
+      expect(dead[0]).toMatchObject({ kind: 'CHECK', id: c2.id, status: 400 });
+      expect(dead[0].error).toContain('durationMs must be an integer');
+      expect(JSON.parse(dead[0].payload)).toEqual(c2);
+
+      expect(engine.status().pending).toBe(0);
+      expect(central.syncCalls).toEqual([null]);
+      expect(engine.status().central.consecutiveFailures).toBe(0);
+    });
+
+    it('413: se parte el lote hasta que cabe; todo llega en orden y nada va a dead_letter', async () => {
+      const items = [ck(1), ck(2), ck(3), ck(4), ck(5)];
+      for (const c of items) outbox.enqueueCheck(c);
+      central.maxItems = 2;
+
+      const engine = make(fakeCheck(() => true).fn);
+      engine.start();
+      await clock.advance(1);
+
+      expect(central.checks.map((c) => c.id)).toEqual(items.map((c) => c.id));
+      expect(outbox.deadLetters()).toEqual([]);
+      expect(engine.status().pending).toBe(0);
+      expect(central.syncCalls).toEqual([null]);
+    });
+
+    it('con el envío fallando siempre, el sync se hace en cada sondeo (config, órdenes y estado) y cuenta como fallo', async () => {
+      const runNow = jest.spyOn(ProbeRunner.prototype, 'runNow');
+      outbox.enqueueCheck(ck(1));
+      central.batchDown = true;
+      const engine = make(fakeCheck(() => true).fn);
+      engine.start();
+      await clock.advance(1);
+      expect(central.syncCalls).toEqual([null]);
+      expect(engine.status().services).toEqual([row(1)]);
+
+      central.orders = [{ id: 5, serviceId: 1, kind: 'MANUAL' }];
+      await clock.advance(15000);
+      await clock.advance(15000);
+      expect(central.syncCalls).toEqual([null, 'v1', 'v1']);
+      expect(runNow).toHaveBeenCalledWith(1, 'MANUAL', 5);
+      expect(engine.status().central.lastSyncAt).toBe('2026-11-23T15:00:30.000Z');
+      expect(engine.status().central.consecutiveFailures).toBe(3);
+      expect(engine.status().central.reachable).toBe(false);
+    });
+  });
+
+  it('stop() y start() en la misma instancia reanudan la medición', async () => {
+    const { fn, produced } = fakeCheck(() => true);
+    const engine = make(fn);
+    engine.start();
+    await clock.advance(1);
+    engine.stop();
+    await clock.advance(60_000);
+    const before = produced.length;
+
+    engine.start();
+    await clock.advance(6 * 60_000);
+    expect(produced.length).toBeGreaterThan(before);
+    expect(produced.some((c) => Date.parse(c.startedAt) > Date.parse('2026-11-23T15:01:00.001Z'))).toBe(true);
+  });
+
+  it('al sustituir el runner (cambia el horario) las pruebas de un servicio no se solapan entre el viejo y el nuevo', async () => {
+    const active = new Map<number, number>();
+    let maxActive = 0;
+    const starts: { kind: string; at: number }[] = [];
+    const slow = (async (target: ServiceTarget, kind: string, cycleAt: Date, opts?: { orderId?: number | null }) => {
+      const n = (active.get(target.id) ?? 0) + 1;
+      active.set(target.id, n);
+      maxActive = Math.max(maxActive, n);
+      starts.push({ kind, at: clock.now().getTime() });
+      const startedAt = clock.now().toISOString();
+      await clock.sleep(20_000);
+      active.set(target.id, (active.get(target.id) ?? 1) - 1);
+      return {
+        id: randomUUID(),
+        serviceId: target.id,
+        kind,
+        cycleAt: cycleAt.toISOString(),
+        startedAt,
+        durationMs: 20_000,
+        ok: true,
+        errorCode: null,
+        httpStatus: null,
+        orderId: opts?.orderId ?? null,
+      } as CheckResult;
+    }) as unknown as CheckFn;
+
+    const engine = make(slow);
+    engine.start();
+    await clock.advance(40_000); // regular del servicio 1 a las 15:00:37, en vuelo hasta 15:00:57
+    expect(active.get(1)).toBe(1);
+
+    central.configVersion = 'v2';
+    central.config = { ...central.config, schedule: { ...DEFAULT_SCHEDULE, nightIntervalMin: 2 } };
+    central.orders = [{ id: 9, serviceId: 1, kind: 'MANUAL' }];
+    await clock.advance(5_000); // sondeo de las 15:00:45: runner nuevo + orden MANUAL
+    await clock.advance(60_000);
+
+    expect(maxActive).toBe(1);
+    const manual = starts.find((s) => s.kind === 'MANUAL');
+    expect(manual).toBeDefined();
+    expect(manual!.at).toBeGreaterThanOrEqual(Date.parse('2026-11-23T15:00:57.000Z'));
+    expect(central.checks.some((c) => c.kind === 'MANUAL' && c.orderId === 9)).toBe(true);
   });
 });
