@@ -23,4 +23,8 @@ export class MonitorProbeState {
 
   @Column({ name: 'updated_at', type: 'datetime', precision: 3 })
   updatedAt!: Date;
+
+  /** Último cambio de `state` hecho por el evaluador (`updated_at` lo mueve también la ingesta). */
+  @Column({ name: 'state_changed_at', type: 'datetime', precision: 3, nullable: true })
+  stateChangedAt!: Date | null;
 }

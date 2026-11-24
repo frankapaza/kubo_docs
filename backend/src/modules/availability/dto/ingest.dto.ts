@@ -29,6 +29,7 @@ const SIGNAL_TYPES = [
   'DEGRADATION_CLEARED',
   'OFFICE_OUTAGE_START',
   'OFFICE_OUTAGE_END',
+  'STATE_SYNC',
 ] as const;
 
 export class CheckResultDto {

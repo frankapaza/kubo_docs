@@ -71,6 +71,13 @@ describe('/ingest/probe (integración HTTP)', () => {
     expect(acceptBatch).toHaveBeenCalledTimes(1);
   });
 
+  it('acepta la señal STATE_SYNC (resincronización de arranque de la sonda)', async () => {
+    const signal = { id: '00000000-0000-4000-8000-0000000000aa', type: 'STATE_SYNC', serviceId: 100, at: '2026-11-23T15:00:00.000Z', firstFailureAt: null };
+    const res = await app.post('/ingest/probe/batch', { token: TOKEN, body: { ...body(1), signals: [signal] } });
+    expect([200, 201]).toContain(res.status);
+    expect(acceptBatch).toHaveBeenCalledTimes(1);
+  });
+
   it('token válido y 501 checks -> 400', async () => {
     const res = await app.post('/ingest/probe/batch', { token: TOKEN, body: body(501) });
     expect(res.status).toBe(400);

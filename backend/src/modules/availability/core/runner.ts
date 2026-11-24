@@ -143,6 +143,9 @@ class EventHeap {
  *   `at` = hora de la evaluación) y se entrega, al final de `signals`, en el `onResult`
  *   del siguiente resultado de servicio entregado — que es el que completa la franja si
  *   fue un servicio, o el primero posterior si la completó una referencia.
+ *   El estado de caída empieza desconocido: la primera franja juzgada tras crear el runner
+ *   emite siempre su señal (START si hay caída, END si no), para que la central cierre una
+ *   caída que terminó con la sonda parada (la central trata ambas de forma idempotente).
  *   Las referencias no tienen tracker, no generan señales propias, no se entregan por
  *   `onResult` y no cuentan para la regla de una prueba por servicio.
  * - `updateServices`: altas se programan; bajas pierden tracker, colas, reintentos y el
@@ -153,6 +156,9 @@ class EventHeap {
  *   terminan: un `start()` inmediato no las solapa ni excede el cupo. Lo mismo vale para un
  *   id dado de baja y vuelto a dar de alta con su prueba en vuelo (`busyIds`). Los trackers
  *   se conservan y `start()` reprograma sus reintentos pendientes.
+ * - Arranque: cada tracker nuevo se sincroniza con la central (STATE_SYNC o su primera
+ *   señal) y el estado de caída de oficina también (ver arriba); así un reinicio de la sonda
+ *   o la sustitución del runner no deja estados ni caídas colgados en la central.
  * - Una excepción en `onResult` o en el procesamiento interno de un resultado se ignora para
  *   no detener la sonda; el recuento de pruebas en vuelo se libera antes.
  */
@@ -170,7 +176,8 @@ export class ProbeRunner {
   private readonly busyIds = new Set<number>();
   private seq = 0;
   private slots: Slot[] = [];
-  private outage = false;
+  /** null = aún sin juzgar ninguna franja desde que se creó el runner. */
+  private outage: boolean | null = null;
   private pendingOffice: ProbeSignal[] = [];
 
   constructor(private readonly opts: RunnerOptions) {
@@ -256,7 +263,7 @@ export class ProbeRunner {
   }
 
   officeOutage(): boolean {
-    return this.outage;
+    return this.outage === true;
   }
 
   // --- planificación ---------------------------------------------------------

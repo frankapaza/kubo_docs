@@ -4,6 +4,7 @@ import { Column, Entity, Index, PrimaryColumn } from 'typeorm';
 @Entity('monitor_checks')
 @Index('idx_monitor_checks_service', ['serviceId', 'probeId', 'startedAt'])
 @Index('idx_monitor_checks_started_at', ['startedAt'])
+@Index('idx_monitor_checks_order', ['probeId', 'orderId'])
 export class MonitorCheck {
   @PrimaryColumn({ name: 'probe_id', type: 'bigint', unsigned: true })
   probeId!: number;

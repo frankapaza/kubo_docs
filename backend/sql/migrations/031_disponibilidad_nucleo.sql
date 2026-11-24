@@ -137,27 +137,10 @@ CREATE TABLE IF NOT EXISTS monitor_checks (
   PRIMARY KEY (probe_id, id),
   KEY idx_monitor_checks_service (service_id, probe_id, started_at),
   KEY idx_monitor_checks_started_at (started_at),
+  KEY idx_monitor_checks_order (probe_id, order_id),
   CONSTRAINT fk_monitor_checks_probe FOREIGN KEY (probe_id)
     REFERENCES monitor_probes (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- Índice de la purga diaria (started_at < corte). Si la tabla ya existía en una
--- base de desarrollo, el CREATE TABLE IF NOT EXISTS de arriba no lo añade.
-DROP PROCEDURE IF EXISTS kubo_add_index_031;
-DELIMITER //
-CREATE PROCEDURE kubo_add_index_031()
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.STATISTICS
-    WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'monitor_checks' AND INDEX_NAME = 'idx_monitor_checks_started_at'
-  ) THEN
-    ALTER TABLE monitor_checks ADD INDEX idx_monitor_checks_started_at (started_at);
-  END IF;
-END //
-DELIMITER ;
-CALL kubo_add_index_031();
-DROP PROCEDURE IF EXISTS kubo_add_index_031;
 
 CREATE TABLE IF NOT EXISTS monitor_probe_signals (
   id                    BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -167,7 +150,9 @@ CREATE TABLE IF NOT EXISTS monitor_probe_signals (
                         COMMENT 'NULL en las señales de la oficina (no son de un servicio)',
   type                  ENUM('VERIFYING','CONFIRMED_FAILURE','TRANSIENT_FAILURE','RECOVERED',
                              'DEGRADED','DEGRADATION_CLEARED',
-                             'OFFICE_OUTAGE_START','OFFICE_OUTAGE_END') NOT NULL,
+                             'OFFICE_OUTAGE_START','OFFICE_OUTAGE_END',
+                             'STATE_SYNC') NOT NULL
+                        COMMENT 'STATE_SYNC: la sonda reinició y juzga el servicio sano',
   at                    DATETIME(3)     NOT NULL,
   first_failure_at      DATETIME(3)     NULL,
   received_at           DATETIME(3)     NOT NULL,
@@ -203,12 +188,64 @@ CREATE TABLE IF NOT EXISTS monitor_probe_states (
   last_ok          TINYINT(1)      NULL,
   last_latency_ms  INT UNSIGNED    NULL,
   updated_at       DATETIME(3)     NOT NULL,
+  state_changed_at DATETIME(3)     NULL
+                   COMMENT 'último cambio de state hecho por el evaluador',
   PRIMARY KEY (service_id, probe_id),
   CONSTRAINT fk_monitor_states_service FOREIGN KEY (service_id)
     REFERENCES monitor_services (id),
   CONSTRAINT fk_monitor_states_probe FOREIGN KEY (probe_id)
     REFERENCES monitor_probes (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Si estas tablas ya existían en una base de desarrollo (031 aplicada antes de
+-- estos cambios), los CREATE TABLE IF NOT EXISTS de arriba no los añaden:
+--   · idx_monitor_checks_started_at  índice de la purga diaria (started_at < corte)
+--   · idx_monitor_checks_order       búsqueda del resultado de un cruce (probe_id, order_id)
+--   · monitor_probe_signals.type     valor STATE_SYNC
+--   · monitor_probe_states.state_changed_at
+DROP PROCEDURE IF EXISTS kubo_upgrade_031;
+DELIMITER //
+CREATE PROCEDURE kubo_upgrade_031()
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'monitor_checks' AND INDEX_NAME = 'idx_monitor_checks_started_at'
+  ) THEN
+    ALTER TABLE monitor_checks ADD INDEX idx_monitor_checks_started_at (started_at);
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'monitor_checks' AND INDEX_NAME = 'idx_monitor_checks_order'
+  ) THEN
+    ALTER TABLE monitor_checks ADD INDEX idx_monitor_checks_order (probe_id, order_id);
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'monitor_probe_signals' AND COLUMN_NAME = 'type'
+      AND COLUMN_TYPE LIKE '%''STATE_SYNC''%'
+  ) THEN
+    ALTER TABLE monitor_probe_signals MODIFY COLUMN type
+      ENUM('VERIFYING','CONFIRMED_FAILURE','TRANSIENT_FAILURE','RECOVERED',
+           'DEGRADED','DEGRADATION_CLEARED',
+           'OFFICE_OUTAGE_START','OFFICE_OUTAGE_END',
+           'STATE_SYNC') NOT NULL
+      COMMENT 'STATE_SYNC: la sonda reinició y juzga el servicio sano';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'monitor_probe_states' AND COLUMN_NAME = 'state_changed_at'
+  ) THEN
+    ALTER TABLE monitor_probe_states ADD COLUMN state_changed_at DATETIME(3) NULL
+      COMMENT 'último cambio de state hecho por el evaluador' AFTER updated_at;
+  END IF;
+END //
+DELIMITER ;
+CALL kubo_upgrade_031();
+DROP PROCEDURE IF EXISTS kubo_upgrade_031;
 
 -- -------------------------------------------------------------------------
 -- 4) Incidentes

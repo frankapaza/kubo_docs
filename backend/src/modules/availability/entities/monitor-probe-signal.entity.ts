@@ -8,7 +8,8 @@ export type MonitorSignalType =
   | 'DEGRADED'
   | 'DEGRADATION_CLEARED'
   | 'OFFICE_OUTAGE_START'
-  | 'OFFICE_OUTAGE_END';
+  | 'OFFICE_OUTAGE_END'
+  | 'STATE_SYNC';
 
 /** Señal de una sonda a la central. `(probeId, uuid)` único: la central deduplica por él. */
 @Entity('monitor_probe_signals')
@@ -38,6 +39,7 @@ export class MonitorProbeSignal {
       'DEGRADATION_CLEARED',
       'OFFICE_OUTAGE_START',
       'OFFICE_OUTAGE_END',
+      'STATE_SYNC',
     ],
   })
   type!: MonitorSignalType;

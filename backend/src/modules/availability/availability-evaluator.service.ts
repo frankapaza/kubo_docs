@@ -29,6 +29,11 @@ import { TicketSync } from './evaluator/ticket-sync';
 import { IncidentCloser } from './incident-closer';
 
 const PAGE = 200;
+/** Intentos fallidos (excepción) tras los que una señal se descarta para no retener su clave para siempre. */
+export const MAX_SIGNAL_ATTEMPTS = 5;
+/** Comprobaciones correctas seguidas que reconcilian un estado sin señal (como la recuperación del tracker). */
+const RECONCILE_OK_COUNT = 2;
+const STUCK_STATES: TrackerState[] = ['FAILED', 'VERIFYING', 'DEGRADED'];
 
 interface TickContext {
   now: Date;
@@ -61,11 +66,24 @@ const SERVICE_PAUSED_TEXT = 'Servicio pausado';
  *
  * `monitor_probe_states.state` lo gobierna este servicio; la ingesta solo
  * crea la fila y actualiza `last_check_at`/`last_ok`/`last_latency_ms`.
+ * `state_changed_at` guarda cuándo lo cambió este servicio por última vez.
+ *
+ * Resincronización tras reiniciar una sonda: STATE_SYNC (servicio sano según
+ * el tracker recién creado) fija OK, cierra la degradación y reevalúa la
+ * recuperación; OFFICE_OUTAGE_START/END son idempotentes. Y como red de
+ * seguridad, al final de cada tick se reconcilia lo que quedó colgado sin
+ * señal (ver `reconcileStates` y `reconcileOutages`).
+ *
+ * Una señal cuyo procesamiento lanza se reintenta en los ticks siguientes
+ * reteniendo su clave; tras `MAX_SIGNAL_ATTEMPTS` intentos se marca procesada
+ * con un error en el log (p. ej. un serviceId inexistente) para no bloquear la
+ * clave para siempre. El recuento es en memoria: un reinicio lo pone a cero.
  */
 @Injectable()
 export class AvailabilityEvaluatorService extends IncidentCloser {
   private readonly logger = new Logger(AvailabilityEvaluatorService.name);
   private readonly ticketSync: TicketSync;
+  private readonly attempts = new Map<number, number>();
 
   constructor(
     private readonly ds: DataSource,
@@ -100,16 +118,140 @@ export class AvailabilityEvaluatorService extends IncidentCloser {
         try {
           outcome = await this.ds.transaction((m) => this.handle(m, s, ctx));
         } catch (e) {
-          this.logger.error(`Señal ${s.id} (${s.type}) no procesada: ${(e as Error).message}`);
+          if (await this.failedAttempt(s, e as Error, now)) continue;
           if (key) held.add(key);
           continue;
         }
+        this.attempts.delete(num(s.id));
         if (!outcome.processed && key) held.add(key);
         await this.runActions(outcome.actions, ctx);
       }
       if (page.length < PAGE) break;
     }
+    await this.reconcileStates(ctx);
+    await this.reconcileOutages(ctx);
     await this.ticketSync.sweep(now, ctx.attempted);
+  }
+
+  /** Cuenta el intento fallido; true si la señal se ha descartado (marcada procesada). */
+  private async failedAttempt(s: MonitorProbeSignal, e: Error, now: Date): Promise<boolean> {
+    const id = num(s.id);
+    const n = (this.attempts.get(id) ?? 0) + 1;
+    if (n < MAX_SIGNAL_ATTEMPTS) {
+      this.attempts.set(id, n);
+      this.logger.error(`Señal ${s.id} (${s.type}) no procesada (intento ${n}/${MAX_SIGNAL_ATTEMPTS}): ${e.message}`);
+      return false;
+    }
+    this.attempts.delete(id);
+    try {
+      await this.ds.manager.getRepository(MonitorProbeSignal).update({ id, processedAt: IsNull() }, { processedAt: now });
+    } catch (err) {
+      this.logger.error(`Señal ${s.id}: no se pudo descartar: ${(err as Error).message}`);
+      return false;
+    }
+    this.logger.error(
+      `Señal ${s.id} (${s.type}, sonda ${s.probeId}, servicio ${s.serviceId ?? '-'}) descartada sin incidente tras ${MAX_SIGNAL_ATTEMPTS} intentos: ${e.message}`,
+    );
+    return true;
+  }
+
+  /**
+   * Red de seguridad: un estado FAILED/VERIFYING/DEGRADED sin señales pendientes
+   * de su (sonda, servicio) cuyas dos comprobaciones más recientes, recibidas
+   * después del último cambio de estado, son correctas (y rápidas, si era
+   * DEGRADED) pasa a OK como lo haría un RECOVERED/DEGRADATION_CLEARED que no
+   * llegó (p. ej. la sonda reinició con la condición abierta).
+   */
+  private async reconcileStates(ctx: TickContext): Promise<void> {
+    const stuck = await this.ds.manager.getRepository(MonitorProbeState).find({ where: { state: In(STUCK_STATES) } });
+    for (const row of stuck) {
+      const probe = ctx.probes.get(num(row.probeId));
+      if (!probe) continue;
+      try {
+        const actions = await this.ds.transaction((m) => this.reconcileState(m, row, probe, ctx));
+        await this.runActions(actions, ctx);
+      } catch (e) {
+        this.logger.error(`No se pudo reconciliar el estado de ${probe.code} para el servicio ${row.serviceId}: ${(e as Error).message}`);
+      }
+    }
+  }
+
+  private async reconcileState(m: EntityManager, row: MonitorProbeState, probe: MonitorProbe, ctx: TickContext): Promise<PostCommitAction[]> {
+    const probeId = num(row.probeId);
+    const serviceId = num(row.serviceId);
+    const pending = await m.getRepository(MonitorProbeSignal).count({ where: { probeId, serviceId, processedAt: IsNull() } });
+    if (pending > 0) return [];
+    const since = row.stateChangedAt ?? row.updatedAt;
+    const checks = await m.getRepository(MonitorCheck).find({
+      where: { probeId, serviceId, receivedAt: MoreThan(since) },
+      order: { startedAt: 'DESC' },
+      take: RECONCILE_OK_COUNT,
+    });
+    if (checks.length < RECONCILE_OK_COUNT || !checks.every((c) => Boolean(c.ok))) return [];
+    if (row.state === 'DEGRADED') {
+      const service = await m.getRepository(MonitorService).findOne({ where: { id: serviceId } });
+      const threshold = Number(service?.latencyThresholdMs ?? 1500);
+      if (!checks.every((c) => Number(c.durationMs) <= threshold)) return [];
+    }
+    // Releer dentro de la transacción: otra ejecución pudo cambiarlo.
+    const fresh = await m.getRepository(MonitorProbeState).findOne({ where: { probeId, serviceId } });
+    if (!fresh || fresh.state !== row.state) return [];
+
+    const at = this.toCentral(checks[0].startedAt, checks[0].receivedAt, probe);
+    this.logger.warn(`Estado ${row.state} de ${probe.code} para el servicio ${serviceId} reconciliado a OK sin señal (dos comprobaciones correctas posteriores)`);
+    await this.setState(m, probeId, serviceId, 'OK', ctx.now);
+    if (row.state === 'DEGRADED' && probe.kind === 'OFFICE') await this.closeDegraded(m, serviceId, at, ctx.now);
+    return this.recover(m, serviceId, at, ctx);
+  }
+
+  /**
+   * Red de seguridad: una caída de oficina abierta se cierra si, sin señales de
+   * oficina pendientes, las comprobaciones más recientes de esa sonda (una por
+   * servicio, iniciadas más de un intervalo después del inicio de la caída) ya
+   * no cumplen la regla de caída: fallan menos de ceil(n/2).
+   */
+  private async reconcileOutages(ctx: TickContext): Promise<void> {
+    const open = await this.ds.manager.getRepository(MonitorOfficeOutage).find({ where: { endedAt: IsNull() } });
+    for (const outage of open) {
+      const probe = ctx.probes.get(num(outage.probeId));
+      if (!probe || probe.kind !== 'OFFICE') continue;
+      try {
+        await this.ds.transaction((m) => this.reconcileOutage(m, outage, probe, ctx));
+      } catch (e) {
+        this.logger.error(`No se pudo reconciliar la caída de oficina ${outage.id}: ${(e as Error).message}`);
+      }
+    }
+  }
+
+  private async reconcileOutage(m: EntityManager, outage: MonitorOfficeOutage, probe: MonitorProbe, ctx: TickContext): Promise<void> {
+    const probeId = num(probe.id);
+    const pending = await m.getRepository(MonitorProbeSignal).count({ where: { probeId, serviceId: IsNull(), processedAt: IsNull() } });
+    if (pending > 0) return;
+    const after = outage.startedAt.getTime() + intervalMsAt(outage.startedAt, DEFAULT_SCHEDULE);
+    // Solo lo reciente (índice por started_at): dos intervalos hacia atrás bastan para una por servicio.
+    const from = Math.max(after, ctx.now.getTime() - 2 * intervalMsAt(ctx.now, DEFAULT_SCHEDULE));
+    const skew = this.skewOf(probe);
+    const recent = await m.getRepository(MonitorCheck).find({
+      where: { probeId, kind: In(['REGULAR', 'RETRY']), startedAt: MoreThan(new Date(from - skew)) },
+      order: { startedAt: 'DESC' },
+    });
+    const latest = new Map<number, MonitorCheck>();
+    for (const c of recent) {
+      const sid = num(c.serviceId);
+      if (sid <= 0 || latest.has(sid)) continue;
+      if (this.toCentral(c.startedAt, c.receivedAt, probe).getTime() <= after) continue;
+      latest.set(sid, c);
+    }
+    const n = latest.size;
+    if (n === 0) return;
+    const failed = [...latest.values()].filter((c) => !c.ok).length;
+    if (failed >= Math.ceil(n / 2)) return;
+    const newest = [...latest.values()].reduce((a, b) => (b.startedAt.getTime() > a.startedAt.getTime() ? b : a));
+    const endedAt = this.toCentral(newest.startedAt, newest.receivedAt, probe);
+    const res = await m.getRepository(MonitorOfficeOutage).update({ id: num(outage.id), endedAt: IsNull() }, { endedAt });
+    if (res.affected) {
+      this.logger.warn(`Caída de oficina ${outage.id} cerrada sin señal: ${n - failed} de ${n} servicios responden`);
+    }
   }
 
   /** Cierra los incidentes abiertos de servicios pausados o archivados, sin evento RECOVERED. */
@@ -190,6 +332,11 @@ export class AvailabilityEvaluatorService extends IncidentCloser {
       case 'RECOVERED':
         await this.setState(m, probeId, serviceId, 'OK', ctx.now);
         return done(await this.recover(m, serviceId, at, ctx));
+      case 'STATE_SYNC':
+        // La sonda reinició y juzga el servicio sano: idempotente con lo que ya hubiera.
+        await this.setState(m, probeId, serviceId, 'OK', ctx.now);
+        if (probe.kind === 'OFFICE') await this.closeDegraded(m, serviceId, at, ctx.now);
+        return done(await this.recover(m, serviceId, at, ctx));
       case 'CONFIRMED_FAILURE':
         return this.confirmed(m, s, probe, serviceId, at, ctx, done);
       default:
@@ -207,6 +354,8 @@ export class AvailabilityEvaluatorService extends IncidentCloser {
     done: (actions?: PostCommitAction[]) => Promise<Outcome>,
   ): Promise<Outcome> {
     const reporter = probe.kind;
+    // El estado refleja siempre al tracker de la sonda, aunque luego el fallo se descarte
+    // (servicio pausado, caída de oficina): RECOVERED o la reconciliación lo devuelven a OK.
     if (s.awaitingCrossUntil === null) await this.setState(m, num(probe.id), serviceId, 'FAILED', ctx.now);
     const service = await m.getRepository(MonitorService).findOne({ where: { id: serviceId } });
     if (!service || service.status !== 'ACTIVE') return done();
@@ -387,20 +536,27 @@ export class AvailabilityEvaluatorService extends IncidentCloser {
 
   private async setState(m: EntityManager, probeId: number, serviceId: number, state: TrackerState, now: Date): Promise<void> {
     const repo = m.getRepository(MonitorProbeState);
-    const res = await repo.update({ serviceId, probeId }, { state, updatedAt: now });
+    const res = await repo.update({ serviceId, probeId }, { state, updatedAt: now, stateChangedAt: now });
     if (res.affected) return;
     try {
-      await repo.insert({ serviceId, probeId, state, lastCheckAt: null, lastOk: null, lastLatencyMs: null, updatedAt: now });
+      await repo.insert({ serviceId, probeId, state, lastCheckAt: null, lastOk: null, lastLatencyMs: null, updatedAt: now, stateChangedAt: now });
     } catch (e) {
       // La fila existía con los mismos valores (MySQL no la cuenta como afectada) o la creó la ingesta a la vez.
       if (!isDuplicateEntry(e)) throw e;
-      await repo.update({ serviceId, probeId }, { state, updatedAt: now });
+      await repo.update({ serviceId, probeId }, { state, updatedAt: now, stateChangedAt: now });
     }
   }
 
   /** Instante de la sonda pasado a hora de la central con su desfase, sin pasar de la recepción. */
   private centralAt(t: Date, s: MonitorProbeSignal, probe: MonitorProbe): Date {
-    const skew = probe.clockSkewMs === null || probe.clockSkewMs === undefined ? 0 : Number(probe.clockSkewMs);
-    return new Date(Math.min(t.getTime() + skew, s.receivedAt.getTime()));
+    return this.toCentral(t, s.receivedAt, probe);
+  }
+
+  private toCentral(t: Date, receivedAt: Date, probe: MonitorProbe): Date {
+    return new Date(Math.min(t.getTime() + this.skewOf(probe), receivedAt.getTime()));
+  }
+
+  private skewOf(probe: MonitorProbe): number {
+    return probe.clockSkewMs === null || probe.clockSkewMs === undefined ? 0 : Number(probe.clockSkewMs);
   }
 }

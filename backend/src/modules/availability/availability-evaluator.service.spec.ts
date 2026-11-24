@@ -170,7 +170,7 @@ const setup = () => {
   db.add(MonitorServer, { id: 10, clientId: 3, name: 'srv-app', status: 'ACTIVE' });
   db.add(MonitorServer, { id: 11, clientId: 3, name: 'srv-db', status: 'ACTIVE' });
   const svc = (id: number, name: string, criticality: string, systemId: number | null = 50, serverId = 10) =>
-    db.add(MonitorService, { id, serverId, systemId, name, protocol: 'TCP', criticality, status: 'ACTIVE' });
+    db.add(MonitorService, { id, serverId, systemId, name, protocol: 'TCP', criticality, status: 'ACTIVE', latencyThresholdMs: 1000 });
   svc(100, 'web HTTPS', 'HIGH');
   svc(101, 'TCP 443', 'MEDIUM');
   svc(102, 'api', 'LOW');
@@ -690,5 +690,209 @@ describe('AvailabilityEvaluatorService', () => {
     const ok = t.signal(OFFICE, 'VERIFYING', 101, T0);
     await t.evaluator.tick(at(1));
     expect(t.sig(ok.id).processedAt).toEqual(at(1));
+  });
+
+  describe('resincronización tras reiniciar una sonda (STATE_SYNC y caída de oficina)', () => {
+    const stateOf = (t: ReturnType<typeof setup>, probeId: number, serviceId: number) =>
+      t.db.rows<MonitorProbeState>(MonitorProbeState).filter((r) => r.probeId === probeId && r.serviceId === serviceId).pop()?.state;
+
+    it('kubo-01 reinicia con el DOWN abierto y el servicio ya bien: su STATE_SYNC pone OK y cierra el incidente con comentario', async () => {
+      const t = setup();
+      await t.officeDownWithCross(100, T0, false);
+      t.state(DC, 100, 'FAILED');
+      t.signal(OFFICE, 'RECOVERED', 100, at(500));
+      await t.evaluator.tick(at(501));
+      expect(t.incidents()[0].recoveredAt).toBeNull(); // el servidor sigue FAILED
+      t.tickets.comment.mockClear();
+
+      t.signal(DC, 'STATE_SYNC', 100, at(900));
+      await t.evaluator.tick(at(901));
+      expect(stateOf(t, DC, 100)).toBe('OK');
+      expect(t.incidents()[0]).toMatchObject({ recoveredAt: at(900), closeReason: 'RECOVERED' });
+      expect(t.tickets.comment).toHaveBeenCalledTimes(1);
+    });
+
+    it('la oficina reinicia con un DEGRADED abierto: su STATE_SYNC lo cierra', async () => {
+      const t = setup();
+      t.signal(OFFICE, 'DEGRADED', 100, T0);
+      await t.evaluator.tick(at(1));
+      t.signal(OFFICE, 'STATE_SYNC', 100, at(600));
+      await t.evaluator.tick(at(601));
+      expect(t.incidents()[0]).toMatchObject({ kind: 'DEGRADED', recoveredAt: at(600) });
+      expect(stateOf(t, OFFICE, 100)).toBe('OK');
+    });
+
+    it('STATE_SYNC con todo ya en OK no hace nada más que fijar el estado', async () => {
+      const t = setup();
+      t.state(OFFICE, 100, 'OK');
+      const s = t.signal(OFFICE, 'STATE_SYNC', 100, T0);
+      await t.evaluator.tick(at(1));
+      expect(t.sig(s.id).processedAt).toEqual(at(1));
+      expect(t.incidents()).toHaveLength(0);
+      expect(stateOf(t, OFFICE, 100)).toBe('OK');
+    });
+
+    it('OFFICE_OUTAGE_END sin caída abierta y START con una ya abierta no hacen nada', async () => {
+      const t = setup();
+      t.signal(OFFICE, 'OFFICE_OUTAGE_END', null, T0);
+      await t.evaluator.tick(at(1));
+      expect(t.db.rows(MonitorOfficeOutage)).toHaveLength(0);
+      t.signal(OFFICE, 'OFFICE_OUTAGE_START', null, at(10));
+      t.signal(OFFICE, 'OFFICE_OUTAGE_START', null, at(400)); // el runner nuevo la vuelve a declarar
+      await t.evaluator.tick(at(401));
+      expect(t.db.rows<MonitorOfficeOutage>(MonitorOfficeOutage)).toHaveLength(1);
+      t.signal(OFFICE, 'OFFICE_OUTAGE_END', null, at(700));
+      await t.evaluator.tick(at(701));
+      expect(t.db.rows<MonitorOfficeOutage>(MonitorOfficeOutage)[0].endedAt).toEqual(at(700));
+    });
+  });
+
+  describe('reconciliación central (red de seguridad sin señales)', () => {
+    const stateOf = (t: ReturnType<typeof setup>, probeId: number, serviceId: number) =>
+      t.db.rows<MonitorProbeState>(MonitorProbeState).filter((r) => r.probeId === probeId && r.serviceId === serviceId).pop()?.state;
+
+    /** DOWN abierto con la oficina ya OK y kubo-01 colgado en FAILED desde at(400). */
+    const stuckDc = async () => {
+      const t = setup();
+      await t.officeDownWithCross(100, T0, false);
+      t.signal(DC, 'CONFIRMED_FAILURE', 100, at(390));
+      t.signal(OFFICE, 'RECOVERED', 100, at(395));
+      await t.evaluator.tick(at(400));
+      expect(stateOf(t, DC, 100)).toBe('FAILED');
+      expect(t.incidents()[0].recoveredAt).toBeNull();
+      t.tickets.comment.mockClear();
+      return t;
+    };
+
+    it('kubo-01 FAILED con dos comprobaciones correctas recibidas después (sin señal): pasa a OK y cierra el DOWN', async () => {
+      const t = await stuckDc();
+      t.check(DC, 100, true, at(600), { kind: 'REGULAR' });
+      t.check(DC, 100, true, at(900), { kind: 'REGULAR' });
+      await t.evaluator.tick(at(905));
+      expect(stateOf(t, DC, 100)).toBe('OK');
+      expect(t.incidents()[0]).toMatchObject({ recoveredAt: at(900), closeReason: 'RECOVERED' });
+      expect(t.tickets.comment).toHaveBeenCalledTimes(1);
+      await t.evaluator.tick(at(1000));
+      expect(t.tickets.comment).toHaveBeenCalledTimes(1);
+    });
+
+    it('no reconcilia con una sola correcta, con la última fallida, ni con comprobaciones anteriores al cambio de estado', async () => {
+      const t = await stuckDc();
+      t.check(DC, 100, true, at(300), { kind: 'REGULAR' }); // anterior al FAILED
+      t.check(DC, 100, true, at(600), { kind: 'REGULAR' });
+      await t.evaluator.tick(at(605));
+      expect(stateOf(t, DC, 100)).toBe('FAILED');
+      t.check(DC, 100, false, at(900), { kind: 'REGULAR' });
+      await t.evaluator.tick(at(905));
+      expect(stateOf(t, DC, 100)).toBe('FAILED');
+      expect(t.incidents()[0].recoveredAt).toBeNull();
+    });
+
+    it('no reconcilia mientras haya señales sin procesar de esa sonda y servicio', async () => {
+      const t = setup();
+      t.signal(OFFICE, 'VERIFYING', 101, T0);
+      await t.evaluator.tick(at(1));
+      t.check(OFFICE, 101, true, at(300), { kind: 'REGULAR' });
+      t.check(OFFICE, 101, true, at(600), { kind: 'REGULAR' });
+      // Señal retenida esperando su cruce: la clave (oficina, 101) sigue pendiente.
+      const held = t.signal(OFFICE, 'CONFIRMED_FAILURE', 101, at(250), { awaitingCrossUntil: at(5000) });
+      await t.evaluator.tick(at(601));
+      expect(t.sig(held.id).processedAt).toBeNull();
+      expect(stateOf(t, OFFICE, 101)).toBe('VERIFYING');
+    });
+
+    it('DEGRADED de la oficina: dos correctas rápidas lo cierran; las lentas no', async () => {
+      const t = setup();
+      t.signal(OFFICE, 'DEGRADED', 100, T0);
+      await t.evaluator.tick(at(1));
+      t.check(OFFICE, 100, true, at(300), { kind: 'REGULAR', durationMs: 4000 });
+      t.check(OFFICE, 100, true, at(600), { kind: 'REGULAR', durationMs: 4000 });
+      await t.evaluator.tick(at(605));
+      expect(stateOf(t, OFFICE, 100)).toBe('DEGRADED');
+      expect(t.incidents()[0].recoveredAt).toBeNull();
+      t.check(OFFICE, 100, true, at(900), { kind: 'REGULAR', durationMs: 50 });
+      t.check(OFFICE, 100, true, at(1200), { kind: 'REGULAR', durationMs: 50 });
+      await t.evaluator.tick(at(1205));
+      expect(stateOf(t, OFFICE, 100)).toBe('OK');
+      expect(t.incidents()[0]).toMatchObject({ kind: 'DEGRADED', recoveredAt: at(1200) });
+    });
+
+    it('VERIFYING colgado (la sonda reinició antes de los reintentos): dos correctas después lo devuelven a OK', async () => {
+      const t = setup();
+      t.signal(OFFICE, 'VERIFYING', 101, T0);
+      await t.evaluator.tick(at(1));
+      t.check(OFFICE, 101, true, at(300), { kind: 'REGULAR' });
+      t.check(OFFICE, 101, true, at(600), { kind: 'REGULAR' });
+      await t.evaluator.tick(at(601));
+      expect(stateOf(t, OFFICE, 101)).toBe('OK');
+    });
+
+    it('caída de oficina abierta sin END: se cierra cuando llegan comprobaciones mayoritariamente correctas posteriores a inicio + un intervalo', async () => {
+      const t = setup();
+      t.signal(OFFICE, 'OFFICE_OUTAGE_START', null, T0);
+      await t.evaluator.tick(at(1));
+      // Dentro del primer intervalo (5 min de día): no cuentan.
+      for (const id of [100, 101, 102]) t.check(OFFICE, id, true, at(100), { kind: 'REGULAR' });
+      await t.evaluator.tick(at(110));
+      expect(t.db.rows<MonitorOfficeOutage>(MonitorOfficeOutage)[0].endedAt).toBeNull();
+      // Después: 2 de 3 correctas (fallan menos de ceil(3/2)).
+      t.check(OFFICE, 100, true, at(400), { kind: 'REGULAR' });
+      t.check(OFFICE, 101, true, at(410), { kind: 'REGULAR' });
+      t.check(OFFICE, 102, false, at(420), { kind: 'REGULAR' });
+      await t.evaluator.tick(at(430));
+      expect(t.db.rows<MonitorOfficeOutage>(MonitorOfficeOutage)[0].endedAt).toEqual(at(420));
+    });
+
+    it('caída de oficina abierta con la mitad o más de las comprobaciones posteriores fallando: sigue abierta', async () => {
+      const t = setup();
+      t.signal(OFFICE, 'OFFICE_OUTAGE_START', null, T0);
+      await t.evaluator.tick(at(1));
+      t.check(OFFICE, 100, true, at(400), { kind: 'REGULAR' });
+      t.check(OFFICE, 101, false, at(410), { kind: 'REGULAR' });
+      await t.evaluator.tick(at(430));
+      expect(t.db.rows<MonitorOfficeOutage>(MonitorOfficeOutage)[0].endedAt).toBeNull();
+    });
+
+    it('fallo de la oficina durante su caída: el estado queda FAILED sin incidente y la reconciliación lo devuelve a OK', async () => {
+      const t = setup();
+      t.signal(OFFICE, 'OFFICE_OUTAGE_START', null, T0);
+      t.signal(OFFICE, 'CONFIRMED_FAILURE', 100, at(30));
+      await t.evaluator.tick(at(40));
+      expect(t.incidents()).toHaveLength(0);
+      expect(stateOf(t, OFFICE, 100)).toBe('FAILED');
+      t.check(OFFICE, 100, true, at(400), { kind: 'REGULAR' });
+      t.check(OFFICE, 100, true, at(700), { kind: 'REGULAR' });
+      await t.evaluator.tick(at(701));
+      expect(stateOf(t, OFFICE, 100)).toBe('OK');
+      expect(t.db.rows<MonitorOfficeOutage>(MonitorOfficeOutage)[0].endedAt).toEqual(at(700));
+      expect(t.incidents()).toHaveLength(0);
+    });
+  });
+
+  it('una señal que falla siempre se descarta tras 5 intentos y libera su clave', async () => {
+    const t = setup();
+    const getRepository = t.db.manager.getRepository;
+    (t.db.manager as any).getRepository = (e: any) => {
+      const repo = getRepository(e);
+      if (e !== MonitorProbeState) return repo;
+      return {
+        ...repo,
+        update: async (where: any, patch: any) => {
+          if (Number(where.serviceId) === 999) throw new Error('Cannot add or update a child row: a foreign key constraint fails');
+          return repo.update(where, patch);
+        },
+      };
+    };
+    const bad = t.signal(OFFICE, 'VERIFYING', 999, T0);
+    const next = t.signal(OFFICE, 'OFFICE_OUTAGE_START', null, at(1));
+    const held = t.signal(OFFICE, 'TRANSIENT_FAILURE', 999, at(30));
+    for (let i = 1; i <= 4; i++) {
+      await t.evaluator.tick(at(40 + i));
+      expect(t.sig(bad.id).processedAt).toBeNull();
+      expect(t.sig(held.id).processedAt).toBeNull();
+    }
+    expect(t.sig(next.id).processedAt).not.toBeNull();
+    await t.evaluator.tick(at(50));
+    expect(t.sig(bad.id).processedAt).toEqual(at(50));
   });
 });

@@ -12,7 +12,14 @@ export type SignalType =
   | 'DEGRADED'
   | 'DEGRADATION_CLEARED'
   | 'OFFICE_OUTAGE_START'
-  | 'OFFICE_OUTAGE_END';
+  | 'OFFICE_OUTAGE_END'
+  /**
+   * Sincronización de arranque: el tracker (recién creado, sin estado previo) juzga el
+   * servicio OK con `recoveryOkCount` correctos REGULAR seguidos (rápidos si vigila la
+   * degradación). La central fija el estado en OK y reevalúa la recuperación, así no queda
+   * un FAILED/VERIFYING/DEGRADED colgado si la condición se resolvió con la sonda parada.
+   */
+  | 'STATE_SYNC';
 
 export interface ProbeSignal {
   /** UUID propio de la señal: la central deduplica por él. */
@@ -44,6 +51,11 @@ export const DEFAULT_TRACKER: TrackerOptions = {
 export type TrackerState = 'OK' | 'VERIFYING' | 'FAILED' | 'DEGRADED';
 
 /**
+ * Arranque: el tracker empieza en OK pero sin sincronizar con la central. La primera
+ * señal que emita la sincroniza (VERIFYING, DEGRADED…); si el servicio está bien, emite
+ * una única STATE_SYNC (ver `SignalType`). Así un reinicio de la sonda nunca deja en la
+ * central un estado que ya no es cierto.
+ *
  * Invariantes: cada DEGRADED va seguido de exactamente un DEGRADATION_CLEARED, y cada
  * CONFIRMED_FAILURE de exactamente un RECOVERED, antes del siguiente de su tipo.
  * Contrato: mientras está en VERIFYING solo los resultados RETRY hacen avanzar el
@@ -57,6 +69,9 @@ export class ServiceProbeTracker {
   private okStreak = 0;
   private slowStreak = 0;
   private fastStreak = 0;
+  /** false hasta la primera señal emitida (o la STATE_SYNC). */
+  private synced = false;
+  private syncOkStreak = 0;
 
   constructor(private readonly service: ServiceTarget, opts: Partial<TrackerOptions> = {}) {
     this.opts = { ...DEFAULT_TRACKER, ...opts };
@@ -74,6 +89,21 @@ export class ServiceProbeTracker {
   }
 
   onResult(r: CheckResult): ProbeSignal[] {
+    const out = this.step(r);
+    if (this.synced) return out;
+    if (out.length > 0) {
+      this.synced = true;
+      return out;
+    }
+    if (this.st !== 'OK' || r.kind !== 'REGULAR') return out;
+    const slow = this.opts.trackDegradation && r.durationMs > this.service.latencyThresholdMs;
+    this.syncOkStreak = r.ok && !slow ? this.syncOkStreak + 1 : 0;
+    if (this.syncOkStreak < this.opts.recoveryOkCount) return out;
+    this.synced = true;
+    return [{ id: randomUUID(), type: 'STATE_SYNC', serviceId: this.service.id, at: r.startedAt, firstFailureAt: null }];
+  }
+
+  private step(r: CheckResult): ProbeSignal[] {
     const sig = (type: SignalType, firstFailureAt: string | null = null): ProbeSignal => ({
       id: randomUUID(),
       type,
