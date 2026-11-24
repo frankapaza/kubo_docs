@@ -282,4 +282,104 @@ describe('ProbeRunner', () => {
     expect(h.signals().some((s) => s.type.startsWith('OFFICE'))).toBe(false);
     expect(h.runner.officeOutage()).toBe(false);
   });
+
+  it('saturación: 48 servicios con el mismo desfase y 16 de concurrencia; 8 tardan 10 s y fallan: las sanas empiezan a menos de 15 s, ninguna franja se pierde y llegan ambos reintentos', async () => {
+    // ids congruentes módulo 60 => todas las franjas vencen en el mismo instante
+    const services = Array.from({ length: 48 }, (_, k) => svc(k * 60 + 1));
+    const failing = new Set(services.slice(0, 8).map((s) => s.id));
+    const h = setup({
+      start: LIMA_23H,
+      services,
+      behavior: (t) => (failing.has(t.id) ? { ms: 10_000, ok: false } : { ms: 2000, ok: true }),
+    });
+    const t0 = h.clock.now().getTime();
+    h.runner.start();
+    await h.clock.advance(10 * MIN);
+    const tEnd = h.clock.now().getTime();
+    await h.clock.advance(30_000);
+    h.runner.stop();
+
+    expect(h.stats.maxInFlight).toBe(16);
+    expect(h.stats.maxPerService).toBe(1);
+    let maxLag = 0;
+    for (const s of services) {
+      const exp = expectedCycles(s.id, t0, tEnd);
+      expect(exp.length).toBeGreaterThanOrEqual(9);
+      const mine = h.delivered.filter((d) => d.result.serviceId === s.id).map((d) => d.result);
+      const covered = new Set(mine.filter((r) => r.kind === 'REGULAR' || r.kind === 'RETRY').map((r) => Date.parse(r.cycleAt)));
+      for (const c of exp) expect(covered.has(c)).toBe(true);
+      if (failing.has(s.id)) {
+        expect(mine.filter((r) => r.kind === 'RETRY').length).toBe(2);
+        expect(h.signals().filter((x) => x.serviceId === s.id).map((x) => x.type)).toEqual(['VERIFYING', 'CONFIRMED_FAILURE']);
+      } else {
+        const regulars = mine.filter((r) => r.kind === 'REGULAR' && Date.parse(r.cycleAt) < tEnd);
+        expect(regulars.map((r) => Date.parse(r.cycleAt))).toEqual(exp);
+        for (const r of regulars) maxLag = Math.max(maxLag, Date.parse(r.startedAt) - Date.parse(r.cycleAt));
+      }
+    }
+    // la cola se ejerce de verdad, pero sin pasar de 15 s
+    expect(maxLag).toBeGreaterThanOrEqual(5000);
+    expect(maxLag).toBeLessThan(15_000);
+  });
+
+  it('stop() y start() con pruebas en vuelo: nunca dos del mismo servicio ni más que la concurrencia', async () => {
+    // 3 servicios con el mismo desfase, pruebas de 20 s, concurrencia 2
+    const services = [svc(1), svc(61), svc(121)];
+    const h = setup({ start: LIMA_23H, services, concurrency: 2, behavior: () => ({ ms: 20_000, ok: true }) });
+    h.runner.start();
+    const s0 = nextCycleAt(1, h.clock.now(), DEFAULT_SCHEDULE).getTime();
+    await h.clock.advance(s0 - h.clock.now().getTime() + 1000);
+    expect(h.stats.inFlight).toBe(2);
+    h.runner.stop();
+    h.runner.start();
+    for (const s of services) h.runner.runNow(s.id, 'MANUAL', null);
+    await h.clock.advance(3 * MIN);
+    h.runner.stop();
+    expect(h.stats.maxPerService).toBe(1);
+    expect(h.stats.maxInFlight).toBe(2);
+    // las MANUAL esperan a que se liberen las pruebas previas al stop()
+    for (const st of h.starts.filter((x) => x.kind === 'MANUAL')) expect(st.at).toBeGreaterThanOrEqual(s0 + 20_000);
+  });
+
+  it('quitar y volver a dar de alta el mismo id con una prueba en vuelo no la solapa', async () => {
+    const h = setup({ start: LIMA_23H, services: [svc(1)], behavior: () => ({ ms: 20_000, ok: true }) });
+    h.runner.start();
+    const s0 = nextCycleAt(1, h.clock.now(), DEFAULT_SCHEDULE).getTime();
+    await h.clock.advance(s0 - h.clock.now().getTime() + 1000);
+    expect(h.stats.inFlight).toBe(1);
+    h.runner.updateServices([]);
+    h.runner.updateServices([svc(1)]);
+    h.runner.runNow(1, 'MANUAL', 3);
+    await h.clock.advance(3 * MIN);
+    h.runner.stop();
+    expect(h.stats.maxPerService).toBe(1);
+    expect(h.starts.find((x) => x.kind === 'MANUAL')!.at).toBe(s0 + 20_000);
+  });
+
+  it('un error interno al procesar un resultado no rompe la sonda ni el recuento', async () => {
+    const clock = new FakeClock(LIMA_23H);
+    let calls = 0;
+    const starts: number[] = [];
+    const check: CheckFn = async (target, kind, cycleAt, opts = {}) => {
+      calls++;
+      starts.push(clock.now().getTime());
+      await clock.sleep(100);
+      // la primera respuesta es inválida: el tracker lanza al procesarla
+      if (calls === 1) return null as unknown as CheckResult;
+      return {
+        id: randomUUID(), serviceId: target.id, kind, cycleAt: cycleAt.toISOString(), startedAt: clock.now().toISOString(),
+        durationMs: 100, ok: true, errorCode: null, httpStatus: null, orderId: opts.orderId ?? null,
+      };
+    };
+    const delivered: CheckResult[] = [];
+    const runner = new ProbeRunner({
+      services: [svc(1)], schedule: DEFAULT_SCHEDULE, concurrency: 1, clock, check,
+      onResult: (r) => delivered.push(r),
+    });
+    runner.start();
+    await clock.advance(5 * MIN);
+    runner.stop();
+    expect(starts.length).toBeGreaterThanOrEqual(5);
+    expect(delivered.length).toBe(starts.length - 1);
+  });
 });

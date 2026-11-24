@@ -145,9 +145,13 @@ class EventHeap {
  * - `updateServices`: altas se programan; bajas pierden tracker, colas, reintentos y el
  *   resultado de la prueba que tuvieran en vuelo; cambios se aplican al destino en sitio
  *   conservando el tracker (incluido el umbral de latencia).
- * - `stop()` cancela temporizadores y colas y descarta los resultados de pruebas en vuelo;
- *   los trackers se conservan y `start()` reprograma sus reintentos pendientes.
- * - Una excepción en `onResult` se ignora para no detener la sonda.
+ * - `stop()` cancela temporizadores y colas y descarta los resultados de pruebas en vuelo,
+ *   pero esas pruebas siguen ocupando su servicio y su hueco de concurrencia hasta que
+ *   terminan: un `start()` inmediato no las solapa ni excede el cupo. Lo mismo vale para un
+ *   id dado de baja y vuelto a dar de alta con su prueba en vuelo (`busyIds`). Los trackers
+ *   se conservan y `start()` reprograma sus reintentos pendientes.
+ * - Una excepción en `onResult` o en el procesamiento interno de un resultado se ignora para
+ *   no detener la sonda; el recuento de pruebas en vuelo se libera antes.
  */
 export class ProbeRunner {
   private readonly clock: Clock;
@@ -159,6 +163,8 @@ export class ProbeRunner {
   private running = false;
   private epoch = 0;
   private inFlight = 0;
+  /** Ids de servicio con prueba en vuelo, independiente de su ServiceState (bajas/altas). */
+  private readonly busyIds = new Set<number>();
   private seq = 0;
   private slots: Slot[] = [];
   private outage = false;
@@ -197,11 +203,9 @@ export class ProbeRunner {
     this.timer = null;
     this.timerAt = null;
     this.events.clear();
-    this.inFlight = 0;
-    for (const o of this.owners()) {
-      o.queue.length = 0;
-      o.busy = false;
-    }
+    // inFlight, busy y busyIds NO se reinician: las pruebas en vuelo siguen corriendo y
+    // los liberan al terminar, así un start() posterior no las solapa ni excede el cupo.
+    for (const o of this.owners()) o.queue.length = 0;
     for (const svc of this.services.values()) {
       svc.retryFor = null;
       svc.substituteCycleAt = null;
@@ -371,6 +375,8 @@ export class ProbeRunner {
       let best: Owner | null = null;
       for (const o of this.owners()) {
         if (o.busy || o.queue.length === 0) continue;
+        // Un id dado de baja y vuelto a dar de alta con su prueba aún en vuelo sigue ocupado.
+        if (this.isService(o) && this.busyIds.has(o.target.id)) continue;
         const j = o.queue[0];
         const b = best?.queue[0];
         if (!b || j.dueAt < b.dueAt || (j.dueAt === b.dueAt && j.seq < b.seq)) best = o;
@@ -382,10 +388,12 @@ export class ProbeRunner {
 
   private launch(owner: Owner): void {
     const job = owner.queue.shift()!;
+    const isRef = !this.isService(owner);
+    const serviceId = owner.target.id;
     owner.busy = true;
+    if (!isRef) this.busyIds.add(serviceId);
     this.inFlight++;
     const epoch = this.epoch;
-    const isRef = !this.isService(owner);
     const startedAt = this.clock.now();
     let p: Promise<CheckResult>;
     try {
@@ -395,15 +403,27 @@ export class ProbeRunner {
     } catch (err) {
       p = Promise.reject(err);
     }
-    p.catch((): CheckResult => this.failure(owner.target, job, startedAt)).then((r) => {
-      if (epoch !== this.epoch) return; // detenido mientras estaba en vuelo
-      this.inFlight--;
-      owner.busy = false;
-      if (isRef) this.onReferenceResult(owner, r);
-      else this.onServiceResult(owner as ServiceState, r);
-      this.pump();
-      this.arm();
-    });
+    p.catch((): CheckResult => this.failure(owner.target, job, startedAt))
+      .then((r) => {
+        // Liberar siempre, aunque la ejecución se haya detenido o el servicio dado de baja.
+        this.inFlight--;
+        owner.busy = false;
+        if (!isRef) this.busyIds.delete(serviceId);
+        try {
+          if (epoch !== this.epoch) return; // detenido mientras estaba en vuelo: se descarta
+          if (isRef) this.onReferenceResult(owner, r);
+          else this.onServiceResult(owner as ServiceState, r);
+        } finally {
+          if (this.running) {
+            this.pump();
+            this.arm();
+          }
+        }
+      })
+      .catch(() => {
+        // Un error interno no debe convertirse en un rechazo no gestionado que tumbe la
+        // sonda 24/7; el recuento ya quedó liberado arriba.
+      });
   }
 
   private isService(o: Owner): o is ServiceState {
