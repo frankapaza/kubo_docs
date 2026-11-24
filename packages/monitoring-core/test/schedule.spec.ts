@@ -1,4 +1,4 @@
-import { DEFAULT_SCHEDULE, intervalMsAt, nextCycleAt } from '../src/schedule';
+import { DEFAULT_SCHEDULE, intervalMsAt, nextCycleAt, assertValidSchedule } from '../src/schedule';
 
 const lima = (s: string) => new Date(`${s}-05:00`);
 
@@ -20,4 +20,18 @@ it('al cruzar las 22:00 pasa a la franja de 1 min sin saltarse la de las 22:00',
 it('al cruzar las 07:00 pasa a la franja de 5 min', () => {
   expect(nextCycleAt(1, lima('2026-11-24T06:59:37'), DEFAULT_SCHEDULE)).toEqual(lima('2026-11-24T07:00:37'));
   expect(nextCycleAt(1, lima('2026-11-24T07:00:37'), DEFAULT_SCHEDULE)).toEqual(lima('2026-11-24T07:05:37'));
+});
+
+describe('assertValidSchedule', () => {
+  const ok = DEFAULT_SCHEDULE;
+  it('DEFAULT_SCHEDULE es valido', () => expect(() => assertValidSchedule(ok)).not.toThrow());
+  it.each([
+    ['intervalo 0', { ...ok, dayIntervalMin: 0 }],
+    ['intervalo negativo', { ...ok, nightIntervalMin: -1 }],
+    ['intervalo que no divide 1440', { ...ok, dayIntervalMin: 7 }],
+    ['dayStart >= nightStart', { ...ok, dayStartHour: 22, nightStartHour: 22 }],
+    ['hora fuera de 0..23', { ...ok, nightStartHour: 24 }],
+    ['hora negativa', { ...ok, dayStartHour: -1 }],
+    ['frontera no multiplo de ambos intervalos', { ...ok, dayIntervalMin: 45 }],
+  ])('%s lanza', (_n, cfg) => expect(() => assertValidSchedule(cfg)).toThrow(/Configuración/));
 });

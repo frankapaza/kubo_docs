@@ -46,3 +46,26 @@ export function nextCycleAt(serviceId: number, after: Date, cfg: ScheduleConfig)
   const slotLimaMs = (Math.floor(limaMs / interval) + 1) * interval;
   return new Date(slotLimaMs - limaShift + offset);
 }
+
+/** Lanza un Error (en español) si la configuración de franjas no es coherente. */
+export function assertValidSchedule(cfg: ScheduleConfig): void {
+  const day = 24 * 60;
+  for (const [name, v] of [['dayIntervalMin', cfg.dayIntervalMin], ['nightIntervalMin', cfg.nightIntervalMin]] as const) {
+    if (!Number.isInteger(v) || v <= 0 || day % v !== 0) {
+      throw new Error(`Configuración de horario inválida: ${name} (${v}) debe ser un entero positivo que divida 1440 minutos.`);
+    }
+  }
+  for (const [name, v] of [['dayStartHour', cfg.dayStartHour], ['nightStartHour', cfg.nightStartHour]] as const) {
+    if (!Number.isInteger(v) || v < 0 || v > 23) {
+      throw new Error(`Configuración de horario inválida: ${name} (${v}) debe estar entre 0 y 23.`);
+    }
+  }
+  if (cfg.dayStartHour >= cfg.nightStartHour) {
+    throw new Error('Configuración de horario inválida: dayStartHour debe ser menor que nightStartHour.');
+  }
+  for (const boundary of [cfg.dayStartHour * 60, cfg.nightStartHour * 60]) {
+    if (boundary % cfg.dayIntervalMin !== 0 || boundary % cfg.nightIntervalMin !== 0) {
+      throw new Error(`Configuración de horario inválida: el límite de franja (${boundary} min) debe ser múltiplo de ambos intervalos.`);
+    }
+  }
+}
