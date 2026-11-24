@@ -186,8 +186,9 @@ export class AvailabilityEvaluatorService extends IncidentCloser {
         await this.setState(m, probeId, serviceId, 'VERIFYING', ctx.now);
         return done();
       case 'TRANSIENT_FAILURE':
+        // Toda vuelta a OK reevalúa la recuperación: la otra sonda pudo quedar esperando a esta.
         await this.setState(m, probeId, serviceId, 'OK', ctx.now);
-        return done();
+        return done(await this.recover(m, serviceId, at, ctx));
       case 'DEGRADED':
         await this.setState(m, probeId, serviceId, 'DEGRADED', ctx.now);
         if (probe.kind === 'OFFICE') await this.openDegraded(m, serviceId, at, ctx.now);
@@ -195,7 +196,7 @@ export class AvailabilityEvaluatorService extends IncidentCloser {
       case 'DEGRADATION_CLEARED':
         await this.setState(m, probeId, serviceId, 'OK', ctx.now);
         if (probe.kind === 'OFFICE') await this.closeDegraded(m, serviceId, at, ctx.now);
-        return done();
+        return done(await this.recover(m, serviceId, at, ctx));
       case 'RECOVERED':
         await this.setState(m, probeId, serviceId, 'OK', ctx.now);
         return done(await this.recover(m, serviceId, at, ctx));

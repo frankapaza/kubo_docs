@@ -459,6 +459,84 @@ describe('AvailabilityEvaluatorService', () => {
     expect(t.incidents()[0].recoveredAt).toEqual(at(700));
   });
 
+  it('DOWN: la oficina se recupera con el servidor VERIFYING; el reintento del servidor pasa (TRANSIENT_FAILURE) -> se cierra una vez', async () => {
+    const t = setup();
+    await t.officeDownWithCross(100, T0, false);
+    const inc = t.incidents()[0];
+    t.state(DC, 100, 'VERIFYING');
+    t.tickets.comment.mockClear();
+    t.signal(OFFICE, 'RECOVERED', 100, at(600));
+    await t.evaluator.tick(at(601));
+    expect(t.incidents()[0].recoveredAt).toBeNull();
+    t.signal(DC, 'TRANSIENT_FAILURE', 100, at(630));
+    await t.evaluator.tick(at(631));
+    expect(t.incidents()[0]).toMatchObject({ recoveredAt: at(630), closeReason: 'RECOVERED' });
+    expect(t.events(inc.id).filter((e) => e.type === 'RECOVERED')).toHaveLength(1);
+    expect(t.tickets.comment).toHaveBeenCalledTimes(1);
+    await t.evaluator.tick(at(700));
+    expect(t.tickets.comment).toHaveBeenCalledTimes(1);
+  });
+
+  it('espejo: el servidor se recupera con la oficina VERIFYING; la oficina pasa el reintento -> se cierra una vez', async () => {
+    const t = setup();
+    await t.officeDownWithCross(100, T0, false);
+    const inc = t.incidents()[0];
+    t.state(DC, 100, 'FAILED');
+    t.signal(OFFICE, 'RECOVERED', 100, at(500)); // oficina OK, servidor FAILED: sigue abierto
+    t.signal(OFFICE, 'VERIFYING', 100, at(550)); // la oficina vuelve a dudar
+    t.signal(DC, 'RECOVERED', 100, at(600)); // servidor OK, oficina VERIFYING: sigue abierto
+    await t.evaluator.tick(at(601));
+    expect(t.incidents()[0].recoveredAt).toBeNull();
+    t.tickets.comment.mockClear();
+    t.signal(OFFICE, 'TRANSIENT_FAILURE', 100, at(610));
+    await t.evaluator.tick(at(611));
+    expect(t.incidents()[0]).toMatchObject({ recoveredAt: at(610), closeReason: 'RECOVERED' });
+    expect(t.events(inc.id).filter((e) => e.type === 'RECOVERED')).toHaveLength(1);
+    expect(t.tickets.comment).toHaveBeenCalledTimes(1);
+  });
+
+  it('DEGRADATION_CLEARED de la otra sonda también cierra el DOWN', async () => {
+    const t = setup();
+    await t.officeDownWithCross(100, T0, false);
+    t.signal(DC, 'DEGRADED', 100, at(400));
+    t.signal(OFFICE, 'RECOVERED', 100, at(500));
+    await t.evaluator.tick(at(501));
+    expect(t.incidents()[0].recoveredAt).toBeNull();
+    t.tickets.comment.mockClear();
+    t.signal(DC, 'DEGRADATION_CLEARED', 100, at(600));
+    await t.evaluator.tick(at(601));
+    expect(t.incidents()[0]).toMatchObject({ recoveredAt: at(600), closeReason: 'RECOVERED' });
+    expect(t.tickets.comment).toHaveBeenCalledTimes(1);
+  });
+
+  it('el barrido de tickets usa el diagnóstico real guardado al abrir', async () => {
+    const t = setup();
+    t.tickets.ensureTicket.mockRejectedValueOnce(new ServiceUnavailableException('caído'));
+    t.signal(OFFICE, 'CONFIRMED_FAILURE', 100, T0);
+    await t.evaluator.tick(at(1));
+    await t.evaluator.tick(at(122)); // vence el cruce: ROUTE pendiente, el ticket falla con 5xx
+    expect(t.incidents()[0].ticketId).toBeNull();
+    await t.evaluator.tick(at(130));
+    expect(t.tickets.ensureTicket).toHaveBeenCalledTimes(2);
+    expect(t.tickets.ensureTicket).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ diagnosis: DIAGNOSIS_LABELS.ROUTE_PENDING }),
+    );
+    expect(t.incidents()[0].ticketId).toBe(901);
+  });
+
+  it('el barrido tras subir a DOWN usa el texto de DOWN, no el ROUTE guardado', async () => {
+    const t = setup();
+    t.tickets.ensureTicket.mockRejectedValueOnce(new ServiceUnavailableException('caído'));
+    await t.officeDownWithCross(100, T0, true); // ROUTE, ticket falla
+    t.signal(DC, 'CONFIRMED_FAILURE', 100, at(300));
+    await t.evaluator.tick(at(301)); // sube a DOWN; el barrido reintenta
+    expect(t.tickets.ensureTicket).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ diagnosis: DIAGNOSIS_LABELS.DOWN }),
+    );
+  });
+
   it('tick procesado dos veces seguidas (reinicio) -> no duplica incidentes ni tickets', async () => {
     const t = setup();
     await t.officeDownWithCross(100, T0, false);

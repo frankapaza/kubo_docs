@@ -70,7 +70,7 @@ export async function openFailureIncident(m: EntityManager, input: OpenFailureIn
     if (isDuplicateEntry(e)) return [];
     throw e;
   }
-  await addEvent(m, id, now, 'OPENED', { diagnosis: diagnosis.label, ...input.detail });
+  await addEvent(m, id, now, 'OPENED', { kind: diagnosis.kind, diagnosis: diagnosis.label, ...input.detail });
   return group(m, id, input);
 }
 
@@ -84,6 +84,7 @@ async function reopen(m: EntityManager, last: MonitorIncident, input: OpenFailur
     throw e;
   }
   await addEvent(m, id, input.now, 'REOPENED', {
+    kind: input.diagnosis.kind,
     diagnosis: input.diagnosis.label,
     previousRecoveredAt: last.recoveredAt ? last.recoveredAt.toISOString() : null,
     ...input.detail,

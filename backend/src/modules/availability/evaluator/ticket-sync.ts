@@ -137,6 +137,22 @@ export class TicketSync {
     await repo.update({ parentId: id, ticketId: was }, { ticketId });
   }
 
+  /**
+   * Diagnóstico real guardado al abrir o reabrir (evento OPENED/REOPENED), si
+   * sigue valiendo para el tipo actual: tras UPGRADED_TO_DOWN, o sin evento
+   * (incidente de servidor), se usa el texto del tipo.
+   */
+  private async storedDiagnosis(inc: MonitorIncident): Promise<string> {
+    const kind = inc.kind === 'ROUTE' ? 'ROUTE' : 'DOWN';
+    const last = await this.ds.manager.getRepository(MonitorIncidentEvent).findOne({
+      where: { incidentId: num(inc.id), type: In(['OPENED', 'REOPENED', 'UPGRADED_TO_DOWN']) },
+      order: { id: 'DESC' },
+    });
+    const detail = last?.detail as { kind?: unknown; diagnosis?: unknown } | null | undefined;
+    if (detail && detail.kind === kind && typeof detail.diagnosis === 'string') return detail.diagnosis;
+    return labelForKind(kind);
+  }
+
   async context(inc: MonitorIncident, diagnosis?: string): Promise<IncidentTicketContext> {
     const m = this.ds.manager;
     const server = await m.getRepository(MonitorServer).findOne({ where: { id: num(inc.serverId) } });
@@ -161,7 +177,7 @@ export class TicketSync {
       criticality: maxCriticality(services.map((s) => s.criticality)),
       serviceNames: services.map((s) => s.name),
       serverName: server.name,
-      diagnosis: diagnosis ?? labelForKind(inc.kind === 'ROUTE' ? 'ROUTE' : 'DOWN'),
+      diagnosis: diagnosis ?? (await this.storedDiagnosis(inc)),
     };
   }
 }
