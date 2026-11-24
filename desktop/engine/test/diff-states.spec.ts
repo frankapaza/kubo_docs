@@ -113,7 +113,7 @@ describe('diffStates', () => {
   });
 
   describe('absorción en un incidente de servidor (decisión 19)', () => {
-    it('svc1 DOWN HIGH (clave 7) → svc1+svc2 bajo el padre 9: un solo OPENED(9) sin aviso y ningún RECOVERED', () => {
+    it('svc1 DOWN HIGH (clave 7) → svc1+svc2 (HIGH, nuevo) bajo el padre 9: un solo OPENED(9) con aviso (svc2 acaba de caer) y ningún RECOVERED', () => {
       const prev = [row(1, { status: 'DOWN', incidentId: 7 }), row(2)];
       const next = [
         row(1, { status: 'DOWN', incidentId: 7, parentIncidentId: 9 }),
@@ -121,7 +121,7 @@ describe('diffStates', () => {
       ];
       const ev = diffStates(prev, next);
       expect(ev).toHaveLength(1);
-      expect(ev[0]).toMatchObject({ kind: 'INCIDENT_OPENED', incidentKey: 9, serviceNames: ['svc-1', 'svc-2'], criticality: 'HIGH', notify: false });
+      expect(ev[0]).toMatchObject({ kind: 'INCIDENT_OPENED', incidentKey: 9, serviceNames: ['svc-1', 'svc-2'], criticality: 'HIGH', notify: true });
     });
 
     it('svc1 MEDIUM heredado + svc2 HIGH nuevo → OPENED(9) con aviso', () => {
@@ -181,6 +181,41 @@ describe('diffStates', () => {
       expect(rec[0]).toMatchObject({ incidentKey: 9, serviceNames: ['svc-2'], criticality: 'MEDIUM', notify: false });
       // svc1 ya avisó su caída (HIGH) y el RECOVERED no lo nombra: la clave 7 se anota sin repetir el aviso.
       expect(ev.filter((e) => e.kind !== 'INCIDENT_RECOVERED').map((e) => [e.kind, e.incidentKey, e.notify])).toEqual([['INCIDENT_OPENED', 7, false]]);
+    });
+
+    it('el padre 9 = {A HIGH, B MEDIUM}; A se recupera y B pasa a la clave 7 con C HIGH que acaba de caer → OPENED(7) con aviso', () => {
+      const prev = [
+        row(1, { status: 'DOWN', incidentId: 4, parentIncidentId: 9 }),
+        row(2, { status: 'DOWN', incidentId: 8, parentIncidentId: 9, criticality: 'MEDIUM' }),
+        row(3),
+      ];
+      const next = [
+        row(1),
+        row(2, { status: 'DOWN', incidentId: 8, parentIncidentId: 7, criticality: 'MEDIUM' }),
+        row(3, { status: 'DOWN', incidentId: 6, parentIncidentId: 7 }),
+      ];
+      expect(diffStates(prev, next).map((e) => [e.kind, e.incidentKey, e.serviceNames, e.notify])).toEqual([
+        ['INCIDENT_RECOVERED', 9, ['svc-1'], true],
+        ['INCIDENT_OPENED', 7, ['svc-2', 'svc-3'], true],
+      ]);
+    });
+
+    it('A HIGH caído (clave 7) absorbido en el padre 9 con D MEDIUM nuevo → OPENED(9) sin aviso', () => {
+      const prev = [row(1, { status: 'DOWN', incidentId: 7 }), row(4, { criticality: 'MEDIUM' })];
+      const next = [
+        row(1, { status: 'DOWN', incidentId: 7, parentIncidentId: 9 }),
+        row(4, { status: 'DOWN', incidentId: 8, parentIncidentId: 9, criticality: 'MEDIUM' }),
+      ];
+      expect(diffStates(prev, next).map((e) => [e.kind, e.incidentKey, e.criticality, e.notify])).toEqual([['INCIDENT_OPENED', 9, 'HIGH', false]]);
+    });
+
+    it('A MEDIUM caído (clave 7) absorbido en el padre 9 con C HIGH nuevo → OPENED(9) con aviso', () => {
+      const prev = [row(1, { status: 'DOWN', incidentId: 7, criticality: 'MEDIUM' }), row(3)];
+      const next = [
+        row(1, { status: 'DOWN', incidentId: 7, parentIncidentId: 9, criticality: 'MEDIUM' }),
+        row(3, { status: 'DOWN', incidentId: 8, parentIncidentId: 9 }),
+      ];
+      expect(diffStates(prev, next).map((e) => [e.kind, e.incidentKey, e.criticality, e.notify])).toEqual([['INCIDENT_OPENED', 9, 'HIGH', true]]);
     });
   });
 });
