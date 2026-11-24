@@ -25,8 +25,8 @@ import { sameId } from '../../../common/ids';
  *
  * - `'EXIGIDO'` (por defecto): hay alguien a quien preguntar --el panel, el
  *   portal--, así que si el cliente tiene sistemas, hay que elegir uno.
- * - `'EXENTO_SIN_QUIEN_ELIJA'`: solo la ingesta de correo. Nadie elige nada, y
- *   un correo que no se convierte en ticket es una petición de cliente perdida.
+ * - `'EXENTO_SIN_QUIEN_ELIJA'`: la ingesta de correo y el monitoreo de disponibilidad. Nadie elige nada, y
+ *   un correo que no se convierte en ticket es una petición de cliente perdida y una caída sin ticket pasaría sin aviso.
  *
  * **Es un valor nombrado y no una deducción.** No se saca de `origin ===
  * 'EMAIL'` ni de que venga un `emailOrigin`, aunque hoy coincidan: decidir por
