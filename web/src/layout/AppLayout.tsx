@@ -8,7 +8,7 @@ import { monitoringApi } from '../api/monitoring.api';
 import { useRealtime } from '../lib/realtime';
 import { workspaceApi } from '../api/workspace.api';
 import { roleLabels } from '../components/ui/Badge';
-import { ArchiveIcon, BellIcon, BookOpenIcon, BotIcon, FileTextIcon, FolderIcon, InboxIcon, KuboLogo, LogOutIcon, SettingsIcon, SparklesIcon, UsersIcon, ZapIcon } from '../components/ui/Icon';
+import { ArchiveIcon, BellIcon, ClockIcon, RefreshIcon, BookOpenIcon, BotIcon, FileTextIcon, FolderIcon, InboxIcon, KuboLogo, LogOutIcon, SettingsIcon, SparklesIcon, UsersIcon, ZapIcon } from '../components/ui/Icon';
 // Nota: "InboxIcon" también se usa en la sección Tickets (nav principal); es intencional.
 import { toast } from '../ui/Toast';
 import { useNewTicketNotifier } from '../pages/tickets/useNewTicketNotifier';
@@ -134,6 +134,21 @@ export default function AppLayout() {
           <p className="px-3 py-1 mt-4 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
             Monitoreo
           </p>
+          {([
+            ['/monitoreo/estado', 'Estado', ZapIcon],
+            ['/monitoreo/incidentes', 'Incidentes', ClockIcon],
+            ['/monitoreo/inventario', 'Inventario', ArchiveIcon],
+            ['/monitoreo/sondas', 'Sondas', RefreshIcon],
+          ] as const).map(([to, label, Icon]) => (
+            <NavLink
+              key={to}
+              to={to}
+              className={({ isActive }) => `${navItem} ${isActive ? navActive : navIdle}`}
+            >
+              <Icon size={18} />
+              {label}
+            </NavLink>
+          ))}
           <NavLink
             to="/monitoreo/errores"
             className={({ isActive }) => `${navItem} ${isActive ? navActive : navIdle}`}
