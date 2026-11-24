@@ -4,6 +4,7 @@ COPY package*.json ./
 RUN npm ci
 COPY tsconfig*.json nest-cli.json ./
 COPY src ./src
+COPY scripts ./scripts
 RUN npm run build
 
 FROM node:20-alpine AS runtime
