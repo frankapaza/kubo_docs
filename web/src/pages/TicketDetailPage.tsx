@@ -14,6 +14,9 @@ import CodeLinksPanel from './dev-connector/CodeLinksPanel';
 import ResolveDialog from './tickets/ResolveDialog';
 import AssignDialog from './tickets/AssignDialog';
 import OverridePriorityDialog from './tickets/OverridePriorityDialog';
+import ChangeClientDialog from './tickets/ChangeClientDialog';
+import { useAuth } from '../auth/AuthContext';
+import { canManageUsers } from '../auth/permissions';
 import TicketThread from './tickets/thread/TicketThread';
 
 // Mismos seis estados que OPEN_STATUSES en
@@ -66,6 +69,9 @@ export default function TicketDetailPage() {
   const [resolveOpen, setResolveOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
   const [priorityOpen, setPriorityOpen] = useState(false);
+  const [clientOpen, setClientOpen] = useState(false);
+  const { user } = useAuth();
+  const isAdmin = canManageUsers(user);
   const [usersById, setUsersById] = useState<Map<number, string>>(new Map());
   const [clientName, setClientName] = useState<string | null>(null);
   const [systems, setSystems] = useState<ClientSystem[]>([]);
@@ -455,7 +461,22 @@ export default function TicketDetailPage() {
           <section style={cardStyle}>
             <h2 style={{ margin: '0 0 12px', fontSize: 13, fontWeight: 600 }}>Ficha</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12 }}>
-              <Field label="Cliente" value={clientId ? clientName ?? String(clientId) : '—'} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
+                <span style={{ color: '#6d7577' }}>Cliente</span>
+                <span style={{ color: '#3a4041', textAlign: 'right' }}>
+                  {clientId ? clientName ?? String(clientId) : '—'}
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => setClientOpen(true)}
+                      style={{ marginLeft: 8, fontSize: 11, padding: '2px 8px', borderRadius: 5, border: '1px solid #d8dcdd', background: '#fff', cursor: 'pointer' }}
+                    >
+                      Cambiar
+                    </button>
+                  )}
+                </span>
+              </div>
               {/*
                 Justo debajo del cliente, porque el sistema cuelga de él. Por
                 valor (`Number`) y no con `===`: los bigint llegan como cadena.
@@ -534,6 +555,16 @@ export default function TicketDetailPage() {
         onConfirm={(v) => {
           setAssignOpen(false);
           act(() => ticketsApi.assign(id, v));
+        }}
+      />
+
+      <ChangeClientDialog
+        open={clientOpen}
+        currentClientId={clientId}
+        onCancel={() => setClientOpen(false)}
+        onConfirm={(v) => {
+          setClientOpen(false);
+          act(() => ticketsApi.changeClient(id, v));
         }}
       />
 

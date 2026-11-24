@@ -29,6 +29,9 @@ import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { EscalateTicketDto } from './dto/escalate-ticket.dto';
 import { OverridePriorityDto } from './dto/override-priority.dto';
 import { ArchiveTicketDto } from './dto/archive-ticket.dto';
+import { ChangeTicketClientDto } from './dto/change-client.dto';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { RolesGuard } from '../../common/guards/roles.guard';
 import { TicketsRealtimeGateway } from './tickets-realtime.gateway';
 import { ServiceCategory } from './entities/ticket.entity';
 import { TicketStatus } from './domain/ticket-state-machine';
@@ -142,6 +145,14 @@ export class TicketsController {
     @Body() dto: ArchiveTicketDto,
   ) {
     return this.changed(this.service.archive(id, user.id, dto.reason));
+  }
+
+  /** Pasa el ticket a otro cliente (solo ADMIN): sistema, usuario de avisos y proyecto incluidos. */
+  @Post(':id/client')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  changeClient(@Param('id', ParseIntPipe) id: number, @Body() dto: ChangeTicketClientDto) {
+    return this.changed(this.service.changeClient(id, dto));
   }
 
   @Post(':id/unarchive')
