@@ -118,12 +118,17 @@ export class Engine {
   private lastState: CombinedStateRow[] = [];
   private lastStateJson: string | null = null;
   /**
-   * Último estado FRESCO (de un sync correcto) de esta ejecución, contra el que se derivan
-   * los eventos (decisión 2). Null hasta el primer sync: el primer estado no genera eventos.
+   * Último estado FRESCO (de un sync correcto, o el guardado de la ejecución anterior), contra
+   * el que se derivan los eventos (decisión 2). Null solo si nunca hubo uno: entonces el
+   * primer estado no genera eventos.
    */
   private freshState: CombinedStateRow[] | null = null;
   /** Caída de oficina según el diario (una entrada por transición, aunque el runner se sustituya). */
   private outageJournaled = false;
+  /** El runner actual ya declaró START o END (tiene veredicto propio sobre la caída de oficina). */
+  private runnerHasOutageVerdict = false;
+  /** CENTRAL_UNREACHABLE anotado (por fallos reales de red/sync); se cierra con CENTRAL_BACK. */
+  private unreachableJournaled = false;
   private readonly local = new Map<number, LocalView>();
   /** Última prueba lanzada por id de destino (de cualquier runner), para no solaparlas. */
   private readonly inFlight = new Map<number, Promise<unknown>>();
@@ -168,6 +173,9 @@ export class Engine {
       try {
         this.lastState = JSON.parse(state) as CombinedStateRow[];
         this.lastStateJson = state;
+        // Lo guardado es siempre un estado fresco (`res.state`, nunca el superpuesto): el primer
+        // sync tras reiniciar anota lo que cambió mientras el motor estaba parado.
+        this.freshState = this.lastState;
       } catch {
         this.log.warn('Estado combinado guardado ilegible: se ignora.');
       }
@@ -206,7 +214,8 @@ export class Engine {
       engine: { version: this.version, startedAt: this.startedAt ?? this.clock.now().toISOString() },
       centralUrl: this.config.centralUrl,
       central: { reachable, lastSyncAt: this.lastSyncAt, consecutiveFailures: this.consecutiveFailures, rejecting: this.rejecting },
-      officeOutage: this.runner?.officeOutage() ?? false,
+      // Un runner recién sustituido aún no sabe nada de la caída: hasta su veredicto, manda el diario.
+      officeOutage: this.runner && this.runnerHasOutageVerdict ? this.runner.officeOutage() : this.outageJournaled,
       pending: this.outbox.pendingCount(),
       services,
     };
@@ -297,16 +306,22 @@ export class Engine {
       errors.push(`sync: ${errMsg(err)}`);
     }
 
+    // Diario: «no responde» solo por fallos reales de red/sync, no por el corte de rechazo
+    // (ese ya tiene su CENTRAL_REJECTING y el sync sigue respondiendo).
+    if (errors.length === 0 && this.unreachableJournaled) {
+      this.unreachableJournaled = false;
+      this.journalEngine('CENTRAL_BACK', false);
+    }
     if (errors.length === 0 && !rejected) {
-      if (this.consecutiveFailures >= UNREACHABLE_AFTER_FAILURES) {
-        this.log.info('La central vuelve a responder.');
-        this.journalEngine('CENTRAL_BACK', false);
-      }
+      if (this.consecutiveFailures >= UNREACHABLE_AFTER_FAILURES) this.log.info('La central vuelve a responder.');
       this.consecutiveFailures = 0;
       return;
     }
     this.consecutiveFailures++;
-    if (this.consecutiveFailures === UNREACHABLE_AFTER_FAILURES) this.journalEngine('CENTRAL_UNREACHABLE', true);
+    if (errors.length > 0 && this.consecutiveFailures >= UNREACHABLE_AFTER_FAILURES && !this.unreachableJournaled) {
+      this.unreachableJournaled = true;
+      this.journalEngine('CENTRAL_UNREACHABLE', true);
+    }
     if (errors.length === 0) return; // solo el rechazo: ya registrado por flush()
     const n = this.consecutiveFailures;
     const msg = `Sondeo fallido (${n} seguidos): ${errors.join('; ')}`;
@@ -417,10 +432,11 @@ export class Engine {
         concurrency: DEFAULT_CONCURRENCY,
         clock: this.clock,
         check: this.check,
-        onResult: (r, signals) => this.onResult(r, signals),
+        onResult: (r, signals) => this.onResult(r, signals, runner),
       });
       this.runner?.stop();
       this.runner = runner;
+      this.runnerHasOutageVerdict = false;
       if (this.running) runner.start();
     }
     const ids = new Set(cfg.services.map((s) => s.id));
@@ -433,7 +449,7 @@ export class Engine {
     }
   }
 
-  private onResult(r: CheckResult, signals: ProbeSignal[]): void {
+  private onResult(r: CheckResult, signals: ProbeSignal[], from: ProbeRunner): void {
     // Primero a disco: es lo único que sobrevive a un reinicio del servicio.
     this.outbox.enqueueResult(r, signals);
     const prev = this.local.get(r.serviceId);
@@ -443,6 +459,9 @@ export class Engine {
     });
     for (const s of signals) {
       this.log.info(`Señal ${s.type}${s.serviceId === null ? '' : ` servicio ${s.serviceId}`} (${s.at}).`);
+      if ((s.type === 'OFFICE_OUTAGE_START' || s.type === 'OFFICE_OUTAGE_END') && from === this.runner) {
+        this.runnerHasOutageVerdict = true;
+      }
       // Un runner nuevo repite START (o declara END sin caída previa): el diario anota solo transiciones.
       if (s.type === 'OFFICE_OUTAGE_START' && !this.outageJournaled) {
         this.outageJournaled = true;

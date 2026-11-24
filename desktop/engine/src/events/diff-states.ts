@@ -90,16 +90,46 @@ function toDraft(kind: EngineEventKind, g: Group, cat: 'DOWN' | 'ROUTE' | 'DEGRA
   };
 }
 
+const incidentRows = (g: Group): CombinedStateRow[] => g.rows.filter((r) => r.status === 'DOWN' || r.status === 'ROUTE');
+
+/** serviceId → clave del grupo en caída (DOWN/ROUTE) en el que está ese servicio. */
+function incidentServices(groups: Map<string, Group>): Map<number, string> {
+  const out = new Map<number, string>();
+  for (const [key, g] of groups) {
+    if (!isIncident(category(g))) continue;
+    for (const r of incidentRows(g)) out.set(r.serviceId, key);
+  }
+  return out;
+}
+
 /**
  * Eventos entre dos estados combinados FRESCOS (decisión 2). Pura.
  * Agrupa por `incidentKey`: una caída de servidor (varios servicios con el mismo
  * `parentIncidentId`) es un solo evento. Con `prev === null` (primer estado tras
  * arrancar) no se emite nada.
+ *
+ * Absorción (decisión 19): cuando la central reagrupa el incidente de un servicio bajo
+ * uno de servidor, la clave cambia pero el servicio sigue caído. La clave vieja no se
+ * da por recuperada si todos sus servicios siguen caídos bajo otra clave; la nueva se
+ * anota como OPENED (o UPGRADED si todo lo heredado era ROUTE y ahora es DOWN) y solo
+ * avisa si es Alta y ninguno de los grupos heredados era Alta (esos ya avisaron).
  */
 export function diffStates(prev: CombinedStateRow[] | null, next: CombinedStateRow[]): EngineEventDraft[] {
   if (prev === null) return [];
   const before = groupRows(prev);
   const after = groupRows(next);
+  const prevSvc = incidentServices(before);
+  const nextSvc = incidentServices(after);
+  // Claves que dejan de estar caídas y no siguen caídas bajo otra clave: se recuperan.
+  const recovered = new Set<string>();
+  for (const [key, p] of before) {
+    if (!isIncident(category(p)) || isIncident(category(after.get(key)))) continue;
+    const moved = incidentRows(p).every((r) => {
+      const k = nextSvc.get(r.serviceId);
+      return k !== undefined && k !== key;
+    });
+    if (!moved) recovered.add(key);
+  }
   const keys = [...new Set([...before.keys(), ...after.keys()])];
   const out: EngineEventDraft[] = [];
   for (const key of keys) {
@@ -109,11 +139,26 @@ export function diffStates(prev: CombinedStateRow[] | null, next: CombinedStateR
     const nc = category(n);
     if (pc === nc) continue;
 
-    if (isIncident(pc) && !isIncident(nc)) out.push(toDraft('INCIDENT_RECOVERED', p!, pc));
+    if (isIncident(pc) && recovered.has(key)) out.push(toDraft('INCIDENT_RECOVERED', p!, pc));
     if (pc === 'DEGRADED') out.push(toDraft('DEGRADED_CLEARED', p!, 'DEGRADED'));
 
-    if (isIncident(nc) && !isIncident(pc)) out.push(toDraft('INCIDENT_OPENED', n!, nc));
-    else if (pc === 'ROUTE' && nc === 'DOWN') out.push(toDraft('INCIDENT_UPGRADED', n!, 'DOWN'));
+    if (isIncident(nc) && !isIncident(pc)) {
+      const carriedKeys = new Set<string>();
+      for (const r of incidentRows(n!)) {
+        const k = prevSvc.get(r.serviceId);
+        if (k !== undefined && k !== key) carriedKeys.add(k);
+      }
+      if (carriedKeys.size === 0) {
+        out.push(toDraft('INCIDENT_OPENED', n!, nc));
+      } else {
+        const carried = [...carriedKeys].map((k) => ({ k, g: before.get(k)! }));
+        // Solo cuenta el aviso de un grupo heredado que no se anuncia ahora como recuperado.
+        const carriedHadHigh = carried.some(({ k, g }) => !recovered.has(k) && incidentRows(g).some((r) => r.criticality === 'HIGH'));
+        const allRoute = carried.every(({ g }) => category(g) === 'ROUTE');
+        const e = toDraft(allRoute && nc === 'DOWN' ? 'INCIDENT_UPGRADED' : 'INCIDENT_OPENED', n!, nc);
+        out.push({ ...e, notify: e.criticality === 'HIGH' && !carriedHadHigh });
+      }
+    } else if (pc === 'ROUTE' && nc === 'DOWN') out.push(toDraft('INCIDENT_UPGRADED', n!, 'DOWN'));
     if (nc === 'DEGRADED') out.push(toDraft('DEGRADED_STARTED', n!, 'DEGRADED'));
   }
   return out;

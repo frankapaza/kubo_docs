@@ -668,5 +668,62 @@ describe('Engine', () => {
       const e2 = make(fakeCheck(() => true).fn, outbox);
       expect(e2.events(0, 10)).toEqual({ lastId: 1, events: [expect.objectContaining({ id: 1, kind: 'INCIDENT_OPENED' })] });
     });
+
+    it('tras reiniciar, el primer sync se compara con el último estado fresco guardado: el incidente cerrado mientras tanto → un RECOVERED', async () => {
+      outbox.saveState(JSON.stringify([{ ...row(1), status: 'DOWN', incidentId: 5 }]));
+      central.state = [row(1)];
+      const engine = make(fakeCheck(() => true).fn);
+      engine.start();
+      await clock.advance(1);
+      const evs = engine.events(0, 10).events;
+      expect(evs.map((e) => [e.kind, e.incidentKey, e.notify])).toEqual([['INCIDENT_RECOVERED', 5, true]]);
+    });
+
+    it('el corte por rechazo no produce un falso CENTRAL_UNREACHABLE (el sync responde) ni un CENTRAL_BACK al cerrarse', async () => {
+      for (let i = 0; i < 10; i++) {
+        outbox.enqueueCheck({
+          id: randomUUID(),
+          serviceId: 1,
+          kind: 'REGULAR',
+          cycleAt: START,
+          startedAt: START,
+          durationMs: 10,
+          ok: true,
+          errorCode: null,
+          httpStatus: null,
+          orderId: null,
+        });
+      }
+      central.rejectAll = true;
+      const engine = make(fakeCheck(() => true).fn);
+      engine.start();
+      await clock.advance(1);
+      await clock.advance(6 * 15000);
+      expect(engine.status().central.rejecting).toBe(true);
+      expect(engine.status().central.consecutiveFailures).toBeGreaterThanOrEqual(3);
+      expect(kinds(engine)).toEqual(['CENTRAL_REJECTING']);
+      central.rejectAll = false;
+      await clock.advance(15000);
+      expect(engine.status().central.rejecting).toBe(false);
+      expect(kinds(engine)).toEqual(['CENTRAL_REJECTING']);
+    });
+
+    it('tras sustituir el runner con la caída de oficina en curso, status().officeOutage sigue en true hasta que el runner nuevo da veredicto', async () => {
+      let internet = false;
+      central.config = { services: [svc(1), svc(2)], schedule: DEFAULT_SCHEDULE, references: [svc(1001)] };
+      const engine = make(fakeCheck(() => internet).fn);
+      engine.start();
+      await clock.advance(11 * 60_000);
+      expect(engine.status().officeOutage).toBe(true);
+      central.configVersion = 'v2';
+      central.config = { ...central.config, schedule: { ...DEFAULT_SCHEDULE, dayIntervalMin: 10 } };
+      await clock.advance(15000); // sync con la config nueva: runner nuevo, sin veredicto aún
+      expect(central.syncCalls).toContain('v1');
+      expect(engine.status().officeOutage).toBe(true);
+      internet = true;
+      await clock.advance(25 * 60_000);
+      expect(engine.status().officeOutage).toBe(false);
+      expect(kinds(engine)).toEqual(['OFFICE_OUTAGE_STARTED', 'OFFICE_OUTAGE_ENDED']);
+    });
   });
 });
