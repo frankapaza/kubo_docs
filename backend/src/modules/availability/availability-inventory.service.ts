@@ -21,6 +21,14 @@ export interface ProbeView {
   hasToken: boolean;
 }
 
+/** Servidor tal como sale por la API: sin la huella del token del agente. */
+export type ServerView = Omit<MonitorServer, 'agentTokenHash'>;
+
+const toServerView = (s: MonitorServer): ServerView => {
+  const { agentTokenHash, ...view } = s;
+  return view;
+};
+
 const badInput = (message: string) => new BadRequestException({ code: 'BAD_INPUT', message });
 const notFound = (what: string) => new NotFoundException({ code: 'NOT_FOUND', message: `${what} no encontrado` });
 
@@ -37,13 +45,13 @@ export class AvailabilityInventoryService {
 
   // ---- Servidores ----
 
-  listServers(): Promise<MonitorServer[]> {
-    return this.servers.find({ order: { id: 'ASC' } });
+  async listServers(): Promise<ServerView[]> {
+    return (await this.servers.find({ order: { id: 'ASC' } })).map(toServerView);
   }
 
-  async createServer(dto: CreateServerDto): Promise<MonitorServer> {
+  async createServer(dto: CreateServerDto): Promise<ServerView> {
     await this.clients.findByIdOrFail(dto.clientId);
-    return this.servers.save(
+    const saved = await this.servers.save(
       this.servers.create({
         clientId: dto.clientId,
         name: dto.name,
@@ -53,9 +61,10 @@ export class AvailabilityInventoryService {
         region: dto.region ?? null,
       }),
     );
+    return toServerView(saved);
   }
 
-  async updateServer(id: number, dto: UpdateServerDto, actorUserId: number): Promise<MonitorServer> {
+  async updateServer(id: number, dto: UpdateServerDto, actorUserId: number): Promise<ServerView> {
     const { status, ...fields } = dto;
     const server = await this.getServer(id);
     Object.assign(server, fields);
@@ -63,19 +72,19 @@ export class AvailabilityInventoryService {
   }
 
   /** Pausar o archivar cierra los incidentes abiertos de todos sus servicios. */
-  async setServerStatus(id: number, status: MonitorEntityStatus, actorUserId: number): Promise<MonitorServer> {
+  async setServerStatus(id: number, status: MonitorEntityStatus, actorUserId: number): Promise<ServerView> {
     return this.applyServerStatus(await this.getServer(id), status, actorUserId);
   }
 
   /** Persiste campos y estado en un solo guardado y, después, cierra los incidentes. */
-  private async applyServerStatus(server: MonitorServer, status: MonitorEntityStatus | undefined, actorUserId: number): Promise<MonitorServer> {
+  private async applyServerStatus(server: MonitorServer, status: MonitorEntityStatus | undefined, actorUserId: number): Promise<ServerView> {
     if (status) server.status = status;
     const saved = await this.servers.save(server);
     if (status && status !== 'ACTIVE') {
       const ids = (await this.services.find({ where: { serverId: Number(server.id) } })).map((s) => Number(s.id));
       if (ids.length) await this.closer.closeForPause(ids, actorUserId);
     }
-    return saved;
+    return toServerView(saved);
   }
 
   // ---- Servicios ----
@@ -156,9 +165,13 @@ export class AvailabilityInventoryService {
     }));
   }
 
-  /** Devuelve el token en claro una única vez; solo se guarda su sha256 hex. */
+  /**
+   * Devuelve el token en claro una única vez; solo se guarda su sha256 hex.
+   * Solo para la sonda de la oficina: kubo-01 corre dentro del worker y no usa token.
+   */
   async issueProbeToken(id: number): Promise<{ token: string }> {
     const probe = await this.getProbe(id);
+    if (probe.kind !== 'OFFICE') throw badInput('Solo la sonda de la oficina usa token; kubo-01 corre dentro del worker');
     const token = `kmp_${randomBytes(32).toString('base64url')}`;
     probe.tokenHash = createHash('sha256').update(token).digest('hex');
     probe.tokenCreatedAt = new Date();

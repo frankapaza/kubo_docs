@@ -35,6 +35,18 @@ describe('config', () => {
     expect(() => loadEngineConfig(home)).toThrow(/localPort/);
   });
 
+  it('centralUrl: https siempre; http solo hacia localhost/127.0.0.1 (el token viajaría en claro)', () => {
+    const write = (centralUrl: string) => writeFileSync(join(home, 'engine.json'), JSON.stringify({ centralUrl, probeCode: 'oficina-01' }));
+    for (const ok of ['https://docs.kuboti.com', 'http://localhost:3000', 'http://127.0.0.1:3000/', 'http://[::1]:3000']) {
+      write(ok);
+      expect(() => loadEngineConfig(home)).not.toThrow();
+    }
+    for (const bad of ['http://docs.kuboti.com', 'http://192.168.1.10:3000', 'http://localhost.evil.com', 'http://127.0.0.1.nip.io']) {
+      write(bad);
+      expect(() => loadEngineConfig(home)).toThrow(/https/);
+    }
+  });
+
   it('loadLocalSecret lee el secreto y rechaza uno vacío', () => {
     writeFileSync(join(home, 'local-api.secret'), 'abc123\r\n');
     expect(loadLocalSecret(home)).toBe('abc123');

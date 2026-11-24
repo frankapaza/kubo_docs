@@ -6,12 +6,15 @@ import { AvailabilityInventoryService } from './availability-inventory.service';
 
 /** Dobles mínimos de repositorio: guardan en memoria lo que el servicio escribe. */
 const makeService = () => {
-  const servers: any[] = [{ id: 10, clientId: 1, name: 'srv', host: 'h', status: 'ACTIVE' }];
+  const servers: any[] = [{ id: 10, clientId: 1, name: 'srv', host: 'h', status: 'ACTIVE', agentTokenHash: 'f'.repeat(64) }];
   const services: any[] = [
     { id: 100, serverId: 10, status: 'ACTIVE' },
     { id: 101, serverId: 10, status: 'ACTIVE' },
   ];
-  const probes: any[] = [{ id: 1, code: 'oficina-01', kind: 'OFFICE', tokenHash: null, lastSeenAt: null, version: null, clockSkewMs: null }];
+  const probes: any[] = [
+    { id: 1, code: 'oficina-01', kind: 'OFFICE', tokenHash: null, lastSeenAt: null, version: null, clockSkewMs: null },
+    { id: 2, code: 'kubo-01', kind: 'DATACENTER', tokenHash: null, lastSeenAt: null, version: null, clockSkewMs: null },
+  ];
   const repoOf = (rows: any[]) => ({
     find: jest.fn(async (opts?: any) => rows.filter((r) => !opts?.where || Object.entries(opts.where).every(([k, v]) => r[k] === v))),
     findOne: jest.fn(async (opts: any) => rows.find((r) => Object.entries(opts.where).every(([k, v]) => r[k] === v)) ?? null),
@@ -70,6 +73,27 @@ describe('AvailabilityInventoryService', () => {
     expect(list[0]).toMatchObject({ code: 'oficina-01', hasToken: true });
     expect(JSON.stringify(list)).not.toContain(token);
     expect(JSON.stringify(list)).not.toContain(probes[0].tokenHash);
+  });
+
+  it('emitir token para una sonda que no es de oficina (kubo-01 corre en proceso) -> 400 y no guarda nada', async () => {
+    const { svc, probes } = makeService();
+    await expect(svc.issueProbeToken(2)).rejects.toMatchObject({ response: { code: 'BAD_INPUT' } });
+    expect(probes[1].tokenHash).toBeNull();
+  });
+
+  it('las respuestas de servidores nunca llevan agentTokenHash (listar, crear, actualizar, cambiar estado)', async () => {
+    const { svc } = makeService();
+    const outs = [
+      await svc.listServers(),
+      await svc.createServer({ clientId: 1, name: 'n', host: 'h2' } as any),
+      await svc.updateServer(10, { name: 'otro' }, 7),
+      await svc.setServerStatus(10, 'ACTIVE', 7),
+    ];
+    for (const o of outs) {
+      expect(JSON.stringify(o)).not.toContain('agentTokenHash');
+      expect(JSON.stringify(o)).not.toContain('f'.repeat(64));
+    }
+    expect(outs[0]).toEqual([expect.objectContaining({ id: 10, name: 'srv' })]);
   });
 
   it('revocar token deja hasToken en false', async () => {

@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Repository } from 'typeorm';
 import { AvailabilityIngestService } from './availability-ingest.service';
 import { CheckResult, DEFAULT_SCHEDULE, ProbeRunner, ProbeSignal, RunnerOptions, runCheck, ServiceTarget, systemClock } from './core';
+import { CROSS_TIMEOUT_MS } from './domain/incident-rules';
 import { MonitorProbeOrder } from './entities/monitor-probe-order.entity';
 import { MonitorProbe } from './entities/monitor-probe.entity';
 import { MonitorService } from './entities/monitor-service.entity';
@@ -104,7 +105,10 @@ export class DatacenterProbeService implements OnApplicationBootstrap, OnApplica
     }
   }
 
-  /** Cada orden MANUAL o CROSS pendiente se toma una sola vez (update condicional sobre taken_at IS NULL). */
+  /**
+   * Cada orden MANUAL o CROSS pendiente se toma una sola vez (update condicional sobre taken_at IS NULL).
+   * Una CROSS más vieja que CROSS_TIMEOUT_MS se cierra sin ejecutar: el evaluador ya no la espera.
+   */
   private async pollOrders(): Promise<void> {
     if (this.pollingOrders || !this.runner || !this.probe) return;
     this.pollingOrders = true;
@@ -114,7 +118,18 @@ export class DatacenterProbeService implements OnApplicationBootstrap, OnApplica
         order: { id: 'ASC' },
       });
       for (const o of pending) {
-        const res = await this.orders.update({ id: o.id, takenAt: IsNull() }, { takenAt: new Date() });
+        const now = new Date();
+        const age = now.getTime() - new Date(o.createdAt).getTime();
+        if (o.kind === 'CROSS' && age > CROSS_TIMEOUT_MS) {
+          // El evaluador ya resolvió sin este cruce (p. ej. el worker estuvo parado): ejecutarlo
+          // ahora solo añadiría una ráfaga de pruebas que nadie lee. Se cierra sin medir.
+          const res = await this.orders.update({ id: o.id, takenAt: IsNull() }, { takenAt: now, doneAt: now });
+          if ((res.affected ?? 0) === 1) {
+            this.logger.log(`Orden CROSS ${o.id} (servicio ${o.serviceId}) caducada tras ${Math.round(age / 1000)} s: se descarta sin medir`);
+          }
+          continue;
+        }
+        const res = await this.orders.update({ id: o.id, takenAt: IsNull() }, { takenAt: now });
         if ((res.affected ?? 0) !== 1) continue; // otro proceso la tomó
         this.runner.runNow(Number(o.serviceId), o.kind, Number(o.id));
       }

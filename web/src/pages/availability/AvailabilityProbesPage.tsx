@@ -98,9 +98,10 @@ export default function AvailabilityProbesPage() {
                   <td style={td} title="Incluye hasta unos 15 s de demora de subida">
                     {p.clockSkewMs === null ? '—' : `${(p.clockSkewMs / 1000).toFixed(1)} s`}
                   </td>
-                  <td style={td}>{p.hasToken ? 'Emitido' : 'Sin token'}</td>
+                  <td style={td}>{p.kind !== 'OFFICE' ? 'No aplica (corre en el worker)' : p.hasToken ? 'Emitido' : 'Sin token'}</td>
                   <td style={{ ...td, whiteSpace: 'nowrap' }}>
-                    {isAdmin && (
+                    {/* Solo la oficina usa token: kubo-01 corre dentro del worker (el backend da 400). */}
+                    {isAdmin && p.kind === 'OFFICE' && (
                       <div style={{ display: 'flex', gap: 6 }}>
                         <button type="button" style={btn} onClick={() => issue(p)} disabled={busyIds.has(p.id)}>Emitir token</button>
                         {p.hasToken && <button type="button" style={{ ...btn, color: '#b3261e' }} onClick={() => revoke(p)}>Revocar</button>}

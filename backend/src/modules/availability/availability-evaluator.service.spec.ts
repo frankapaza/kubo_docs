@@ -516,7 +516,7 @@ describe('AvailabilityEvaluatorService', () => {
     await t.evaluator.tick(at(1));
     await t.evaluator.tick(at(122)); // vence el cruce: ROUTE pendiente, el ticket falla con 5xx
     expect(t.incidents()[0].ticketId).toBeNull();
-    await t.evaluator.tick(at(130));
+    await t.evaluator.tick(at(132)); // primera espera del barrido tras un 5xx: 10 s
     expect(t.tickets.ensureTicket).toHaveBeenCalledTimes(2);
     expect(t.tickets.ensureTicket).toHaveBeenLastCalledWith(
       expect.anything(),
@@ -572,6 +572,30 @@ describe('AvailabilityEvaluatorService', () => {
     await t.evaluator.tick(at(60));
     expect(t.incidents()[0].ticketId).toBe(901);
     expect(t.events().some((e) => e.type === 'TICKET_NOT_CREATED')).toBe(false);
+  });
+
+  it('ensureTicket con 5xx persistente: el barrido reintenta con espera exponencial por incidente (tope 10 min), una línea por intento', async () => {
+    const t = setup();
+    t.tickets.ensureTicket.mockRejectedValue(new ServiceUnavailableException('caído'));
+    const warn = jest.spyOn((t.evaluator as any).logger, 'warn').mockImplementation(() => undefined);
+    await t.officeDownWithCross(100, T0, false); // primer intento a los 20 s
+    const times = [20];
+    for (let sec = 25; sec <= 4000; sec += 5) {
+      const before = t.tickets.ensureTicket.mock.calls.length;
+      await t.evaluator.tick(at(sec));
+      if (t.tickets.ensureTicket.mock.calls.length > before) times.push(sec);
+    }
+    const gaps = times.slice(1).map((x, i) => x - times[i]);
+    expect(gaps.slice(0, 6)).toEqual([10, 20, 40, 80, 160, 320]);
+    expect(gaps.slice(6).every((g) => g === 600)).toBe(true);
+    expect(times.length).toBeLessThan(15);
+    const ticketWarns = warn.mock.calls.filter(([m]) => String(m).includes('ENSURE_TICKET'));
+    expect(ticketWarns).toHaveLength(times.length);
+
+    // Cuando la central de tickets vuelve, se crea en el siguiente intento programado.
+    t.tickets.ensureTicket.mockResolvedValue({ id: 777, status: 'NUEVO' } as any);
+    await t.evaluator.tick(at(4000 + 600));
+    expect(t.incidents()[0].ticketId).toBe(777);
   });
 
   it('ensureTicket con 4xx registra TICKET_NOT_CREATED y deja de reintentar', async () => {

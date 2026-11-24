@@ -41,8 +41,10 @@ export function loadEngineConfig(home: string = monitorHome()): EngineConfig {
   } catch {
     throw new Error(`${file}: centralUrl no es una URL válida.`);
   }
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-    throw new Error(`${file}: centralUrl debe ser http(s).`);
+  // El token de la sonda viaja en cada petición: http solo hacia la propia máquina (desarrollo).
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) {
+    throw new Error(`${file}: centralUrl debe ser https (http solo hacia localhost o 127.0.0.1).`);
   }
   const localPort = raw.localPort === undefined ? DEFAULT_LOCAL_PORT : raw.localPort;
   if (!Number.isInteger(localPort) || (localPort as number) < 1 || (localPort as number) > 65535) {

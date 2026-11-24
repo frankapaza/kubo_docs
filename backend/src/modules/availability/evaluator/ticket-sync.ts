@@ -17,6 +17,10 @@ import {
   TICKET_RESET_EVENTS,
 } from './incident-store';
 
+/** Espera del barrido tras el primer fallo no-4xx de un ticket; se duplica en cada fallo seguido. */
+export const TICKET_RETRY_BASE_MS = 10_000;
+export const TICKET_RETRY_MAX_MS = 10 * 60_000;
+
 const is4xx = (e: unknown): e is HttpException =>
   e instanceof HttpException && e.getStatus() >= 400 && e.getStatus() < 500;
 
@@ -25,9 +29,15 @@ const is4xx = (e: unknown): e is HttpException =>
  * señales. Un 4xx de `ensureTicket` (p. ej. `SISTEMA_AJENO`) no se arregla
  * reintentando: queda el evento `TICKET_NOT_CREATED` y el incidente no se
  * vuelve a intentar hasta que cambie (se reabre, sube a DOWN o se agrupa).
- * Un 5xx o un error desconocido se reintenta en el siguiente tick.
+ * Un 5xx o un error desconocido se reintenta desde el barrido con espera
+ * exponencial por incidente (10 s, 20 s, 40 s… con tope de 10 min) y una sola
+ * línea WARN por intento; la espera se olvida al primer éxito. Es en memoria:
+ * un reinicio vuelve a intentar enseguida.
  */
 export class TicketSync {
+  /** Incidente → fallos seguidos de ENSURE/REOPEN y cuándo puede volver a intentarse. */
+  private readonly backoff = new Map<number, { failures: number; nextAt: number }>();
+
   constructor(
     private readonly ds: DataSource,
     private readonly tickets: AvailabilityTicketsService,
@@ -36,15 +46,18 @@ export class TicketSync {
 
   /** `attempted`: incidentes cuyo ticket ya se intentó en este tick (el barrido no repite). */
   async apply(a: PostCommitAction, now: Date, attempted: Set<number>): Promise<void> {
+    const ticketWork = a.type === 'ENSURE_TICKET' || a.type === 'REOPEN_TICKET';
     try {
       switch (a.type) {
         case 'ENSURE_TICKET':
           attempted.add(a.incidentId);
           await this.ensure(a.incidentId, now, a.diagnosis);
+          this.backoff.delete(a.incidentId);
           return;
         case 'REOPEN_TICKET':
           attempted.add(a.incidentId);
           await this.reopen(a.incidentId, now);
+          this.backoff.delete(a.incidentId);
           return;
         case 'COMMENT': {
           const ticketId = await this.ticketOf(a.incidentId);
@@ -58,7 +71,14 @@ export class TicketSync {
         }
       }
     } catch (e) {
-      this.logger.warn(`Acción de ticket ${a.type} del incidente ${a.incidentId} falló: ${(e as Error).message}`);
+      let retry = '';
+      if (ticketWork) {
+        const failures = (this.backoff.get(a.incidentId)?.failures ?? 0) + 1;
+        const wait = Math.min(TICKET_RETRY_BASE_MS * 2 ** (failures - 1), TICKET_RETRY_MAX_MS);
+        this.backoff.set(a.incidentId, { failures, nextAt: now.getTime() + wait });
+        retry = ` (fallo ${failures} seguido; se reintenta en ${Math.round(wait / 1000)} s)`;
+      }
+      this.logger.warn(`Acción de ticket ${a.type} del incidente ${a.incidentId} falló: ${(e as Error).message}${retry}`);
     }
   }
 
@@ -68,9 +88,14 @@ export class TicketSync {
       where: { recoveredAt: IsNull(), ticketId: IsNull(), parentId: IsNull(), kind: In(['DOWN', 'ROUTE']) },
       order: { id: 'ASC' },
     });
-    for (const inc of pending) {
-      if (attempted.has(num(inc.id))) continue;
-      await this.apply({ type: 'ENSURE_TICKET', incidentId: num(inc.id) }, now, attempted);
+    const ids = new Set(pending.map((inc) => num(inc.id)));
+    // Lo que ya no está pendiente (tiene ticket o se cerró) olvida su espera.
+    for (const id of [...this.backoff.keys()]) if (!ids.has(id)) this.backoff.delete(id);
+    for (const id of ids) {
+      if (attempted.has(id)) continue;
+      const wait = this.backoff.get(id);
+      if (wait && now.getTime() < wait.nextAt) continue;
+      await this.apply({ type: 'ENSURE_TICKET', incidentId: id }, now, attempted);
     }
   }
 

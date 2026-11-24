@@ -94,6 +94,25 @@ describe('DatacenterProbeService', () => {
     await t.svc.onApplicationShutdown();
   });
 
+  it('una orden CROSS más vieja que el plazo del cruce (2 min) no se ejecuta: se marca tomada y hecha (el evaluador ya resolvió sin ella)', async () => {
+    jest.setSystemTime(new Date('2026-11-23T15:10:00.000Z'));
+    const t = setup({
+      orders: [
+        { id: 31, serviceId: 7, kind: 'CROSS', createdAt: new Date('2026-11-23T15:00:00.000Z') }, // 10 min: caducada
+        { id: 32, serviceId: 7, kind: 'CROSS', createdAt: new Date('2026-11-23T15:09:30.000Z') }, // vigente
+        { id: 33, serviceId: 7, kind: 'MANUAL', createdAt: new Date('2026-11-23T14:00:00.000Z') }, // MANUAL: siempre
+      ],
+    });
+    await t.svc.onApplicationBootstrap();
+    await jest.advanceTimersByTimeAsync(5000);
+    expect(t.orders.update).toHaveBeenCalledWith({ id: 31, takenAt: expect.anything() }, { takenAt: expect.any(Date), doneAt: expect.any(Date) });
+    expect(t.runner.runNow).toHaveBeenCalledTimes(2);
+    expect(t.runner.runNow).toHaveBeenCalledWith(7, 'CROSS', 32);
+    expect(t.runner.runNow).toHaveBeenCalledWith(7, 'MANUAL', 33);
+    expect(t.runner.runNow).not.toHaveBeenCalledWith(7, 'CROSS', 31);
+    await t.svc.onApplicationShutdown();
+  });
+
   it('consulta órdenes MANUAL y CROSS de kubo-01', async () => {
     const t = setup();
     await t.svc.onApplicationBootstrap();
