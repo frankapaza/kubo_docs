@@ -24,6 +24,13 @@ export const canManageSystemCatalog = (user: User | null): boolean => user?.role
  */
 export const canManageLogInstallations = (user: User | null): boolean => user?.role === 'ADMIN';
 
+/**
+ * Claves `kdev_` del conector de Claude: todo rol de desarrollo menos
+ * STAKEHOLDER (mismo criterio que el backend).
+ */
+export const canUseDevKeys = (user: User | null): boolean =>
+  !!user && (['ADMIN', 'DEVELOPER', 'SCRUM_MASTER', 'PRODUCT_OWNER'] as UserRole[]).includes(user.role);
+
 export const canCreateProject = (user: User | null): boolean =>
   user?.role === 'ADMIN' || user?.role === 'PRODUCT_OWNER';
 

@@ -3,7 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../auth/AuthContext';
 import { useIdleLogout } from '../auth/useIdleLogout';
-import { canManageLogInstallations, canManageUsers } from '../auth/permissions';
+import { canManageLogInstallations, canManageUsers, canUseDevKeys } from '../auth/permissions';
 import { monitoringApi } from '../api/monitoring.api';
 import { useRealtime } from '../lib/realtime';
 import { workspaceApi } from '../api/workspace.api';
@@ -160,6 +160,15 @@ export default function AppLayout() {
             >
               <SettingsIcon size={18} />
               Instalaciones
+            </NavLink>
+          )}
+          {canUseDevKeys(user) && (
+            <NavLink
+              to="/dev/claves"
+              className={({ isActive }) => `${navItem} ${isActive ? navActive : navIdle}`}
+            >
+              <ZapIcon size={18} />
+              Claves de desarrollo
             </NavLink>
           )}
 
