@@ -1,20 +1,20 @@
-import { Injectable } from "@nestjs/common";
-import { TicketAssignmentService } from "../tickets/ticket-assignment.service";
-import { TicketEventsService } from "../tickets/ticket-events.service";
-import { TicketTransitionsService } from "../tickets/ticket-transitions.service";
-import { canTransition } from "../tickets/domain/ticket-state-machine";
+import { Injectable } from '@nestjs/common';
+import { TicketAssignmentService } from '../tickets/ticket-assignment.service';
+import { TicketEventsService } from '../tickets/ticket-events.service';
+import { TicketTransitionsService } from '../tickets/ticket-transitions.service';
+import { canTransition } from '../tickets/domain/ticket-state-machine';
 import {
   TicketPriority,
   TicketUrgency,
-} from "../tickets/domain/ticket-priority";
-import { Ticket } from "../tickets/entities/ticket.entity";
-import { TicketsRepository } from "../tickets/tickets.repository";
-import { TicketsService } from "../tickets/tickets.service";
-import { UsersService } from "../users/users.service";
-import { MONITORING_ACTOR_EMAIL } from "./availability.constants";
-import type { Criticality } from "./core";
-import { buildIncidentTicket } from "./domain/ticket-text";
-import { MonitorIncident } from "./entities/monitor-incident.entity";
+} from '../tickets/domain/ticket-priority';
+import { Ticket } from '../tickets/entities/ticket.entity';
+import { TicketsRepository } from '../tickets/tickets.repository';
+import { TicketsService } from '../tickets/tickets.service';
+import { UsersService } from '../users/users.service';
+import { MONITORING_ACTOR_EMAIL } from './availability.constants';
+import type { Criticality } from './core';
+import { buildIncidentTicket } from './domain/ticket-text';
+import { MonitorIncident } from './entities/monitor-incident.entity';
 
 export interface IncidentTicketContext {
   clientId: number;
@@ -27,20 +27,20 @@ export interface IncidentTicketContext {
 }
 
 const URGENCY: Record<Criticality, TicketUrgency> = {
-  HIGH: "ALTA",
-  MEDIUM: "MEDIA",
-  LOW: "BAJA",
+  HIGH: 'ALTA',
+  MEDIUM: 'MEDIA',
+  LOW: 'BAJA',
 };
 const PRIORITY: Record<Criticality, TicketPriority> = {
-  HIGH: "P1",
-  MEDIUM: "P2",
-  LOW: "P3",
+  HIGH: 'P1',
+  MEDIUM: 'P2',
+  LOW: 'P3',
 };
 const RANK: Record<TicketPriority, number> = { P1: 1, P2: 2, P3: 3, P4: 4 };
 
 const REOPEN_REASON =
-  "El servicio volvió a caer antes de 30 minutos de recuperado.";
-const RAISE_REASON = "Se sumó un servicio más crítico al incidente de servidor";
+  'El servicio volvió a caer antes de 30 minutos de recuperado.';
+const RAISE_REASON = 'Se sumó un servicio más crítico al incidente de servidor';
 
 const labelOf = (incidentId: number) => `monitoreo:incidente:${incidentId}`;
 
@@ -64,7 +64,7 @@ export class AvailabilityTicketsService {
       const user = await this.users.findByEmail(MONITORING_ACTOR_EMAIL);
       if (!user)
         throw new Error(
-          "Falta el usuario de monitoreo: aplicar la migración 031",
+          'Falta el usuario de monitoreo: aplicar la migración 031',
         );
       this.monitoringUserId = Number(user.id);
     }
@@ -79,7 +79,7 @@ export class AvailabilityTicketsService {
     if (existing) {
       // Cura el UPDATE no transaccional de la creación si se cayó a medias.
       if (!existing.escalationLevel) {
-        await this.repo.update(Number(existing.id), { escalationLevel: "N1" });
+        await this.repo.update(Number(existing.id), { escalationLevel: 'N1' });
       }
       return existing;
     }
@@ -93,16 +93,16 @@ export class AvailabilityTicketsService {
   ): Promise<Ticket> {
     const userId = await this.actorId();
     const text = buildIncidentTicket({
-      kind: incident.kind === "ROUTE" ? "ROUTE" : "DOWN",
+      kind: incident.kind === 'ROUTE' ? 'ROUTE' : 'DOWN',
       serviceNames: ctx.serviceNames,
       serverName: ctx.serverName,
       firstFailureAt: incident.firstFailureAt,
       confirmedAt: incident.confirmedAt,
       diagnosis:
         ctx.diagnosis ??
-        (incident.kind === "ROUTE"
-          ? "El servicio responde desde otros puntos pero no desde Perú."
-          : "El servicio no responde a las comprobaciones."),
+        (incident.kind === 'ROUTE'
+          ? 'El servicio responde desde otros puntos pero no desde Perú.'
+          : 'El servicio no responde a las comprobaciones.'),
     });
     const rawText = previousCode
       ? `Continúa el incidente del ticket ${previousCode}.\n\n${text.rawText}`
@@ -111,24 +111,24 @@ export class AvailabilityTicketsService {
     // MONITOREO aunque el DTO HTTP lo prohíba. Nunca se asigna.
     // nadie elige el sistema; decisión 13 del diseño de disponibilidad
     const created = await this.tickets.create(
-      { kind: "STAFF", userId },
+      { kind: 'STAFF', userId },
       {
         rawText,
         subject: text.subject,
-        origin: "MONITOREO",
-        requestType: "INCIDENCIA",
-        serviceCategory: "SOPORTE",
-        impact: "ALTO",
+        origin: 'MONITOREO',
+        requestType: 'INCIDENCIA',
+        serviceCategory: 'SOPORTE',
+        impact: 'ALTO',
         urgency: URGENCY[ctx.criticality],
         clientId: ctx.clientId,
         systemId: ctx.systemId ?? undefined,
-        labels: ["monitoreo", "disponibilidad", labelOf(incident.id)],
+        labels: ['monitoreo', 'disponibilidad', labelOf(incident.id)],
       },
       undefined,
-      "EXENTO_SIN_QUIEN_ELIJA",
+      'EXENTO_SIN_QUIEN_ELIJA',
     );
     // No transaccional: si falla, el ticket queda sin nivel N1 (inofensivo).
-    await this.repo.update(Number(created.id), { escalationLevel: "N1" });
+    await this.repo.update(Number(created.id), { escalationLevel: 'N1' });
     return created;
   }
 
@@ -143,7 +143,7 @@ export class AvailabilityTicketsService {
     await this.assignment.overridePriority({
       ticketId,
       actorUserId: await this.actorId(),
-      impact: "ALTO",
+      impact: 'ALTO',
       urgency: URGENCY[criticality],
       reason: RAISE_REASON,
     });
@@ -157,15 +157,15 @@ export class AvailabilityTicketsService {
     const ticket = await this.repo.findById(ticketId);
     if (!ticket) return this.replace(incident, ctx, ticketId, null);
     const previousCode = ticket.code ?? `#${ticket.id}`;
-    if (ticket.status === "CERRADO")
+    if (ticket.status === 'CERRADO')
       return this.replace(incident, ctx, ticketId, previousCode);
-    if (ticket.status === "RESUELTO") {
-      if (!canTransition(ticket.status, "EN_ATENCION"))
+    if (ticket.status === 'RESUELTO') {
+      if (!canTransition(ticket.status, 'EN_ATENCION'))
         return this.replace(incident, ctx, ticketId, previousCode);
       return this.transitions.transition({
         ticketId,
         actorUserId: await this.actorId(),
-        toStatus: "EN_ATENCION",
+        toStatus: 'EN_ATENCION',
         reason: REOPEN_REASON,
       });
     }
@@ -184,7 +184,7 @@ export class AvailabilityTicketsService {
     if (
       found &&
       Number(found.id) !== Number(oldTicketId) &&
-      found.status !== "CERRADO"
+      found.status !== 'CERRADO'
     )
       return found;
     return this.createTicket(incident, ctx, previousCode);
@@ -197,10 +197,10 @@ export class AvailabilityTicketsService {
   ): Promise<void> {
     await this.events.record({
       ticketId,
-      type: "COMMENT",
+      type: 'COMMENT',
       actorUserId: await this.actorId(),
       reason: text,
-      payload: { source: "DISPONIBILIDAD", ...payload },
+      payload: { source: 'DISPONIBILIDAD', ...payload },
     });
   }
 }
