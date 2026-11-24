@@ -1,6 +1,7 @@
 import * as net from 'node:net';
 import * as https from 'node:https';
 import * as tls from 'node:tls';
+import { promises as dns } from 'node:dns';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { CheckErrorCode, CheckKind, CheckResult, Protocol, ServiceTarget } from './types';
@@ -21,7 +22,7 @@ const TLS_CODES = /^(DEPTH_ZERO_SELF_SIGNED_CERT|SELF_SIGNED_CERT_IN_CHAIN|UNABL
 
 function mapError(err: unknown): CheckErrorCode {
   const code = String((err as { code?: unknown } | null)?.code ?? '');
-  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN' || code === 'EAI_NODATA') return 'DNS';
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN' || code === 'EAI_NODATA' || code === 'EAI_FAIL') return 'DNS';
   if (code === 'ECONNREFUSED') return 'REFUSED';
   if (code === 'ETIMEDOUT' || code === 'ABORT_ERR' || code === 'ERR_TIMEOUT') return 'TIMEOUT';
   if (TLS_CODES.test(code)) return 'TLS';
@@ -85,10 +86,19 @@ function httpsCheck(target: string, timeoutMs: number, ca?: string): Promise<Out
   });
 }
 
-function icmpCheck(host: string, timeoutMs: number): Promise<Outcome> {
+async function icmpCheck(host: string, timeoutMs: number): Promise<Outcome> {
+  // Un destino con forma de opción no debe llegar a `ping` como flag.
+  if (!host || host.startsWith('-') || /\s/.test(host)) return { ok: false, errorCode: 'NETWORK' };
+  // La resolución DNS se decide aquí, no por el texto (localizado) de `ping`.
+  if (!net.isIP(host)) {
+    try {
+      await dns.lookup(host);
+    } catch (e) {
+      const code = mapError(e);
+      return { ok: false, errorCode: code === 'NETWORK' ? 'DNS' : code };
+    }
+  }
   return new Promise((resolve) => {
-    // Un destino con forma de opción no debe llegar a `ping` como flag.
-    if (!host || host.startsWith('-') || /\s/.test(host)) return resolve({ ok: false, errorCode: 'NETWORK' });
     const win = process.platform === 'win32';
     const args = win
       ? ['-n', '1', '-w', String(timeoutMs), host]
@@ -102,10 +112,8 @@ function icmpCheck(host: string, timeoutMs: number): Promise<Outcome> {
       }
       if ((err as { code?: unknown }).code === 'ENOENT') return resolve({ ok: false, errorCode: 'NETWORK' });
       if ((err as { killed?: boolean }).killed) return resolve({ ok: false, errorCode: 'TIMEOUT' });
-      if (/could not find host|unknown host|name or service not known|temporary failure in name resolution|cannot resolve|no address associated/i.test(out)) {
-        return resolve({ ok: false, errorCode: 'DNS' });
-      }
-      if (/general failure|network is unreachable|transmit failed/i.test(out)) {
+      // Best-effort (inglés, español, busybox); el DNS ya se resolvió arriba.
+      if (/general failure|error general|unreachable|transmit failed|error en la transmisi|permission denied|operation not permitted/i.test(out)) {
         return resolve({ ok: false, errorCode: 'NETWORK' });
       }
       resolve({ ok: false, errorCode: 'TIMEOUT' });

@@ -118,7 +118,11 @@ describe('ICMP', () => {
   });
   it('destino con forma de opcion no se interpreta como flag', async () => {
     const r = await runCheck(svc({ protocol: 'ICMP', target: '-f' }), 'REGULAR', cycleAt);
-    expect(r.ok).toBe(false);
+    expect(r).toMatchObject({ ok: false, errorCode: 'NETWORK' });
+  });
+  it('host inexistente -> DNS', async () => {
+    const r = await runCheck(svc({ protocol: 'ICMP', target: 'nohost.invalid' }), 'REGULAR', cycleAt);
+    expect(r).toMatchObject({ ok: false, errorCode: 'DNS' });
   });
 });
 
