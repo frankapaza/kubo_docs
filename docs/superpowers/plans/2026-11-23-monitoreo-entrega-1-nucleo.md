@@ -2,42 +2,46 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Medir los servicios de cada cliente desde la oficina en Lima y desde el VPS de KUBO, cruzar las dos mediciones, abrir incidentes con ticket automático (oculto al cliente hasta validar) y verlos en las pantallas Estado e Incidentes de la web del personal.
+**Goal:** Medir los servicios de cada cliente desde la oficina en Lima y desde el VPS de KUBO, cruzar las dos mediciones, abrir incidentes con ticket automático (siempre interno: el cliente nunca lo ve) y verlos en las pantallas Estado e Incidentes de la web del personal.
 
-**Architecture:** Un paquete puro `packages/monitoring-core` (pruebas TCP/HTTPS/ICMP, planificador en hora de Lima, confirmación, degradación, ejecutor) lo usan el motor de oficina (`desktop/engine`, servicio de Windows en Node) y el contenedor `monitor-worker` (sonda `kubo-01` y evaluador). El backend NestJS gana un módulo `monitoring` con la ingesta de la sonda, la API del personal y la regla que oculta al cliente los tickets automáticos. Las sondas mandan resultados y **señales** (fallo confirmado, recuperación…); el evaluador del worker las convierte en incidentes y tickets.
+**Architecture:** Un paquete puro `packages/monitoring-core` (pruebas TCP/HTTPS/ICMP, planificador en hora de Lima, confirmación, degradación, ejecutor) lo usan el motor de oficina (`desktop/engine`, servicio de Windows en Node) y el contenedor `monitor-worker` (sonda `kubo-01` y evaluador). El backend NestJS gana un módulo `availability`, al lado del módulo `monitoring` de logs y errores que ya existe, con la ingesta de la sonda y la API del personal. Los tickets automáticos usan el origen `MONITOREO`, que el sistema ya trata como interno. Las sondas mandan resultados y **señales** (fallo confirmado, recuperación…); el evaluador del worker las convierte en incidentes y tickets.
 
 **Tech Stack:** Node 20, TypeScript, NestJS 10 + TypeORM 0.3 + MySQL 8, Jest + ts-jest, React 18 + Vite + Tailwind + TanStack Query, better-sqlite3 (motor).
 
-**Spec:** `docs/superpowers/specs/2026-11-23-monitoreo-disponibilidad-design.md` (aprobado). Prototipo visual: `docs/superpowers/specs/prototipos/2026-11-23-monitoreo-v2.html`.
+**Spec:** `docs/superpowers/specs/2026-11-23-monitoreo-disponibilidad-design.md` (aprobado; actualizado al rebasar sobre `main`, ver su sección «Encaje con lo que ya existe en main»).
+
+**Rama:** `feat/monitoreo-nucleo`, creada desde `main` (que ya trae el catálogo de sistemas, migración 029, y logs y errores centralizados, migración 030). Prototipo visual: `docs/superpowers/specs/prototipos/2026-11-23-monitoreo-v2.html`.
 
 **Esta es la primera de cuatro entregas** (spec, «Entregas del piloto»). Quedan fuera y van en planes posteriores: widget Electron y notificaciones de Windows, vigilancia cruzada de sondas por correo, mantenimientos, resúmenes diarios e informe de disponibilidad, agente .NET y pantalla Servidores, WinMTR, importación CSV, sección de disponibilidad del portal.
 
 ## Global Constraints
 
 - Node `>=20 <21` en backend, `packages/monitoring-core` y `desktop/engine`.
-- Migraciones SQL manuales numeradas desde `029_`, idempotentes con procedimientos guardados contra `information_schema` (patrón de `backend/sql/migrations/028_tickets_archivados.sql`); se aplican a mano antes del despliegue (`deploy.sh`).
+- Migraciones SQL manuales numeradas desde `031_` (la 029 y la 030 ya existen en `main`), idempotentes con procedimientos guardados contra `information_schema` (patrón de `backend/sql/migrations/028_tickets_archivados.sql`); se aplican a mano antes del despliegue (`deploy.sh`).
 - Todos los instantes se guardan en UTC. La hora de Lima es UTC−5 fija (sin horario de verano); en el backend se usan `common/time-zone.ts`, `common/peru-month.ts`, `common/peru-date-time.ts`.
 - Valores por defecto, configurables: cada **5 min de 07:00 a 22:00** y cada **1 min de 22:00 a 07:00** (Lima); reintentos a **+30 s y +60 s** del primer intento; **3 fallos** confirman; **3 ciclos regulares lentos** = degradación; **2 comprobaciones correctas seguidas** = recuperación; retención de `monitor_checks` **90 días**.
 - Concurrencia máxima por sonda **16**; tiempos de espera **TCP 5 s, HTTPS 10 s**, ICMP 5 s.
 - **Nunca hay dos pruebas simultáneas del mismo servicio desde la misma sonda.**
 - La validación TLS nunca se desactiva. Solo se prueban destinos del inventario; ninguna ruta acepta destinos libres.
-- Prefijo global `/api/v1`. Ingesta bajo `/api/v1/monitoring/ingest/*`, con token de sonda guardado solo como hash SHA-256; API del personal con `@UseGuards(JwtAuthGuard, StaffOnlyGuard, RolesGuard)`.
+- Prefijo global `/api/v1`. Ingesta bajo `/api/v1/ingest/probe/*`, con token de sonda guardado solo como hash SHA-256; API del personal con `@UseGuards(JwtAuthGuard, StaffOnlyGuard, RolesGuard)`.
 - Ticket automático: `requestType 'INCIDENCIA'`, `origin 'MONITOREO'`, `escalationLevel 'N1'`, **sin asignado**; prioridad por criticidad (HIGH → P1, MEDIUM → P2, LOW → P3). La recuperación agrega un evento y **no** cierra el ticket. Las degradaciones no abren ticket.
-- Un ticket con `origin = 'MONITOREO'` es visible para el cliente solo si `monitor_client_settings.portal_availability_visible = 1` para su cliente. El personal lo ve siempre.
+- Los tickets automáticos usan `origin 'MONITOREO'`, que ya está en `INTERNAL_TICKET_ORIGINS` (`backend/src/modules/tickets/entities/ticket.entity.ts`): el cliente nunca los ve (portal, detalle, hilo, informe, avisos). **Esa regla no se modifica.**
+- Convivencia con el módulo de logs: el código nuevo **no** toca `backend/src/modules/monitoring/` ni `web/src/pages/monitoring/`, salvo añadir entradas al menú «Monitoreo» de `web/src/layout/AppLayout.tsx` y rutas en `web/src/App.tsx`. Las rutas web nuevas van bajo `/monitoreo/` como las existentes.
 - Textos visibles en español. Código e identificadores en inglés, como el resto del repositorio.
-- **No hacer commit sin autorización del usuario.** Los pasos «Commit» se ejecutan solo si la dio para esta ejecución; si no, se dejan los cambios sin confirmar y se sigue.
+- Commits por tarea en la rama local `feat/monitoreo-nucleo` (autorizado por el usuario). **Sin push ni merge.**
 - No leer `.env`, `SECRETS.local.txt` ni ningún archivo de credenciales.
 
 ## Decisiones de este plan (añadidas a la spec)
 
 La spec deja estos puntos al constructor o no los nombra; se fijan aquí para que todas las tareas usen lo mismo:
 
-1. **Empaquetado de `monitoring-core`:** fuente única en `packages/monitoring-core/src`. El backend recibe una copia generada y versionada en `backend/src/modules/monitoring/core/` mediante `backend/scripts/sync-monitoring-core.mjs` (mismo patrón que `web/scripts/sync-attachment-rules.mjs`, con `--check` en `prebuild` y `--skip-if-missing`), porque la imagen Docker del backend solo ve `backend/`. El motor la consume con `"@kubo/monitoring-core": "file:../../packages/monitoring-core"`.
-2. **Autor de los tickets automáticos:** `TicketActor` solo admite `STAFF` o `CLIENT`. La migración 029 crea un usuario de sistema `monitoreo@sistema.kubo` («Monitoreo KUBO», rol `STAKEHOLDER`, `is_active = 0` para que no pueda iniciar sesión, `password_hash = '!'`). El monitoreo escribe como `{ kind: 'STAFF', userId }` de ese usuario. Como el autor no es un usuario de cliente, `plansForEvent` no avisa al cliente.
+1. **Empaquetado de `monitoring-core`:** fuente única en `packages/monitoring-core/src`. El backend recibe una copia generada y versionada en `backend/src/modules/availability/core/` mediante `backend/scripts/sync-monitoring-core.mjs` (mismo patrón que `web/scripts/sync-attachment-rules.mjs`, con `--check` en `prebuild` y `--skip-if-missing`), porque la imagen Docker del backend solo ve `backend/`. El motor la consume con `"@kubo/monitoring-core": "file:../../packages/monitoring-core"`.
+2. **Autor de los tickets automáticos:** `TicketActor` solo admite `STAFF` o `CLIENT`. La migración 031 crea un usuario de sistema `monitoreo@sistema.kubo` («Monitoreo KUBO», rol `STAKEHOLDER`, `is_active = 0` para que no pueda iniciar sesión, `password_hash = '!'`). El monitoreo escribe como `{ kind: 'STAFF', userId }` de ese usuario. Como el autor no es un usuario de cliente, `plansForEvent` no avisa al cliente.
 3. **Tablas auxiliares** que la spec no lista: `monitor_probe_signals` (señales recibidas de las sondas), `monitor_probe_orders` («probar ahora» y comprobación cruzada) y `monitor_probe_states` (estado actual por servicio y sonda).
 4. **Ticket idempotente:** cada ticket automático lleva la etiqueta `monitoreo:incidente:<id>`; antes de crear uno, el evaluador busca por esa etiqueta.
 5. **La pantalla Inventario (básica) y la de Sondas** entran en esta entrega aunque la spec solo nombre Estado e Incidentes: sin ellas no se puede cargar `VMI2571371` ni emitir el token de la oficina. La importación CSV queda para la Entrega 3.
-6. **El worker no emite avisos en vivo** del gateway de tickets (no tiene servidor HTTP): los tickets automáticos aparecen en la bandeja al refrescar.
+6. **Módulo, rutas y nombres separados del módulo de logs:** backend en `backend/src/modules/availability/` (`AvailabilityModule`), API del personal bajo `/api/v1/availability/*`, ingesta bajo `/api/v1/ingest/probe/*` (junto a la `/api/v1/ingest/logs` existente), páginas en `web/src/pages/availability/`, rutas web `/monitoreo/estado`, `/monitoreo/incidentes`, `/monitoreo/inventario`, `/monitoreo/sondas`.
+7. **El worker no emite avisos en vivo** del gateway de tickets (no tiene servidor HTTP): los tickets automáticos aparecen en la bandeja al refrescar.
 
 ## Review Focus
 
@@ -63,8 +67,8 @@ packages/monitoring-core/
   src/runner.ts           ejecutor: franjas, reintentos, concurrencia, sin solapes
   test/*.spec.ts
 backend/scripts/sync-monitoring-core.mjs
-backend/sql/migrations/029_monitoreo_nucleo.sql
-backend/src/modules/monitoring/
+backend/sql/migrations/031_disponibilidad_nucleo.sql
+backend/src/modules/availability/
   core/                   COPIA GENERADA de packages/monitoring-core/src
   entities/*.entity.ts
   domain/diagnose.ts           tabla de cruce de sondas
@@ -72,22 +76,21 @@ backend/src/modules/monitoring/
   domain/combined-state.ts     estado combinado de un servicio
   domain/ticket-text.ts        asunto y texto del ticket automático
   probe-token.guard.ts
-  monitoring-ingest.controller.ts / monitoring-ingest.service.ts
-  monitoring-inventory.controller.ts / monitoring-inventory.service.ts
-  monitoring-state.controller.ts / monitoring-state.service.ts
-  monitoring-tickets.service.ts
-  monitoring-evaluator.service.ts
-  monitoring.module.ts
-  monitoring-worker.module.ts
+  availability-ingest.controller.ts / availability-ingest.service.ts
+  availability-inventory.controller.ts / availability-inventory.service.ts
+  availability-state.controller.ts / availability-state.service.ts
+  availability-tickets.service.ts
+  availability-evaluator.service.ts
+  availability.module.ts
+  availability-worker.module.ts
 backend/src/monitoring-worker.ts
-backend/src/modules/tickets/domain/client-visibility.ts   (regla de la decisión 21)
 desktop/engine/
   package.json, tsconfig.json, jest.config.js
   src/config.ts  src/outbox.ts  src/central-client.ts  src/engine.ts
   src/local-api.ts  src/main.ts  src/service/install.ts  src/service/uninstall.ts
   test/*.spec.ts
-web/src/api/monitoring.api.ts
-web/src/pages/monitoring/{MonitoringStatePage,MonitoringIncidentsPage,MonitoringIncidentDetailPage,MonitoringInventoryPage,MonitoringProbesPage}.tsx
+web/src/api/availability.api.ts
+web/src/pages/availability/{AvailabilityStatePage,AvailabilityIncidentsPage,AvailabilityIncidentDetailPage,AvailabilityInventoryPage,AvailabilityProbesPage}.tsx
 ```
 
 ---
@@ -263,12 +266,12 @@ web/src/pages/monitoring/{MonitoringStatePage,MonitoringIncidentsPage,Monitoring
 
 ---
 
-### Task 5: Copia de `monitoring-core` en el backend, migración 029 y entidades
+### Task 5: Copia de `monitoring-core` en el backend, migración 031 y entidades
 
 **Files:**
-- Create: `backend/scripts/sync-monitoring-core.mjs`, `backend/src/modules/monitoring/core/**` (generado), `backend/sql/migrations/029_monitoreo_nucleo.sql`, `backend/src/modules/monitoring/entities/*.entity.ts`
-- Modify: `backend/package.json` (`"prebuild": "node scripts/sync-monitoring-core.mjs --check --skip-if-missing"`), `backend/Dockerfile` (añadir `COPY scripts ./scripts` antes de `RUN npm run build` en la etapa `builder`), `backend/src/modules/tickets/entities/ticket.entity.ts:20-50` (`'MONITOREO'` en `TicketOrigin` y `TICKET_ORIGINS`), `web/src/api/types.ts` y `web/src/pages/tickets/ticket-ui.ts` (origen `MONITOREO`, etiqueta «Monitoreo»)
-- Test: `backend/src/modules/monitoring/entities/entities.spec.ts`
+- Create: `backend/scripts/sync-monitoring-core.mjs`, `backend/src/modules/availability/core/**` (generado), `backend/sql/migrations/031_disponibilidad_nucleo.sql`, `backend/src/modules/availability/entities/*.entity.ts`
+- Modify: `backend/package.json` (`"prebuild": "node scripts/sync-monitoring-core.mjs --check --skip-if-missing"`), `backend/Dockerfile` (añadir `COPY scripts ./scripts` antes de `RUN npm run build` en la etapa `builder`)
+- Test: `backend/src/modules/availability/entities/entities.spec.ts`
 
 **Interfaces:**
 - Produces, tablas de la migración (todas InnoDB, utf8mb4, instantes `DATETIME(3)` en UTC):
@@ -282,41 +285,38 @@ web/src/pages/monitoring/{MonitoringStatePage,MonitoringIncidentsPage,Monitoring
   - `monitor_incidents` (`id`, `service_id NULL`, `server_id`, `parent_id NULL`, `kind ENUM('DOWN','ROUTE','DEGRADED')`, `first_failure_at`, `confirmed_at`, `recovered_at NULL`, `close_reason ENUM('RECOVERED','SERVICE_PAUSED') NULL`, `ticket_id NULL`, `acknowledged_by NULL`, `acknowledged_at NULL`); columna generada `open_service_id = IF(recovered_at IS NULL AND service_id IS NOT NULL, service_id, NULL)` con **índice único** (garantiza un solo incidente abierto por servicio), y lo mismo para el incidente de servidor: `open_server_parent = IF(recovered_at IS NULL AND service_id IS NULL, server_id, NULL)` único
   - `monitor_incident_events` (`id`, `incident_id`, `at`, `type VARCHAR(40)`, `detail JSON NULL`, `author_user_id NULL`)
   - `monitor_office_outages` (`id`, `probe_id`, `started_at`, `ended_at NULL`, `affected_services INT`)
-  - `monitor_client_settings` (`client_id` PK FK, `portal_availability_visible TINYINT(1) NOT NULL DEFAULT 0`, `updated_at`, `updated_by NULL`)
-  - `ALTER TABLE tickets MODIFY origin ENUM(<todos los valores actuales>, 'MONITOREO') NOT NULL DEFAULT 'NOTE'` (leer la definición vigente con `SHOW CREATE TABLE tickets` antes de escribirla; el procedimiento la aplica solo si `'MONITOREO'` no está en `information_schema.COLUMNS.COLUMN_TYPE`)
   - `INSERT ... SELECT ... WHERE NOT EXISTS` del usuario `monitoreo@sistema.kubo` (decisión 2 de este plan)
-- Produces: entidades TypeORM `MonitorServer`, `MonitorService`, `MonitorProbe`, `MonitorCheck`, `MonitorProbeSignal`, `MonitorProbeOrder`, `MonitorProbeState`, `MonitorIncident`, `MonitorIncidentEvent`, `MonitorOfficeOutage`, `MonitorClientSettings`, con los nombres de columna anteriores en camelCase.
-- Produces: `MONITORING_ACTOR_EMAIL = 'monitoreo@sistema.kubo'` en `backend/src/modules/monitoring/monitoring.constants.ts`.
+- Produces: entidades TypeORM `MonitorServer`, `MonitorService`, `MonitorProbe`, `MonitorCheck`, `MonitorProbeSignal`, `MonitorProbeOrder`, `MonitorProbeState`, `MonitorIncident`, `MonitorIncidentEvent`, `MonitorOfficeOutage`, con los nombres de columna anteriores en camelCase.
+- Produces: `MONITORING_ACTOR_EMAIL = 'monitoreo@sistema.kubo'` en `backend/src/modules/availability/availability.constants.ts`.
 
-- [ ] **Step 1: Write `sync-monitoring-core.mjs`** copiando `packages/monitoring-core/src/**/*.ts` a `backend/src/modules/monitoring/core/` con una cabecera «GENERADO — no editar; fuente: packages/monitoring-core/src»; `--check` sale con código 1 si difiere; `--skip-if-missing` sale con 0 si no existe la fuente.
+- [ ] **Step 1: Write `sync-monitoring-core.mjs`** copiando `packages/monitoring-core/src/**/*.ts` a `backend/src/modules/availability/core/` con una cabecera «GENERADO — no editar; fuente: packages/monitoring-core/src»; `--check` sale con código 1 si difiere; `--skip-if-missing` sale con 0 si no existe la fuente.
 - [ ] **Step 2: Run** `cd backend && node scripts/sync-monitoring-core.mjs && node scripts/sync-monitoring-core.mjs --check` → código 0. Editar a mano un archivo de `core/` y repetir `--check` → código 1; restaurar.
-- [ ] **Step 3: Write the failing test** `entities.spec.ts`: construye un `DataSource` de TypeORM con las entidades nuevas sin conectar (`new DataSource({ type: 'mysql', entities: [...] }).buildMetadatas()`) y afirma `MonitorCheck` tiene clave primaria `['probeId','id']`, `MonitorProbeSignal` tiene índice único `['probeId','uuid']`, y `TICKET_ORIGINS` incluye `'MONITOREO'`.
-- [ ] **Step 4: Run** `npx jest src/modules/monitoring/entities` → FAIL.
-- [ ] **Step 5: Implement** migración, entidades, constante y los cambios de `origin` en backend y web.
-- [ ] **Step 6: Apply the migration twice** contra la base local de desarrollo (`docker compose -f docker-compose.dev.yml up -d mysql`, luego `mysql ... < backend/sql/migrations/029_monitoreo_nucleo.sql` dos veces) → la segunda vez sin errores ni cambios. Comprobar `SELECT code, kind FROM monitor_probes` → 2 filas y `SELECT is_active FROM users WHERE email='monitoreo@sistema.kubo'` → 0.
-- [ ] **Step 7: Run** `npx jest src/modules/monitoring/entities && npm run build` → PASS y build sin errores; `cd ../web && npm run build` → sin errores.
-- [ ] **Step 8: Commit** `feat(monitoring): migración 029, entidades y origen MONITOREO`
+- [ ] **Step 3: Write the failing test** `entities.spec.ts`: construye un `DataSource` de TypeORM con las entidades nuevas sin conectar (`new DataSource({ type: 'mysql', entities: [...] }).buildMetadatas()`) y afirma `MonitorCheck` tiene clave primaria `['probeId','id']`, `MonitorProbeSignal` tiene índice único `['probeId','uuid']`.
+- [ ] **Step 4: Run** `npx jest src/modules/availability/entities` → FAIL.
+- [ ] **Step 5: Implement** migración, entidades y constante. El origen `MONITOREO` ya existe (migración 030): no se toca.
+- [ ] **Step 6: Apply the migration twice** contra la base local de desarrollo (`docker compose -f docker-compose.dev.yml up -d mysql`, luego `mysql ... < backend/sql/migrations/031_disponibilidad_nucleo.sql` dos veces) → la segunda vez sin errores ni cambios. Comprobar `SELECT code, kind FROM monitor_probes` → 2 filas y `SELECT is_active FROM users WHERE email='monitoreo@sistema.kubo'` → 0.
+- [ ] **Step 7: Run** `npx jest src/modules/availability/entities && npm run build` → PASS y build sin errores.
+- [ ] **Step 8: Commit** `feat(disponibilidad): migración 031 y entidades`
 
 ---
 
-### Task 6: Inventario, sondas y opciones por cliente (API del personal)
+### Task 6: Inventario y sondas (API del personal)
 
 **Files:**
-- Create: `backend/src/modules/monitoring/monitoring-inventory.service.ts`, `monitoring-inventory.controller.ts`, `dto/*.dto.ts`, `monitoring.module.ts`
-- Modify: `backend/src/app.module.ts` (importar `MonitoringModule`)
-- Test: `backend/src/modules/monitoring/monitoring-inventory.service.spec.ts`
+- Create: `backend/src/modules/availability/availability-inventory.service.ts`, `availability-inventory.controller.ts`, `dto/*.dto.ts`, `availability.module.ts`
+- Modify: `backend/src/app.module.ts` (importar `AvailabilityModule`)
+- Test: `backend/src/modules/availability/availability-inventory.service.spec.ts`
 
 **Interfaces:**
 - Consumes: entidades de la Task 5; `ClientsService.findByIdOrFail`; `ClientSystemsRepository` (para validar que `systemId` pertenece al cliente del servidor).
-- Produces (todas bajo `@UseGuards(JwtAuthGuard, StaffOnlyGuard, RolesGuard)`, prefijo `/monitoring`):
+- Produces (todas bajo `@UseGuards(JwtAuthGuard, StaffOnlyGuard, RolesGuard)`, prefijo `/availability`):
   - `GET/POST /servers`, `PATCH /servers/:id` (incluye `status`)
   - `GET /services?serverId=`, `POST /services`, `PATCH /services/:id` (incluye `status`)
   - `POST /services/test` con cuerpo `{ serviceId }` → `CheckResult` (ejecuta `runCheck` una vez desde el backend; solo servicios del inventario)
   - `GET /probes` → `{ id, code, kind, lastSeenAt, version, clockSkewMs, hasToken }[]`
   - `POST /probes/:id/token` → `{ token }` en claro **una sola vez** (`kmp_` + 32 bytes aleatorios en base64url); guarda `sha256` hex
   - `DELETE /probes/:id/token` → revoca
-  - `PUT /clients/:clientId/monitoring-settings` `{ portalAvailabilityVisible: boolean }`
-  - `MonitoringInventoryService.setServiceStatus(id, status, actorUserId)` y `setServerStatus(...)`: al pasar a `PAUSED` o `ARCHIVED` cierran los incidentes abiertos afectados con `close_reason = 'SERVICE_PAUSED'` llamando a `MonitoringEvaluatorService.closeForPause(serviceIds, actorUserId)` (Task 9). Hasta que exista la Task 9, la prueba usa un doble.
+  - `AvailabilityInventoryService.setServiceStatus(id, status, actorUserId)` y `setServerStatus(...)`: al pasar a `PAUSED` o `ARCHIVED` cierran los incidentes abiertos afectados con `close_reason = 'SERVICE_PAUSED'` llamando a `AvailabilityEvaluatorService.closeForPause(serviceIds, actorUserId)` (Task 9). Hasta que exista la Task 9, la prueba usa un doble.
 - Validación: `protocol HTTPS` exige `target` con `https://`; `TCP` exige `port` 1–65535; `systemId` debe pertenecer al cliente del servidor (400 `BAD_INPUT` si no).
 
 - [ ] **Step 1: Write the failing tests** (con dobles de repositorio, estilo `ticket-transitions.service.spec.ts`):
@@ -325,30 +325,30 @@ web/src/pages/monitoring/{MonitoringStatePage,MonitoringIncidentsPage,Monitoring
   - `emitir token devuelve kmp_… y guarda solo su sha256; una segunda lectura de probes no trae el token`
   - `pausar un servicio con incidente abierto llama a closeForPause([id], actor)` (Review Focus 3)
   - `archivar un servidor llama a closeForPause con todos sus servicios`
-- [ ] **Step 2: Run** `npx jest src/modules/monitoring/monitoring-inventory` → FAIL.
+- [ ] **Step 2: Run** `npx jest src/modules/availability/availability-inventory` → FAIL.
 - [ ] **Step 3: Implement** servicio, DTO con `class-validator`, controlador y módulo.
 - [ ] **Step 4: Run** → PASS; `npm run build` → OK.
-- [ ] **Step 5: Commit** `feat(monitoring): inventario, tokens de sonda y opciones por cliente`
+- [ ] **Step 5: Commit** `feat(disponibilidad): inventario y tokens de sonda`
 
 ---
 
 ### Task 7: Ingesta de la sonda de oficina
 
 **Files:**
-- Create: `backend/src/modules/monitoring/probe-token.guard.ts`, `monitoring-ingest.service.ts`, `monitoring-ingest.controller.ts`, `dto/ingest.dto.ts`, `domain/combined-state.ts`
-- Test: `monitoring-ingest.service.spec.ts`, `probe-token.guard.spec.ts`, `domain/combined-state.spec.ts`, `monitoring-ingest.integration.spec.ts` (con `test-utils/test-http-app.ts`)
+- Create: `backend/src/modules/availability/probe-token.guard.ts`, `availability-ingest.service.ts`, `availability-ingest.controller.ts`, `dto/ingest.dto.ts`, `domain/combined-state.ts`
+- Test: `availability-ingest.service.spec.ts`, `probe-token.guard.spec.ts`, `domain/combined-state.spec.ts`, `availability-ingest.integration.spec.ts` (con `test-utils/test-http-app.ts`)
 
 **Interfaces:**
 - Consumes: entidades; tipos `CheckResult`, `ProbeSignal`, `ServiceTarget`, `ScheduleConfig` desde `./core`.
 - Produces:
   - `ProbeTokenGuard`: `Authorization: Bearer <token>` → busca `monitor_probes` por `sha256(token)`; 401 si no existe o no tiene token; deja `req.probe: MonitorProbe`.
-  - `MonitoringIngestService.acceptBatch(probe: MonitorProbe, batch: { checks: CheckResult[]; signals: ProbeSignal[]; version: string }, receivedAt: Date): Promise<{ acceptedChecks: number; duplicateChecks: number; acceptedSignals: number; duplicateSignals: number }>`: `INSERT IGNORE` por `(probe_id, id)` y `(probe_id, uuid)`; actualiza `last_seen_at`, `version` y `clock_skew_ms` (= mediana de `receivedAt − startedAt` del lote menos `durationMs`, redondeada); actualiza `monitor_probe_states.last_check_at/last_ok/last_latency_ms`; marca `done_at` de las órdenes cuyo `orderId` llega. **La usa también el worker** (Task 10) para la sonda `kubo-01`.
-  - `MonitoringIngestService.sync(probe, configVersion: string | null): Promise<SyncResponse>`
+  - `AvailabilityIngestService.acceptBatch(probe: MonitorProbe, batch: { checks: CheckResult[]; signals: ProbeSignal[]; version: string }, receivedAt: Date): Promise<{ acceptedChecks: number; duplicateChecks: number; acceptedSignals: number; duplicateSignals: number }>`: `INSERT IGNORE` por `(probe_id, id)` y `(probe_id, uuid)`; actualiza `last_seen_at`, `version` y `clock_skew_ms` (= mediana de `receivedAt − startedAt` del lote menos `durationMs`, redondeada); actualiza `monitor_probe_states.last_check_at/last_ok/last_latency_ms`; marca `done_at` de las órdenes cuyo `orderId` llega. **La usa también el worker** (Task 10) para la sonda `kubo-01`.
+  - `AvailabilityIngestService.sync(probe, configVersion: string | null): Promise<SyncResponse>`
     ```ts
     interface SyncResponse { configVersion: string; config: { services: ServiceTarget[]; schedule: ScheduleConfig; references: ServiceTarget[] } | null /* null si no cambió */; orders: { id: number; serviceId: number; kind: 'MANUAL' | 'CROSS' }[]; state: CombinedStateRow[]; }
     ```
     `configVersion` = sha256 del JSON canónico de servicios `ACTIVE` + horario + referencias. Las órdenes devueltas quedan con `taken_at`.
-  - Rutas: `POST /api/v1/monitoring/ingest/office/batch` (máx. 500 checks, 200 señales, cuerpo ≤ 1 MB, `@Throttle` 60/min por sonda), `GET /api/v1/monitoring/ingest/office/sync?configVersion=`. Ambas con `ProbeTokenGuard` y **sin** `JwtAuthGuard`.
+  - Rutas: `POST /api/v1/ingest/probe/batch` (máx. 500 checks, 200 señales, cuerpo ≤ 1 MB, `@Throttle` 60/min por sonda), `GET /api/v1/ingest/probe/sync?configVersion=`. Ambas con `ProbeTokenGuard` y **sin** `JwtAuthGuard`.
   - `domain/combined-state.ts`:
     ```ts
     export type CombinedStatus = 'OK' | 'VERIFYING' | 'DEGRADED' | 'DOWN' | 'ROUTE' | 'NO_DATA';
@@ -365,63 +365,54 @@ web/src/pages/monitoring/{MonitoringStatePage,MonitoringIncidentsPage,Monitoring
   - `sync con la configVersion vigente → config null; tras editar un servicio → config con la lista nueva`
   - `sync entrega cada orden una sola vez`
   - `combineStatus`: un caso por fila de la regla de prioridad, más `NO_DATA` con las dos sondas sin datos en 3 franjas
-  - integración: `POST /api/v1/monitoring/ingest/office/batch` con un JWT de personal en vez de token de sonda → 401; con token válido y cuerpo de 501 checks → 400
-- [ ] **Step 2: Run** `npx jest src/modules/monitoring` → FAIL en las nuevas.
+  - integración: `POST /api/v1/ingest/probe/batch` con un JWT de personal en vez de token de sonda → 401; con token válido y cuerpo de 501 checks → 400
+- [ ] **Step 2: Run** `npx jest src/modules/availability` → FAIL en las nuevas.
 - [ ] **Step 3: Implement** guard, DTO (validan UUID, ISO, enums y topes), servicio, controlador y `combined-state.ts`.
 - [ ] **Step 4: Run** → PASS; `npm run build` → OK.
-- [ ] **Step 5: Commit** `feat(monitoring): ingesta de la sonda de oficina y estado combinado`
+- [ ] **Step 5: Commit** `feat(disponibilidad): ingesta de la sonda de oficina y estado combinado`
 
 ---
 
-### Task 8: Tickets automáticos ocultos al cliente (decisión 21)
+### Task 8: Tickets automáticos (siempre internos)
 
 **Files:**
-- Create: `backend/src/modules/tickets/domain/client-visibility.ts`, `backend/src/modules/monitoring/domain/ticket-text.ts`, `backend/src/modules/monitoring/monitoring-tickets.service.ts`
-- Modify: `backend/src/modules/tickets/tickets.repository.ts` (`TicketListFilters` + `list`, `listForClientPeriod`, `countResolvedInPeriod`, nuevo `findByLabel`, nuevo `isVisibleToClient`), `backend/src/modules/portal/portal-tickets.service.ts:112-134`, `backend/src/modules/portal/portal-reports.service.ts:~250`, y **cualquier otra lectura de tickets con identidad de cliente** (buscar con `grep -rn "tickets\.\(list\|find\|count\)" backend/src/modules/portal backend/src/modules/notifications`; cubrir cada una)
-- Test: `tickets/domain/client-visibility.spec.ts`, `portal/portal-tickets.service.spec.ts` (ampliar), `portal/portal-reports.service.spec.ts` (ampliar), `notifications/domain/notification-rules.spec.ts` (ampliar), `monitoring/monitoring-tickets.service.spec.ts`, `monitoring/domain/ticket-text.spec.ts`
+- Create: `backend/src/modules/availability/domain/ticket-text.ts`, `backend/src/modules/availability/availability-tickets.service.ts`
+- Modify: `backend/src/modules/tickets/tickets.repository.ts` (nuevo `findByLabel`; nada más en el módulo de tickets)
+- Test: `availability/domain/ticket-text.spec.ts`, `availability/availability-tickets.service.spec.ts`, `tickets/tickets.repository.spec.ts` (ampliar para `findByLabel`)
 
 **Interfaces:**
-- Produces (`client-visibility.ts`), **único lugar de la regla**:
-  ```ts
-  /** Fragmento SQL que aplica la regla sobre el alias de `tickets`. */
-  export function clientVisibilityCondition(alias: string): string;
-  // `${alias}.origin <> 'MONITOREO' OR EXISTS (SELECT 1 FROM monitor_client_settings s WHERE s.client_id = ${alias}.client_id AND s.portal_availability_visible = 1)`
-  ```
-- Produces (repositorio): `TicketListFilters.clientFacing?: boolean`; `listForClientPeriod(clientId, from, to, opts: { clientFacing: boolean })` y `countResolvedInPeriod(clientId, from, to, opts: { clientFacing: boolean })` con `opts` **obligatorio** (que cada llamador decida; el compilador señala a todos); `isVisibleToClient(ticketId: number): Promise<boolean>`; `findByLabel(label: string): Promise<Ticket | null>`.
-- Portal: `PortalTicketsService.list` pasa `clientFacing: true`; `detail` responde el mismo `ticketNotFound()` si `!isVisibleToClient`; `PortalReportsService.monthly` pasa `clientFacing: true`. Llamadores del personal pasan `clientFacing: false`.
+- Consumes: `TicketsService.create`, `TicketTransitionsService.transition`, `TicketEventsService.record`, `TicketAssignmentService.overridePriority`, `canTransition`, `isInternalTicketOrigin` (ya existentes); `MONITORING_ACTOR_EMAIL` (Task 5).
+- Produces (repositorio): `findByLabel(label: string): Promise<Ticket | null>` (leer cómo se guarda `labels` en `ticket.entity.ts` y consultar en consecuencia, p. ej. `JSON_CONTAINS`).
 - Produces (`ticket-text.ts`): `buildIncidentTicket(input: { kind: 'DOWN' | 'ROUTE'; serviceNames: string[]; serverName: string; firstFailureAt: Date; confirmedAt: Date; diagnosis: string }): { subject: string; rawText: string }`. Asunto `Caída: <servicio> (<servidor>)` o `Sin acceso desde Perú: <servicio> (<servidor>)`; con varios servicios, `Caída del servidor <servidor> (<n> servicios)`. Las horas con `formatPeruDateTime`.
-- Produces (`MonitoringTicketsService`):
-  - `ensureTicket(incident: MonitorIncident, ctx: { clientId: number; systemId: number | null; criticality: Criticality; serviceNames: string[]; serverName: string }): Promise<Ticket>`: si `findByLabel('monitoreo:incidente:<id>')` encuentra un ticket, lo devuelve; si no, `TicketsService.create({ kind: 'STAFF', userId: monitoringUserId }, dto)` con `origin 'MONITOREO'`, `requestType 'INCIDENCIA'`, `serviceCategory 'SOPORTE'`, `impact 'ALTO'` y `urgency` `ALTA`/`MEDIA`/`BAJA` según criticidad (→ P1/P2/P3 por la matriz existente), `labels: ['monitoreo', 'monitoreo:incidente:<id>']`; después fija `escalationLevel 'N1'` con `TicketsRepository.update`. Nunca asigna.
-  - `raisePriority(ticketId, criticality)`: usa `TicketAssignmentService.overridePriority` (leer su firma en `ticket-assignment.service.ts:160`) con el usuario de monitoreo y el motivo «Se sumó un servicio más crítico al incidente de servidor». Solo sube, nunca baja.
+- Produces (`AvailabilityTicketsService`):
+  - `ensureTicket(incident: MonitorIncident, ctx: { clientId: number; systemId: number | null; criticality: Criticality; serviceNames: string[]; serverName: string }): Promise<Ticket>`: si `findByLabel('monitoreo:incidente:<id>')` encuentra un ticket, lo devuelve; si no, `TicketsService.create({ kind: 'STAFF', userId: monitoringUserId }, dto)` con `origin 'MONITOREO'`, `requestType 'INCIDENCIA'`, `serviceCategory 'SOPORTE'`, `impact 'ALTO'` y `urgency` `ALTA`/`MEDIA`/`BAJA` según criticidad (→ P1/P2/P3 por la matriz existente), `labels: ['monitoreo', 'disponibilidad', 'monitoreo:incidente:<id>']`; después fija `escalationLevel 'N1'` con `TicketsRepository.update`. Nunca asigna. Seguir cómo `backend/src/modules/monitoring/error-actions.service.ts` ya crea tickets `MONITOREO` desde el servicio (el DTO HTTP impide elegir ese origen a mano; el servicio no).
+  - `raisePriority(ticketId, criticality)`: usa `TicketAssignmentService.overridePriority` (leer su firma) con el usuario de monitoreo y el motivo «Se sumó un servicio más crítico al incidente de servidor». Solo sube, nunca baja.
   - `reopenOrReplace(incident, ticketId, ctx): Promise<Ticket>`: `RESUELTO` → `TicketTransitionsService.transition({ toStatus: 'EN_ATENCION', reason: 'El servicio volvió a caer antes de 30 minutos de recuperado.', actorUserId })`; `CERRADO` o transición no permitida (`canTransition` falso) → ticket nuevo vía `ensureTicket` cuyo `rawText` empieza por «Continúa el incidente del ticket <código anterior>»; abierto → solo comentario.
-  - `comment(ticketId, text, payload)`: `TicketEventsService.record({ type: 'COMMENT', actorUserId: monitoringUserId, reason: text, payload: { source: 'MONITOREO', ...payload } })`.
-  - `monitoringUserId` se resuelve una vez por email (`MONITORING_ACTOR_EMAIL`) y falla al arrancar si no existe («Falta el usuario de monitoreo: aplicar la migración 029»).
+  - `comment(ticketId, text, payload)`: `TicketEventsService.record({ type: 'COMMENT', actorUserId: monitoringUserId, reason: text, payload: { source: 'DISPONIBILIDAD', ...payload } })`.
+  - `monitoringUserId` se resuelve una vez por email (`MONITORING_ACTOR_EMAIL`) y falla al arrancar si no existe («Falta el usuario de monitoreo: aplicar la migración 031»).
 
 - [ ] **Step 1: Write the failing tests:**
-  - portal list: `cliente con portal desactivado no ve el ticket MONITOREO y sí los demás; activado lo ve` (sobre una base real si el repositorio ya tiene pruebas de integración de MySQL; si no, se prueba que `list` añade `clientVisibilityCondition` cuando `clientFacing` es verdadero y no cuando es falso, y la condición se prueba en `client-visibility.spec.ts` como texto)
-  - portal detail: `ticket MONITOREO oculto → la misma excepción que un ticket inexistente`
-  - portal informe: `listForClientPeriod y countResolvedInPeriod reciben clientFacing: true`
-  - notificaciones: `plansForEvent({ type: 'CREATED', origin: 'MONITOREO', hasClientAuthor: false, … })` → sin plan `CLIENT` ni `TEAM`
   - `ticket-text`: un caso DOWN, uno ROUTE y uno de servidor con 3 servicios; las horas en Lima
-  - `ensureTicket` sin ticket previo → crea con P1 para HIGH, P2 para MEDIUM, P3 para LOW, `escalationLevel 'N1'`, sin `assigneeUserId`, etiqueta correcta
+  - `ensureTicket` sin ticket previo → crea con `origin 'MONITOREO'` (y `isInternalTicketOrigin` del ticket creado es verdadero), P1 para HIGH, P2 para MEDIUM, P3 para LOW, `escalationLevel 'N1'`, sin `assigneeUserId`, etiquetas correctas, actor `STAFF` con el usuario de monitoreo
   - `ensureTicket` con un ticket que ya tiene la etiqueta → no crea otro (Review Focus 5)
   - `reopenOrReplace`: RESUELTO → transición con motivo; CERRADO → ticket nuevo que cita el código anterior; EN_ATENCION → solo comentario
   - `raisePriority` de P2 a P1 → llama a `overridePriority`; de P1 con LOW → no hace nada
-- [ ] **Step 2: Run** `npx jest src/modules/tickets src/modules/portal src/modules/notifications src/modules/monitoring` → FAIL en las nuevas.
-- [ ] **Step 3: Implement** la regla, los cambios de repositorio y portal, `ticket-text.ts` y `MonitoringTicketsService`. Registrar `MonitoringTicketsService` en `MonitoringModule` (que importa `TicketsModule` y `UsersModule`).
-- [ ] **Step 4: Run** `npx jest` (suite completa del backend) → PASS; `npm run build` → OK.
-- [ ] **Step 5: Commit** `feat(tickets): tickets de monitoreo ocultos al cliente hasta validar`
+  - `findByLabel` encuentra por etiqueta exacta y no por prefijo (`monitoreo:incidente:1` no encuentra `monitoreo:incidente:12`)
+- [ ] **Step 2: Run** `npx jest src/modules/tickets src/modules/availability` → FAIL en las nuevas.
+- [ ] **Step 3: Implement** `findByLabel`, `ticket-text.ts` y `AvailabilityTicketsService`; registrarlo en `AvailabilityModule` (que importa `TicketsModule` y `UsersModule`).
+- [ ] **Step 4: Run** `npx jest` (suite completa del backend, incluidas las pruebas existentes del portal que ocultan `MONITOREO`) → PASS; `npm run build` → OK.
+- [ ] **Step 5: Commit** `feat(disponibilidad): tickets automáticos de caídas`
 
 ---
 
 ### Task 9: Evaluador — señales a incidentes
 
 **Files:**
-- Create: `backend/src/modules/monitoring/domain/diagnose.ts`, `domain/incident-rules.ts`, `monitoring-evaluator.service.ts`
-- Test: `domain/diagnose.spec.ts`, `domain/incident-rules.spec.ts`, `monitoring-evaluator.service.spec.ts`
+- Create: `backend/src/modules/availability/domain/diagnose.ts`, `domain/incident-rules.ts`, `availability-evaluator.service.ts`
+- Test: `domain/diagnose.spec.ts`, `domain/incident-rules.spec.ts`, `availability-evaluator.service.spec.ts`
 
 **Interfaces:**
-- Consumes: entidades, `MonitoringTicketsService` (Task 8), `MonitoringIngestService` no (el evaluador solo lee tablas).
+- Consumes: entidades, `AvailabilityTicketsService` (Task 8), `AvailabilityIngestService` no (el evaluador solo lee tablas).
 - Produces (`diagnose.ts`), la tabla de la spec «Cruce de sondas»:
   ```ts
   export type Diagnosis = { kind: 'DOWN' | 'ROUTE'; label: string } | { kind: 'NONE'; label: string };
@@ -433,7 +424,7 @@ web/src/pages/monitoring/{MonitoringStatePage,MonitoringIncidentsPage,Monitoring
   - `groupDecision(newConfirmedAt: Date, openSiblings: { incidentId: number; confirmedAt: Date; parentId: number | null }[], openServerParentId: number | null): { action: 'ALONE' } | { action: 'JOIN_PARENT'; parentId: number } | { action: 'CREATE_PARENT'; siblingIds: number[] }`
   - `reopenCandidate(lastClosed: { id: number; kind: string; recoveredAt: Date; closeReason: string } | null, now: Date): number | null`: solo `DOWN`/`ROUTE` cerrados por `RECOVERED` hace menos de 30 min.
   - `recoveryCloses(kind: 'DOWN' | 'ROUTE' | 'DEGRADED', office: TrackerState | null, dc: TrackerState | null): boolean`: DOWN exige las dos sondas en `OK` (o la oficina sin datos por caída de oficina); ROUTE exige la oficina en `OK`; DEGRADED exige que llegue `DEGRADATION_CLEARED`.
-- Produces (`MonitoringEvaluatorService`):
+- Produces (`AvailabilityEvaluatorService`):
   - `tick(now: Date): Promise<void>`: procesa en orden de `id` las señales con `processed_at IS NULL`, de a 200, cada una en su transacción:
     - `OFFICE_OUTAGE_START/END` → abre o cierra `monitor_office_outages` (`affected_services` = destinos fallidos de esa franja).
     - `VERIFYING`/`TRANSIENT_FAILURE` → actualiza `monitor_probe_states`.
@@ -451,7 +442,7 @@ web/src/pages/monitoring/{MonitoringStatePage,MonitoringIncidentsPage,Monitoring
   - `groupDecision`: segundo servicio a los 2 min → `CREATE_PARENT`; a los 4 min → `ALONE`; con padre abierto → `JOIN_PARENT`
   - `reopenCandidate`: cerrado hace 29 min → id; 31 min → null; cerrado por `SERVICE_PAUSED` → null
   - `recoveryCloses`: DOWN con oficina OK y servidor FAILED → false; con las dos OK → true; ROUTE con oficina OK → true
-- [ ] **Step 2: Write the failing tests** del servicio (dobles de repositorio y de `MonitoringTicketsService`), con los escenarios de la spec:
+- [ ] **Step 2: Write the failing tests** del servicio (dobles de repositorio y de `AvailabilityTicketsService`), con los escenarios de la spec:
   - `HTTPS caído con TCP operativo`: solo el servicio HTTPS abre incidente y ticket
   - `ROUTE`: oficina confirma, cruce del servidor responde → ROUTE con ticket; luego el servidor confirma → mismo incidente pasa a DOWN, sin ticket nuevo
   - `cruce que no llega`: a los 2 min se abre ROUTE con la información disponible
@@ -463,38 +454,38 @@ web/src/pages/monitoring/{MonitoringStatePage,MonitoringIncidentsPage,Monitoring
   - `incidente abierto sin ticket_id` → `ensureTicket` en el siguiente tick (Review Focus 5)
   - `closeForPause` → cierra sin `RECOVERED` y comenta (Review Focus 3)
   - `recuperación con ticket RESUELTO` → comentario igual (decisión 20)
-- [ ] **Step 3: Run** `npx jest src/modules/monitoring` → FAIL en las nuevas.
-- [ ] **Step 4: Implement** `diagnose.ts`, `incident-rules.ts` y `MonitoringEvaluatorService`. Conectar `closeForPause` en `MonitoringInventoryService` (Task 6) en lugar del doble.
+- [ ] **Step 3: Run** `npx jest src/modules/availability` → FAIL en las nuevas.
+- [ ] **Step 4: Implement** `diagnose.ts`, `incident-rules.ts` y `AvailabilityEvaluatorService`. Conectar `closeForPause` en `AvailabilityInventoryService` (Task 6) en lugar del doble.
 - [ ] **Step 5: Run** `npx jest` → PASS; `npm run build` → OK.
-- [ ] **Step 6: Commit** `feat(monitoring): evaluador de señales, cruce de sondas e incidentes`
+- [ ] **Step 6: Commit** `feat(disponibilidad): evaluador de señales, cruce de sondas e incidentes`
 
 ---
 
 ### Task 10: Contenedor `monitor-worker`
 
 **Files:**
-- Create: `backend/src/monitoring-worker.ts`, `backend/src/modules/monitoring/monitoring-worker.module.ts`, `backend/src/modules/monitoring/datacenter-probe.service.ts`, `backend/src/modules/monitoring/monitoring-purge.service.ts`, `backend/src/config/typeorm.options.ts`
-- Modify: `backend/src/app.module.ts` (usar `typeorm.options.ts`), `docker-compose.yml` y `docker-compose.dev.yml` (servicio `monitor-worker`), `deploy.sh` y `README.md` (migración 029 y el servicio nuevo)
-- Test: `datacenter-probe.service.spec.ts`, `monitoring-purge.service.spec.ts`
+- Create: `backend/src/monitoring-worker.ts`, `backend/src/modules/availability/availability-worker.module.ts`, `backend/src/modules/availability/datacenter-probe.service.ts`, `backend/src/modules/availability/availability-purge.service.ts`, `backend/src/config/typeorm.options.ts`
+- Modify: `backend/src/app.module.ts` (usar `typeorm.options.ts`), `docker-compose.yml` y `docker-compose.dev.yml` (servicio `monitor-worker`), `deploy.sh` y `README.md` (migración 031 y el servicio nuevo)
+- Test: `datacenter-probe.service.spec.ts`, `availability-purge.service.spec.ts`
 
 **Interfaces:**
-- Consumes: `ProbeRunner`, `runCheck` (de `./core`), `MonitoringIngestService.acceptBatch`, `MonitoringEvaluatorService.tick` y `crossCheck`.
+- Consumes: `ProbeRunner`, `runCheck` (de `./core`), `AvailabilityIngestService.acceptBatch`, `AvailabilityEvaluatorService.tick` y `crossCheck`.
 - Produces:
   - `typeOrmOptionsFactory(config: ConfigService): TypeOrmModuleOptions` extraída de `app.module.ts` sin cambiar su comportamiento; la usan los dos módulos raíz.
-  - `MonitoringWorkerModule`: `ConfigModule`, `ScheduleModule`, `TypeOrmModule.forRootAsync(typeOrmOptionsFactory)`, `BullModule.forRootAsync` igual que `AppModule` si alguna dependencia de `TicketsModule` lo necesita (comprobar arrancando), `MonitoringModule`.
-  - `monitoring-worker.ts`: `NestFactory.createApplicationContext(MonitoringWorkerModule)`, `enableShutdownHooks()`, log `Monitor worker iniciado (kubo-01)`.
-  - `DatacenterProbeService` (`OnApplicationBootstrap`/`OnApplicationShutdown`): crea un `ProbeRunner` con `trackDegradation: false`, sin referencias, servicios `ACTIVE` del inventario (recarga cada 60 s con `updateServices`), y `onResult` → `acceptBatch(probe kubo-01, { checks: [r], signals, version: 'worker' })`. Expone `crossCheck(serviceId)` → `runner.runNow(serviceId, 'CROSS', null)`. Cada 5 s toma las órdenes pendientes de `kubo-01` en `monitor_probe_orders` (las crea «Probar ahora» desde el backend, Task 12), las marca `taken_at` y las ejecuta con `runNow(serviceId, kind, orderId)`. Ejecuta `MonitoringEvaluatorService.tick(new Date())` cada 5 s, sin solaparse (si un tick sigue en curso, el siguiente se salta).
-  - `MonitoringPurgeService`: `@Cron('0 0 3 * * *', { timeZone: 'America/Lima' })` → borra `monitor_checks` con `started_at < now − 90 días` y `monitor_probe_signals` procesadas con la misma antigüedad, en lotes de 5000 hasta vaciar.
+  - `AvailabilityWorkerModule`: `ConfigModule`, `ScheduleModule`, `TypeOrmModule.forRootAsync(typeOrmOptionsFactory)`, `BullModule.forRootAsync` igual que `AppModule` si alguna dependencia de `TicketsModule` lo necesita (comprobar arrancando), `AvailabilityModule`.
+  - `monitoring-worker.ts`: `NestFactory.createApplicationContext(AvailabilityWorkerModule)`, `enableShutdownHooks()`, log `Monitor worker iniciado (kubo-01)`.
+  - `DatacenterProbeService` (`OnApplicationBootstrap`/`OnApplicationShutdown`): crea un `ProbeRunner` con `trackDegradation: false`, sin referencias, servicios `ACTIVE` del inventario (recarga cada 60 s con `updateServices`), y `onResult` → `acceptBatch(probe kubo-01, { checks: [r], signals, version: 'worker' })`. Expone `crossCheck(serviceId)` → `runner.runNow(serviceId, 'CROSS', null)`. Cada 5 s toma las órdenes pendientes de `kubo-01` en `monitor_probe_orders` (las crea «Probar ahora» desde el backend, Task 12), las marca `taken_at` y las ejecuta con `runNow(serviceId, kind, orderId)`. Ejecuta `AvailabilityEvaluatorService.tick(new Date())` cada 5 s, sin solaparse (si un tick sigue en curso, el siguiente se salta).
+  - `AvailabilityPurgeService`: `@Cron('0 0 3 * * *', { timeZone: 'America/Lima' })` → borra `monitor_checks` con `started_at < now − 90 días` y `monitor_probe_signals` procesadas con la misma antigüedad, en lotes de 5000 hasta vaciar.
   - `docker-compose.yml`: servicio `monitor-worker` con el mismo `build` y `environment` de base de datos que `backend`, `command: ["node", "dist/monitoring-worker.js"]`, `mem_limit: 512m`, `restart: unless-stopped`, `depends_on` mysql (healthy) y redis; sin puertos ni entrada en el `Caddyfile`.
 
 - [ ] **Step 1: Write the failing tests:**
   - `DatacenterProbeService`: con `ProbeRunner` y reloj falsos, un resultado se entrega a `acceptBatch` con la sonda `kubo-01`; `crossCheck(7)` llama `runNow(7, 'CROSS', null)`; una orden `MANUAL` pendiente de `kubo-01` se toma una sola vez y llama `runNow(id, 'MANUAL', orderId)`; un tick lento no se solapa con el siguiente
-  - `MonitoringPurgeService`: con un doble que devuelve 5000, 5000 y 12 filas borradas, ejecuta tres lotes y para
+  - `AvailabilityPurgeService`: con un doble que devuelve 5000, 5000 y 12 filas borradas, ejecuta tres lotes y para
 - [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement** lo anterior y actualizar compose, `deploy.sh` (paso «aplicar 029» en la lista de migraciones manuales y levantar `monitor-worker`) y `README.md` (una sección corta «Monitoreo»).
+- [ ] **Step 3: Implement** lo anterior y actualizar compose, `deploy.sh` (paso «aplicar 031» en la lista de migraciones manuales y levantar `monitor-worker`) y `README.md` (una sección corta «Monitoreo de disponibilidad»).
 - [ ] **Step 4: Run** `npx jest` → PASS; `npm run build` → OK, y `ls dist/monitoring-worker.js` existe.
 - [ ] **Step 5: Smoke local:** `docker compose -f docker-compose.dev.yml up -d --build monitor-worker`, cargar por la API del personal (Task 6) un servidor de prueba con un servicio TCP a `127.0.0.1:9` (puerto cerrado), esperar 3 min → `SELECT kind, ok FROM monitor_checks ORDER BY started_at DESC LIMIT 5` muestra REGULAR y RETRY fallidos de `kubo-01`, y `docker compose logs monitor-worker` no tiene errores. Borrar el servidor de prueba (archivarlo).
-- [ ] **Step 6: Commit** `feat(monitoring): contenedor monitor-worker con sonda kubo-01 y purga`
+- [ ] **Step 6: Commit** `feat(disponibilidad): contenedor monitor-worker con sonda kubo-01 y purga`
 
 ---
 
@@ -530,7 +521,7 @@ web/src/pages/monitoring/{MonitoringStatePage,MonitoringIncidentsPage,Monitoring
 - [ ] **Step 2: Run** `cd desktop/engine && npm install && npx jest` → FAIL.
 - [ ] **Step 3: Implement** los módulos, `main.ts` (carga config, crea `Outbox`, `CentralClient`, `Engine` con `systemClock` y `runCheck`, arranca la API local) y los scripts de instalación. `README.md` del motor: cómo instalar, dónde están config, token y registros, y cómo emitir el token desde la pantalla Sondas.
 - [ ] **Step 4: Run** `npx jest` → PASS; `npm run build` → OK.
-- [ ] **Step 5: Smoke en esta PC:** instalar el servicio apuntando a la central local de desarrollo, con un token emitido desde `POST /monitoring/probes/:id/token`; reiniciar Windows **sin iniciar sesión** durante 2 min (o detener y arrancar el servicio si no se puede reiniciar ahora y anotarlo como pendiente) → `monitor_probes.last_seen_at` de `oficina-01` se actualiza; `curl -H "X-Kubo-Secret: …" http://127.0.0.1:47800/v1/status` devuelve el estado.
+- [ ] **Step 5: Smoke en esta PC:** instalar el servicio apuntando a la central local de desarrollo, con un token emitido desde `POST /availability/probes/:id/token`; reiniciar Windows **sin iniciar sesión** durante 2 min (o detener y arrancar el servicio si no se puede reiniciar ahora y anotarlo como pendiente) → `monitor_probes.last_seen_at` de `oficina-01` se actualiza; `curl -H "X-Kubo-Secret: …" http://127.0.0.1:47800/v1/status` devuelve el estado.
 - [ ] **Step 6: Commit** `feat(desktop): motor de la oficina como servicio de Windows`
 
 ---
@@ -538,12 +529,12 @@ web/src/pages/monitoring/{MonitoringStatePage,MonitoringIncidentsPage,Monitoring
 ### Task 12: API de estado e incidentes para el personal
 
 **Files:**
-- Create: `backend/src/modules/monitoring/monitoring-state.service.ts`, `monitoring-state.controller.ts`
-- Test: `monitoring-state.service.spec.ts`
+- Create: `backend/src/modules/availability/availability-state.service.ts`, `availability-state.controller.ts`
+- Test: `availability-state.service.spec.ts`
 
 **Interfaces:**
 - Consumes: `combineStatus`, entidades, `TicketsRepository.findById` (para `ticketCode`).
-- Produces (bajo `/monitoring`, guardas del personal):
+- Produces (bajo `/availability`, guardas del personal):
   - `GET /state?clientId=&status=&serverId=` → `CombinedStateRow[]`, ordenado: `DOWN`, `ROUTE`, `VERIFYING`, `DEGRADED`, `NO_DATA`, `OK`, y por nombre
   - `GET /state.csv` con los mismos filtros → CSV (`;` como separador, UTF-8 con BOM; mismo formato que `web/src/lib/csv.ts` si aplica)
   - `POST /services/:id/check-now` → crea órdenes `MANUAL` en `monitor_probe_orders` para las dos sondas (la oficina las recoge en su `sync`; `kubo-01` las recoge el worker, Task 10); **429** si `last_manual_check_at` es de hace menos de 15 s
@@ -556,30 +547,30 @@ web/src/pages/monitoring/{MonitoringStatePage,MonitoringIncidentsPage,Monitoring
 - [ ] **Step 2: Run** → FAIL.
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run** `npx jest` → PASS; `npm run build` → OK.
-- [ ] **Step 5: Commit** `feat(monitoring): API de estado e incidentes para el personal`
+- [ ] **Step 5: Commit** `feat(disponibilidad): API de estado e incidentes para el personal`
 
 ---
 
 ### Task 13: Pantallas del personal (Estado, Incidentes, Inventario, Sondas)
 
 **Files:**
-- Create: `web/src/api/monitoring.api.ts`, `web/src/pages/monitoring/MonitoringStatePage.tsx`, `MonitoringIncidentsPage.tsx`, `MonitoringIncidentDetailPage.tsx`, `MonitoringInventoryPage.tsx`, `MonitoringProbesPage.tsx`, `monitoring-ui.ts`
-- Modify: `web/src/App.tsx` (rutas), `web/src/layout/AppLayout.tsx` (sección «Monitoreo» de la barra lateral)
+- Create: `web/src/api/availability.api.ts`, `web/src/pages/availability/AvailabilityStatePage.tsx`, `AvailabilityIncidentsPage.tsx`, `AvailabilityIncidentDetailPage.tsx`, `AvailabilityInventoryPage.tsx`, `AvailabilityProbesPage.tsx`, `availability-ui.ts`
+- Modify: `web/src/App.tsx` (rutas), `web/src/layout/AppLayout.tsx` (añadir «Estado», «Incidentes», «Inventario» y «Sondas» a la sección «Monitoreo» que ya existe, encima de «Errores», «Logs» e «Instalaciones»; no tocar las entradas existentes)
 
 **Interfaces:**
-- Consumes: rutas de las Tasks 6 y 12; tipos copiados a mano en `monitoring.api.ts` (la web no importa del backend; mismo criterio que `ticket-ui.ts`).
-- Produces: rutas `/monitoring` (Estado), `/monitoring/incidents`, `/monitoring/incidents/:id`, `/monitoring/inventory`, `/monitoring/probes`. `monitoring-ui.ts` con `STATUS_LABELS: Record<CombinedStatus, string>` = `{ OK: 'Operativo', VERIFYING: 'Verificando', DEGRADED: 'Degradado', DOWN: 'Caído', ROUTE: 'Sin acceso desde Perú', NO_DATA: 'Sin datos' }` y sus colores (rojo DOWN/ROUTE, ámbar VERIFYING/DEGRADED, gris NO_DATA, verde OK).
+- Consumes: rutas de las Tasks 6 y 12; tipos copiados a mano en `availability.api.ts` (la web no importa del backend; mismo criterio que `ticket-ui.ts`).
+- Produces: rutas `/monitoreo/estado` (Estado), `/monitoreo/incidentes`, `/monitoreo/incidentes/:id`, `/monitoreo/inventario`, `/monitoreo/sondas`. `availability-ui.ts` con `STATUS_LABELS: Record<CombinedStatus, string>` = `{ OK: 'Operativo', VERIFYING: 'Verificando', DEGRADED: 'Degradado', DOWN: 'Caído', ROUTE: 'Sin acceso desde Perú', NO_DATA: 'Sin datos' }` y sus colores (rojo DOWN/ROUTE, ámbar VERIFYING/DEGRADED, gris NO_DATA, verde OK).
 - Comportamiento (referencia visual: prototipo, vista «Central»):
   - **Estado:** tabla con columnas «Servicio», «Servidor», «Cliente», «Desde Perú», «Desde servidor», «Estado», «Ticket»; filtros cliente/estado/servidor; botón «Probar ahora» (deshabilitado 15 s tras usarlo; muestra el 429 como «Espera unos segundos»); «Exportar CSV»; refresco cada 15 s con `refetchInterval`.
   - **Incidentes:** pestañas «Abiertos» y «Cerrados»; fila de incidente de servidor desplegable en sus servicios; clic → detalle.
   - **Detalle:** diagnóstico, enlace al ticket (`/tickets/:id`), lo que vio cada sonda (dos listas de comprobaciones), cronología, «Reconocer», notas, «Copiar destino WinMTR» (copia `winmtrTarget` al portapapeles). «Adjuntar WinMTR» queda para la Entrega 3: no se muestra.
   - **Inventario:** servidores por cliente con sus servicios; alta y edición en un formulario lateral (cliente, sistema del cliente, protocolo, destino, puerto, umbral, criticidad); «Pausar», «Archivar» (con confirmación que avisa que cierra incidentes abiertos); «Probar configuración».
-  - **Sondas:** las dos sondas con última conexión, versión y desfase de reloj; «Emitir token» (muestra el token una sola vez con botón copiar y el aviso «No se volverá a mostrar») y «Revocar»; por cliente, el interruptor «Mostrar disponibilidad y tickets de monitoreo en el portal» con confirmación.
+  - **Sondas:** las dos sondas con última conexión, versión y desfase de reloj; «Emitir token» (muestra el token una sola vez con botón copiar y el aviso «No se volverá a mostrar») y «Revocar».
 
-- [ ] **Step 1: Implement** `monitoring.api.ts` con el patrón de `clients.api.ts`.
+- [ ] **Step 1: Implement** `availability.api.ts` con el patrón de `clients.api.ts`.
 - [ ] **Step 2: Implement** las cinco páginas, las rutas y la sección de la barra lateral.
 - [ ] **Step 3: Run** `cd web && npm run build` → sin errores de TypeScript ni de Vite.
-- [ ] **Step 4: Verificación manual** con backend y worker locales levantados: cargar un servidor de prueba con un servicio TCP a un puerto cerrado y otro a uno abierto; en Estado el primero pasa a «Verificando» y luego a «Caído» o «Sin acceso desde Perú», el segundo queda «Operativo»; aparece el incidente con su ticket `KB-…` en la bandeja de tickets con origen «Monitoreo», prioridad P2 (criticidad media) y sin asignado; entrando al portal como usuario de ese cliente el ticket **no** aparece; activar el interruptor en Sondas → aparece; desactivarlo de nuevo. Abrir el puerto → «Operativo» y el incidente cerrado con su comentario en el ticket. Comparar a ojo con el prototipo.
+- [ ] **Step 4: Verificación manual** con backend y worker locales levantados: cargar un servidor de prueba con un servicio TCP a un puerto cerrado y otro a uno abierto; en Estado el primero pasa a «Verificando» y luego a «Caído» o «Sin acceso desde Perú», el segundo queda «Operativo»; aparece el incidente con su ticket `KB-…` en la bandeja de tickets con origen «Monitoreo», prioridad P2 (criticidad media) y sin asignado; entrando al portal como usuario de ese cliente el ticket **no** aparece (regla existente de tickets internos). Abrir el puerto → «Operativo» y el incidente cerrado con su comentario en el ticket. Comparar a ojo con el prototipo.
 - [ ] **Step 5: Commit** `feat(web): sección Monitoreo (estado, incidentes, inventario y sondas)`
 
 ---
@@ -595,5 +586,5 @@ web/src/pages/monitoring/{MonitoringStatePage,MonitoringIncidentsPage,Monitoring
   - el cambio de las 07:00 y las 22:00 cambia la frecuencia sin pruebas duplicadas (consulta sobre `monitor_checks` de esa franja);
   - un fallo aislado queda en el historial sin incidente; tres intentos fallidos abren un incidente y un ticket; la recuperación cierra el mismo incidente;
   - HTTPS caído con TCP operativo; falla solo desde Perú (ROUTE); caída del internet de la oficina (desconectar el cable: ningún ticket, una fila en `monitor_office_outages`); central detenida (el motor acumula y vacía la cola al volver); reinicio del backend y del worker con un incidente abierto (sin duplicar incidente ni ticket);
-  - un ticket automático no aparece en el portal del cliente ni cuenta en el SLA de su informe con el portal desactivado; al activarlo aparece.
+  - un ticket automático no aparece en el portal del cliente ni cuenta en el SLA de su informe.
 - [ ] **Step 3:** Presentar el documento de aceptación al usuario antes de cargar `VMI2571371` en producción. Cargarlo solo con su visto bueno.

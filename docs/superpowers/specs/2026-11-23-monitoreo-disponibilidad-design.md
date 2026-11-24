@@ -25,7 +25,7 @@ Acordadas con el responsable antes de escribir este documento; no se reabren.
 3. **Dos sondas por servicio:** la de la oficina (lo que vive un usuario en Perú) y la del servidor de KUBO (si el servicio está vivo). El diagnóstico sale de cruzarlas.
 4. **En la PC de la oficina hay un widget de escritorio** pequeño y siempre visible que informa continuamente, y **notificaciones nativas de Windows solo para lo crítico**.
 5. **Un agente en cada servidor vigilado** reporta disco, CPU, memoria, IIS, servicios de Windows y errores del Visor de eventos. Los VPS de Contacto Eficaz son del cliente: instalar el agente requiere su autorización por escrito.
-6. **El portal del cliente muestra la disponibilidad solo después de validar los datos.** Durante el piloto la ve únicamente el personal. **Lo mismo vale para los tickets automáticos:** mientras el cliente no tenga activada la disponibilidad, los tickets que crea el monitoreo no aparecen en su portal ni cuentan en el SLA de su informe mensual (cómo se aplica: decisión 21).
+6. **El portal del cliente muestra la disponibilidad solo después de validar los datos.** Durante el piloto la ve únicamente el personal. **Los tickets automáticos son siempre internos:** el cliente nunca los ve, ni antes ni después de activar la disponibilidad (decisión 21).
 7. **Piloto con Contacto Eficaz.** Primero `VMI2571371`; `VMI2429301` queda pendiente hasta tener su IP.
 8. **Valores iniciales configurables**, tomados del documento de requisitos original:
    - cada 5 min de 07:00 a 22:00 y cada 1 min de 22:00 a 07:00, hora de Lima;
@@ -42,20 +42,24 @@ Las tomo yo y quedan registradas para poder revertirlas.
 11. **El agente de servidor es .NET 8, un único ejecutable autocontenido.** Lee contadores de rendimiento, IIS (`Microsoft.Web.Administration`) y el Visor de eventos de forma nativa y no obliga a instalar Node en servidores del cliente. *Coste:* un segundo lenguaje, limitado a una pieza pequeña.
 12. **Las pruebas de la central corren en un contenedor aparte, `monitor-worker`**: mismo código del backend, otro punto de entrada. Un despliegue o una caída del backend (límite de 1 GB) no detiene el monitoreo.
 13. **El servicio vigilado cuelga del sistema.** `monitor_services.system_id` apunta a `client_systems`; el servidor cuelga del cliente. Así el ticket automático nace con `system_id` y el informe puede agrupar por sistema, como pide «el sistema como columna». Si el servicio no tiene sistema asignado, el ticket nace sin sistema (no se inventa uno).
-14. **Ticket automático para toda caída confirmada.** Abre un ticket `INCIDENCIA` con origen `MONITOREO` (valor nuevo del enum `origin`, con su migración) y prioridad por criticidad (Alta → P1, Media → P2, Baja → P3). Se crea con `escalation_level = 'N1'` y **sin asignado**: la asignación la confirma siempre una persona («Regla 01» de `TicketAssignmentService`), y el monitoreo no la salta. La recuperación agrega un evento al ticket **pero no lo cierra**: el agente documenta la causa. Las degradaciones **no** abren ticket. *Coste:* si hay muchos servicios inestables, la mesa recibe muchos tickets; lo mitigan las decisiones 15 y 19.
+14. **Ticket automático para toda caída confirmada.** Abre un ticket `INCIDENCIA` con origen `MONITOREO` (ya existe en `main`, migración 030, y ya es interno) y prioridad por criticidad (Alta → P1, Media → P2, Baja → P3). Se crea con `escalation_level = 'N1'` y **sin asignado**: la asignación la confirma siempre una persona («Regla 01» de `TicketAssignmentService`), y el monitoreo no la salta. La recuperación agrega un evento al ticket **pero no lo cierra**: el agente documenta la causa. Las degradaciones **no** abren ticket. *Coste:* si hay muchos servicios inestables, la mesa recibe muchos tickets; lo mitigan las decisiones 15 y 19.
 15. **Un servicio que vuelve a caer antes de 30 min de recuperado reabre el mismo incidente** y el mismo ticket, en vez de crear otros. Evita la ráfaga de tickets cuando un servicio parpadea. Si el agente ya pasó el ticket a `RESUELTO`, el monitoreo lo reabre **por la máquina de estados** (evento de reapertura), nunca escribiendo el estado a mano. Si ya está `CERRADO` (o la transición no está permitida), se crea un ticket nuevo que menciona el anterior.
 16. **La sonda de oficina empuja, nunca recibe conexiones.** Envía sus resultados por HTTPS saliente a la central, pide su configuración y sus órdenes («probar ahora», «comprobación cruzada») en cada sondeo, y guarda en un SQLite local lo que no pudo enviar.
 17. **El widget habla solo con el motor local**, por `127.0.0.1`. El motor junta lo que mide la oficina con el estado que trae de la central. Así el widget sigue funcionando cuando la central no responde.
 18. **La disponibilidad se calcula a partir de los incidentes**, no del porcentaje de comprobaciones exitosas. La fórmula está en «Disponibilidad mensual».
 19. **Una caída de servidor es un solo ticket y una sola notificación.** Si dos o más servicios del mismo servidor confirman fallo dentro de una ventana de 3 minutos, se agrupan en un **incidente de servidor** (`monitor_incidents.parent_id` apunta a él; los incidentes de cada servicio cuelgan de él y conservan su propia cronología y duración para el informe). El ticket y la notificación se emiten sobre el incidente de servidor, con la prioridad del servicio más crítico afectado. El widget muestra una fila por servidor que se despliega en sus servicios. Un servicio que cae después de abierto el incidente de servidor se suma a él. *Coste:* dos fallos independientes casi simultáneos en el mismo servidor quedan en un mismo ticket; el agente puede separarlos.
 20. **El ticket no gobierna el incidente.** Si el agente resuelve el ticket mientras el servicio sigue sin responder, el incidente sigue abierto: el incidente es un hecho medido y solo lo cierran las comprobaciones. Al recuperarse, se agrega el evento al ticket aunque esté resuelto.
-21. **Los tickets automáticos quedan ocultos al cliente hasta activar el portal** (aplica la decisión 6). La regla es una sola y vive en un único lugar del módulo de tickets: un ticket con `origin = 'MONITOREO'` es visible para el cliente solo si `monitor_client_settings.portal_availability_visible` es verdadero para su cliente. La aplican:
-    - la lista del portal (`PortalTicketsService.list`);
-    - el detalle del portal (`PortalTicketsService.detail`): un ticket oculto responde igual que uno inexistente (404), sin revelar que existe;
-    - el informe mensual del portal (`PortalReportsService.monthly`): ni la lista de tickets (`listForClientPeriod`) ni el conteo de resueltos (`countResolvedInPeriod`) lo incluyen, así que no cuenta para el SLA del cliente;
-    - cualquier otra lectura de tickets hecha con identidad de cliente que exista al construir (el constructor la busca y la cubre).
+21. **Los tickets automáticos son siempre internos** (decisión del responsable, 2026-11-23, que reemplaza la opción «ocultos hasta validar»). Usan el origen `MONITOREO`, que `main` ya trata como interno (`INTERNAL_TICKET_ORIGINS`): no aparecen en el portal, ni en el detalle, ni en el hilo, ni en el informe del cliente, ni generan avisos al cliente. No se modifica esa regla. Cuando se active el portal para un cliente (Entrega 4), verá su disponibilidad y la lista de incidentes, pero no los tickets de la mesa.
 
-    El personal ve siempre todos los tickets; su vista y sus informes no cambian. El cliente tampoco recibe correo por estos tickets: `plansForEvent` solo avisa al cliente cuando el autor es un usuario del cliente, y el monitoreo no lo es (se confirma con una prueba). Al activar el portal pasan a verse los tickets automáticos, **también los anteriores a la activación**; si se prefiere que solo cuenten desde la fecha de activación, es un cambio pequeño posterior. Cada punto lleva su prueba: con el portal desactivado el cliente no ve el ticket ni le cuenta en el SLA; activado, sí; el personal, siempre. *Coste:* se toca el módulo de tickets existente y sus pruebas.
+## Encaje con lo que ya existe en main
+
+Este diseño se escribió mirando una rama anterior. Al empezar la implementación, `main` ya traía el catálogo de sistemas (migración 029) y los logs y errores centralizados (`2026-11-07-logs-centralizados-design.md`, migración 030), que crearon el módulo `backend/src/modules/monitoring/`, el menú «Monitoreo» de la web, el origen de ticket `MONITOREO` y la regla de tickets internos. Para convivir sin pisarse:
+
+- El código de disponibilidad va en `backend/src/modules/availability/` y `web/src/pages/availability/`.
+- La API del personal va bajo `/api/v1/availability/*`; la ingesta de las sondas, bajo `/api/v1/ingest/probe/*`, junto a la `/api/v1/ingest/logs` existente.
+- Las pantallas nuevas se suman al menú «Monitoreo» existente: `/monitoreo/estado`, `/monitoreo/incidentes`, `/monitoreo/inventario`, `/monitoreo/sondas`.
+- Las migraciones empiezan en `031_`.
+- `monitor_services.system_id` sigue apuntando a `client_systems` (la pareja cliente-producto del catálogo), igual que `tickets.system_id`.
 
 ## Fuera de alcance
 
@@ -95,19 +99,19 @@ Todas las conexiones son salientes desde la oficina y desde los servidores del c
 
 ## Estructura del código
 
-- `backend/src/modules/monitoring/`: entidades, API del personal, ingesta, evaluación, informe.
+- `backend/src/modules/availability/`: entidades, API del personal, ingesta, evaluación, informe.
 - `backend/src/monitoring-worker.ts`: punto de entrada del contenedor `monitor-worker` (contexto de aplicación Nest sin HTTP).
 - `packages/monitoring-core/`: las pruebas (TCP, HTTPS, ICMP), el planificador de ciclos en hora de Lima y la lógica pura de confirmación y degradación. Sin base de datos ni red propia, probado con entradas y salidas. Lo usan el worker y el motor de oficina.
 - `desktop/engine/`: el motor de la oficina (Node, servicio de Windows).
 - `desktop/widget/`: el widget (Electron).
 - `agent/`: el agente .NET.
-- `web/src/pages/monitoring/`: las pantallas del personal, en una sección «Monitoreo» de la barra lateral.
+- `web/src/pages/availability/`: las pantallas del personal, dentro de la sección «Monitoreo» existente de la barra lateral.
 
 Cómo se empaqueta `monitoring-core` para que lo consuman el backend y el motor (workspace de npm o copia en el build) queda al constructor.
 
 ## Modelo de datos
 
-Migraciones numeradas desde `029_`, con el mismo cuidado que las anteriores: índices protegidos con el chequeo contra `information_schema.STATISTICS` y aplicación manual antes del despliegue (ver `deploy.sh`). Todos los instantes se guardan en UTC.
+Migraciones numeradas desde `031_`, con el mismo cuidado que las anteriores: índices protegidos con el chequeo contra `information_schema.STATISTICS` y aplicación manual antes del despliegue (ver `deploy.sh`). Todos los instantes se guardan en UTC.
 
 | Tabla | Para qué | Campos clave |
 |---|---|---|
@@ -122,7 +126,7 @@ Migraciones numeradas desde `029_`, con el mismo cuidado que las anteriores: ín
 | `monitor_evidence` | Trazas WinMTR | `incident_id`, `captured_at`, `origin`, `notes`, archivo vía el módulo de almacenamiento existente |
 | `monitor_daily_rollups` | Resúmenes para el informe | `service_id`, `probe_id`, `date` (Lima), `expected`, `executed`, `succeeded`, `p50_ms`, `p95_ms`, `down_minutes`, `route_minutes`, `no_data_minutes` |
 | `monitor_agent_samples` | Recursos del servidor | `server_id`, `at`, `cpu_pct`, `ram_pct`, `disks` (JSON), `iis` (JSON), `services` (JSON), `event_errors` |
-| `monitor_client_settings` | Opciones por cliente | `client_id`, `portal_availability_visible` (por defecto `false`) |
+| `monitor_client_settings` | Opciones por cliente | `client_id`, `portal_availability_visible` (por defecto `false`). Se crea en la Entrega 4 |
 
 Retención: `monitor_checks` 90 días; `monitor_agent_samples` 30 días; `monitor_daily_rollups`, incidentes e informes 12 meses. La purga corre de noche en el worker, por lotes.
 
@@ -307,7 +311,7 @@ Los minutos en que la oficina no tenía datos **no cuentan como caída**: durant
   - se guardan solo como hash;
   - revocables desde la web.
 - **Endpoints de ingesta:**
-  - bajo `/api/v1/monitoring/ingest/*` (el prefijo global del backend), separados de la autenticación del personal y del portal;
+  - bajo `/api/v1/ingest/probe/*` (el prefijo global del backend), separados de la autenticación del personal y del portal;
   - con límite de frecuencia y límite de tamaño del cuerpo.
 - Solo se prueban destinos cargados en el inventario. «Probar ahora» no acepta destinos libres.
 - La validación TLS nunca se desactiva.
@@ -322,7 +326,7 @@ Los minutos en que la oficina no tenía datos **no cuentan como caída**: durant
    - ingesta;
    - motor de oficina;
    - estado combinado;
-   - incidentes con ticket automático, **ya ocultos al cliente** (decisión 21: el primer ticket automático no puede nacer visible en el portal);
+   - incidentes con ticket automático (internos, decisión 21);
    - pantalla de Estado e Incidentes.
 2. **Escritorio:** widget, notificaciones de Windows, bandeja, resumen al iniciar sesión, vigilancia cruzada de sondas.
 3. **Informe y agente:**
@@ -345,7 +349,7 @@ Los minutos en que la oficina no tenía datos **no cuentan como caída**: durant
   - central detenida (el widget sigue y la cola se vacía al volver);
   - reinicio del backend con un incidente abierto (sin duplicar incidente ni ticket);
   - informe de un mes en que el worker no corrió el día 1.
-- Con el portal desactivado, un ticket automático no aparece en la lista ni en el detalle del portal del cliente, ni cuenta en el SLA de su informe; el personal sí lo ve. Al activar el portal, aparece.
+- Un ticket automático no aparece en la lista ni en el detalle del portal del cliente, ni cuenta en el SLA de su informe; el personal sí lo ve.
 - Con dos clientes, cada informe contiene solo los servicios, incidentes y evidencia del cliente seleccionado.
 - **Prueba de carga:** 50 servicios con las dos sondas cumplen el intervalo de 1 min sin acumular retraso cuando 10 destinos dejan de responder a la vez.
 - Con siete días de datos reales se revisan juntos los falsos avisos, la latencia habitual, la carga y el formato del informe antes de sumar más IP y antes de activar el portal.
