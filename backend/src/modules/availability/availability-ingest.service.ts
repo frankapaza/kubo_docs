@@ -226,17 +226,20 @@ export class AvailabilityIngestService {
   /**
    * Desfase del reloj de la sonda: MÍNIMO de `(received_at − started_at) − duration_ms`
    * (negativo si la sonda va adelantada) sobre los checks NUEVOS del lote (no los
-   * duplicados) y recientes: se ignoran los de más de 2 intervalos de antigüedad, para
-   * que una cola reenviada tras una caída no se tome por desfase. El mínimo es el
-   * check con menos retraso de envío, el más cercano al desfase real. Sin candidatos
+   * duplicados). Lo viejo de una cola reenviada se distingue con el reloj de la PROPIA
+   * sonda, no con el de la central: solo cuentan los checks a menos de 2 intervalos del
+   * más reciente del lote (un reloj lento o un salto de NTP no los descarta). El mínimo
+   * es el de menos retraso de envío, el más cercano al desfase real. Sin checks nuevos
    * devuelve null y `clock_skew_ms` queda como estaba.
    */
   private clockSkewMs(rows: { startedAt: Date; durationMs: number }[], receivedAt: Date): number | null {
-    const maxAgeMs = 2 * intervalMsAt(receivedAt, DEFAULT_SCHEDULE);
+    if (rows.length === 0) return null;
+    const maxSpanMs = 2 * intervalMsAt(receivedAt, DEFAULT_SCHEDULE);
+    const newestStart = Math.max(...rows.map((r) => r.startedAt.getTime()));
     const diffs = rows
-      .map((r) => receivedAt.getTime() - r.startedAt.getTime() - r.durationMs)
-      .filter((d) => d <= maxAgeMs);
-    return diffs.length === 0 ? null : Math.round(Math.min(...diffs));
+      .filter((r) => newestStart - r.startedAt.getTime() <= maxSpanMs)
+      .map((r) => receivedAt.getTime() - r.startedAt.getTime() - r.durationMs);
+    return Math.round(Math.min(...diffs));
   }
 
   /**

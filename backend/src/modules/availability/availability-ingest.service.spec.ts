@@ -168,27 +168,31 @@ describe('hora de la central en monitor_probe_states', () => {
     await fut.svc.acceptBatch(fut.probe, { checks: [mkCheck(1, { startedAt: at(600_000), durationMs: 0 })], signals: [], version: 'v' }, T0);
     expect(Math.abs(fut.states.rows[0].lastCheckAt.getTime() - T0.getTime())).toBeLessThan(1000);
 
-    const past = makeSvc();
-    // el skew ya conocido de la sonda (reloj atrasado 20 min); el check es reciente para la central
-    past.probe.clockSkewMs = 1_200_000;
-    await past.svc.acceptBatch(past.probe, { checks: [mkCheck(2, { startedAt: at(-1_200_000), durationMs: 0 })], signals: [], version: 'v' }, T0);
-    expect(Math.abs(past.states.rows[0].lastCheckAt.getTime() - T0.getTime())).toBeLessThan(1000);
+    const slow = makeSvc();
+    expect(slow.probe.clockSkewMs).toBeNull();
+    await slow.svc.acceptBatch(slow.probe, { checks: [mkCheck(2, { startedAt: at(-1_200_000), durationMs: 0 })], signals: [], version: 'v' }, T0);
+    expect(Math.abs(slow.probes.update.mock.calls[0][1].clockSkewMs - 1_200_000)).toBeLessThan(1000);
+    expect(Math.abs(slow.states.rows[0].lastCheckAt.getTime() - T0.getTime())).toBeLessThan(1000);
   });
 
-  it('un salto de NTP hacia atrás sigue actualizando el estado (gana el lote que llegó después)', async () => {
+  it('salto de NTP de -50 min (más de 2 intervalos, T0 fijo a las 10:00 de Lima, franja de día) sigue actualizando el estado', async () => {
     const { svc, probe, states } = makeSvc();
     await svc.acceptBatch(probe, { checks: [mkCheck(1, { startedAt: at(0), durationMs: 0, ok: true })], signals: [], version: 'v' }, T0);
-    await svc.acceptBatch(probe, { checks: [mkCheck(2, { startedAt: at(-180_000), durationMs: 0, ok: false })], signals: [], version: 'v' }, T1);
+    await svc.acceptBatch(probe, { checks: [mkCheck(2, { startedAt: at(-3_000_000), durationMs: 0, ok: false })], signals: [], version: 'v' }, T1);
     expect(states.rows[0].lastOk).toBe(false);
     expect(states.rows[0].lastCheckAt.getTime()).toBeGreaterThan(T0.getTime());
     expect(states.rows[0].lastCheckAt.getTime()).toBeLessThanOrEqual(T1.getTime());
   });
 
-  it('una cola vieja reenviada no cambia clock_skew_ms', async () => {
+  it('cola vieja: un check fresco y varios 30 min más viejos (hora de sonda) -> el desfase sale del fresco', async () => {
     const { svc, probe, probes } = makeSvc();
-    probe.clockSkewMs = 20;
-    await svc.acceptBatch(probe, { checks: [mkCheck(1, { startedAt: at(-1_800_000), durationMs: 0 })], signals: [], version: 'v' }, T0);
-    expect(probes.update.mock.calls[0][1]).not.toHaveProperty('clockSkewMs');
+    const checks = [
+      mkCheck(1, { startedAt: at(-30_000), durationMs: 0 }),
+      mkCheck(2, { startedAt: at(-1_800_000), durationMs: 0 }),
+      mkCheck(3, { startedAt: at(-1_790_000), durationMs: 0 }),
+    ];
+    await svc.acceptBatch(probe, { checks, signals: [], version: 'v' }, T0);
+    expect(probes.update.mock.calls[0][1].clockSkewMs).toBe(30_000);
   });
 
   it('los duplicados no cuentan para el desfase', async () => {
