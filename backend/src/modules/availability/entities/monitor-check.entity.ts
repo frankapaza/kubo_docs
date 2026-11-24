@@ -25,7 +25,7 @@ export class MonitorCheck {
   @Column({ name: 'duration_ms', type: 'int', unsigned: true })
   durationMs!: number;
 
-  @Column({ type: 'tinyint', width: 1 })
+  @Column({ type: 'boolean' })
   ok!: boolean;
 
   @Column({ name: 'error_code', type: 'varchar', length: 20, nullable: true })

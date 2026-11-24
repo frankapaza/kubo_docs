@@ -58,3 +58,15 @@ describe('entidades de disponibilidad', () => {
     expect(meta.primaryColumns.map((c) => c.propertyName)).toEqual(['serviceId', 'probeId']);
   });
 });
+
+describe('columnas booleanas', () => {
+  const ds = buildMetadata();
+
+  it.each([
+    [MonitorCheck, 'ok'],
+    [MonitorProbeState, 'lastOk'],
+  ])('%p.%s se mapea como boolean (TypeORM convierte 0/1)', (entity, prop) => {
+    const col = ds.getMetadata(entity).findColumnWithPropertyName(prop as string);
+    expect(col?.type).toBe('boolean');
+  });
+});

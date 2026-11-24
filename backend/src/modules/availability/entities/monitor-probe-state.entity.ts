@@ -15,7 +15,7 @@ export class MonitorProbeState {
   @Column({ name: 'last_check_at', type: 'datetime', precision: 3, nullable: true })
   lastCheckAt!: Date | null;
 
-  @Column({ name: 'last_ok', type: 'tinyint', width: 1, nullable: true })
+  @Column({ name: 'last_ok', type: 'boolean', nullable: true })
   lastOk!: boolean | null;
 
   @Column({ name: 'last_latency_ms', type: 'int', unsigned: true, nullable: true })
