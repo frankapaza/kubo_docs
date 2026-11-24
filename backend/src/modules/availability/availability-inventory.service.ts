@@ -59,20 +59,23 @@ export class AvailabilityInventoryService {
     const { status, ...fields } = dto;
     const server = await this.getServer(id);
     Object.assign(server, fields);
-    await this.servers.save(server);
-    if (status) return this.setServerStatus(id, status, actorUserId);
-    return server;
+    return this.applyServerStatus(server, status, actorUserId);
   }
 
   /** Pausar o archivar cierra los incidentes abiertos de todos sus servicios. */
   async setServerStatus(id: number, status: MonitorEntityStatus, actorUserId: number): Promise<MonitorServer> {
-    const server = await this.getServer(id);
-    if (status !== 'ACTIVE') {
-      const ids = (await this.services.find({ where: { serverId: id } })).map((s) => Number(s.id));
+    return this.applyServerStatus(await this.getServer(id), status, actorUserId);
+  }
+
+  /** Persiste campos y estado en un solo guardado y, después, cierra los incidentes. */
+  private async applyServerStatus(server: MonitorServer, status: MonitorEntityStatus | undefined, actorUserId: number): Promise<MonitorServer> {
+    if (status) server.status = status;
+    const saved = await this.servers.save(server);
+    if (status && status !== 'ACTIVE') {
+      const ids = (await this.services.find({ where: { serverId: Number(server.id) } })).map((s) => Number(s.id));
       if (ids.length) await this.closer.closeForPause(ids, actorUserId);
     }
-    server.status = status;
-    return this.servers.save(server);
+    return saved;
   }
 
   // ---- Servicios ----
@@ -109,17 +112,20 @@ export class AvailabilityInventoryService {
       await this.validateSystem(server.clientId, dto.systemId);
     }
     Object.assign(service, fields);
-    await this.services.save(service);
-    if (status) return this.setServiceStatus(id, status, actorUserId);
-    return service;
+    return this.applyServiceStatus(service, status, actorUserId);
   }
 
   /** Pausar o archivar cierra sus incidentes abiertos (`SERVICE_PAUSED`, vía el evaluador). */
   async setServiceStatus(id: number, status: MonitorEntityStatus, actorUserId: number): Promise<MonitorService> {
-    const service = await this.getService(id);
-    if (status !== 'ACTIVE') await this.closer.closeForPause([Number(service.id)], actorUserId);
-    service.status = status;
-    return this.services.save(service);
+    return this.applyServiceStatus(await this.getService(id), status, actorUserId);
+  }
+
+  /** Estado primero, cierre después: un fallo del cierre nunca deja incidentes cerrados con el estado sin cambiar. */
+  private async applyServiceStatus(service: MonitorService, status: MonitorEntityStatus | undefined, actorUserId: number): Promise<MonitorService> {
+    if (status) service.status = status;
+    const saved = await this.services.save(service);
+    if (status && status !== 'ACTIVE') await this.closer.closeForPause([Number(service.id)], actorUserId);
+    return saved;
   }
 
   /** Ejecuta un chequeo único desde el backend; solo servicios del inventario. */

@@ -1,5 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { createHash } from 'node:crypto';
+import { ROLES_KEY } from '../../common/decorators/roles.decorator';
+import { AvailabilityInventoryController } from './availability-inventory.controller';
 import { AvailabilityInventoryService } from './availability-inventory.service';
 
 /** Dobles mínimos de repositorio: guardan en memoria lo que el servicio escribe. */
@@ -94,4 +96,30 @@ describe('AvailabilityInventoryService', () => {
     await svc.setServerStatus(10, 'ARCHIVED', 7);
     expect(closer.closeForPause).toHaveBeenCalledWith([100, 101], 7);
   });
+
+  it('si closeForPause falla, el estado ya quedó guardado y el error se propaga', async () => {
+    const { svc, closer, services } = makeService();
+    closer.closeForPause.mockRejectedValueOnce(new Error('boom'));
+    await expect(svc.setServiceStatus(100, 'PAUSED', 7)).rejects.toThrow('boom');
+    expect(services[0].status).toBe('PAUSED');
+  });
+
+  it('updateServer guarda campos y estado juntos antes de cerrar incidentes', async () => {
+    const { svc, closer } = makeService();
+    closer.closeForPause.mockRejectedValueOnce(new Error('boom'));
+    await expect(svc.updateServer(10, { name: 'nuevo', status: 'PAUSED' }, 7)).rejects.toThrow('boom');
+    expect((await svc.listServers())[0]).toMatchObject({ name: 'nuevo', status: 'PAUSED' });
+  });
+});
+
+describe('AvailabilityInventoryController roles', () => {
+  const proto = AvailabilityInventoryController.prototype as any;
+  const roles = (h: string) => Reflect.getMetadata(ROLES_KEY, proto[h]);
+
+  it.each(['createServer', 'updateServer', 'createService', 'testService', 'updateService', 'issueToken', 'revokeToken'])(
+    '%s exige ADMIN',
+    (h) => expect(roles(h)).toEqual(['ADMIN']),
+  );
+
+  it.each(['listServers', 'listServices', 'listProbes'])('%s queda abierto al personal', (h) => expect(roles(h)).toBeUndefined());
 });
