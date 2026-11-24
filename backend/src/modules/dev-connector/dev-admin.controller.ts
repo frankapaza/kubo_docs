@@ -54,6 +54,13 @@ export class DevAdminController {
     return this.repos.setActive(id, dto.isActive);
   }
 
+  /** Borra el repo con sus claves y vínculos: libera el nombre para registrarlo en otra asignación. */
+  @Delete('dev-repos/:id')
+  @Roles('ADMIN')
+  remove(@Param('id', ParseIntPipe) id: number) {
+    return this.repos.remove(id);
+  }
+
   /** El secreto anterior deja de valer en el acto: hay que pegarlo de nuevo en GitHub. */
   @Post('dev-repos/:id/webhook-secret')
   @Roles('ADMIN')

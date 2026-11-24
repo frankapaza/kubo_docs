@@ -56,6 +56,10 @@ export const devConnectorApi = {
     api.post<IssuedRepoSecret>('/dev-repos', { clientSystemId, githubFullName }).then((r) => r.data),
   setRepoActive: (id: number, isActive: boolean) =>
     api.patch<DevRepoView>(`/dev-repos/${id}`, { isActive }).then((r) => r.data),
+  removeRepo: (id: number) =>
+    api
+      .delete<{ githubFullName: string; clavesBorradas: number; vinculosBorrados: number }>(`/dev-repos/${id}`)
+      .then((r) => r.data),
   regenerateWebhookSecret: (id: number) =>
     api.post<IssuedRepoSecret>(`/dev-repos/${id}/webhook-secret`).then((r) => r.data),
 

@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 
 import { decryptSecret } from '../../common/crypto/aes-gcm.util';
 import { DevReposService } from './dev-repos.service';
@@ -59,6 +59,21 @@ describe('DevReposService', () => {
     await expect(service.register({ clientSystemId: 11, githubFullName: 'a/b' }, 1)).rejects.toBeInstanceOf(
       BadRequestException,
     );
+  });
+
+  it('quitar un repo lo borra con sus claves y vínculos y libera el nombre', async () => {
+    const deleteRepoCascade = jest.fn().mockResolvedValue({ keys: 2, links: 5 });
+    const { service } = build({ deleteRepoCascade });
+    const out = await service.remove(3);
+    expect(deleteRepoCascade).toHaveBeenCalledWith(3);
+    expect(out).toEqual({ githubFullName: 'cobrosseguros/cobranza', clavesBorradas: 2, vinculosBorrados: 5 });
+  });
+
+  it('quitar un repo inexistente responde 404 sin borrar nada', async () => {
+    const deleteRepoCascade = jest.fn();
+    const { service } = build({ deleteRepoCascade, findRepoById: jest.fn().mockResolvedValue(null) });
+    await expect(service.remove(99)).rejects.toBeInstanceOf(NotFoundException);
+    expect(deleteRepoCascade).not.toHaveBeenCalled();
   });
 
   it('regenerar el secreto guarda uno nuevo cifrado', async () => {

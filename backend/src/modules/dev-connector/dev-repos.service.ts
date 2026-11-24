@@ -98,6 +98,18 @@ export class DevReposService {
     return { repo: view(updated!), secret };
   }
 
+  /**
+   * Quita el repo del todo para poder registrarlo en otra asignación. Se van
+   * con él sus claves (solo valían para este repo) y sus vínculos de código
+   * (apuntan a tickets del alcance anterior). El webhook de GitHub queda
+   * huérfano: al registrarlo de nuevo hay que pegar el secreto nuevo.
+   */
+  async remove(id: number): Promise<{ githubFullName: string; clavesBorradas: number; vinculosBorrados: number }> {
+    const r = await this.findOrFail(id);
+    const out = await this.repo.deleteRepoCascade(Number(r.id));
+    return { githubFullName: r.githubFullName, clavesBorradas: out.keys, vinculosBorrados: out.links };
+  }
+
   private async findOrFail(id: number): Promise<DevRepo> {
     const r = await this.repo.findRepoById(id);
     if (!r) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Repositorio no encontrado.' });

@@ -190,6 +190,16 @@ export class DevConnectorRepository {
     return this.findRepoById(id);
   }
 
+  /** Vínculos, claves y repo en una transacción (las FK de 031 exigen ese orden). */
+  deleteRepoCascade(id: number): Promise<{ keys: number; links: number }> {
+    return this.repos.manager.transaction(async (m) => {
+      const links = await m.delete(DevLink, { devRepoId: id });
+      const keys = await m.delete(DevKey, { devRepoId: id });
+      await m.delete(DevRepo, { id });
+      return { keys: keys.affected ?? 0, links: links.affected ?? 0 };
+    });
+  }
+
   // ── Vínculos de código ─────────────────────────────────────────────────
 
   /**
