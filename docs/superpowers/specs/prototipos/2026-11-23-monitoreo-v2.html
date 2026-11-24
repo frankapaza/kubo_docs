@@ -1,0 +1,655 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KUBO Monitoreo · Prototipo v2</title>
+<style>
+:root{
+  --primary:#4F46E5;--primary-dark:#4338CA;--primary-light:#EEF2FF;--accent:#10B981;
+  --surface:#F8FAFC;--surface2:#F1F5F9;--ink:#0F172A;--text:#1e293b;--muted:#64748B;--line:#e2e8f0;--line2:#f1f5f9;
+  --ok:#047857;--ok-bg:#d1fae5;--warn:#b45309;--warn-bg:#fef3c7;--bad:#b91c1c;--bad-bg:#fee2e2;
+  --route:#c2410c;--route-bg:#ffedd5;--info:#4338CA;--info-bg:#e0e7ff;--gray:#475569;--gray-bg:#f1f5f9;--maint:#6d28d9;--maint-bg:#ede9fe;
+  --card:0 1px 2px 0 rgba(15,23,42,.04),0 1px 3px 0 rgba(15,23,42,.06);
+  --pop:0 10px 25px -5px rgba(15,23,42,.1),0 8px 10px -6px rgba(15,23,42,.08);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--surface);color:var(--text);font:14px/1.45 Inter,ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif}
+a{color:var(--primary);text-decoration:none}a:hover{text-decoration:underline}
+button{font:inherit;cursor:pointer}
+.mono{font-family:ui-monospace,Consolas,monospace;font-size:12.5px}
+.muted{color:var(--muted)}.small{font-size:12px}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+
+/* ===== barra del prototipo ===== */
+.proto{position:sticky;top:0;z-index:100;background:#0F172A;color:#e2e8f0;display:flex;align-items:center;gap:8px;padding:6px 12px;font-size:13px;flex-wrap:wrap}
+.proto b{color:#fff;margin-right:6px}
+.proto .tab{background:transparent;border:1px solid #334155;color:#cbd5e1;border-radius:999px;padding:4px 12px}
+.proto .tab.on{background:var(--primary);border-color:var(--primary);color:#fff}
+.proto .sp{flex:1}
+.sim{position:relative}
+.sim>button{background:#7c3aed;border:0;color:#fff;border-radius:999px;padding:4px 12px}
+.sim-menu{position:absolute;right:0;top:34px;background:#fff;color:var(--text);border-radius:12px;box-shadow:var(--pop);padding:6px;width:330px;display:none;border:1px solid var(--line)}
+.sim-menu.open{display:block}
+.sim-menu button{display:block;width:100%;text-align:left;background:none;border:0;padding:8px 10px;border-radius:8px}
+.sim-menu button:hover{background:var(--surface2)}
+.sim-menu small{display:block;color:var(--muted);font-size:11.5px}
+.sim-menu hr{border:0;border-top:1px solid var(--line);margin:4px 0}
+
+/* ===== componentes comunes ===== */
+.btn{border:1px solid var(--line);background:#fff;color:var(--text);border-radius:8px;padding:7px 12px;font-weight:500;white-space:nowrap}
+.btn:hover{border-color:#cbd5e1;background:var(--surface)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}.btn.primary:hover{background:var(--primary-dark)}
+.btn.sm{padding:4px 10px;font-size:12.5px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.card{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:var(--card);padding:18px;margin-bottom:16px}
+.card h2{font-size:15px;margin:0 0 12px;color:var(--ink)}
+h1{font-size:20px;margin:0;color:var(--ink)}
+.sub{color:var(--muted);margin:4px 0 18px}
+.grid{display:grid;gap:16px}.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}
+@media(max-width:1000px){.g3,.g4{grid-template-columns:1fr 1fr}}
+@media(max-width:640px){.g2,.g3,.g4{grid-template-columns:1fr}}
+.kpi .n{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--ink)}.kpi .l{color:var(--muted);font-size:12.5px}
+.tbl{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:11.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:10px;border-bottom:1px solid var(--line2);vertical-align:middle}
+tr.click{cursor:pointer}tr.click:hover td{background:var(--surface)}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+.badge::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.b-ok{color:var(--ok);background:var(--ok-bg)}.b-verif{color:var(--info);background:var(--info-bg)}.b-verif::before{animation:pulse 1s infinite}
+.b-deg{color:var(--warn);background:var(--warn-bg)}.b-down{color:var(--bad);background:var(--bad-bg)}.b-route{color:var(--route);background:var(--route-bg)}
+.b-nodata,.b-gray{color:var(--gray);background:var(--gray-bg)}.b-maint{color:var(--maint);background:var(--maint-bg)}
+@keyframes pulse{50%{opacity:.25}}
+.pill{font-size:11px;padding:1px 7px;border-radius:6px;background:var(--surface2);color:var(--gray);font-weight:600;white-space:nowrap}
+.pill.alta{background:var(--bad-bg);color:var(--bad)}.pill.media{background:var(--warn-bg);color:var(--warn)}
+.pill.new{background:var(--primary-light);color:var(--primary)}
+.probe-cell{display:flex;align-items:center;gap:6px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.pi{width:18px;height:18px;border-radius:50%;display:inline-grid;place-items:center;font-size:11px;font-weight:700;color:#fff;flex:none}
+.pi.ok{background:#10B981}.pi.down{background:#ef4444}.pi.verif{background:#6366f1;animation:pulse 1s infinite}.pi.deg{background:#f59e0b}.pi.nodata{background:#94a3b8}
+.filters{display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:12px}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted);font-weight:500}
+input,select,textarea{font:inherit;color:var(--text);background:#fff;border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+textarea{width:100%;font-family:ui-monospace,Consolas,monospace;font-size:12px}
+.banner{border-radius:12px;padding:12px 14px;margin-bottom:16px;display:flex;gap:10px;align-items:flex-start}
+.banner.warn{background:var(--warn-bg);color:#78350f}.banner.bad{background:var(--bad-bg);color:#7f1d1d}.banner.info{background:var(--primary-light);color:#312e81}
+.diag{border-left:4px solid var(--route);background:var(--route-bg);padding:12px 14px;border-radius:8px;color:#7c2d12}
+.diag.down{border-color:var(--bad);background:var(--bad-bg);color:#7f1d1d}
+.timeline{list-style:none;margin:0;padding:0}
+.timeline li{display:flex;gap:12px;padding:6px 0 6px 14px;border-left:2px solid var(--line);margin-left:5px;position:relative}
+.timeline li::before{content:"";position:absolute;left:-7px;top:11px;width:12px;height:12px;border-radius:50%;background:#fff;border:2px solid #94a3b8}
+.timeline li.bad::before{border-color:#ef4444}.timeline li.ok::before{border-color:#10B981}.timeline li.tk::before{border-color:var(--primary)}
+.timeline time{min-width:64px;color:var(--muted)}
+.bar{height:8px;background:var(--surface2);border-radius:4px;overflow:hidden}.bar>i{display:block;height:100%;background:var(--accent)}
+.bar.w>i{background:#f59e0b}.bar.b>i{background:#ef4444}
+dl.kv{display:grid;grid-template-columns:190px 1fr;gap:7px 12px;margin:0}dl.kv dt{color:var(--muted)}dl.kv dd{margin:0}
+@media(max-width:640px){dl.kv{grid-template-columns:1fr}}
+.check{display:flex;gap:8px;align-items:center;padding:5px 0}
+.ok-t{color:var(--ok)}.bad-t{color:var(--bad)}.warn-t{color:var(--warn)}
+
+/* ===== central (kubo_documentacion) ===== */
+.app{display:flex;min-height:calc(100vh - 41px)}
+.side{width:250px;background:#fff;border-right:1px solid var(--line);flex:none;display:flex;flex-direction:column}
+.side .brand{display:flex;gap:10px;align-items:center;padding:18px 20px;border-bottom:1px solid var(--line2)}
+.side .brand p{margin:0}
+.side nav{padding:14px 12px;display:flex;flex-direction:column;gap:2px}
+.side .sec{padding:4px 12px;margin-top:12px;font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.06em;display:flex;gap:6px;align-items:center}
+.side a{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:8px;color:#475569;font-weight:500;font-size:14px;text-decoration:none}
+.side a:hover{background:var(--surface2)}
+.side a.on{background:var(--primary-light);color:var(--primary-dark)}
+.side a.dim{color:#94a3b8}
+.side .cnt{margin-left:auto;background:#ef4444;color:#fff;border-radius:999px;font-size:11px;padding:0 7px}
+.content{flex:1;min-width:0;padding:24px 28px;max-width:1280px}
+@media(max-width:860px){.side{display:none}.content{padding:16px}}
+.split{display:grid;grid-template-columns:1fr 340px;gap:16px}
+@media(max-width:1100px){.split{grid-template-columns:1fr}}
+
+/* ===== portal ===== */
+.portal-h{background:#fff;border-bottom:1px solid var(--line)}
+.portal-h .in{max-width:1024px;margin:0 auto;padding:14px 24px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
+.portal-h nav{display:flex;gap:18px;font-weight:500;color:#475569}
+.portal-h nav span.on{color:var(--primary)}
+.portal-c{max-width:1024px;margin:0 auto;padding:24px}
+
+/* ===== escritorio Windows simulado ===== */
+.desk{position:relative;height:calc(100vh - 41px);min-height:560px;overflow:hidden;background:
+ radial-gradient(1200px 600px at 70% 110%,#3b82f6 0%,transparent 60%),radial-gradient(900px 500px at 20% -10%,#1e40af 0%,transparent 60%),linear-gradient(160deg,#0b1f4d,#163a8a 55%,#2563eb);}
+.desk-icons{position:absolute;left:18px;top:18px;display:flex;flex-direction:column;gap:18px}
+.dicon{width:78px;text-align:center;color:#fff;font-size:12px;text-shadow:0 1px 2px #000}
+.dicon .ic{width:44px;height:44px;margin:0 auto 4px;border-radius:10px;display:grid;place-items:center;background:rgba(255,255,255,.15);font-size:20px}
+.desk-note{position:absolute;left:120px;top:20px;max-width:430px;background:rgba(255,255,255,.92);border-radius:12px;padding:14px 16px;font-size:13px;box-shadow:var(--pop)}
+.desk-note h3{margin:0 0 6px;font-size:14px}
+.desk-note ul{margin:6px 0 0;padding-left:18px}
+@media(max-width:900px){.desk-note{display:none}}
+.taskbar{position:absolute;left:0;right:0;bottom:0;height:48px;background:rgba(32,32,32,.85);backdrop-filter:blur(20px);display:flex;align-items:center;justify-content:center;color:#fff}
+.taskbar .apps{display:flex;gap:6px}
+.taskbar .apps span{width:36px;height:36px;border-radius:6px;display:grid;place-items:center;font-size:16px}
+.taskbar .apps span:hover{background:rgba(255,255,255,.1)}
+.taskbar .tray{position:absolute;right:10px;display:flex;align-items:center;gap:12px;font-size:12px;text-align:right}
+.trayk{width:20px;height:20px;border-radius:5px;background:var(--primary);display:grid;place-items:center;font-size:10px;font-weight:700;position:relative;cursor:pointer}
+.trayk.alert::after{content:"";position:absolute;right:-3px;top:-3px;width:8px;height:8px;border-radius:50%;background:#ef4444;border:2px solid #202020}
+.tray-menu{position:absolute;right:60px;bottom:56px;background:#2b2b2b;color:#f3f3f3;border-radius:10px;padding:6px;min-width:240px;display:none;box-shadow:0 8px 32px rgba(0,0,0,.4);z-index:30}
+.tray-menu.open{display:block}
+.tray-menu button{display:block;width:100%;text-align:left;background:transparent;color:inherit;border:0;padding:8px 12px;border-radius:6px}
+.tray-menu button:hover{background:#3a3a3a}
+.tray-menu hr{border:0;border-top:1px solid #444;margin:4px 0}
+
+/* widget */
+.wg{position:absolute;width:330px;background:rgba(28,28,30,.94);backdrop-filter:blur(24px);color:#f1f5f9;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.08);font-size:13px;z-index:20;user-select:none}
+.wg.tr{right:16px;top:16px}.wg.tl{left:16px;top:16px}.wg.br{right:16px;bottom:64px}.wg.bl{left:16px;bottom:64px}
+.wg-h{display:flex;align-items:center;gap:8px;padding:9px 12px;cursor:pointer;border-radius:12px}
+.wg-h .st{width:10px;height:10px;border-radius:50%;flex:none}
+.wg-h .tt{flex:1;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wg-h .tm{color:#94a3b8;font-variant-numeric:tabular-nums;font-size:12px}
+.wg.ok .st{background:#22c55e}.wg.warn .st{background:#f59e0b}.wg.bad .st{background:#ef4444;animation:pulse 1.2s infinite}.wg.gray .st{background:#94a3b8}
+.wg.bad{border-color:rgba(239,68,68,.6)}.wg.warn{border-color:rgba(245,158,11,.5)}
+.wg-b{border-top:1px solid rgba(255,255,255,.08);padding:6px 0}
+.wg-i{padding:6px 12px;display:flex;gap:8px;cursor:pointer}
+.wg-i:hover{background:rgba(255,255,255,.06)}
+.wg-i .ico{width:16px;flex:none;text-align:center;font-weight:700}
+.wg-i .ico.bad{color:#f87171}.wg-i .ico.warn{color:#fbbf24}.wg-i .ico.route{color:#fb923c}.wg-i .ico.info{color:#a5b4fc}
+.wg-i .l2{color:#94a3b8;font-size:11.5px}
+.wg-msg{padding:8px 12px;color:#e2e8f0;font-size:12.5px}
+.wg-f{border-top:1px solid rgba(255,255,255,.08);padding:8px 12px;display:flex;align-items:center;gap:10px;color:#94a3b8;font-size:11.5px;flex-wrap:wrap}
+.wg-f .d{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:4px;vertical-align:1px}
+.wg-f button{margin-left:auto;background:#3a3a3c;color:#fff;border:0;border-radius:6px;padding:4px 10px;font-size:12px}
+.wg-pins{display:flex;gap:2px}
+.wg-pins button{background:transparent;border:0;color:#64748b;padding:0 3px;font-size:12px;margin:0}
+.wg-pins button.on{color:#e2e8f0}
+
+/* toasts Windows */
+.toasts{position:fixed;right:16px;bottom:60px;z-index:200;display:flex;flex-direction:column;gap:10px;width:364px;max-width:calc(100vw - 32px)}
+.toast{background:#2b2b2b;color:#f3f3f3;border-radius:10px;padding:12px 14px;box-shadow:0 8px 32px rgba(0,0,0,.45);animation:slide .25s ease-out;border-left:4px solid var(--primary)}
+.toast.bad{border-left-color:#ef4444}.toast.ok{border-left-color:#22c55e}.toast.warn{border-left-color:#f59e0b}.toast.route{border-left-color:#fb923c}
+.toast .tapp{font-size:11px;color:#bbb;display:flex;gap:6px;align-items:center;margin-bottom:4px}
+.toast .tapp i{width:14px;height:14px;border-radius:4px;background:var(--primary);display:inline-grid;place-items:center;font-size:9px;color:#fff;font-style:normal;font-weight:700}
+.toast .t{font-weight:600}.toast .b{font-size:13px;color:#ddd;margin-top:2px}
+.toast button{margin-top:8px;background:#3a3a3a;color:#fff;border:0;border-radius:6px;padding:5px 12px}
+.toast .x{background:none;margin:0 0 0 auto;padding:0 4px;color:#999}
+@keyframes slide{from{transform:translateX(30px);opacity:0}}
+.web-toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:9px 16px;border-radius:10px;z-index:150;font-size:13px;box-shadow:var(--pop)}
+</style>
+</head>
+<body>
+
+<div class="proto">
+  <b>Prototipo v2</b>
+  <button class="tab" data-v="pc">💻 PC de oficina (widget)</button>
+  <button class="tab" data-v="central">🌐 Central · docs.kuboti.com</button>
+  <button class="tab" data-v="portal">👤 Portal del cliente</button>
+  <span class="sp"></span>
+  <div class="sim">
+    <button id="simBtn">▶ Simular evento</button>
+    <div class="sim-menu" id="simMenu">
+      <button onclick="sim.caida('v1')">Caída real · HTTPS portal<small>Fallan las dos sondas → incidente + ticket P1 + notificación</small></button>
+      <button onclick="sim.ruta('v1')">Falla solo desde Perú · HTTPS portal<small>El servidor responde, la oficina no → «Sin acceso desde Perú»</small></button>
+      <button onclick="sim.degradar('v4')">Lentitud sostenida · HTTPS app (criticidad media)<small>Solo cambia el color del widget, sin notificación</small></button>
+      <button onclick="sim.disco()">Disco casi lleno · SRV-APP-01<small>El agente reporta D: con menos del 10 % libre</small></button>
+      <hr>
+      <button onclick="sim.oficina()">Se cae el internet de la oficina<small>Un solo aviso; la sonda guarda resultados para enviarlos después</small></button>
+      <button onclick="sim.central()">La central no responde<small>El widget sigue con lo que mide la oficina</small></button>
+      <hr>
+      <button onclick="sim.recuperar()">✔ Recuperar todo<small>Cierra incidentes (2 comprobaciones), un aviso por recuperación</small></button>
+    </div>
+  </div>
+</div>
+
+<div id="view"></div>
+<div class="toasts" id="toasts"></div>
+
+<script>
+/* =====================================================================
+   PROTOTIPO v2 · datos de ejemplo, sin backend.
+   Tiempo comprimido: los reintentos de 30 s ocurren cada 2.5 s.
+   ===================================================================== */
+const TZ='America/Lima';
+const f=(o)=>new Intl.DateTimeFormat('es-PE',{timeZone:TZ,hour12:false,...o});
+const hms=d=>f({hour:'2-digit',minute:'2-digit',second:'2-digit'}).format(new Date(d));
+const hm=d=>f({hour:'2-digit',minute:'2-digit'}).format(new Date(d));
+const dmy=d=>f({day:'2-digit',month:'2-digit',year:'numeric'}).format(new Date(d));
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const STEP=2500;
+const now=()=>Date.now();
+
+/* ---------- Estado ---------- */
+const clients=[{id:1,name:'Contacto Eficaz'},{id:2,name:'Cliente de ejemplo B'}];
+const servers=[
+  {id:'s1',client:1,name:'VMI2571371',ip:'203.0.113.25',role:'Web',provider:'Contabo',region:'EE. UU. (ejemplo)',
+   agent:{st:'ok',ver:'0.1.0',cpu:22,ram:61,disks:[{u:'C:',size:200,used:151,grow:1.1},{u:'D:',size:400,used:162,grow:0.4}],
+   pools:[['Portal','Iniciado'],['API','Iniciado'],['Reportes','Iniciado']],svcs:[['W3SVC (IIS)','En ejecución'],['MSSQLSERVER','En ejecución']],events:3}},
+  {id:'s2',client:1,name:'VMI2429301',ip:'',role:'Base de datos',provider:'Contabo',region:'—',agent:{st:'none'}},
+  {id:'s3',client:2,name:'SRV-APP-01',ip:'198.51.100.40',role:'Aplicación',provider:'Contabo',region:'Europa (ejemplo)',
+   agent:{st:'ok',ver:'0.1.0',cpu:41,ram:73,disks:[{u:'C:',size:120,used:88,grow:0.3},{u:'D:',size:250,used:196,grow:2.2}],
+   pools:[['App','Iniciado'],['Backoffice','Iniciado']],svcs:[['W3SVC (IIS)','En ejecución'],['MSSQLSERVER','En ejecución']],events:0}}
+];
+const services=[
+  {id:'v1',server:'s1',name:'HTTPS portal',proto:'HTTPS',target:'https://portal.ejemplo.pe',crit:'Alta',thr:800,pe:{st:'ok',lat:212},dc:{st:'ok',lat:38}},
+  {id:'v2',server:'s1',name:'TCP origen',proto:'TCP',target:'203.0.113.25:443',crit:'Alta',thr:300,pe:{st:'ok',lat:148},dc:{st:'ok',lat:3}},
+  {id:'v3',server:'s1',name:'ICMP diagnóstico',proto:'ICMP',target:'203.0.113.25',crit:'Baja',thr:250,pe:{st:'ok',lat:139},dc:{st:'ok',lat:1}},
+  {id:'v4',server:'s3',name:'HTTPS app',proto:'HTTPS',target:'https://app.ejemplo-b.pe',crit:'Media',thr:600,pe:{st:'ok',lat:318},dc:{st:'ok',lat:94}},
+  {id:'v5',server:'s3',name:'TCP 1433 SQL',proto:'TCP',target:'198.51.100.40:1433',crit:'Media',thr:300,pe:{st:'ok',lat:231},dc:{st:'ok',lat:4}}
+];
+services.forEach(s=>{s.hist=Array.from({length:30},()=>Math.round(s.pe.lat*(.85+Math.random()*.3)));s.dhist=Array.from({length:30},()=>Math.max(1,Math.round(s.dc.lat*(.8+Math.random()*.4))))});
+const office={internet:true,engine:true,last:now(),pending:0,ref:'1.1.1.1 18 ms · 8.8.8.8 21 ms'};
+const central={up:true,last:now()};
+const incidents=[]; const tickets=[]; let incSeq=12, tkSeq=1042;
+// incidente histórico ya cerrado
+incidents.push({id:'INC-0011',svc:'v1',kind:'route',open:false,first:now()-26*3600e3,confirmed:now()-26*3600e3+60e3,closed:now()-25.4*3600e3,
+  tl:[[now()-26*3600e3,'Primer fallo desde Perú (HTTPS)','bad'],[now()-26*3600e3+60e3,'Confirmado desde Perú · el servidor KUBO responde (41 ms)','bad'],[now()-26*3600e3+90e3,'Ticket TCK-1041 creado · P1 · Mesa N1','tk'],[now()-25.4*3600e3,'Dos comprobaciones correctas · recuperado','ok']],
+  ticket:'TCK-1041',notes:[{t:now()-25.5*3600e3,txt:'WinMTR muestra pérdida en el tránsito internacional del ISP. Se reportó al proveedor de la oficina.'}],evidence:[]});
+tickets.push({id:'TCK-1041',prio:'P1',state:'Resuelto',assignee:'Mesa N1'});
+
+const svc=id=>services.find(s=>s.id===id), srv=id=>servers.find(s=>s.id===id), cli=id=>clients.find(c=>c.id===id);
+const cOf=s=>cli(srv(s.server).client);
+
+const ST={ok:['Operativo','b-ok'],verif:['Verificando','b-verif'],deg:['Degradado','b-deg'],down:['Sin respuesta confirmada','b-down'],
+  route:['Sin acceso desde Perú','b-route'],nodata:['Sin datos','b-nodata'],maint:['Mantenimiento','b-maint'],pending:['Configuración pendiente','b-gray']};
+const badge=k=>`<span class="badge ${ST[k][1]}">${ST[k][0]}</span>`;
+function combined(s){
+  const p=s.pe.st,d=s.dc.st;
+  if(p==='verif'||d==='verif')return 'verif';
+  if(p==='down'&&d==='down')return 'down';
+  if(p==='down')return 'route';
+  if(p==='deg')return 'deg';
+  if(p==='nodata'&&(d==='nodata'||!central.up))return 'nodata';
+  return 'ok';
+}
+const SEV={down:5,route:4,verif:3,deg:2,nodata:1,ok:0};
+function probeCell(p,isDc){
+  if(isDc&&!central.up)return `<span class="probe-cell"><span class="pi nodata">?</span><span class="muted">central caída</span></span>`;
+  const m={ok:['ok','✓'],down:['down','✕'],verif:['verif','…'],deg:['deg','!'],nodata:['nodata','–']}[p.st];
+  const txt=p.st==='down'?'<span class="bad-t">sin respuesta</span>':p.st==='verif'?'<span class="muted">reintentando</span>':p.st==='nodata'?'<span class="muted">sin datos</span>':`${p.lat} ms`;
+  return `<span class="probe-cell"><span class="pi ${m[0]}">${m[1]}</span>${txt}</span>`;
+}
+function diagText(k){return {down:'Fallan las dos sondas: el servicio o el servidor está caído.',route:'El servidor responde, pero no desde Perú: falla la ruta (ISP, tránsito internacional o borde de Cloudflare).',
+  deg:'Responde, pero por encima de su umbral de forma sostenida.',nodata:'La oficina no está enviando mediciones.',verif:'Hubo un fallo; están en curso los reintentos de +30 s y +60 s.',ok:'Responde dentro de lo esperado.'}[k]}
+
+/* ---------- Notificaciones ---------- */
+function winToast({title,body,kind='',act,actLabel='Ver incidente'}){
+  const el=document.createElement('div');el.className='toast '+kind;
+  el.innerHTML=`<div class="tapp"><i>K</i>KUBO Monitoreo · ahora<button class="x" title="Cerrar">✕</button></div><div class="t">${esc(title)}</div><div class="b">${body}</div>${act?`<button class="go">${actLabel}</button>`:''}`;
+  el.querySelector('.x').onclick=()=>el.remove();
+  if(act)el.querySelector('.go').onclick=()=>{act();el.remove()};
+  $('#toasts').prepend(el);setTimeout(()=>el.remove(),12000);
+}
+function webToast(msg){const el=document.createElement('div');el.className='web-toast';el.textContent=msg;document.body.appendChild(el);setTimeout(()=>el.remove(),2800)}
+
+/* ---------- Simulación ---------- */
+const sim={
+  _fail(id,both){
+    const s=svc(id);if(['verif','down','route'].includes(combined(s)))return;
+    const t0=now();const c=cOf(s);
+    s.pe.st='verif';if(both)s.dc.st='verif';render();
+    const inc={id:'INC-'+String(incSeq++).padStart(4,'0'),svc:id,kind:both?'down':'route',open:false,first:t0,confirmed:null,closed:null,
+      tl:[[t0,`Primer fallo ${both?'en ambas sondas':'desde Perú'} (${s.proto})`,'bad']],notes:[],evidence:[],ticket:null};
+    setTimeout(()=>{inc.tl.push([t0+30e3,'Reintento +30 s fallido','bad']);render()},STEP);
+    setTimeout(()=>{
+      s.pe.st='down';s.dc.st=both?'down':'ok';if(!both)s.dc.lat=41;
+      inc.open=true;inc.confirmed=t0+60e3;
+      inc.tl.push([t0+60e3,`Reintento +60 s fallido · incidente abierto · ${both?'el servidor KUBO tampoco responde':'el servidor KUBO sí responde ('+s.dc.lat+' ms)'}`,'bad']);
+      const prio={Alta:'P1',Media:'P2',Baja:'P3'}[s.crit];
+      const tk={id:'TCK-'+(tkSeq++),prio,state:'Nuevo',assignee:'Mesa N1'};tickets.unshift(tk);inc.ticket=tk.id;
+      inc.tl.push([t0+75e3,`Ticket ${tk.id} creado automáticamente · ${prio} · Mesa N1 · corre el SLA`,'tk']);
+      incidents.unshift(inc);render();
+      if(s.crit==='Alta')winToast({kind:both?'bad':'route',title:`KUBO · ${both?'Sin respuesta confirmada':'Sin acceso desde Perú'}`,
+        body:`${esc(c.name)} · ${esc(s.name)}<br>${s.proto} falló tres veces desde las ${hm(t0)}. ${both?'Tampoco responde desde el servidor.':'Desde el servidor sí responde: revisar la ruta.'}<br>Ticket ${tk.id} (${prio}).`,act:()=>go('central/incidente/'+inc.id)});
+    },STEP*2);
+  },
+  caida(id){this._fail(id,true)},
+  ruta(id){this._fail(id,false)},
+  degradar(id){
+    const s=svc(id);let n=0;
+    const tick=()=>{n++;s.pe.lat=Math.round(s.thr*1.45+Math.random()*80);s.hist.push(s.pe.lat);s.hist.shift();
+      if(n===3){s.pe.st='deg';incidents.unshift({id:'INC-'+String(incSeq++).padStart(4,'0'),svc:id,kind:'deg',open:true,first:now()-2*STEP,confirmed:now(),closed:null,
+        tl:[[now()-2*STEP,`Latencia ${s.pe.lat} ms (1/3)`,''],[now()-STEP,'Latencia sostenida (2/3)',''],[now(),`3 ciclos sobre ${s.thr} ms · aviso de degradación (sin ticket ni notificación)`,'bad']],notes:[],evidence:[],ticket:null})}
+      render();if(n<3)setTimeout(tick,STEP/2)};
+    tick();webToast('Simulando 3 ciclos lentos… (criticidad media: solo widget, sin notificación de Windows)');
+  },
+  disco(){
+    const a=srv('s3').agent;a.disks[1].used=232;render();
+    winToast({kind:'warn',title:'KUBO · Disco casi lleno',body:'Cliente de ejemplo B · SRV-APP-01<br>D: tiene 7 % libre (18 GB). A este ritmo se llena en ~8 días.',act:()=>go('central/servidores'),actLabel:'Ver servidor'});
+  },
+  oficina(){
+    office.internet=false;office.ref='1.1.1.1 y 8.8.8.8 sin respuesta';services.forEach(s=>s.pe.st='nodata');render();
+    winToast({kind:'bad',title:'KUBO · Sin internet en la oficina',body:`Fallan las referencias externas y ${services.length} destinos a la vez. Es un solo aviso: no se abren incidentes por cliente.<br>La sonda guarda los resultados y los enviará al volver.`,actLabel:'Ver salud',act:()=>go('central/sondas')});
+  },
+  central(){
+    central.up=false;render();
+    winToast({kind:'warn',title:'KUBO · La central no responde',body:'docs.kuboti.com no contesta desde la oficina. El widget sigue mostrando lo que mide esta PC y guarda los resultados para enviarlos.'});
+  },
+  recuperar(){
+    const wasOffice=!office.internet;
+    office.internet=true;office.ref='1.1.1.1 18 ms · 8.8.8.8 21 ms';central.up=true;
+    services.forEach(s=>{if(s.pe.st==='nodata')s.pe.st='ok'});
+    const open=incidents.filter(i=>i.open);
+    open.forEach(i=>{const t=now();i.tl.push([t,'Comprobación correcta (1/2)','ok'])});
+    const a=srv('s3').agent;a.disks[1].used=196;
+    render();
+    setTimeout(()=>{
+      open.forEach(i=>{const s=svc(i.svc);const t=now();
+        s.pe.st='ok';s.dc.st='ok';s.pe.lat=Math.round(s.thr*.35);s.dc.lat=Math.max(2,Math.round(s.thr*.05));
+        i.open=false;i.closed=t;i.tl.push([t,'Comprobación correcta (2/2) · incidente cerrado','ok']);
+        if(i.ticket){const tk=tickets.find(x=>x.id===i.ticket);tk.state='En atención';i.tl.push([t,`Nota automática en ${i.ticket}: servicio recuperado. El agente documenta la causa y cierra el ticket.`,'tk'])}
+        const mins=Math.max(1,Math.round((t-i.first)/60e3));
+        if(s.crit==='Alta'&&i.kind!=='deg')winToast({kind:'ok',title:'KUBO · Recuperado',body:`${esc(cOf(s).name)} · ${esc(s.name)}<br>Responde desde las ${hm(t)}. Duración observada: ${mins} min.`,act:()=>go('central/incidente/'+i.id)});
+      });
+      if(wasOffice||office.pending){webToast(`Enviando ${office.pending} resultados guardados a la central…`);setTimeout(()=>{office.pending=0;render()},1500)}
+      render();
+    },STEP);
+  }
+};
+document.querySelectorAll('.sim-menu button').forEach(b=>b.addEventListener('click',()=>$('#simMenu').classList.remove('open')));
+$('#simBtn').onclick=e=>{e.stopPropagation();$('#simMenu').classList.toggle('open')};
+document.addEventListener('click',e=>{if(!e.target.closest('.sim'))$('#simMenu').classList.remove('open');if(!e.target.closest('.trayk,.tray-menu'))$('#trayMenu')?.classList.remove('open')});
+
+/* ---------- Utilidades de vista ---------- */
+function spark(vals,thr,w=110,h=24,color='#4F46E5'){
+  const max=Math.max(thr?thr*1.25:0,...vals,1);
+  const pts=vals.map((v,i)=>`${(i/(vals.length-1)*w).toFixed(1)},${(h-2-(v/max)*(h-4)).toFixed(1)}`).join(' ');
+  const ty=thr?(h-2-(thr/max)*(h-4)).toFixed(1):null;
+  return `<svg width="${w}" height="${h}" style="display:block">${ty?`<line x1="0" x2="${w}" y1="${ty}" y2="${ty}" stroke="#f59e0b" stroke-dasharray="3 3"/>`:''}<polyline fill="none" stroke="${color}" stroke-width="1.6" points="${pts}"/></svg>`;
+}
+const pct=(v,d=2)=>v.toFixed(d)+' %';
+function problems(){
+  return services.map(s=>({s,k:combined(s)})).filter(x=>x.k!=='ok'&&x.k!=='nodata').sort((a,b)=>SEV[b.k]-SEV[a.k]);
+}
+function diskAlerts(){
+  const out=[];servers.forEach(sv=>{if(sv.agent.st!=='ok')return;sv.agent.disks.forEach(d=>{const free=(d.size-d.used)/d.size;if(free<.15)out.push({sv,d,free})})});return out;
+}
+
+/* =====================================================================
+   VISTA 1 · PC de oficina con widget
+   ===================================================================== */
+let wgPos='tr',wgOpen=false;
+function widget(){
+  const pr=problems();const disks=diskAlerts();
+  let cls='ok',title='Todo operativo';
+  if(!office.internet){cls='bad';title='Sin internet en la oficina'}
+  else if(!central.up){cls='warn';title='Central no responde'}
+  else if(pr.some(x=>['down','route'].includes(x.k))){cls='bad';const n=pr.filter(x=>['down','route'].includes(x.k)).length,d=pr.filter(x=>x.k==='deg').length;title=`${n} sin respuesta${d?` · ${d} degradado`:''}`}
+  else if(pr.some(x=>x.k==='verif')){cls='warn';title='Verificando un fallo…'}
+  else if(pr.length||disks.length){cls='warn';const d=pr.filter(x=>x.k==='deg').length;title=[d?`${d} degradado`:'',disks.length?`${disks.length} disco con poco espacio`:''].filter(Boolean).join(' · ')}
+  const showBody=wgOpen||cls!=='ok';
+  const icon={down:['✕','bad'],route:['✕','route'],verif:['…','info'],deg:['!','warn']};
+  let body='';
+  if(!office.internet)body+=`<div class="wg-msg">Fallan las referencias externas. No se abren incidentes por cliente. Guardando resultados: <b>${office.pending}</b> pendientes de envío.</div>`;
+  else if(!central.up)body+=`<div class="wg-msg">docs.kuboti.com no contesta. Se muestra solo lo que mide esta PC. <b>${office.pending}</b> resultados pendientes de envío.</div>`;
+  pr.forEach(({s,k})=>{const inc=incidents.find(i=>i.svc===s.id&&i.open);
+    const l2=k==='deg'?`Desde Perú ${s.pe.lat} ms · umbral ${s.thr} ms`:k==='verif'?'Reintentando (+30 s / +60 s)':`Perú ✕ · Servidor ${central.up?(s.dc.st==='down'?'✕':'✓'):'?'}${inc?.ticket?' · '+inc.ticket:''}`;
+    body+=`<div class="wg-i" onclick="${inc?`go('central/incidente/${inc.id}')`:`go('central/estado')`}"><span class="ico ${icon[k][1]}">${icon[k][0]}</span><div style="flex:1;min-width:0"><div>${esc(cOf(s).name)} · ${esc(s.name)} <span style="float:right;color:#94a3b8">${inc?hm(inc.first):''}</span></div><div class="l2">${l2}</div></div></div>`});
+  disks.forEach(({sv,d,free})=>body+=`<div class="wg-i" onclick="go('central/servidores')"><span class="ico warn">▤</span><div><div>${esc(cli(sv.client).name)} · ${esc(sv.name)} ${d.u}</div><div class="l2">${Math.round(free*100)} % libre · se llena en ~${Math.max(1,Math.round((d.size-d.used)/d.grow))} días</div></div></div>`);
+  if(!body)body=`<div class="wg-msg" style="color:#94a3b8">${services.length} servicios de ${clients.length} clientes responden con normalidad.</div>`;
+  const dot=(ok,l)=>`<span><span class="d" style="background:${ok?'#22c55e':'#ef4444'}"></span>${l}</span>`;
+  return `<div class="wg ${cls} ${wgPos}" id="wg">
+    <div class="wg-h" onclick="wgOpen=!wgOpen;render()" title="Clic para ${showBody?'plegar':'desplegar'}"><span class="st"></span><span class="tt">KUBO · ${title}</span><span class="tm" id="wgClock">${hm(now())}</span></div>
+    ${showBody?`<div class="wg-b">${body}</div>
+    <div class="wg-f">${dot(office.internet,'Oficina')}${dot(central.up,'Central')}<span>${services.length} servicios</span>
+      <span class="wg-pins" title="Fijar en una esquina">${[['tl','◸'],['tr','◹'],['bl','◺'],['br','◿']].map(([k,i])=>`<button class="${wgPos===k?'on':''}" onclick="event.stopPropagation();wgPos='${k}';render()">${i}</button>`).join('')}</span>
+      <button onclick="go('central/estado')">Abrir tablero</button></div>`:''}
+  </div>`;
+}
+function vPC(){
+  return `<div class="desk">
+    <div class="desk-icons">
+      <div class="dicon"><div class="ic">🗑️</div>Papelera</div>
+      <div class="dicon"><div class="ic">📡</div>WinMTR</div>
+      <div class="dicon"><div class="ic" style="background:var(--primary);color:#fff;font-weight:700">K</div>KUBO Monitoreo</div>
+    </div>
+    <div class="desk-note"><h3>Escritorio de la PC de oficina (simulado)</h3>
+      El <b>motor</b> corre sin ventana desde que Windows arranca. El <b>widget</b> queda siempre encima, plegado cuando todo está bien.
+      <ul><li>Clic en la barra del widget para desplegarlo; ◸◹◺◿ lo fijan en una esquina.</li>
+      <li>Usa <b>▶ Simular evento</b> arriba a la derecha.</li>
+      <li>Notificación de Windows solo para lo crítico: caída confirmada de un servicio de criticidad Alta, su recuperación, internet de oficina, central caída y disco casi lleno.</li></ul></div>
+    ${widget()}
+    <div class="tray-menu" id="trayMenu">
+      <button onclick="wgOpen=true;render()">Mostrar widget</button>
+      <button onclick="go('central/estado')">Abrir tablero web</button>
+      <button onclick="go('central/incidentes')">Ver incidentes</button>
+      <button onclick="winToast({title:'KUBO · Notificación de prueba',body:'Si ves este aviso, las notificaciones de Windows funcionan.'})">Probar notificación</button>
+      <button onclick="go('central/sondas')">Ver salud del monitor</button>
+      <hr><button disabled style="opacity:.6">Motor: activo · ${office.pending} pendientes de envío</button>
+    </div>
+    <div class="taskbar"><div class="apps"><span>⊞</span><span>🔍</span><span>📁</span><span>🌐</span><span>✉️</span></div>
+      <div class="tray"><span class="trayk ${problems().some(x=>['down','route'].includes(x.k))||!office.internet?'alert':''}" onclick="event.stopPropagation();$('#trayMenu').classList.toggle('open')" title="KUBO Monitoreo">K</span>
+      <span>📶 🔊</span><span><div id="tbClock">${hm(now())}</div><div>${dmy(now())}</div></span></div></div>
+  </div>`;
+}
+
+/* =====================================================================
+   VISTA 2 · Central (módulo Monitoreo dentro de kubo_documentacion)
+   ===================================================================== */
+const LOGO=`<svg width="32" height="32" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8" fill="#4F46E5"/><path d="M10 8v16M10 16l7-7M10 16l7 7" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+function centralLayout(page,html){
+  const open=incidents.filter(i=>i.open).length;
+  const L=(p,t,ic,extra='')=>`<a href="#/central/${p}" class="${page===p?'on':''}">${ic} ${t}${extra}</a>`;
+  const old=t=>`<a class="dim" href="javascript:webToast('Sección existente de kubo_documentacion')">${t}</a>`;
+  return `<div class="app"><aside class="side">
+    <div class="brand">${LOGO}<div><p style="font-weight:600;color:var(--ink);line-height:1">Kubo DevDocs</p><p class="small muted" style="margin-top:4px">CRM de reuniones</p></div></div>
+    <nav><div class="sec" style="margin-top:0">Principal</div>${old('👥 Clientes')}${old('📁 Proyectos')}${old('📥 Tickets')}${old('🗂️ Requerimientos')}
+      <div class="sec">Monitoreo <span class="pill new">Nuevo</span></div>
+      ${L('estado','Estado','🟢')}${L('incidentes','Incidentes','⚠️',open?`<span class="cnt">${open}</span>`:'')}${L('servidores','Servidores','🖥️')}${L('inventario','Inventario','🧾')}${L('informes','Disponibilidad','📊')}${L('sondas','Sondas y alertas','📡')}
+      <div class="sec">Agentes IA</div>${old('🤖 Agentes')}</nav></aside>
+    <main class="content">${!central.up?`<div class="banner warn">⚠ <div><b>Simulación: la central no responde.</b> En la realidad esta página no cargaría; el widget de la oficina sigue funcionando solo.</div></div>`:''}${html}</main></div>`;
+}
+
+let F={client:'',state:'',q:''};
+function vEstado(){
+  const rows=[];services.forEach(s=>rows.push({s,sv:srv(s.server)}));
+  servers.filter(sv=>!services.some(s=>s.server===sv.id)).forEach(sv=>rows.push({s:null,sv}));
+  const list=rows.filter(r=>(!F.client||r.sv.client==F.client)&&(!F.state||(r.s?combined(r.s):'pending')===F.state)&&(!F.q||(r.sv.name+r.sv.ip).toLowerCase().includes(F.q.toLowerCase())));
+  const cnt=k=>services.filter(s=>k.includes(combined(s))).length;
+  return `<div style="display:flex;justify-content:space-between;align-items:end;gap:12px;flex-wrap:wrap"><div><h1>Estado del monitoreo</h1><p class="sub">Cada servicio se mide desde dos puntos: la oficina en Perú y el servidor de KUBO. La combinación dice dónde está el problema.</p></div>
+    <div style="display:flex;gap:8px;margin-bottom:18px"><button class="btn" onclick="webToast('Exporta el historial filtrado a CSV')">Exportar CSV</button><button class="btn primary" onclick="go('central/inventario')">Agregar servidor</button></div></div>
+  <div class="grid g4" style="margin-bottom:16px">
+    <div class="card kpi" style="margin:0"><div class="n ok-t">${cnt(['ok'])}</div><div class="l">Operativos</div></div>
+    <div class="card kpi" style="margin:0"><div class="n bad-t">${cnt(['down','verif'])}</div><div class="l">Caídos / verificando</div></div>
+    <div class="card kpi" style="margin:0"><div class="n" style="color:var(--route)">${cnt(['route'])}</div><div class="l">Sin acceso desde Perú</div></div>
+    <div class="card kpi" style="margin:0"><div class="n warn-t">${cnt(['deg'])}</div><div class="l">Degradados</div></div>
+  </div>
+  <div class="card" style="padding:12px 18px;display:flex;gap:28px;flex-wrap:wrap">
+    <span><span class="pi ${office.internet?'ok':'down'}" style="width:10px;height:10px;display:inline-block;vertical-align:0"></span> <b>Sonda oficina (Perú)</b> · ${office.internet?'Activa':'Sin internet'} · última ${hms(office.last)}${office.pending?` · <span class="warn-t">${office.pending} pendientes</span>`:''}</span>
+    <span><span class="pi ok" style="width:10px;height:10px;display:inline-block;vertical-align:0"></span> <b>Sonda servidor KUBO</b> · Activa · última ${hms(central.last)}</span>
+    <span class="muted">Frecuencia: ${isNight()?'cada 1 min (22:00–07:00)':'cada 5 min (07:00–22:00)'} · hora de Lima</span>
+  </div>
+  <div class="card">
+    <div class="filters">
+      <label class="f">Cliente<select onchange="F.client=this.value;render()"><option value="">Todos</option>${clients.map(c=>`<option value="${c.id}" ${F.client==c.id?'selected':''}>${c.name}</option>`).join('')}</select></label>
+      <label class="f">Estado<select onchange="F.state=this.value;render()"><option value="">Todos</option>${Object.entries(ST).map(([k,v])=>`<option value="${k}" ${F.state===k?'selected':''}>${v[0]}</option>`).join('')}</select></label>
+      <label class="f">Servidor o IP<input value="${esc(F.q)}" onchange="F.q=this.value;render()" placeholder="Buscar…"></label>
+    </div>
+    <div class="tbl"><table><thead><tr><th>Cliente</th><th>Servidor</th><th>Servicio</th><th>Criticidad</th><th>Desde Perú</th><th>Desde servidor</th><th>Estado</th><th>Tendencia Perú</th><th></th></tr></thead><tbody>
+    ${list.map(({s,sv})=>{
+      if(!s)return `<tr><td>${cli(sv.client).name}</td><td class="mono">${sv.name}</td><td class="muted">—</td><td></td><td class="muted">—</td><td class="muted">—</td><td>${badge('pending')}</td><td></td><td><button class="btn sm" onclick="go('central/inventario')">Completar IP</button></td></tr>`;
+      const k=combined(s);const inc=incidents.find(i=>i.svc===s.id&&i.open);
+      return `<tr title="${esc(diagText(k))}"><td>${cOf(s).name}</td><td class="mono">${sv.name}</td><td>${s.name} <span class="pill">${s.proto}</span></td>
+        <td><span class="pill ${s.crit==='Alta'?'alta':s.crit==='Media'?'media':''}">${s.crit}</span></td>
+        <td>${probeCell(s.pe)}</td><td>${probeCell(s.dc,true)}</td><td>${badge(k)}</td><td>${spark(s.hist,s.thr)}</td>
+        <td style="white-space:nowrap">${inc?`<button class="btn sm" onclick="go('central/incidente/${inc.id}')">Ver incidente</button> `:''}<button class="btn sm" onclick="webToast('Prueba manual enviada a las dos sondas (límite: 1 cada 15 s)')">Probar ahora</button></td></tr>`}).join('')}
+    </tbody></table></div></div>
+  <div class="card"><h2>Cómo se lee</h2><div class="tbl"><table><thead><tr><th>Desde Perú</th><th>Desde servidor</th><th>Estado</th><th>Qué significa</th></tr></thead><tbody>
+    <tr><td><span class="pi down">✕</span></td><td><span class="pi down">✕</span></td><td>${badge('down')}</td><td>${diagText('down')} Abre ticket.</td></tr>
+    <tr><td><span class="pi down">✕</span></td><td><span class="pi ok">✓</span></td><td>${badge('route')}</td><td>${diagText('route')} Abre ticket; adjuntar WinMTR.</td></tr>
+    <tr><td><span class="pi nodata">–</span> todos</td><td><span class="pi ok">✓</span></td><td>${badge('nodata')}</td><td>Cayó el internet de la oficina: un solo aviso, no se culpa a ningún cliente.</td></tr>
+    <tr><td><span class="pi deg">!</span></td><td><span class="pi ok">✓</span></td><td>${badge('deg')}</td><td>${diagText('deg')}</td></tr>
+  </tbody></table></div></div>`;
+}
+function isNight(){const h=+f({hour:'2-digit'}).format(new Date())%24;return h>=22||h<7}
+
+let IF='open';
+function vIncidentes(){
+  const list=incidents.filter(i=>IF==='all'||(IF==='open')===i.open);
+  return `<h1>Incidentes</h1><p class="sub">Cada fallo confirmado de las sondas abre un ticket en la mesa de soporte. Las degradaciones quedan aquí sin ticket.</p>
+  <div class="card"><div class="filters"><label class="f">Mostrar<select onchange="IF=this.value;render()">${[['open','Abiertos'],['closed','Cerrados'],['all','Todos']].map(([k,t])=>`<option value="${k}" ${IF===k?'selected':''}>${t}</option>`).join('')}</select></label></div>
+  <div class="tbl"><table><thead><tr><th>ID</th><th>Cliente / servidor / servicio</th><th>Tipo</th><th>Inicio</th><th>Duración</th><th>Ticket</th><th>Estado</th></tr></thead><tbody>
+  ${list.length?list.map(i=>{const s=svc(i.svc);const tk=tickets.find(t=>t.id===i.ticket);return `<tr class="click" onclick="go('central/incidente/${i.id}')"><td class="mono">${i.id}</td>
+    <td>${cOf(s).name} / <span class="mono">${srv(s.server).name}</span> / ${s.name}</td><td>${badge(i.kind)}</td><td class="mono">${dmy(i.first)} ${hm(i.first)}</td>
+    <td class="num">${Math.max(1,Math.round(((i.closed||now())-i.first)/60e3))} min</td><td>${tk?`<span class="mono">${tk.id}</span> <span class="pill">${tk.prio}</span>`:'<span class="muted">—</span>'}</td>
+    <td>${i.open?'<b class="bad-t">Abierto</b>':'<span class="muted">Cerrado</span>'}</td></tr>`}).join(''):'<tr><td colspan="7" class="muted">No hay incidentes con este filtro. Prueba ▶ Simular evento.</td></tr>'}
+  </tbody></table></div></div>`;
+}
+function vIncidente(id){
+  const i=incidents.find(x=>x.id===id);if(!i)return '<p>No existe.</p>';
+  const s=svc(i.svc),sv=srv(s.server),c=cOf(s);const tk=tickets.find(t=>t.id===i.ticket);
+  const host=s.proto==='HTTPS'?new URL(s.target).hostname:sv.ip;
+  const tcp=services.find(o=>o.server===s.server&&o.proto==='TCP'&&o.id!==s.id);
+  return `<p><a href="#/central/incidentes">← Incidentes</a></p>
+  <div class="split"><div>
+  <div class="card"><div class="muted small">${i.id} · ${c.name} / <span class="mono">${sv.name}</span> / ${s.name}</div>
+    <div style="margin:8px 0;display:flex;gap:8px;align-items:center">${badge(i.kind)} ${i.open?'':'<span class="badge b-ok">Recuperado</span>'}</div>
+    <div class="muted">Inicio <b class="mono">${hms(i.first)}</b> · Confirmado <b class="mono">${i.confirmed?hms(i.confirmed):'—'}</b>${i.closed?` · Recuperado <b class="mono">${hms(i.closed)}</b>`:''} · hora de Lima</div>
+    ${i.kind!=='deg'?`<div class="diag ${i.kind==='down'?'down':''}" style="margin-top:14px"><b>Diagnóstico automático:</b> ${diagText(i.kind)}</div>`:''}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px"><button class="btn" onclick="webToast('Destino copiado: ${host}')">Copiar destino WinMTR</button><button class="btn" onclick="attach('${i.id}')">Adjuntar WinMTR</button><button class="btn" onclick="note('${i.id}')">Añadir nota</button></div></div>
+  <div class="card"><h2>Lo que vio cada sonda</h2><div class="tbl"><table><thead><tr><th>Prueba</th><th>Desde Perú (oficina)</th><th>Desde servidor KUBO</th></tr></thead><tbody>
+    <tr><td>${s.name} <span class="pill">${s.proto}</span></td><td>${i.kind==='deg'?`Lento · ${s.pe.lat} ms (umbral ${s.thr})`:'<span class="bad-t">Sin respuesta en 3 intentos</span>'}</td><td>${i.kind==='down'?'<span class="bad-t">Sin respuesta en 3 intentos</span>':`<span class="ok-t">Correcto · ${s.dc.lat} ms</span>`}</td></tr>
+    ${tcp?`<tr><td>${tcp.name} <span class="pill">TCP</span></td><td class="ok-t">Correcto · ${tcp.pe.lat} ms</td><td class="ok-t">Correcto · ${tcp.dc.lat} ms</td></tr>`:''}
+    <tr><td>Referencias externas</td><td class="ok-t">${office.ref}</td><td class="muted">—</td></tr>
+    <tr><td>Recursos del servidor (agente)</td><td colspan="2">${sv.agent.st==='ok'?`CPU ${sv.agent.cpu} % · RAM ${sv.agent.ram} % · ${sv.agent.disks.map(d=>`${d.u} ${Math.round((1-d.used/d.size)*100)} % libre`).join(' · ')} · app pools iniciados`:'<span class="muted">Sin agente instalado</span>'}</td></tr>
+  </tbody></table></div></div>
+  <div class="card"><h2>Evidencia WinMTR</h2>${i.evidence.length?i.evidence.map(e=>`<div class="muted small" style="margin-bottom:6px">${esc(e.meta)}</div><pre style="background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;font-size:12px">${esc(e.txt)}</pre>`).join(''):'<p class="muted" style="margin:0">Sin trazas. Copia el destino, ejecuta WinMTR en la oficina y adjunta la exportación.</p>'}</div>
+  <div class="card"><h2>Notas</h2>${i.notes.length?i.notes.map(n=>`<p style="margin:0 0 6px"><span class="muted mono">${dmy(n.t)} ${hm(n.t)}</span> · ${esc(n.txt)}</p>`).join(''):'<p class="muted" style="margin:0">Sin notas.</p>'}</div>
+  </div><div>
+  ${tk?`<div class="card"><h2>Ticket vinculado</h2><dl class="kv" style="grid-template-columns:110px 1fr"><dt>Ticket</dt><dd><a href="javascript:webToast('Abre el ticket en la sección Tickets existente')" class="mono">${tk.id}</a></dd>
+    <dt>Prioridad</dt><dd><span class="pill alta">${tk.prio}</span> por criticidad ${s.crit}</dd><dt>Estado</dt><dd>${tk.state}</dd><dt>Asignado</dt><dd>${tk.assignee}</dd>
+    <dt>Origen</dt><dd>Monitoreo (automático)</dd><dt>SLA respuesta</dt><dd>${tk.state==='Resuelto'?'<span class="ok-t">Cumplido</span>':`vence ${hm(i.first+15*60e3)}`}</dd></dl>
+    <p class="muted small" style="margin:12px 0 0">La recuperación agrega una nota al ticket pero no lo cierra: el agente documenta la causa.</p></div>`
+   :`<div class="card"><h2>Ticket</h2><p class="muted" style="margin:0">Las degradaciones no abren ticket. Puedes crearlo a mano.</p><button class="btn sm" style="margin-top:10px" onclick="webToast('Crea un ticket con este incidente como origen')">Crear ticket</button></div>`}
+  <div class="card"><h2>Cronología</h2><ul class="timeline">${i.tl.map(t=>`<li class="${t[2]}"><time class="mono">${hms(t[0])}</time><span>${esc(t[1])}</span></li>`).join('')}</ul></div>
+  </div></div>`;
+}
+const MTR=`|                       Host              -  % | Sent | Recv | Best | Avrg | Wrst |
+|                      192.168.1.1        -  0 |  100 |  100 |    1 |    1 |    4 |
+|                ae1.lim.isp.example      -  0 |  100 |  100 |    7 |   11 |   45 |
+|          be-12.mia.transit.example      - 34 |  100 |   66 |   72 |  181 |  990 |
+|            edge.cloudflare.example      - 38 |  100 |   62 |  118 |  204 |  980 |
+|                portal.ejemplo.pe        - 41 |  100 |   59 |  121 |  215 | 1012 |`;
+function attach(id){const i=incidents.find(x=>x.id===id);i.evidence.push({meta:`${dmy(now())} ${hm(now())} · Origen: PC oficina · Nota: pérdida desde el tránsito en Miami`,txt:MTR});webToast('Exportación WinMTR adjuntada (ejemplo)');render()}
+function note(id){const t=prompt('Nota para el incidente');if(t){incidents.find(x=>x.id===id).notes.push({t:now(),txt:t});render()}}
+
+function vServidores(){
+  return `<h1>Servidores</h1><p class="sub">Recursos reportados por el agente instalado en cada servidor (cada 1 min). Requiere autorización del cliente.</p>
+  <div class="grid g3">${servers.map(sv=>{const a=sv.agent;
+    if(a.st!=='ok')return `<div class="card"><div style="display:flex;justify-content:space-between"><b class="mono">${sv.name}</b><span class="badge b-gray">Sin agente</span></div><p class="muted small">${cli(sv.client).name} · ${sv.role}</p><p class="muted">Pendiente: IP del servidor y autorización de ${cli(sv.client).name} para instalar el agente.</p><button class="btn sm" onclick="webToast('Genera el instalador del agente con un token único para este servidor')">Generar instalador del agente</button></div>`;
+    const cpuH=Array.from({length:40},(_,i)=>Math.round(a.cpu*(.6+.8*Math.abs(Math.sin(i/4)))));
+    return `<div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><b class="mono">${sv.name}</b><span class="badge b-ok">Agente activo</span></div>
+    <p class="muted small" style="margin:4px 0 12px">${cli(sv.client).name} · ${sv.role} · ${sv.provider} ${sv.region} · último reporte hace 40 s</p>
+    <div style="display:flex;justify-content:space-between" class="small"><span>CPU <b>${a.cpu} %</b></span><span class="muted">últimas 24 h</span></div>${spark(cpuH,80,280,32,'#4F46E5')}
+    <div style="display:flex;justify-content:space-between;margin-top:8px" class="small"><span>RAM <b>${a.ram} %</b></span></div><div class="bar ${a.ram>85?'b':a.ram>70?'w':''}"><i style="width:${a.ram}%"></i></div>
+    <div style="margin-top:12px">${a.disks.map(d=>{const free=1-d.used/d.size;const days=Math.round((d.size-d.used)/d.grow);return `<div style="display:flex;justify-content:space-between" class="small"><span>Disco <b>${d.u}</b> ${d.size-d.used} GB libres de ${d.size}</span><span class="${free<.1?'bad-t':free<.15?'warn-t':'muted'}">${Math.round(free*100)} % · ~${days} días</span></div><div class="bar ${free<.1?'b':free<.2?'w':''}" style="margin-bottom:8px"><i style="width:${d.used/d.size*100}%"></i></div>`}).join('')}</div>
+    <div class="small" style="margin-top:6px"><b>IIS</b> · ${a.pools.map(p=>`${p[0]} <span class="ok-t">●</span>`).join(' · ')}</div>
+    <div class="small" style="margin-top:4px"><b>Servicios</b> · ${a.svcs.map(p=>`${p[0]} <span class="ok-t">●</span>`).join(' · ')}</div>
+    <div class="small" style="margin-top:4px"><b>Visor de eventos</b> · ${a.events?`<span class="warn-t">${a.events} errores</span> en 24 h`:'sin errores en 24 h'}</div></div>`}).join('')}</div>`;
+}
+
+let selSrv='s1';
+function vInventario(){
+  const sv=srv(selSrv);const ss=services.filter(s=>s.server===sv.id);
+  return `<h1>Inventario</h1><p class="sub">Los servidores cuelgan de los <b>Clientes</b> que ya existen en kubo_documentacion; no se duplica el maestro de clientes.</p>
+  <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><h2 style="margin:0">Servidores</h2><div style="display:flex;gap:8px"><button class="btn sm" onclick="webToast('Importación CSV con vista previa de filas inválidas y duplicadas (ver prototipo v1)')">Importar CSV</button><button class="btn sm primary">+ Servidor</button></div></div>
+  <div class="tbl"><table><thead><tr><th>Cliente</th><th>Servidor</th><th>IP</th><th>Rol</th><th>Proveedor</th><th class="num">Servicios</th><th>Agente</th></tr></thead><tbody>
+  ${servers.map(s=>`<tr class="click" onclick="selSrv='${s.id}';render()" style="${s.id===selSrv?'background:var(--primary-light)':''}"><td>${cli(s.client).name}</td><td class="mono">${s.name}</td><td class="mono">${s.ip||'<span class="warn-t">pendiente</span>'}</td><td>${s.role}</td><td>${s.provider} · ${s.region}</td><td class="num">${services.filter(x=>x.server===s.id).length}</td><td>${s.agent.st==='ok'?'<span class="ok-t">Activo</span>':'<span class="muted">No instalado</span>'}</td></tr>`).join('')}
+  </tbody></table></div></div>
+  <div class="card"><h2>Servicios de <span class="mono">${sv.name}</span></h2>
+  ${ss.length?`<div class="tbl"><table><thead><tr><th>Servicio</th><th>Protocolo</th><th>Destino</th><th>Criticidad</th><th>Umbral</th><th>Frecuencia</th><th>Notifica en Windows</th></tr></thead><tbody>
+  ${ss.map(s=>`<tr><td>${s.name}</td><td>${s.proto}</td><td class="mono">${s.target}</td><td><select>${['Alta','Media','Baja'].map(o=>`<option ${o===s.crit?'selected':''}>${o}</option>`).join('')}</select></td><td>${s.thr} ms</td><td>Heredar horario</td><td>${s.crit==='Alta'?'<span class="ok-t">Sí (crítico)</span>':'<span class="muted">Solo widget</span>'}</td></tr>`).join('')}</tbody></table></div>`
+  :'<p class="muted">Sin servicios. Completa la IP y agrega al menos una prueba.</p>'}
+  <p class="muted small">Recomendado para webs detrás de Cloudflare: TCP al origen + HTTPS por el dominio público. Los dos se miden desde ambas sondas.</p></div>`;
+}
+
+let RC=1;
+function availability(cid){
+  // números de ejemplo deterministas por cliente
+  return cid===1?{svc:99.91,peru:99.62,cov:97.4,down:38,routeMin:127,inc:2,mttr:21,
+    rows:[['VMI2571371 · HTTPS portal',99.91,99.55,38,2,'209 / 397','41 / 66'],['VMI2571371 · TCP origen',100,99.80,0,1,'148 / 201','3 / 5'],['VMI2571371 · ICMP diagnóstico',100,99.71,0,0,'139 / 188','1 / 2']],
+    incs:[['14/10 02:14','HTTPS portal','Sin respuesta confirmada','38 min','TCK-1032'],['21/10 19:40','HTTPS portal','Sin acceso desde Perú','127 min','TCK-1036']]}
+   :{svc:99.97,peru:99.90,cov:97.4,down:13,routeMin:31,inc:1,mttr:13,rows:[['SRV-APP-01 · HTTPS app',99.97,99.90,13,1,'318 / 610','94 / 140'],['SRV-APP-01 · TCP 1433 SQL',100,99.93,0,0,'231 / 280','4 / 6']],
+    incs:[['09/10 23:05','HTTPS app','Sin respuesta confirmada','13 min','TCK-1029']]};
+}
+function availBlock(cid,forClient){
+  const a=availability(cid);
+  return `<div class="grid g3" style="margin-bottom:16px">
+    <div><div class="muted small">Disponibilidad del servicio</div><div style="font-size:30px;font-weight:700;color:var(--ink)">${pct(a.svc)}</div><div class="bar"><i style="width:${a.svc}%"></i></div><div class="muted small" style="margin-top:4px">${a.down} min sin servicio · fallan ambas sondas · descontado mantenimiento</div></div>
+    <div><div class="muted small">Acceso desde Perú</div><div style="font-size:30px;font-weight:700;color:var(--ink)">${pct(a.peru)}</div><div class="bar w"><i style="width:${a.peru}%"></i></div><div class="muted small" style="margin-top:4px">Incluye ${a.routeMin} min en que el servidor respondía pero no se llegaba desde Perú</div></div>
+    ${forClient?`<div><div class="muted small">Incidentes · tiempo medio de recuperación</div><div style="font-size:30px;font-weight:700;color:var(--ink)">${a.inc} · ${a.mttr} min</div><div class="muted small" style="margin-top:4px">Todos atendidos con ticket</div></div>`
+    :`<div><div class="muted small">Cobertura de la sonda de oficina</div><div style="font-size:30px;font-weight:700;color:var(--ink)">${pct(a.cov,1)}</div><div class="bar"><i style="width:${a.cov}%"></i></div><div class="muted small" style="margin-top:4px">Ejecutadas ÷ esperadas · huecos listados abajo</div></div>`}
+  </div>
+  <div class="tbl"><table><thead><tr><th>Servicio</th><th class="num">Disponibilidad</th><th class="num">Acceso Perú</th><th class="num">Min. caído</th><th class="num">Incidentes</th><th class="num">Latencia Perú P50/P95</th>${forClient?'':'<th class="num">Desde servidor P50/P95</th>'}</tr></thead><tbody>
+  ${a.rows.map(r=>`<tr><td>${r[0]}</td><td class="num">${pct(r[1])}</td><td class="num">${pct(r[2])}</td><td class="num">${r[3]}</td><td class="num">${r[4]}</td><td class="num">${r[5]} ms</td>${forClient?'':`<td class="num">${r[6]} ms</td>`}</tr>`).join('')}</tbody></table></div>
+  <h2 style="margin-top:18px">Incidentes del mes</h2><div class="tbl"><table><tbody>${a.incs.map(r=>`<tr><td class="mono">${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td class="num">${r[3]}</td><td class="mono">${r[4]}</td></tr>`).join('')}</tbody></table></div>`;
+}
+function vInformes(){
+  return `<h1>Disponibilidad mensual</h1><p class="sub">Se genera el día 1 a las 08:00 (Lima) y se suma al informe mensual de atención que ya existe por cliente.</p>
+  <div class="card"><div class="filters"><label class="f">Cliente<select onchange="RC=+this.value;render()">${clients.map(c=>`<option value="${c.id}" ${RC===c.id?'selected':''}>${c.name}</option>`).join('')}</select></label>
+  <label class="f">Mes<select><option>Octubre 2026</option><option>Noviembre 2026 (parcial)</option></select></label>
+  <div style="margin-left:auto;display:flex;gap:8px"><button class="btn">Exportar CSV</button><button class="btn" onclick="webToast('Regenerado: reemplaza la versión de ese cliente y mes')">Regenerar</button><button class="btn primary" onclick="go('portal')">Ver como cliente</button></div></div>
+  <div class="muted small" style="margin-bottom:14px">${cli(RC).name} · 1–31 de octubre de 2026 · hora de Lima · sondas: oficina (Perú) y servidor KUBO</div>
+  ${availBlock(RC,false)}
+  <div class="grid g2" style="margin-top:18px"><div><h2>Ventanas sin datos (oficina)</h2><table><tbody><tr><td class="mono">17/10 13:05–13:31</td><td>Internet de oficina caído · el servidor KUBO siguió midiendo</td></tr><tr><td class="mono">25/10 03:00–03:12</td><td>Reinicio por Windows Update (ventana programada)</td></tr></tbody></table></div>
+  <div><h2>Recursos del servidor (agente)</h2><table><tbody><tr><td>CPU P95</td><td class="num">58 %</td></tr><tr><td>RAM P95</td><td class="num">74 %</td></tr><tr><td>Disco C: al cierre</td><td class="num">25 % libre · −1.1 GB/día</td></tr></tbody></table></div></div>
+  <p class="muted small" style="margin-top:16px">Disponibilidad = 1 − minutos sin servicio ÷ (minutos del mes − mantenimiento). Un minuto cuenta como «sin servicio» solo si fallan las dos sondas; si falla solo la oficina, cuenta en «Acceso desde Perú». Si la oficina no tiene datos, decide la sonda del servidor.</p></div>`;
+}
+function vSondas(){
+  return `<h1>Sondas y alertas</h1><p class="sub">Salud de los puntos de medición y qué genera una notificación de Windows.</p>
+  <div class="grid g2">
+  <div class="card"><h2>Sonda oficina · PC-OFICINA-01 (Perú)</h2><dl class="kv">
+    <dt>Motor</dt><dd>${office.internet?'<span class="ok-t">● Activo</span>':'<span class="bad-t">● Sin internet</span>'} · servicio de Windows, arranca sin iniciar sesión</dd>
+    <dt>Última ejecución</dt><dd class="mono">${hms(office.last)}</dd><dt>Referencias externas</dt><dd class="${office.internet?'ok-t':'bad-t'}">${office.ref}</dd>
+    <dt>Pendientes de envío</dt><dd>${office.pending} resultados</dd><dt>Disco local</dt><dd>142 GB libres</dd><dt>Versión</dt><dd>motor 0.1.0 · widget 0.1.0</dd></dl>
+    <h2 style="margin-top:16px">Para que la PC no deje huecos</h2>
+    <div class="check"><span class="ok-t">✔</span> Suspensión e hibernación desactivadas</div>
+    <div class="check"><span class="ok-t">✔</span> Reinicios de Windows Update entre 13:00 y 15:00 (marcados como mantenimiento)</div>
+    <div class="check"><span class="ok-t">✔</span> El motor se recupera solo si falla</div>
+    <div class="check"><span class="warn-t">⚠</span> UPS no registrado: un corte de luz aparece como «sin datos»</div></div>
+  <div class="card"><h2>Sonda servidor KUBO · contabo-kubo-01</h2><dl class="kv">
+    <dt>Worker</dt><dd>${central.up?'<span class="ok-t">● Activo</span>':'<span class="bad-t">● No responde</span>'} · contenedor <span class="mono">monitor-worker</span>, separado del backend</dd>
+    <dt>Última ejecución</dt><dd class="mono">${hms(central.last)}</dd><dt>Ubicación</dt><dd>Contabo · misma zona que algunos VPS de clientes</dd></dl>
+    <div class="banner info" style="margin-top:14px">ℹ <div>Si Contabo tiene una caída en esa zona, se pueden caer a la vez la central y el cliente. Por eso el widget de la oficina avisa «La central no responde» por su cuenta.</div></div></div>
+  </div>
+  <div class="card"><h2>Notificaciones</h2><div class="tbl"><table><thead><tr><th>Evento</th><th>Windows (PC)</th><th>Widget</th><th>Ticket</th></tr></thead><tbody>
+    ${[['Caída confirmada · criticidad Alta','✔','✔','✔ P1'],['Sin acceso desde Perú · criticidad Alta','✔','✔','✔ P1'],['Recuperación de lo anterior (un aviso)','✔','✔','nota'],['Caída confirmada · criticidad Media/Baja','—','✔','✔ P2/P3'],['Degradación sostenida','—','✔','—'],['Internet de oficina caído (agrupado)','✔','✔','—'],['Central no responde','✔','✔','—'],['Disco con menos del 10 % libre (agente)','✔','✔','—'],['Fallo transitorio (un reintento respondió)','—','—','—'],['Informe mensual generado','—','—','—']].map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td></tr>`).join('')}
+  </tbody></table></div><p class="muted small">Todo queda en el historial aunque no notifique. Las alertas al celular quedan para una fase posterior.</p></div>`;
+}
+
+/* =====================================================================
+   VISTA 3 · Portal del cliente
+   ===================================================================== */
+function vPortal(){
+  return `<div class="portal-h"><div class="in"><div style="display:flex;gap:12px;align-items:center">${LOGO.replace(/32/g,'28')}<div><div style="font-weight:600;color:var(--ink)">Portal de clientes</div><div class="small muted">Contacto Eficaz</div></div></div>
+    <nav><span>Tickets</span><span>Requerimientos</span><span class="on">Informes</span><span>Ayuda</span><span>Salir</span></nav></div></div>
+  <div class="portal-c">
+   <div class="banner warn">⚠ <div><b>Pendiente de decisión:</b> ¿el cliente ve esta sección desde el piloto o después de validar los datos? El cliente nunca ve la sonda del servidor, la cobertura interna ni las IP.</div></div>
+   <h1>Informe mensual · octubre 2026</h1><p class="sub">Contacto Eficaz · hora de Lima</p>
+   <div class="card"><h2>Atención de tickets</h2><p class="muted" style="margin:0">(Sección existente del informe mensual: tickets, SLA de respuesta y resolución, requerimientos.)</p></div>
+   <div class="card"><h2>Disponibilidad de servicios <span class="pill new">Nuevo</span></h2>${availBlock(1,true)}
+   <p class="muted small" style="margin-top:14px">Medido por KUBO cada 1 a 5 minutos desde Lima y desde un servidor externo. «Acceso desde Perú» refleja la experiencia de los usuarios en Perú, incluida la red entre Perú y el servidor.</p></div>
+  </div>`;
+}
+
+/* ---------- Router ---------- */
+function go(h){location.hash='#/'+h}
+function render(){
+  const parts=location.hash.replace(/^#\//,'').split('/');const v=parts[0]||'pc';
+  document.querySelectorAll('.proto .tab').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  let html;
+  if(v==='central'){const p=parts[1]||'estado';
+    const pages={estado:vEstado,incidentes:vIncidentes,incidente:()=>vIncidente(parts[2]),servidores:vServidores,inventario:vInventario,informes:vInformes,sondas:vSondas};
+    html=centralLayout(p==='incidente'?'incidentes':p,(pages[p]||vEstado)());}
+  else if(v==='portal')html=vPortal();
+  else html=vPC();
+  const y=window.scrollY;$('#view').innerHTML=html;window.scrollTo(0,y);
+}
+document.querySelectorAll('.proto .tab').forEach(b=>b.onclick=()=>go(b.dataset.v));
+window.addEventListener('hashchange',()=>{render();window.scrollTo(0,0)});
+setInterval(()=>{const c=$('#wgClock');if(c)c.textContent=hm(now());const t=$('#tbClock');if(t)t.textContent=hm(now())},5000);
+setInterval(()=>{
+  if(office.internet&&central.up)office.last=now();else office.pending+=services.length;
+  if(central.up)central.last=now();
+  services.forEach(s=>{if(s.pe.st==='ok'){s.pe.lat=Math.max(20,Math.min(Math.round(s.thr*.8),Math.round(s.pe.lat*(.92+Math.random()*.16))));s.hist.push(s.pe.lat);s.hist.shift()}
+    if(s.dc.st==='ok'){s.dc.lat=Math.max(1,Math.min(Math.round(s.thr*.2),Math.round(s.dc.lat*(.85+Math.random()*.3))))}});
+  const a=document.activeElement;if(!(a&&['INPUT','SELECT','TEXTAREA'].includes(a.tagName)))render();
+},5000);
+render();
+</script>
+</body>
+</html>
