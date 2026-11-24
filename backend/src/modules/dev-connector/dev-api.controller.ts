@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, ParseIntPipe, Post, Req, UseGuards } from
 
 import { DevApiService } from './dev-api.service';
 import { DevKeyGuard, DevRequest } from './dev-key.guard';
-import { DevLinkDto, DevNoteDto, DevStatusDto } from './dto/dev-admin.dto';
+import { DevLinkDto, DevNoteDto, DevResolveDto, DevStatusDto } from './dto/dev-admin.dto';
 
 /**
  * `/api/v1/dev/*`: lo que llama el MCP `kubo-devdocs`. Autentica la clave
@@ -31,6 +31,21 @@ export class DevApiController {
   @Get('items/:code/adjuntos/:id')
   adjunto(@Req() req: DevRequest, @Param('code') code: string, @Param('id', ParseIntPipe) id: number) {
     return this.api.adjunto(req.dev!, code, id);
+  }
+
+  @Post('items/:code/tomar')
+  tomar(@Req() req: DevRequest, @Param('code') code: string) {
+    return this.api.tomar(req.dev!, code);
+  }
+
+  @Post('items/:code/resolver')
+  resolver(@Req() req: DevRequest, @Param('code') code: string, @Body() dto: DevResolveDto) {
+    return this.api.resolver(req.dev!, code, dto);
+  }
+
+  @Post('items/:code/borrador')
+  borrador(@Req() req: DevRequest, @Param('code') code: string, @Body() dto: DevNoteDto) {
+    return this.api.borrador(req.dev!, code, dto.texto);
   }
 
   @Post('items/:code/nota')

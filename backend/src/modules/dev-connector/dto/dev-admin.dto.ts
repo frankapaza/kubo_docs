@@ -57,3 +57,14 @@ export class DevLinkDto {
   @MaxLength(500)
   url?: string;
 }
+
+export class DevResolveDto {
+  @IsString() @MinLength(1) @MaxLength(20_000)
+  solucion!: string;
+
+  @IsString() @MinLength(1) @MaxLength(5_000)
+  causaRaiz!: string;
+
+  @IsString() @MinLength(1) @MaxLength(5_000)
+  accionCorrectiva!: string;
+}

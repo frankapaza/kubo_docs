@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Readable } from 'stream';
 
-import { DevApiService } from './dev-api.service';
+import { BORRADOR_CABECERA, DevApiService } from './dev-api.service';
 import { DevPrincipal } from './dev-keys.service';
 
 const P: DevPrincipal = {
@@ -52,10 +52,15 @@ function build(over: { ticket?: object | null; rq?: object | null; open?: object
     record: jest.fn().mockResolvedValue({ id: 1 }),
     listByItem: jest.fn().mockResolvedValue([]),
   };
+  const assignment = {
+    assign: jest.fn().mockResolvedValue({ ...TICKET, status: 'ASIGNADO' }),
+    take: jest.fn().mockResolvedValue({ ...TICKET, status: 'EN_ATENCION' }),
+  };
   const service = new DevApiService(
     data as never, messages as never, attachments as never, transitions as never, board as never, wiEvents as never,
+    assignment as never,
   );
-  return { service, data, messages, attachments, transitions, board, wiEvents };
+  return { service, data, messages, attachments, transitions, board, wiEvents, assignment };
 }
 
 describe('DevApiService', () => {
@@ -211,5 +216,102 @@ describe('adjuntos', () => {
     const { service, attachments } = build({ files: [{ ...FILE, size: 6 * 1024 * 1024 }] });
     await expect(service.adjunto(P, 'KB-0210', 77)).rejects.toBeInstanceOf(BadRequestException);
     expect(attachments.download).not.toHaveBeenCalled();
+  });
+});
+
+describe('tomar', () => {
+  it('un ticket NUEVO sin asignar: se lo asigna al dueño de la clave y lo pone en atención', async () => {
+    const { service, assignment } = build({ ticket: { ...TICKET, status: 'NUEVO', assigneeUserId: null } });
+    const out = await service.tomar(P, 'KB-0210');
+    expect(assignment.assign).toHaveBeenCalledWith(
+      expect.objectContaining({ ticketId: 100, actorUserId: 9, assigneeUserId: 9 }),
+    );
+    expect(assignment.take).toHaveBeenCalledWith({ ticketId: 100, actorUserId: 9 });
+    expect(out).toEqual({ codigo: 'KB-0210', estado: 'EN_ATENCION' });
+  });
+
+  it('un ticket ASIGNADO a mí: solo lo pone en atención', async () => {
+    const { service, assignment } = build({ ticket: { ...TICKET, status: 'ASIGNADO', assigneeUserId: 9 } });
+    await service.tomar(P, 'KB-0210');
+    expect(assignment.assign).not.toHaveBeenCalled();
+    expect(assignment.take).toHaveBeenCalled();
+  });
+
+  it('ya en atención y mío: no hace nada', async () => {
+    const { service, assignment } = build({ ticket: { ...TICKET, status: 'EN_ATENCION', assigneeUserId: 9 } });
+    const out = await service.tomar(P, 'KB-0210');
+    expect(assignment.take).not.toHaveBeenCalled();
+    expect(out.estado).toBe('EN_ATENCION');
+  });
+
+  it('asignado a otra persona: 409 sin tocarlo', async () => {
+    const { service, assignment } = build({ ticket: { ...TICKET, status: 'ASIGNADO', assigneeUserId: 77 } });
+    await expect(service.tomar(P, 'KB-0210')).rejects.toBeInstanceOf(ConflictException);
+    expect(assignment.assign).not.toHaveBeenCalled();
+    expect(assignment.take).not.toHaveBeenCalled();
+  });
+
+  it('resuelto o cerrado: 409', async () => {
+    const { service } = build({ ticket: { ...TICKET, status: 'CERRADO', assigneeUserId: null } });
+    await expect(service.tomar(P, 'KB-0210')).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('un requerimiento no se toma desde Claude: 400', async () => {
+    const { service } = build();
+    await expect(service.tomar(P, 'RQ-0045')).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('resolver', () => {
+  const EVIDENCIA = { solucion: 'Se partió la sincronización en lotes', causaRaiz: 'Timeout de Cloudflare a los 100 s', accionCorrectiva: 'Job en segundo plano' };
+
+  it('resuelve un ticket mío en atención con la evidencia y marca que fue vía Claude', async () => {
+    const { service, transitions } = build({ ticket: { ...TICKET, status: 'EN_ATENCION', assigneeUserId: 9 } });
+    transitions.transition.mockResolvedValueOnce({ ...TICKET, status: 'RESUELTO' });
+    const out = await service.resolver(P, 'KB-0210', EVIDENCIA);
+    const arg = transitions.transition.mock.calls[0][0];
+    expect(arg).toMatchObject({ ticketId: 100, actorUserId: 9, toStatus: 'RESUELTO', rootCause: EVIDENCIA.causaRaiz, correctiveAction: EVIDENCIA.accionCorrectiva });
+    expect(arg.resolutionMd).toContain(EVIDENCIA.solucion);
+    expect(arg.resolutionMd).toContain('vía Claude');
+    expect(out).toEqual({ codigo: 'KB-0210', estado: 'RESUELTO' });
+  });
+
+  it('sin alguno de los tres campos: 400 sin tocarlo', async () => {
+    const { service, transitions } = build({ ticket: { ...TICKET, status: 'EN_ATENCION', assigneeUserId: 9 } });
+    await expect(service.resolver(P, 'KB-0210', { ...EVIDENCIA, causaRaiz: '  ' })).rejects.toBeInstanceOf(BadRequestException);
+    expect(transitions.transition).not.toHaveBeenCalled();
+  });
+
+  it('no asignado a mí: 409', async () => {
+    const { service } = build({ ticket: { ...TICKET, status: 'EN_ATENCION', assigneeUserId: 77 } });
+    await expect(service.resolver(P, 'KB-0210', EVIDENCIA)).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('solo desde EN_ATENCION o ESPERA_CLIENTE: 409 en otro estado', async () => {
+    const { service } = build({ ticket: { ...TICKET, status: 'ASIGNADO', assigneeUserId: 9 } });
+    await expect(service.resolver(P, 'KB-0210', EVIDENCIA)).rejects.toBeInstanceOf(ConflictException);
+  });
+});
+
+describe('borrador de respuesta', () => {
+  it('queda como nota INTERNA marcada como borrador, nunca pública', async () => {
+    const { service, messages } = build();
+    await service.borrador(P, 'KB-0210', 'Hola, ya está corregido.');
+    const [, ticketId, body] = messages.post.mock.calls[0];
+    expect(ticketId).toBe(100);
+    expect(body.visibility).toBe('INTERNA');
+    expect(body.bodyMd.startsWith(BORRADOR_CABECERA)).toBe(true);
+    expect(body.bodyMd).toContain('Hola, ya está corregido.');
+  });
+
+  it('vacío: 400', async () => {
+    const { service, messages } = build();
+    await expect(service.borrador(P, 'KB-0210', '   ')).rejects.toBeInstanceOf(BadRequestException);
+    expect(messages.post).not.toHaveBeenCalled();
+  });
+
+  it('un ticket cerrado no admite borradores: 409', async () => {
+    const { service } = build({ ticket: { ...TICKET, status: 'CERRADO' } });
+    await expect(service.borrador(P, 'KB-0210', 'x')).rejects.toBeInstanceOf(ConflictException);
   });
 });

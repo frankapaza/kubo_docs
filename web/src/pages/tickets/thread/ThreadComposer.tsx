@@ -57,6 +57,12 @@ interface ThreadComposerProps {
   clientName: string | null;
   /** Lo llama el hilo para recargarse. Sus fallos los cuenta el hilo, no esto. */
   onPosted: () => void;
+  /**
+   * Texto a cargar en el cuadro (un borrador de Claude elegido en el hilo).
+   * Solo lo escribe; enviarlo sigue pasando por los mismos botones y la misma
+   * confirmación de respuesta pública.
+   */
+  prefill?: { text: string; nonce: number } | null;
 }
 
 /**
@@ -84,7 +90,7 @@ const TIMEOUT_FAILURE: PostFailure = {
     'antes de volver a enviarlo.',
 };
 
-export default function ThreadComposer({ ticketId, clientName, onPosted }: ThreadComposerProps) {
+export default function ThreadComposer({ ticketId, clientName, onPosted, prefill }: ThreadComposerProps) {
   const [body, setBody] = useState('');
   const [files, setFiles] = useState<PendingAttachment[]>([]);
 
@@ -116,6 +122,13 @@ export default function ThreadComposer({ ticketId, clientName, onPosted }: Threa
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const domId = useId();
+
+  useEffect(() => {
+    if (!prefill) return;
+    setBody(prefill.text);
+    textareaRef.current?.focus();
+    textareaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [prefill]);
 
   /**
    * Corta el camino tardío tras desmontar. La tienen `TicketThread`,

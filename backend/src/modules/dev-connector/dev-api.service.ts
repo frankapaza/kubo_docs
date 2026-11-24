@@ -4,6 +4,7 @@ import { TicketAttachmentsService } from '../ticket-messages/ticket-attachments.
 import { TicketMessagesService } from '../ticket-messages/ticket-messages.service';
 import { TicketStatus } from '../tickets/domain/ticket-state-machine';
 import { Ticket } from '../tickets/entities/ticket.entity';
+import { TicketAssignmentService } from '../tickets/ticket-assignment.service';
 import { TicketTransitionsService } from '../tickets/ticket-transitions.service';
 import { WorkItemStatus } from '../work-items/domain/work-item-board';
 import { WorkItem } from '../work-items/entities/work-item.entity';
@@ -18,6 +19,16 @@ export const MAX_PENDIENTES = 50;
 
 const NOT_FOUND = { code: 'NOT_FOUND', message: 'No existe en este cliente y sistema.' } as const;
 const ADJUNTO_NOT_FOUND = { code: 'NOT_FOUND', message: 'Ese adjunto no existe en este ticket.' } as const;
+
+/**
+ * Cómo empieza un borrador de respuesta escrito por Claude. La web lo reconoce
+ * por esta cabecera (copia en `web/src/pages/tickets/thread/claude-draft.ts`)
+ * y el texto para el cliente es lo que va después del separador.
+ */
+export const BORRADOR_CABECERA = '**Borrador de respuesta al cliente**';
+export const BORRADOR_SEPARADOR = '---';
+
+const TOMABLES: string[] = ['NUEVO', 'TRIAJE', 'ASIGNADO', 'EN_ATENCION', 'ESPERA_CLIENTE', 'DERIVADO'];
 
 /** Tope para pasar un adjunto a Claude (el JSON en base64 pesa un tercio más). */
 export const MAX_ADJUNTO_BYTES = 5 * 1024 * 1024;
@@ -78,7 +89,112 @@ export class DevApiService {
     private readonly transitions: TicketTransitionsService,
     private readonly board: WorkItemBoardService,
     private readonly wiEvents: WorkItemEventsService,
+    private readonly assignment: TicketAssignmentService,
   ) {}
+
+  /**
+   * Asignarse un ticket y ponerlo en atención (el «Tomar» de la web). Solo si
+   * está libre o ya es del dueño de la clave: quitárselo a otro es cosa del líder.
+   */
+  async tomar(p: DevPrincipal, rawCode: string): Promise<{ codigo: string; estado: string }> {
+    const t = await this.ticketOnly(p, rawCode, 'tomar');
+    const assignee = t.assigneeUserId;
+    if (assignee != null && !isMine(assignee, p.userId)) {
+      throw new ConflictException({
+        code: 'CONFLICT',
+        message: 'Este ticket ya está asignado a otra persona: pide que te lo reasignen en DevDocs.',
+      });
+    }
+    if (!TOMABLES.includes(t.status)) {
+      throw new ConflictException({ code: 'CONFLICT', message: `Un ticket en ${t.status} no se puede tomar.` });
+    }
+    if (t.status === 'EN_ATENCION' && isMine(assignee, p.userId)) return { codigo: t.code!, estado: t.status };
+
+    if (t.status === 'NUEVO' || t.status === 'TRIAJE') {
+      await this.assignment.assign({
+        ticketId: Number(t.id),
+        actorUserId: p.userId,
+        assigneeUserId: p.userId,
+        reason: `Tomado vía Claude (${p.repoFullName})`,
+      });
+    }
+    const out = await this.assignment.take({ ticketId: Number(t.id), actorUserId: p.userId });
+    return { codigo: t.code!, estado: out.status };
+  }
+
+  /**
+   * Resolver con la misma evidencia que exige la web (solución, causa raíz y
+   * acción correctiva). Cerrar sigue siendo de una persona: el cliente aún
+   * puede confirmar o reabrir.
+   */
+  async resolver(
+    p: DevPrincipal,
+    rawCode: string,
+    e: { solucion: string; causaRaiz: string; accionCorrectiva: string },
+  ): Promise<{ codigo: string; estado: string }> {
+    const solucion = String(e?.solucion ?? '').trim();
+    const causaRaiz = String(e?.causaRaiz ?? '').trim();
+    const accionCorrectiva = String(e?.accionCorrectiva ?? '').trim();
+    if (!solucion || !causaRaiz || !accionCorrectiva) {
+      throw new BadRequestException({
+        code: 'BAD_INPUT',
+        message: 'Para resolver hacen falta solución aplicada, causa raíz y acción correctiva.',
+      });
+    }
+    const t = await this.ticketOnly(p, rawCode, 'resolver');
+    if (!isMine(t.assigneeUserId, p.userId)) {
+      throw new ConflictException({
+        code: 'CONFLICT',
+        message: 'Este ticket no está asignado a ti: tómalo primero (herramienta tomar_ticket).',
+      });
+    }
+    if (t.status !== 'EN_ATENCION' && t.status !== 'ESPERA_CLIENTE') {
+      throw new ConflictException({
+        code: 'CONFLICT',
+        message: `Solo se resuelve un ticket en atención o en espera del cliente; este está en ${t.status}.`,
+      });
+    }
+    const out = await this.transitions.transition({
+      ticketId: Number(t.id),
+      actorUserId: p.userId,
+      toStatus: 'RESUELTO',
+      resolutionMd: `${solucion}\n\n_— vía Claude (${p.repoFullName})_`,
+      rootCause: causaRaiz,
+      correctiveAction: accionCorrectiva,
+    });
+    return { codigo: t.code!, estado: out.status };
+  }
+
+  /**
+   * La respuesta al cliente, como borrador: una nota INTERNA marcada que en
+   * DevDocs se revisa y se envía con «Usar como respuesta». Ningún texto de
+   * Claude le llega al cliente sin que una persona lo lea.
+   */
+  async borrador(p: DevPrincipal, rawCode: string, texto: string): Promise<{ ok: true }> {
+    const body = String(texto ?? '').trim();
+    if (!body) throw new BadRequestException({ code: 'BAD_INPUT', message: 'El borrador está vacío.' });
+    const t = await this.ticketOnly(p, rawCode, 'redactar respuestas');
+    if (t.status === 'CERRADO') {
+      throw new ConflictException({ code: 'CONFLICT', message: 'El ticket está cerrado: su hilo no admite mensajes.' });
+    }
+    await this.messages.post({ kind: 'STAFF', userId: p.userId }, t.id, {
+      bodyMd: `${BORRADOR_CABECERA} · vía Claude (${p.repoFullName})\n\n${BORRADOR_SEPARADOR}\n\n${body}`,
+      visibility: 'INTERNA',
+    });
+    return { ok: true };
+  }
+
+  /** Las tres de arriba solo existen para tickets. */
+  private async ticketOnly(p: DevPrincipal, rawCode: string, que: string): Promise<Ticket> {
+    const r = await this.resolve(p, rawCode);
+    if (r.kind !== 'KB') {
+      throw new BadRequestException({
+        code: 'BAD_INPUT',
+        message: `Desde Claude solo se puede ${que} en tickets (KB-); los requerimientos se gestionan en DevDocs.`,
+      });
+    }
+    return r.ticket;
+  }
 
   contexto(p: DevPrincipal) {
     return {

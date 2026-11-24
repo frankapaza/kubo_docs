@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react';
 import type { TicketAttachment, TicketMessage, TicketMessageVisibility } from '../../../api/types';
 import { VISIBILITY_SKINS } from './message-visibility';
 import ThreadAttachment from './ThreadAttachment';
+import { claudeDraftText } from './claude-draft';
 
 /**
  * Un mensaje del hilo, ya escrito.
@@ -50,6 +51,11 @@ export interface ThreadMessageProps {
   attachments: TicketAttachment[];
   /** Nombre del autor ya resuelto por quien conoce los catálogos. */
   authorName: string;
+  /**
+   * Si el mensaje es un borrador de Claude, lleva su texto al compositor para
+   * revisarlo y enviarlo. Sin esta prop (hilo cerrado) no se ofrece.
+   */
+  onUseDraft?: (text: string) => void;
 }
 
 interface Look {
@@ -149,8 +155,9 @@ function lookFor(message: TicketMessage): Look {
   return UNKNOWN_AUTHOR;
 }
 
-export default function ThreadMessage({ message, attachments, authorName }: ThreadMessageProps) {
+export default function ThreadMessage({ message, attachments, authorName, onUseDraft }: ThreadMessageProps) {
   const look = lookFor(message);
+  const draft = onUseDraft ? claudeDraftText(message) : null;
   const fecha = new Date(message.createdAt).toLocaleString('es-PE');
 
   return (
@@ -197,6 +204,16 @@ export default function ThreadMessage({ message, attachments, authorName }: Thre
       <p className="mt-2 whitespace-pre-wrap text-[13px] leading-relaxed text-slate-800">
         {message.bodyMd}
       </p>
+
+      {draft && (
+        <button
+          type="button"
+          onClick={() => onUseDraft?.(draft)}
+          className="mt-2 rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 print:hidden"
+        >
+          Usar como respuesta
+        </button>
+      )}
 
       {attachments.length > 0 && (
         <ul className="mt-3 space-y-2">

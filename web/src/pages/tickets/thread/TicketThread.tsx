@@ -74,6 +74,8 @@ export default function TicketThread({
   /** Hay una recarga en curso: el botón de reintentar no admite una segunda. */
   const [reloading, setReloading] = useState(false);
   const [clientUsersById, setClientUsersById] = useState<Map<number, string>>(new Map());
+  /** Borrador de Claude elegido para revisar en el compositor; `nonce` lo vuelve a cargar aunque sea el mismo texto. */
+  const [draftPrefill, setDraftPrefill] = useState<{ text: string; nonce: number } | null>(null);
 
   const fetchThread = useCallback(
     () => Promise.all([ticketMessagesApi.listThread(ticketId), ticketMessagesApi.listAttachments(ticketId)]),
@@ -297,6 +299,9 @@ export default function TicketThread({
                     message={message}
                     attachments={byMessage.get(message.id) ?? []}
                     authorName={authorName(message)}
+                    onUseDraft={
+                      closed ? undefined : (text) => setDraftPrefill({ text, nonce: Date.now() })
+                    }
                   />
                 </li>
               ))}
@@ -340,7 +345,7 @@ export default function TicketThread({
             esto hay que abrir un ticket nuevo.
           </p>
         ) : (
-          <ThreadComposer ticketId={ticketId} clientName={clientName} onPosted={reload} />
+          <ThreadComposer ticketId={ticketId} clientName={clientName} onPosted={reload} prefill={draftPrefill} />
         )}
       </div>
     </section>
