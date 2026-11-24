@@ -1,4 +1,4 @@
-import { IsDateString, IsIn, Matches } from 'class-validator';
+import { IsDateString, IsIn, IsInt, IsOptional, Matches, Min } from 'class-validator';
 import { WORK_ITEM_PRIORITIES, WorkItemPriority } from '../domain/work-item-board';
 
 /**
@@ -30,4 +30,8 @@ export class AcceptWorkItemDto {
   })
   @IsDateString({ strict: true }, { message: 'La fecha comprometida no es una fecha válida.' })
   committedDate!: string;
+
+  /** El sistema del requerimiento, que el admin elige al aceptarlo (conector de Claude). */
+  @IsOptional() @IsInt() @Min(1)
+  clientSystemId?: number;
 }

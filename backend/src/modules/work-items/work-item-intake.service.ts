@@ -55,6 +55,8 @@ export class WorkItemIntakeService {
         priority: dto.priority,
         dueDate: dto.committedDate,
         boardOrder: index,
+        // Validado contra el cliente en el controlador (`assertClientSystem`).
+        ...(dto.clientSystemId != null ? { clientSystemId: dto.clientSystemId } : {}),
       });
 
       const eventRepo = manager.getRepository(WorkItemEvent);

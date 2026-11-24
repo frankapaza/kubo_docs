@@ -14,6 +14,10 @@ export class CreateWorkItemDto {
   @IsInt() @Min(1)
   clientId!: number;
 
+  /** Asignación cliente-sistema (conector de Claude). Opcional. */
+  @IsOptional() @IsInt() @Min(1)
+  clientSystemId?: number;
+
   @IsString() @MinLength(1) @MaxLength(240)
   title!: string;
 
