@@ -169,11 +169,20 @@ export class Outbox {
 
   /** Último estado combinado recibido (JSON): el widget lo ve aunque se reinicie sin red. */
   saveState(json: string): void {
-    this.db.prepare("INSERT INTO kv (k, v) VALUES ('state', ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run(json);
+    this.saveKv('state', json);
   }
 
   loadState(): string | null {
-    const row = this.db.prepare("SELECT v FROM kv WHERE k = 'state'").get() as { v: string } | undefined;
+    return this.loadKv('state');
+  }
+
+  /** Valor (texto) guardado bajo `k` en la tabla `kv`. */
+  saveKv(k: string, v: string): void {
+    this.db.prepare('INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v').run(k, v);
+  }
+
+  loadKv(k: string): string | null {
+    const row = this.db.prepare('SELECT v FROM kv WHERE k = ?').get(k) as { v: string } | undefined;
     return row ? row.v : null;
   }
 

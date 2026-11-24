@@ -8,9 +8,20 @@ en una cola SQLite local y cada 15 s:
 2. pide `sync`: aplica la configuración nueva, ejecuta las órdenes («probar ahora», cruzada) y
    guarda el estado combinado para el widget.
 
-Si la central no responde sigue midiendo y acumulando; tras 3 sondeos fallidos seguidos la API
-local informa `central.reachable: false`. Al arrancar sin red usa la última configuración y el
-último estado guardados.
+Si la central no responde sigue midiendo y acumulando; tras 3 sondeos seguidos con fallos de
+red/sync la API local informa `central.reachable: false` (el corte por rechazo no cuenta: ahí la
+central responde y se informa `central.rejecting`). Al arrancar sin red usa la última
+configuración y el último estado guardados.
+
+**Un corte, un aviso.** Sin internet en la oficina tampoco hay central, así que el umbral de «la
+central no responde» (~45 s) llegaría antes que el veredicto de caída de oficina (la primera franja
+completa tras el corte: 5–10 min de día). Por eso `CENTRAL_UNREACHABLE` queda pendiente hasta el
+veredicto de la primera franja que empiece después del primer sondeo fallido: si hay caída de
+oficina se anota sin aviso (el corte ya avisa con `OFFICE_OUTAGE_STARTED`); si no, con aviso; si
+la central vuelve antes, no se anota. Sin referencias configuradas se decide al momento; sin
+veredicto, 2 min después del fin de esa franja (con aviso). `OFFICE_OUTAGE_ENDED` y `CENTRAL_BACK`
+no avisan. Las marcas del diario (caída anotada, «no responde» anotado, aviso pendiente) se
+guardan en la tabla `kv` de `engine.db`: un reinicio durante un corte no vuelve a avisar.
 
 El `sync` se hace en cada sondeo aunque el envío falle. Si la central rechaza un lote por su
 contenido (400 o 413), el motor lo parte por la mitad (siempre un prefijo, sin alterar el orden)

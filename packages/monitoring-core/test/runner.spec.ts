@@ -24,6 +24,7 @@ interface SetupOpts {
   behavior?: (target: ServiceTarget, kind: CheckKind) => Behavior;
   concurrency?: number;
   references?: ServiceTarget[];
+  onOfficeVerdict?: (v: { slotStart: Date; outage: boolean }) => void;
 }
 
 function setup(o: SetupOpts) {
@@ -62,6 +63,7 @@ function setup(o: SetupOpts) {
     clock,
     check,
     references: o.references,
+    onOfficeVerdict: o.onOfficeVerdict,
     onResult: (result, signals) => delivered.push({ result, signals }),
   });
   const signals = () => delivered.flatMap((d) => d.signals);
@@ -315,6 +317,34 @@ describe('ProbeRunner', () => {
     // la segunda REGULAR correcta es la que sincroniza
     const regs = h.delivered.filter((d) => d.result.kind === 'REGULAR');
     expect(sig[0].result.id).toBe(regs[1].result.id);
+  });
+
+  it('onOfficeVerdict informa cada franja juzgada (también sin transición), en orden; un fallo del consumidor no rompe la sonda', async () => {
+    let down = false;
+    const verdicts: { slotStart: number; outage: boolean }[] = [];
+    const h = setup({
+      start: LIMA_23H,
+      services: [svc(1), svc(2)],
+      references: [svc(1001)],
+      behavior: () => ({ ms: 500, ok: !down }),
+      onOfficeVerdict: (v) => {
+        verdicts.push({ slotStart: v.slotStart.getTime(), outage: v.outage });
+        throw new Error('consumidor roto');
+      },
+    });
+    h.runner.start();
+    await h.clock.advance(3 * MIN);
+    down = true;
+    await h.clock.advance(3 * MIN);
+    h.runner.stop();
+    expect(verdicts.length).toBeGreaterThanOrEqual(4);
+    // Franjas de 1 min alineadas, sin repetir, en orden.
+    for (let i = 1; i < verdicts.length; i++) expect(verdicts[i].slotStart).toBe(verdicts[i - 1].slotStart + MIN);
+    expect(verdicts[0]).toEqual({ slotStart: Date.parse(LIMA_23H) + MIN, outage: false });
+    expect(verdicts[1].outage).toBe(false); // sin transición: no hay señal, pero sí veredicto
+    expect(verdicts[verdicts.length - 1].outage).toBe(true);
+    const office = h.signals().filter((s) => s.type.startsWith('OFFICE'));
+    expect(office.map((s) => s.type)).toEqual(['OFFICE_OUTAGE_END', 'OFFICE_OUTAGE_START']);
   });
 
   it('sin referencias nunca emite señales de oficina', async () => {

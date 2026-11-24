@@ -118,6 +118,20 @@ describe('Outbox', () => {
     again.close();
   });
 
+  it('saveKv/loadKv guardan valores por clave, independientes del estado, y sobreviven a reabrir', () => {
+    const file = join(dir, 'engine.db');
+    const ob = new Outbox(file);
+    expect(ob.loadKv('journal')).toBeNull();
+    ob.saveState('[1]');
+    ob.saveKv('journal', '{"a":1}');
+    ob.saveKv('journal', '{"a":2}');
+    ob.close();
+    const again = new Outbox(file);
+    expect(again.loadKv('journal')).toBe('{"a":2}');
+    expect(again.loadState()).toBe('[1]');
+    again.close();
+  });
+
   it('peekItems devuelve checks y señales intercalados en su orden real', () => {
     const ob = new Outbox(':memory:');
     const s1 = signal();

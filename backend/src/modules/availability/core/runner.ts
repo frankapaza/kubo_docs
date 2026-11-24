@@ -23,6 +23,11 @@ export interface RunnerOptions {
   /** Solo la oficina: 1.1.1.1 y 8.8.8.8 (ICMP o TCP 443/53, a elección del constructor). */
   references?: ServiceTarget[];
   onResult(result: CheckResult, signals: ProbeSignal[]): void;
+  /**
+   * Veredicto de cada franja de oficina juzgada (haya transición o no), en orden de franjas,
+   * en el momento de juzgarla. `slotStart` es el inicio de la franja. Una excepción se ignora.
+   */
+  onOfficeVerdict?(verdict: { slotStart: Date; outage: boolean }): void;
 }
 
 interface Job {
@@ -511,6 +516,11 @@ export class ProbeRunner {
       this.slots.shift();
       if (!refsDone) continue; // sin todas las referencias no se puede juzgar
       const out = isOfficeOutage([...s.refsOk.values()], [...s.servicesOk.values()]);
+      try {
+        this.opts.onOfficeVerdict?.({ slotStart: new Date(s.start), outage: out });
+      } catch {
+        // un fallo del consumidor no debe detener la sonda
+      }
       if (out === this.outage) continue;
       this.outage = out;
       this.pendingOffice.push({

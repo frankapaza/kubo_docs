@@ -1,5 +1,6 @@
 import {
   DEFAULT_CONCURRENCY,
+  nextCycleAt,
   ProbeRunner,
   type CheckFn,
   type CheckResult,
@@ -58,6 +59,30 @@ export const MAX_BATCHES_PER_TICK = 10;
 const CONTENT_REJECTED = new Set([400, 413]);
 /** Descartes seguidos (sin envío aceptado en medio) que abren el corte. */
 export const DEAD_LETTER_BREAKER = 3;
+/**
+ * Margen para decidir el aviso de «la central no responde» si no llega el veredicto de oficina:
+ * tras el fin de la primera franja que puede juzgar el fallo (y nunca antes de este tiempo desde el umbral).
+ */
+export const UNREACHABLE_VERDICT_GRACE_MS = 2 * 60_000;
+/** Clave de la tabla `kv` con las marcas del diario (sobreviven a un reinicio). */
+export const JOURNAL_FLAGS_KEY = 'journal';
+
+/** «La central no responde» alcanzado, a la espera del veredicto de oficina para decidir si avisa. */
+interface UnreachablePending {
+  /** ms del primer sondeo fallido de la racha: solo decide una franja que empiece en o después. */
+  since: number;
+  /** ms: si no llega veredicto, se anota con aviso. */
+  deadline: number;
+  /** Algún veredicto (de una franja válida) dijo caída de oficina. */
+  sawOutage: boolean;
+}
+
+interface JournalFlags {
+  outageJournaled: boolean;
+  unreachableJournaled: boolean;
+  unreachableSilent: boolean;
+  pending: UnreachablePending | null;
+}
 
 const silent: EngineLogger = { info: () => undefined, warn: () => undefined, error: () => undefined };
 
@@ -74,7 +99,9 @@ interface LocalView {
  *    guarda el estado combinado para el widget.
  * El `sync` se hace SIEMPRE, aunque el envío falle: la configuración, las órdenes, el
  * estado y el `last_seen_at` no dependen de que la cola avance. Un sondeo cuenta como
- * fallido si falla el envío o el `sync`; tras 3 seguidos, `central.reachable` es false.
+ * fallido si falla el envío o el `sync`; tras 3 seguidos con fallos reales de red/sync,
+ * `central.reachable` es false (los del corte de rechazo cuentan en `consecutiveFailures`,
+ * pero no en `reachable`: la central responde, solo rechaza).
  * Un 429 no cuenta como fallo: se respeta `Retry-After` antes de volver a enviar.
  * Un 400/413 (el contenido del lote) parte el lote por la mitad, siempre como prefijo
  * ordenado, hasta que la central lo acepte; un único elemento rechazado va a
@@ -86,7 +113,9 @@ interface LocalView {
  *
  * Nada del estado del `ProbeRunner` sobrevive a un reinicio: al arrancar se crea uno
  * nuevo con la configuración guardada (trackers en OK, caída de oficina desconocida). Lo
- * único persistente es la cola. Para que la central no se quede con un estado que ya no es
+ * persistente es la cola, el último estado combinado y las marcas del diario (caída de oficina
+ * y «no responde» anotados, y el aviso pendiente) en `kv`, para no repetir avisos tras un
+ * reinicio. Para que la central no se quede con un estado que ya no es
  * cierto, el runner nuevo (también al sustituirlo por cambio de horario o referencias) se
  * resincroniza: STATE_SYNC por servicio sano y la señal de caída de la primera franja.
  */
@@ -129,8 +158,15 @@ export class Engine {
   private runnerHasOutageVerdict = false;
   /** CENTRAL_UNREACHABLE anotado (por fallos reales de red/sync); se cierra con CENTRAL_BACK. */
   private unreachableJournaled = false;
+  /** El CENTRAL_UNREACHABLE anotado fue sin aviso (durante una caída de oficina). */
+  private unreachableSilent = false;
+  /** Umbral alcanzado, aviso aún sin decidir (ver `poll`). */
+  private unreachablePending: UnreachablePending | null = null;
   /** Sondeos seguidos con fallos reales de red/sync (sin contar los del corte de rechazo). */
   private realFailures = 0;
+  /** ms del primer sondeo de la racha actual de fallos reales. */
+  private failureSince: number | null = null;
+  private lastFlagsJson: string | null = null;
   private readonly local = new Map<number, LocalView>();
   /** Última prueba lanzada por id de destino (de cualquier runner), para no solaparlas. */
   private readonly inFlight = new Map<number, Promise<unknown>>();
@@ -161,6 +197,7 @@ export class Engine {
     this.running = true;
     this.generation++;
     this.startedAt = this.clock.now().toISOString();
+    this.loadFlags();
     const saved = this.outbox.loadConfig();
     if (saved) {
       try {
@@ -197,7 +234,8 @@ export class Engine {
   }
 
   status(): EngineStatus {
-    const reachable = this.consecutiveFailures < UNREACHABLE_AFTER_FAILURES;
+    // Solo los fallos reales de red/sync: con el corte de rechazo abierto el sync responde.
+    const reachable = this.realFailures < UNREACHABLE_AFTER_FAILURES;
     const states = this.runner?.states();
     const services = reachable
       ? this.lastState
@@ -248,6 +286,91 @@ export class Engine {
       ticketCode: null,
       notify,
     });
+  }
+
+  // --- un corte, un aviso ----------------------------------------------------
+  //
+  // Un corte de internet de la oficina también deja sin central: el motor alcanzaría el umbral
+  // de «no responde» (~45 s) antes de que el runner juzgue la caída de oficina (5–10 min de día).
+  // Para que el corte dé un solo aviso (OFFICE_OUTAGE_STARTED), CENTRAL_UNREACHABLE no se anota
+  // al alcanzar el umbral: queda pendiente hasta el veredicto de la primera franja que empiece en
+  // o después del primer sondeo fallido (las anteriores se midieron con internet).
+  // - caída de oficina (ya anotada, o anotada al llegar su START) → se anota sin aviso;
+  // - sin caída → se anota con aviso;
+  // - la central vuelve antes → no se anota nada;
+  // - sin referencias no hay veredicto posible → se decide al momento, con aviso;
+  // - sin veredicto a tiempo → con aviso (`UNREACHABLE_VERDICT_GRACE_MS` tras el fin de esa franja).
+  // Si la caída de oficina termina y la central sigue sin responder, ahora sí es la central: se
+  // vuelve a dejar pendiente (desde ese momento) para avisar con el siguiente veredicto.
+
+  private beginUnreachable(since: number): void {
+    const cfg = this.runnerConfig;
+    if (this.outageJournaled) {
+      this.journalUnreachable(false);
+    } else if (!cfg || cfg.references.length === 0) {
+      this.journalUnreachable(true);
+    } else {
+      this.unreachablePending = { since, deadline: this.verdictDeadline(since, cfg), sawOutage: false };
+      this.log.info('La central no responde: el aviso espera al veredicto de oficina (¿es internet de la oficina?).');
+    }
+  }
+
+  private verdictDeadline(since: number, cfg: ProbeConfig): number {
+    // La franja siguiente a `since` (la que la contiene puede no abrirse si el runner acaba de arrancar).
+    const slotStart = nextCycleAt(0, new Date(since), cfg.schedule);
+    const slotEnd = nextCycleAt(0, slotStart, cfg.schedule).getTime();
+    return Math.max(this.clock.now().getTime(), slotEnd) + UNREACHABLE_VERDICT_GRACE_MS;
+  }
+
+  private journalUnreachable(notify: boolean): void {
+    this.unreachablePending = null;
+    this.unreachableJournaled = true;
+    this.unreachableSilent = !notify;
+    this.journalEngine('CENTRAL_UNREACHABLE', notify);
+  }
+
+  private onOfficeVerdict(v: { slotStart: Date; outage: boolean }, from: ProbeRunner): void {
+    const p = this.unreachablePending;
+    if (from !== this.runner || !p || v.slotStart.getTime() < p.since) return;
+    if (!v.outage) this.journalUnreachable(true);
+    else if (this.outageJournaled) this.journalUnreachable(false);
+    else p.sawOutage = true; // su START llega con el siguiente resultado y lo decide (onResult)
+    this.saveFlags();
+  }
+
+  private loadFlags(): void {
+    const raw = this.outbox.loadKv(JOURNAL_FLAGS_KEY);
+    if (raw === null) return;
+    try {
+      const f = JSON.parse(raw) as Partial<JournalFlags>;
+      this.outageJournaled = f.outageJournaled === true;
+      this.unreachableJournaled = f.unreachableJournaled === true;
+      this.unreachableSilent = f.unreachableSilent === true;
+      const p = f.pending;
+      this.unreachablePending =
+        p && Number.isFinite(p.since) && Number.isFinite(p.deadline) ? { since: p.since, deadline: p.deadline, sawOutage: p.sawOutage === true } : null;
+      this.lastFlagsJson = raw;
+    } catch {
+      this.log.warn('Marcas del diario guardadas ilegibles: se ignoran.');
+    }
+  }
+
+  /** Guarda las marcas del diario si cambiaron: un reinicio no repite avisos ni pierde el pendiente. */
+  private saveFlags(): void {
+    const flags: JournalFlags = {
+      outageJournaled: this.outageJournaled,
+      unreachableJournaled: this.unreachableJournaled,
+      unreachableSilent: this.unreachableSilent,
+      pending: this.unreachablePending ? { ...this.unreachablePending } : null,
+    };
+    const json = JSON.stringify(flags);
+    if (json === this.lastFlagsJson) return;
+    try {
+      this.outbox.saveKv(JOURNAL_FLAGS_KEY, json);
+      this.lastFlagsJson = json;
+    } catch (err) {
+      this.log.error(`No se pudieron guardar las marcas del diario: ${errMsg(err)}`);
+    }
   }
 
   // --- sondeo ----------------------------------------------------------------
@@ -310,19 +433,33 @@ export class Engine {
 
     // Diario: «no responde» solo tras 3 sondeos seguidos con fallos reales de red/sync; los
     // sondeos del corte de rechazo no cuentan (ese ya tiene su CENTRAL_REJECTING y el sync responde).
+    const now = this.clock.now().getTime();
     if (errors.length === 0) {
       this.realFailures = 0;
+      this.failureSince = null;
+      if (this.unreachablePending) {
+        this.unreachablePending = null;
+        this.log.info('La central volvió a responder antes de decidir el aviso: no se anota.');
+      }
       if (this.unreachableJournaled) {
         this.unreachableJournaled = false;
+        this.unreachableSilent = false;
         this.journalEngine('CENTRAL_BACK', false);
       }
     } else {
+      if (this.realFailures === 0) this.failureSince = now;
       this.realFailures++;
-      if (this.realFailures >= UNREACHABLE_AFTER_FAILURES && !this.unreachableJournaled) {
-        this.unreachableJournaled = true;
-        this.journalEngine('CENTRAL_UNREACHABLE', true);
+      const p = this.unreachablePending;
+      if (p) {
+        if (now >= p.deadline) {
+          this.log.warn('Sin veredicto de oficina a tiempo: se anota que la central no responde.');
+          this.journalUnreachable(!(p.sawOutage || this.outageJournaled));
+        }
+      } else if (this.realFailures >= UNREACHABLE_AFTER_FAILURES && !this.unreachableJournaled) {
+        this.beginUnreachable(this.failureSince ?? now);
       }
     }
+    this.saveFlags();
     if (errors.length === 0 && !rejected) {
       if (this.consecutiveFailures >= UNREACHABLE_AFTER_FAILURES) this.log.info('La central vuelve a responder.');
       this.consecutiveFailures = 0;
@@ -440,6 +577,7 @@ export class Engine {
         clock: this.clock,
         check: this.check,
         onResult: (r, signals) => this.onResult(r, signals, runner),
+        onOfficeVerdict: (v) => this.onOfficeVerdict(v, runner),
       });
       this.runner?.stop();
       this.runner = runner;
@@ -470,14 +608,26 @@ export class Engine {
         this.runnerHasOutageVerdict = true;
       }
       // Un runner nuevo repite START (o declara END sin caída previa): el diario anota solo transiciones.
-      if (s.type === 'OFFICE_OUTAGE_START' && !this.outageJournaled) {
-        this.outageJournaled = true;
-        this.journalEngine('OFFICE_OUTAGE_STARTED', true);
+      if (s.type === 'OFFICE_OUTAGE_START') {
+        if (!this.outageJournaled) {
+          this.outageJournaled = true;
+          this.journalEngine('OFFICE_OUTAGE_STARTED', true);
+        }
+        // El corte ya avisa: «la central no responde» queda solo en el historial.
+        if (this.unreachablePending) this.journalUnreachable(false);
       } else if (s.type === 'OFFICE_OUTAGE_END' && this.outageJournaled) {
         this.outageJournaled = false;
-        this.journalEngine('OFFICE_OUTAGE_ENDED', true);
+        // Un aviso por corte: el regreso queda solo en el historial.
+        this.journalEngine('OFFICE_OUTAGE_ENDED', false);
+        if (this.unreachableJournaled && this.unreachableSilent) {
+          // Internet volvió y la central sigue sin responder: ahora sí es la central.
+          const now = this.clock.now().getTime();
+          const cfg = this.runnerConfig;
+          if (cfg) this.unreachablePending = { since: now, deadline: this.verdictDeadline(now, cfg), sawOutage: false };
+        }
       }
     }
+    this.saveFlags();
   }
 }
 

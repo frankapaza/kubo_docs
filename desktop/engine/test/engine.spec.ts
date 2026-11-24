@@ -652,7 +652,8 @@ describe('Engine', () => {
       const evs = engine.events(0, 500).events;
       expect(evs.map((e) => [e.kind, e.notify])).toEqual([
         ['OFFICE_OUTAGE_STARTED', true],
-        ['OFFICE_OUTAGE_ENDED', true],
+        // Un aviso por corte: el regreso queda solo en el historial.
+        ['OFFICE_OUTAGE_ENDED', false],
       ]);
     });
 
@@ -701,6 +702,8 @@ describe('Engine', () => {
       await clock.advance(6 * 15000);
       expect(engine.status().central.rejecting).toBe(true);
       expect(engine.status().central.consecutiveFailures).toBeGreaterThanOrEqual(3);
+      // El sync responde: la central no está «caída», solo rechaza (el widget debe decir «rechaza»).
+      expect(engine.status().central.reachable).toBe(true);
       expect(kinds(engine)).toEqual(['CENTRAL_REJECTING']);
       central.rejectAll = false;
       await clock.advance(15000);
@@ -763,6 +766,267 @@ describe('Engine', () => {
       await clock.advance(25 * 60_000);
       expect(engine.status().officeOutage).toBe(false);
       expect(kinds(engine)).toEqual(['OFFICE_OUTAGE_STARTED', 'OFFICE_OUTAGE_ENDED']);
+    });
+
+    describe('un corte, un aviso (CENTRAL_UNREACHABLE se decide con el veredicto de oficina)', () => {
+      const officeCfg = (): ProbeConfig => ({ services: [svc(1), svc(2)], schedule: DEFAULT_SCHEDULE, references: [svc(1001)] });
+      const pairs = (e: Engine) => e.events(0, 500).events.map((x) => [x.kind, x.notify]);
+      const notified = (e: Engine) => e.events(0, 500).events.filter((x) => x.notify).map((x) => x.kind);
+
+      it('internet de la oficina cae a mitad de franja (referencias y destinos fallan y el sync falla): un solo aviso, OFFICE_OUTAGE_STARTED', async () => {
+        let internet = true;
+        central.config = officeCfg();
+        const engine = make(fakeCheck(() => internet).fn);
+        engine.start();
+        await clock.advance(7 * 60_000 + 5_000); // 15:07:05, a mitad de la franja de las 15:05
+        expect(kinds(engine)).toEqual([]);
+        internet = false;
+        central.down = true;
+        await clock.advance(60_000); // 3 sondeos fallidos: «no responde», pero el aviso queda pendiente
+        expect(engine.status().central.reachable).toBe(false);
+        expect(kinds(engine)).toEqual([]);
+        await clock.advance(15 * 60_000);
+        expect(engine.status().officeOutage).toBe(true);
+        expect(pairs(engine)).toEqual([
+          ['OFFICE_OUTAGE_STARTED', true],
+          ['CENTRAL_UNREACHABLE', false],
+        ]);
+
+        internet = true;
+        central.down = false;
+        await clock.advance(15 * 60_000);
+        expect(engine.status().officeOutage).toBe(false);
+        expect(pairs(engine)).toEqual([
+          ['OFFICE_OUTAGE_STARTED', true],
+          ['CENTRAL_UNREACHABLE', false],
+          ['CENTRAL_BACK', false],
+          ['OFFICE_OUTAGE_ENDED', false],
+        ]);
+        expect(notified(engine)).toEqual(['OFFICE_OUTAGE_STARTED']);
+      });
+
+      it('la franja en curso al caer internet (referencias medidas antes del corte) no decide aunque se juzgue después del umbral', async () => {
+        let internet = true;
+        // Desfases: servicio 2 a +14 s, 1 a +37 s, 3 a +51 s: la franja de las 15:10 se juzga a las 15:10:51.
+        central.config = { ...officeCfg(), services: [svc(1), svc(2), svc(3)] };
+        const engine = make(fakeCheck(() => internet).fn);
+        engine.start();
+        await clock.advance(10 * 60_000 + 1_000); // 15:10:01: referencias de las 15:10 ya medidas, bien
+        internet = false;
+        central.down = true;
+        await clock.advance(60_000); // umbral a las 15:10:45; veredicto «sin caída» de las 15:10 a las 15:10:51
+        expect(kinds(engine)).toEqual([]);
+        await clock.advance(6 * 60_000); // la franja de las 15:15 se juzga a las 15:15:51: caída
+        expect(pairs(engine)).toEqual([
+          ['OFFICE_OUTAGE_STARTED', true],
+          ['CENTRAL_UNREACHABLE', false],
+        ]);
+      });
+
+      it('todo falla desde el arranque (config guardada): un solo aviso, OFFICE_OUTAGE_STARTED', async () => {
+        outbox.saveConfig('v1', JSON.stringify(officeCfg()));
+        central.config = officeCfg();
+        central.down = true;
+        const engine = make(fakeCheck(() => false).fn);
+        engine.start();
+        // El runner abre su primera franja a las 15:05 y la juzga a las 15:05:37 (START): se decide en ese momento, sin esperar al plazo (15:12).
+        await clock.advance(6 * 60_000);
+        expect(pairs(engine)).toEqual([
+          ['OFFICE_OUTAGE_STARTED', true],
+          ['CENTRAL_UNREACHABLE', false],
+        ]);
+        await clock.advance(10 * 60_000);
+        expect(pairs(engine)).toEqual([
+          ['OFFICE_OUTAGE_STARTED', true],
+          ['CENTRAL_UNREACHABLE', false],
+        ]);
+      });
+
+      it('la central cae con internet de la oficina bien: un CENTRAL_UNREACHABLE con aviso tras el veredicto de la primera franja posterior al fallo', async () => {
+        central.config = officeCfg();
+        const engine = make(fakeCheck(() => true).fn);
+        engine.start();
+        await clock.advance(7 * 60_000 + 5_000);
+        central.down = true;
+        await clock.advance(60_000); // 15:08:05
+        expect(engine.status().central.reachable).toBe(false);
+        expect(kinds(engine)).toEqual([]);
+        // La franja de las 15:05 (juzgada antes del fallo) no decide; la de las 15:10 sí (≈15:10:37).
+        await clock.advance(2 * 60_000); // 15:10:05
+        expect(kinds(engine)).toEqual([]);
+        await clock.advance(60_000); // 15:11:05
+        expect(pairs(engine)).toEqual([['CENTRAL_UNREACHABLE', true]]);
+        await clock.advance(10 * 60_000);
+        expect(pairs(engine)).toEqual([['CENTRAL_UNREACHABLE', true]]);
+        central.down = false;
+        await clock.advance(15_000);
+        expect(pairs(engine)).toEqual([
+          ['CENTRAL_UNREACHABLE', true],
+          ['CENTRAL_BACK', false],
+        ]);
+      });
+
+      it('la central vuelve antes de decidir: no se anota nada', async () => {
+        central.config = officeCfg();
+        const engine = make(fakeCheck(() => true).fn);
+        engine.start();
+        await clock.advance(7 * 60_000 + 5_000);
+        central.down = true;
+        await clock.advance(60_000);
+        expect(engine.status().central.reachable).toBe(false);
+        central.down = false;
+        await clock.advance(15_000);
+        expect(engine.status().central.reachable).toBe(true);
+        await clock.advance(10 * 60_000);
+        expect(kinds(engine)).toEqual([]);
+      });
+
+      it('sin veredicto de oficina (las referencias no terminan): decide con aviso 2 min después del fin de la primera franja posterior al fallo', async () => {
+        let refsHang = false;
+        const base = fakeCheck(() => true).fn;
+        const fn = ((t, k, c, o) => (refsHang && t.id >= 1000 ? new Promise(() => undefined) : base(t, k, c, o))) as CheckFn;
+        central.config = officeCfg();
+        const engine = make(fn);
+        engine.start();
+        await clock.advance(7 * 60_000 + 5_000);
+        refsHang = true;
+        central.down = true; // primer sondeo fallido a las 15:07:15 → franja de las 15:10, que acaba a las 15:15
+        await clock.advance(9 * 60_000); // 15:16:05
+        expect(kinds(engine)).toEqual([]);
+        await clock.advance(60_000); // 15:17:05: pasado el plazo (15:17:00)
+        expect(pairs(engine)).toEqual([['CENTRAL_UNREACHABLE', true]]);
+      });
+
+      it('sin referencias configuradas no hay veredicto que esperar: avisa al tercer sondeo fallido', async () => {
+        const engine = make(fakeCheck(() => true).fn);
+        engine.start();
+        await clock.advance(1);
+        central.down = true;
+        await clock.advance(45_000);
+        expect(pairs(engine)).toEqual([['CENTRAL_UNREACHABLE', true]]);
+      });
+
+      it('con la caída de oficina ya anotada, CENTRAL_UNREACHABLE va solo al historial en cuanto se alcanza el umbral', async () => {
+        let internet = false;
+        central.config = officeCfg();
+        const engine = make(fakeCheck(() => internet).fn);
+        engine.start();
+        await clock.advance(11 * 60_000);
+        expect(pairs(engine)).toEqual([['OFFICE_OUTAGE_STARTED', true]]);
+        central.down = true;
+        await clock.advance(45_000);
+        expect(pairs(engine)).toEqual([
+          ['OFFICE_OUTAGE_STARTED', true],
+          ['CENTRAL_UNREACHABLE', false],
+        ]);
+
+        // Vuelve internet pero la central sigue caída: ahora sí es la central → un aviso tras el siguiente veredicto.
+        internet = true;
+        await clock.advance(12 * 60_000);
+        expect(pairs(engine)).toEqual([
+          ['OFFICE_OUTAGE_STARTED', true],
+          ['CENTRAL_UNREACHABLE', false],
+          ['OFFICE_OUTAGE_ENDED', false],
+          ['CENTRAL_UNREACHABLE', true],
+        ]);
+        central.down = false;
+        await clock.advance(15_000);
+        expect(notified(engine)).toEqual(['OFFICE_OUTAGE_STARTED', 'CENTRAL_UNREACHABLE']);
+        expect(kinds(engine).slice(-1)).toEqual(['CENTRAL_BACK']);
+      });
+    });
+
+    describe('reinicio del motor (las marcas del diario persisten)', () => {
+      const officeCfg = (): ProbeConfig => ({ services: [svc(1), svc(2)], schedule: DEFAULT_SCHEDULE, references: [svc(1001)] });
+      const pairs = (e: Engine) => e.events(0, 500).events.map((x) => [x.kind, x.notify]);
+      const reopen = (e: Engine) => {
+        e.stop();
+        outbox.close();
+        outbox = new Outbox(join(dir, 'engine.db'));
+      };
+
+      it('reinicio durante una caída de oficina: no vuelve a avisar; al terminar, OFFICE_OUTAGE_ENDED sin aviso', async () => {
+        let internet = false;
+        central.config = officeCfg();
+        const e1 = make(fakeCheck(() => internet).fn);
+        e1.start();
+        await clock.advance(6 * 60_000);
+        expect(pairs(e1)).toEqual([['OFFICE_OUTAGE_STARTED', true]]);
+        reopen(e1);
+
+        const e2 = make(fakeCheck(() => internet).fn, outbox);
+        e2.start();
+        expect(e2.status().officeOutage).toBe(true);
+        await clock.advance(11 * 60_000);
+        expect(pairs(e2)).toEqual([['OFFICE_OUTAGE_STARTED', true]]);
+        internet = true;
+        await clock.advance(11 * 60_000);
+        expect(pairs(e2)).toEqual([
+          ['OFFICE_OUTAGE_STARTED', true],
+          ['OFFICE_OUTAGE_ENDED', false],
+        ]);
+      });
+
+      it('la caída terminó con el motor parado: el primer veredicto anota OFFICE_OUTAGE_ENDED sin aviso', async () => {
+        let internet = false;
+        central.config = officeCfg();
+        const e1 = make(fakeCheck(() => internet).fn);
+        e1.start();
+        await clock.advance(6 * 60_000);
+        reopen(e1);
+        internet = true;
+        const e2 = make(fakeCheck(() => internet).fn, outbox);
+        e2.start();
+        await clock.advance(6 * 60_000);
+        expect(e2.status().officeOutage).toBe(false);
+        expect(pairs(e2)).toEqual([
+          ['OFFICE_OUTAGE_STARTED', true],
+          ['OFFICE_OUTAGE_ENDED', false],
+        ]);
+      });
+
+      it('reinicio con la central sin responder: no se repite CENTRAL_UNREACHABLE; al volver, CENTRAL_BACK', async () => {
+        const e1 = make(fakeCheck(() => true).fn);
+        e1.start();
+        await clock.advance(1);
+        central.down = true;
+        await clock.advance(45_000);
+        expect(pairs(e1)).toEqual([['CENTRAL_UNREACHABLE', true]]);
+        reopen(e1);
+
+        const e2 = make(fakeCheck(() => true).fn, outbox);
+        e2.start();
+        await clock.advance(2 * 60_000);
+        expect(pairs(e2)).toEqual([['CENTRAL_UNREACHABLE', true]]);
+        central.down = false;
+        await clock.advance(15_000);
+        expect(pairs(e2)).toEqual([
+          ['CENTRAL_UNREACHABLE', true],
+          ['CENTRAL_BACK', false],
+        ]);
+      });
+
+      it('reinicio con el aviso pendiente: se guarda y se decide con el primer veredicto del motor nuevo', async () => {
+        central.config = officeCfg();
+        const e1 = make(fakeCheck(() => true).fn);
+        e1.start();
+        await clock.advance(9 * 60_000 + 5_000); // 15:09:05
+        central.down = true;
+        await clock.advance(56_000); // fallos a las 15:09:15, :30 y :45 → pendiente
+        expect(JSON.parse(outbox.loadKv('journal')!)).toMatchObject({
+          unreachableJournaled: false,
+          pending: { since: Date.parse('2026-11-23T15:09:15.000Z') },
+        });
+        reopen(e1);
+
+        const e2 = make(fakeCheck(() => true).fn, outbox);
+        e2.start(); // 15:10:01: el runner nuevo juzga primero la franja de las 15:15
+        await clock.advance(4 * 60_000);
+        expect(pairs(e2)).toEqual([]);
+        await clock.advance(2 * 60_000); // 15:16:01
+        expect(pairs(e2)).toEqual([['CENTRAL_UNREACHABLE', true]]);
+        expect(JSON.parse(outbox.loadKv('journal')!)).toMatchObject({ unreachableJournaled: true, pending: null });
+      });
     });
   });
 });
