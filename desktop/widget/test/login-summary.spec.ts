@@ -79,6 +79,20 @@ describe('summarize', () => {
     expect(summarize(events, SINCE, model([]))).toBeNull();
   });
 
+  it('skips a history-only CENTRAL_UNREACHABLE (notify false) even outside a visible office outage window', () => {
+    const base: Partial<EngineEvent> = { incidentKey: null, incidentKind: null, serverName: null, serviceNames: [], criticality: null };
+    // Anotado sin aviso antes del START (o con el START ya fuera del diario): es el mismo corte de oficina.
+    const events = [
+      ev({ ...base, id: 1, kind: 'CENTRAL_UNREACHABLE', notify: false, at: '2026-11-24T05:00:00Z' }),
+      ev({ ...base, id: 2, kind: 'OFFICE_OUTAGE_STARTED', at: '2026-11-24T05:00:01Z' }),
+      ev({ ...base, id: 3, kind: 'OFFICE_OUTAGE_ENDED', notify: false, at: '2026-11-24T05:30:00Z' }),
+      ev({ ...base, id: 4, kind: 'CENTRAL_UNREACHABLE', notify: false, at: '2026-11-24T06:00:00Z' }),
+    ];
+    const s = summarize(events, SINCE, model([]))!;
+    expect([s.officeOutages, s.centralOutages]).toEqual([1, 0]);
+    expect(s.lines).toEqual(['1 corte de internet en la oficina', 'Ahora todo está operativo']);
+  });
+
   it('counts a recovered incident once even if it recovered twice', () => {
     const events = [
       ev({ id: 1, kind: 'INCIDENT_RECOVERED', incidentKey: 7, at: '2026-11-24T05:00:00Z' }),

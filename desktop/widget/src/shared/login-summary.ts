@@ -53,7 +53,8 @@ export function summarize(events: EngineEvent[], since: string | null, model: Wi
   const opened = recent.filter((e) => (e.kind === 'INCIDENT_OPENED' || e.kind === 'INCIDENT_UPGRADED') && isOutage(e));
   const recovered = recent.filter((e) => e.kind === 'INCIDENT_RECOVERED');
   const officeOutages = recent.filter((e) => e.kind === 'OFFICE_OUTAGE_STARTED').length;
-  const centralOutages = recent.filter((e) => e.kind === 'CENTRAL_UNREACHABLE' && !centralInOutage.has(e.id)).length;
+  // Un CENTRAL_UNREACHABLE sin aviso es solo historial: el motor lo anota así durante un corte de oficina.
+  const centralOutages = recent.filter((e) => e.kind === 'CENTRAL_UNREACHABLE' && e.notify && !centralInOutage.has(e.id)).length;
   if (opened.length + recovered.length + officeOutages + centralOutages === 0) return null;
   // Un incidente reabierto o escalado sigue siendo el mismo: se cuenta por `incidentKey` (también al recuperarse).
   const openedCount = new Set(opened.map((e) => e.incidentKey ?? `e:${e.id}`)).size;

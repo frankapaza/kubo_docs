@@ -207,6 +207,12 @@ export class Engine {
         this.log.error(`Configuración guardada inválida: ${errMsg(err)}`);
       }
     }
+    // El plazo guardado es absoluto y pudo pasar con el motor parado: el runner nuevo necesita su
+    // propia franja para dar veredicto, así que el plazo se recalcula desde ahora (`since` se conserva).
+    if (this.unreachablePending && this.runnerConfig) {
+      this.unreachablePending.deadline = this.verdictDeadline(this.clock.now().getTime(), this.runnerConfig);
+      this.saveFlags();
+    }
     const state = this.outbox.loadState();
     if (state) {
       try {

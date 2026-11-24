@@ -1027,6 +1027,40 @@ describe('Engine', () => {
         expect(pairs(e2)).toEqual([['CENTRAL_UNREACHABLE', true]]);
         expect(JSON.parse(outbox.loadKv('journal')!)).toMatchObject({ unreachableJournaled: true, pending: null });
       });
+
+      // El plazo guardado (15:17:00) es absoluto: el motor nuevo lo recalcula desde su arranque.
+      const restartWithPendingDuringOfficeCut = async (restartAt: string) => {
+        let internet = true;
+        central.config = officeCfg();
+        const e1 = make(fakeCheck(() => internet).fn);
+        e1.start();
+        await clock.advance(9 * 60_000 + 5_000); // 15:09:05: cae internet de la oficina
+        internet = false;
+        central.down = true;
+        await clock.advance(56_000); // 15:10:01: pendiente desde las 15:09:15, plazo 15:17:00
+        expect(JSON.parse(outbox.loadKv('journal')!)).toMatchObject({
+          pending: { since: Date.parse('2026-11-23T15:09:15.000Z'), deadline: Date.parse('2026-11-23T15:17:00.000Z') },
+        });
+        reopen(e1);
+        await clock.advance(Date.parse(restartAt) - clock.now().getTime());
+
+        const e2 = make(fakeCheck(() => internet).fn, outbox);
+        e2.start();
+        await clock.advance(20 * 60_000);
+        expect(e2.events(0, 500).events.filter((x) => x.notify).map((x) => x.kind)).toEqual(['OFFICE_OUTAGE_STARTED']);
+        expect(pairs(e2)).toEqual([
+          ['OFFICE_OUTAGE_STARTED', true],
+          ['CENTRAL_UNREACHABLE', false],
+        ]);
+      };
+
+      it('reinicio con el aviso pendiente pasado el plazo guardado y sin internet: un solo aviso, OFFICE_OUTAGE_STARTED', async () => {
+        await restartWithPendingDuringOfficeCut('2026-11-23T15:20:00.000Z');
+      });
+
+      it('reinicio con el aviso pendiente a menos de 2 min del plazo guardado y sin internet: un solo aviso, OFFICE_OUTAGE_STARTED', async () => {
+        await restartWithPendingDuringOfficeCut('2026-11-23T15:16:00.000Z');
+      });
     });
   });
 });

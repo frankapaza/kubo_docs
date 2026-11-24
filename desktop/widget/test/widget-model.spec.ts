@@ -104,9 +104,19 @@ describe('deriveModel', () => {
     expect(c.rows[0].title).toBe('Sin internet en la oficina');
   });
 
-  it('rechazando con muchos fallos seguidos sigue diciendo «rechaza» aunque reachable venga en false', () => {
-    const m = ok(status([], { central: { reachable: false, lastSyncAt: null, consecutiveFailures: 6, rejecting: true } }));
+  it('con el corte de rechazo abierto y la central respondiendo, dice «rechaza»', () => {
+    const m = ok(status([], { central: { reachable: true, lastSyncAt: null, consecutiveFailures: 6, rejecting: true } }));
     expect(m.rows.map((r) => r.title)).toEqual(['La central rechaza los envíos']);
+  });
+
+  it('un fallo real de red tras el corte de rechazo (reachable false) dice «no responde»', () => {
+    const m = ok(status([], { central: { reachable: false, lastSyncAt: null, consecutiveFailures: 9, rejecting: true } }));
+    expect(m.rows.map((r) => r.title)).toEqual(['La central no responde']);
+  });
+
+  it('con caída de oficina tampoco se muestra la fila de la central aunque rechace', () => {
+    const m = ok(status([], { officeOutage: true, central: { reachable: false, lastSyncAt: null, consecutiveFailures: 9, rejecting: true } }));
+    expect(m.rows.map((r) => r.title)).toEqual(['Sin internet en la oficina']);
   });
 
   it('con caída de oficina no se muestra la fila de la central (un corte, una fila)', () => {

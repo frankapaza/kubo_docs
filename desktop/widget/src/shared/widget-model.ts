@@ -107,13 +107,14 @@ function problemRows(status: EngineStatus): WidgetRow[] {
   }
   const extra: WidgetRow[] = [];
   // Sin internet en la oficina tampoco hay central: es el mismo corte, solo la fila de oficina.
-  // «Rechaza» va antes que «no responde»: con el corte de rechazo la central responde.
+  // `reachable` solo cuenta fallos reales de red: si es false, la central no responde aunque el corte
+  // de rechazo siga abierto; si responde y rechaza, «rechaza».
   const centralTitle = status.officeOutage
     ? null
-    : status.central.rejecting
-      ? 'La central rechaza los envíos'
-      : !status.central.reachable
-        ? 'La central no responde'
+    : !status.central.reachable
+      ? 'La central no responde'
+      : status.central.rejecting
+        ? 'La central rechaza los envíos'
         : null;
   if (centralTitle) extra.push({ key: 'central', tone: 'amber', title: centralTitle, detail: '', incidentId: null, children: [] });
   if (status.officeOutage) {
