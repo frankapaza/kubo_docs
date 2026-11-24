@@ -98,16 +98,23 @@ export class AvailabilityIngestService {
       crossOrderId: null,
     }));
 
+    // Los ya recibidos no cuentan para el desfase ni para el estado (un reenvío no cambia nada).
+    const known = checkRows.length
+      ? new Set((await this.checks.find({ where: { probeId, id: In(checkRows.map((c) => c.id)) } })).map((c) => c.id))
+      : new Set<string>();
+    const newRows = checkRows.filter((c) => !known.has(c.id));
+
     const acceptedChecks = await this.insertIgnore(this.checks, MonitorCheck, checkRows);
     const acceptedSignals = await this.insertIgnore(this.signals, MonitorProbeSignal, signalRows);
 
     const patch: Partial<MonitorProbe> = { lastSeenAt: receivedAt, version: batch.version };
-    const skew = this.clockSkewMs(checkRows, receivedAt);
+    const skew = this.clockSkewMs(newRows, receivedAt);
     if (skew !== null) patch.clockSkewMs = skew;
+    const effectiveSkew = skew ?? (probe.clockSkewMs === null || probe.clockSkewMs === undefined ? 0 : Number(probe.clockSkewMs));
     await this.probes.update(probeId, patch);
     Object.assign(probe, patch);
 
-    await this.updateProbeStates(probeId, checkRows, receivedAt);
+    await this.updateProbeStates(probeId, newRows, receivedAt, effectiveSkew);
 
     const orderIds = [...new Set(checkRows.map((c) => c.orderId).filter((id): id is number => id !== null))];
     if (orderIds.length > 0) {
@@ -216,28 +223,56 @@ export class AvailabilityIngestService {
     return Number((res.raw as { affectedRows?: number })?.affectedRows ?? 0);
   }
 
-  /** Mediana de `(received_at − started_at) − duration_ms`; negativa si la sonda va adelantada. */
+  /**
+   * Desfase del reloj de la sonda: MÍNIMO de `(received_at − started_at) − duration_ms`
+   * (negativo si la sonda va adelantada) sobre los checks NUEVOS del lote (no los
+   * duplicados) y recientes: se ignoran los de más de 2 intervalos de antigüedad, para
+   * que una cola reenviada tras una caída no se tome por desfase. El mínimo es el
+   * check con menos retraso de envío, el más cercano al desfase real. Sin candidatos
+   * devuelve null y `clock_skew_ms` queda como estaba.
+   */
   private clockSkewMs(rows: { startedAt: Date; durationMs: number }[], receivedAt: Date): number | null {
-    if (rows.length === 0) return null;
-    const diffs = rows.map((r) => receivedAt.getTime() - r.startedAt.getTime() - r.durationMs).sort((a, b) => a - b);
-    const mid = Math.floor(diffs.length / 2);
-    return Math.round(diffs.length % 2 ? diffs[mid] : (diffs[mid - 1] + diffs[mid]) / 2);
+    const maxAgeMs = 2 * intervalMsAt(receivedAt, DEFAULT_SCHEDULE);
+    const diffs = rows
+      .map((r) => receivedAt.getTime() - r.startedAt.getTime() - r.durationMs)
+      .filter((d) => d <= maxAgeMs);
+    return diffs.length === 0 ? null : Math.round(Math.min(...diffs));
   }
 
-  /** Último resultado por servicio; un lote reenviado y viejo no retrocede `last_check_at`. */
-  private async updateProbeStates(probeId: number, rows: MonitorCheck[] | any[], receivedAt: Date): Promise<void> {
-    const latest = new Map<number, MonitorCheck>();
-    for (const c of rows as MonitorCheck[]) {
+  /**
+   * Último resultado por servicio. `last_check_at` se guarda en hora de la central:
+   * `started_at + skew`, sin pasar de `received_at` (la central compara con su `now`, y
+   * un reloj de sonda adelantado, atrasado o corregido por NTP no debe congelar ni
+   * falsear el estado). Con ese mismo instante se ordena, así que un lote que llega
+   * después siempre gana. `last_latency_ms` solo sale de checks OK.
+   */
+  private async updateProbeStates(
+    probeId: number,
+    rows: { serviceId: number; startedAt: Date; durationMs: number; ok: boolean }[],
+    receivedAt: Date,
+    skewMs: number,
+  ): Promise<void> {
+    const central = (c: { startedAt: Date }) => Math.min(c.startedAt.getTime() + skewMs, receivedAt.getTime());
+    const latest = new Map<number, (typeof rows)[number]>();
+    const latestOk = new Map<number, (typeof rows)[number]>();
+    for (const c of rows) {
       const prev = latest.get(c.serviceId);
       if (!prev || c.startedAt.getTime() >= prev.startedAt.getTime()) latest.set(c.serviceId, c);
+      const prevOk = latestOk.get(c.serviceId);
+      if (c.ok && (!prevOk || c.startedAt.getTime() >= prevOk.startedAt.getTime())) latestOk.set(c.serviceId, c);
     }
     for (const [serviceId, c] of latest) {
-      const fields = { lastCheckAt: c.startedAt, lastOk: c.ok, lastLatencyMs: c.durationMs };
+      const at = central(c);
+      const okRow = latestOk.get(serviceId);
+      const fields: Partial<MonitorProbeState> = { lastCheckAt: new Date(at), lastOk: c.ok };
+      if (okRow) fields.lastLatencyMs = okRow.durationMs;
       const existing = await this.states.findOne({ where: { serviceId, probeId } });
       if (!existing) {
         // `state` lo gobierna el evaluador (Task 9) con las señales; hasta entonces, OK.
-        await this.insertIgnore(this.states, MonitorProbeState, [{ serviceId, probeId, state: 'OK', ...fields, updatedAt: receivedAt }]);
-      } else if (!existing.lastCheckAt || existing.lastCheckAt.getTime() < c.startedAt.getTime()) {
+        await this.insertIgnore(this.states, MonitorProbeState, [
+          { serviceId, probeId, state: 'OK', lastLatencyMs: null, ...fields, updatedAt: receivedAt },
+        ]);
+      } else if (!existing.lastCheckAt || existing.lastCheckAt.getTime() < at) {
         await this.states.update({ serviceId, probeId }, { ...fields, updatedAt: receivedAt });
       }
     }

@@ -114,7 +114,7 @@ describe('AvailabilityIngestService.acceptBatch', () => {
     expect(patch.lastSeenAt).toEqual(T0);
   });
 
-  it('clock_skew_ms es la mediana redondeada', async () => {
+  it('clock_skew_ms es el mínimo de los checks nuevos', async () => {
     const { svc, probe, probes } = makeSvc();
     const at = (ms: number) => new Date(T0.getTime() - ms).toISOString();
     await svc.acceptBatch(
@@ -122,7 +122,7 @@ describe('AvailabilityIngestService.acceptBatch', () => {
       { checks: [mkCheck(1, { startedAt: at(100), durationMs: 0 }), mkCheck(2, { startedAt: at(201), durationMs: 0 })], signals: [], version: 'v' },
       T0,
     );
-    expect(probes.update.mock.calls[0][1].clockSkewMs).toBe(151);
+    expect(probes.update.mock.calls[0][1].clockSkewMs).toBe(100);
   });
 
   it('lote sin checks no toca clock_skew_ms', async () => {
@@ -142,8 +142,9 @@ describe('AvailabilityIngestService.acceptBatch', () => {
       T0,
     );
     expect(states.rows).toHaveLength(1);
-    expect(states.rows[0]).toMatchObject({ serviceId: 100, probeId: 1, lastOk: false, lastLatencyMs: 77 });
-    expect(states.rows[0].lastCheckAt).toEqual(new Date(later));
+    expect(states.rows[0]).toMatchObject({ serviceId: 100, probeId: 1, lastOk: false, lastLatencyMs: 50 });
+    expect(states.rows[0].lastCheckAt.getTime()).toBeLessThanOrEqual(T0.getTime());
+    expect(states.rows[0].lastCheckAt.getTime()).toBeGreaterThan(T0.getTime() - 1000);
     expect(orders.rows[0].doneAt).toEqual(T0);
   });
 
@@ -155,6 +156,54 @@ describe('AvailabilityIngestService.acceptBatch', () => {
     await svc.acceptBatch(probe, { checks: [mkCheck(1, { ok: false })], signals: [], version: 'v' }, T0);
     expect(states.rows[0].lastCheckAt).toEqual(newer);
     expect(states.rows[0].lastOk).toBe(true);
+  });
+});
+
+describe('hora de la central en monitor_probe_states', () => {
+  const at = (ms: number) => new Date(T0.getTime() + ms).toISOString();
+  const T1 = new Date(T0.getTime() + 60_000);
+
+  it('startedAt 10 min en el futuro y 20 min en el pasado: last_check_at ~ received_at', async () => {
+    const fut = makeSvc();
+    await fut.svc.acceptBatch(fut.probe, { checks: [mkCheck(1, { startedAt: at(600_000), durationMs: 0 })], signals: [], version: 'v' }, T0);
+    expect(Math.abs(fut.states.rows[0].lastCheckAt.getTime() - T0.getTime())).toBeLessThan(1000);
+
+    const past = makeSvc();
+    // el skew ya conocido de la sonda (reloj atrasado 20 min); el check es reciente para la central
+    past.probe.clockSkewMs = 1_200_000;
+    await past.svc.acceptBatch(past.probe, { checks: [mkCheck(2, { startedAt: at(-1_200_000), durationMs: 0 })], signals: [], version: 'v' }, T0);
+    expect(Math.abs(past.states.rows[0].lastCheckAt.getTime() - T0.getTime())).toBeLessThan(1000);
+  });
+
+  it('un salto de NTP hacia atrás sigue actualizando el estado (gana el lote que llegó después)', async () => {
+    const { svc, probe, states } = makeSvc();
+    await svc.acceptBatch(probe, { checks: [mkCheck(1, { startedAt: at(0), durationMs: 0, ok: true })], signals: [], version: 'v' }, T0);
+    await svc.acceptBatch(probe, { checks: [mkCheck(2, { startedAt: at(-180_000), durationMs: 0, ok: false })], signals: [], version: 'v' }, T1);
+    expect(states.rows[0].lastOk).toBe(false);
+    expect(states.rows[0].lastCheckAt.getTime()).toBeGreaterThan(T0.getTime());
+    expect(states.rows[0].lastCheckAt.getTime()).toBeLessThanOrEqual(T1.getTime());
+  });
+
+  it('una cola vieja reenviada no cambia clock_skew_ms', async () => {
+    const { svc, probe, probes } = makeSvc();
+    probe.clockSkewMs = 20;
+    await svc.acceptBatch(probe, { checks: [mkCheck(1, { startedAt: at(-1_800_000), durationMs: 0 })], signals: [], version: 'v' }, T0);
+    expect(probes.update.mock.calls[0][1]).not.toHaveProperty('clockSkewMs');
+  });
+
+  it('los duplicados no cuentan para el desfase', async () => {
+    const { svc, probe, probes } = makeSvc();
+    const batch = { checks: [mkCheck(1, { startedAt: at(0), durationMs: 0 })], signals: [], version: 'v' };
+    await svc.acceptBatch(probe, batch, T0);
+    await svc.acceptBatch(probe, batch, T1);
+    expect(probes.update.mock.calls[1][1]).not.toHaveProperty('clockSkewMs');
+  });
+
+  it('last_latency_ms solo sale de checks OK', async () => {
+    const { svc, probe, states } = makeSvc();
+    await svc.acceptBatch(probe, { checks: [mkCheck(1, { durationMs: 40, ok: true })], signals: [], version: 'v' }, T0);
+    await svc.acceptBatch(probe, { checks: [mkCheck(2, { startedAt: at(30_000), durationMs: 9000, ok: false })], signals: [], version: 'v' }, T1);
+    expect(states.rows[0]).toMatchObject({ lastOk: false, lastLatencyMs: 40 });
   });
 });
 
