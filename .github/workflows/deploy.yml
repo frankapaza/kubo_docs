@@ -213,7 +213,7 @@ jobs:
             fi
 
             echo "===== 6. Reconstruir y levantar ====="
-            docker compose build backend web
+            docker compose build backend monitor-worker web
             docker compose up -d
 
             echo "===== 7. Esperar a que el backend arranque ====="

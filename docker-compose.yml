@@ -103,6 +103,35 @@ services:
     networks:
       - internal
 
+  # Sonda kubo-01 del monitoreo de disponibilidad: el mismo codigo del backend,
+  # otro punto de entrada. Sin puertos ni entrada en el Caddyfile: no atiende
+  # HTTP. Es el unico proceso que ejecuta el tick del evaluador y la purga.
+  # Requiere la migracion 031 aplicada (busca la sonda 'kubo-01' al arrancar).
+  monitor-worker:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    mem_limit: 512m
+    command: ["node", "dist/monitoring-worker.js"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: ${DB_ROOT_PASSWORD}
+      DB_NAME: ${DB_NAME}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      CRYPTO_SECRET: ${CRYPTO_SECRET}
+      FRONTEND_URL: ${FRONTEND_URL}
+    networks:
+      - internal
+
   backend:
     build:
       context: ./backend

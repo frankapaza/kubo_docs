@@ -87,6 +87,30 @@ services:
     volumes:
       - redis_dev_data:/data
 
+  # Sonda kubo-01 (monitoreo de disponibilidad). Opcional en desarrollo; se
+  # levanta con:
+  #   docker compose -f docker-compose.dev.yml up -d --build monitor-worker
+  monitor-worker:
+    build:
+      context: ./backend
+    container_name: kubo-monitor-worker-dev
+    restart: unless-stopped
+    command: ["node", "dist/monitoring-worker.js"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      NODE_ENV: development
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_NAME: kubo_devdocs
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+
   # Loki de desarrollo: el backend local (fuera de Docker) lo alcanza por Solo en 127.0.0.1: Loki no tiene autenticacion.
   # localhost:3100. En produccion NO lleva `ports`.
   loki:

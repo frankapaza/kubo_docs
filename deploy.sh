@@ -20,8 +20,13 @@ set -e
 # Si se olvida, el backend aborta al arrancar (PortalSchemaValidator) diciendo
 # que migracion falta. Procedimiento completo en COMANDOS.txt, "PASO 3-bis".
 # -----------------------------------------------------------------------------
+#
+# Migracion 031 (monitoreo de disponibilidad): aplicarla a mano ANTES de este
+# deploy en una base con datos, igual que las anteriores. Crea la sonda
+# 'kubo-01' que busca el servicio monitor-worker; sin ella el worker aborta
+# al arrancar ("aplicar la migracion 031").
 cd /home/kubo/kubo
 git pull
-docker compose build backend web
+docker compose build backend monitor-worker web
 docker compose up -d
 echo "Deploy completado"

@@ -65,6 +65,10 @@ flutter pub get
 flutter run
 ```
 
+## Monitoreo de disponibilidad
+
+Además del backend, el stack levanta el contenedor `monitor-worker` (`node dist/monitoring-worker.js`, mismo código y mismas variables de base de datos que `backend`, sin puertos). Corre la sonda del centro de datos `kubo-01`, es el único proceso que ejecuta el evaluador de incidentes (cada 5 s) y purga cada día a las 03:00 (Lima) los checks y señales de más de 90 días. Requiere la migración `031_disponibilidad_nucleo.sql`: en una base con datos hay que aplicarla a mano antes del deploy (ver `deploy.sh`); sin ella el worker aborta al arrancar. En desarrollo: `docker compose -f docker-compose.dev.yml up -d --build monitor-worker`.
+
 ## Estado del MVP
 
 > Ver [docs/05-roadmap.md](docs/05-roadmap.md). Los `// TODO:` en el código marcan puntos de integración real pendientes (Whisper, almacenamiento cloud, notificaciones push).
