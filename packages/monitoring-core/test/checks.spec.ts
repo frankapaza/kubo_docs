@@ -120,6 +120,16 @@ describe('ICMP', () => {
     const r = await runCheck(svc({ protocol: 'ICMP', target: '-f' }), 'REGULAR', cycleAt);
     expect(r).toMatchObject({ ok: false, errorCode: 'NETWORK' });
   });
+  it('resolvedor colgado -> TIMEOUT dentro del presupuesto', async () => {
+    const hang = () => new Promise<never>(() => undefined);
+    const r = await runCheck(svc({ protocol: 'ICMP', target: 'lento.example' }), 'REGULAR', cycleAt, {
+      timeoutsMs: { ICMP: 300 },
+      lookup: hang,
+    });
+    expect(r).toMatchObject({ ok: false, errorCode: 'TIMEOUT' });
+    expect(r.durationMs).toBeGreaterThanOrEqual(250);
+    expect(r.durationMs).toBeLessThan(800);
+  });
   it('host inexistente -> DNS', async () => {
     const r = await runCheck(svc({ protocol: 'ICMP', target: 'nohost.invalid' }), 'REGULAR', cycleAt);
     expect(r).toMatchObject({ ok: false, errorCode: 'DNS' });

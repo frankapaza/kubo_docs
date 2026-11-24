@@ -14,6 +14,8 @@ export interface RunCheckOptions {
   now?: () => Date;
   /** CA PEM adicional de confianza (la validación TLS siempre queda activa). */
   ca?: string;
+  /** Resolución DNS del ICMP; inyectable para pruebas. */
+  lookup?: (host: string) => Promise<unknown>;
 }
 
 type Outcome = { ok: true; httpStatus?: number } | { ok: false; errorCode: CheckErrorCode; httpStatus?: number };
@@ -86,17 +88,32 @@ function httpsCheck(target: string, timeoutMs: number, ca?: string): Promise<Out
   });
 }
 
-async function icmpCheck(host: string, timeoutMs: number): Promise<Outcome> {
+async function icmpCheck(
+  host: string,
+  totalMs: number,
+  lookup: (host: string) => Promise<unknown>,
+): Promise<Outcome> {
+  const t0 = performance.now();
+  let timeoutMs = totalMs;
   // Un destino con forma de opción no debe llegar a `ping` como flag.
   if (!host || host.startsWith('-') || /\s/.test(host)) return { ok: false, errorCode: 'NETWORK' };
   // La resolución DNS se decide aquí, no por el texto (localizado) de `ping`.
   if (!net.isIP(host)) {
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<'timeout'>((r) => {
+      timer = setTimeout(() => r('timeout'), totalMs);
+    });
     try {
-      await dns.lookup(host);
+      const res = await Promise.race([lookup(host), timedOut]);
+      if (res === 'timeout') return { ok: false, errorCode: 'TIMEOUT' };
     } catch (e) {
       const code = mapError(e);
       return { ok: false, errorCode: code === 'NETWORK' ? 'DNS' : code };
+    } finally {
+      clearTimeout(timer);
     }
+    // ping solo recibe el presupuesto restante (mínimo 200 ms).
+    timeoutMs = Math.max(200, Math.round(totalMs - (performance.now() - t0)));
   }
   return new Promise((resolve) => {
     const win = process.platform === 'win32';
@@ -136,7 +153,7 @@ export async function runCheck(
   try {
     if (target.protocol === 'TCP') outcome = await tcpCheck(target.target, target.port, timeoutMs);
     else if (target.protocol === 'HTTPS') outcome = await httpsCheck(target.target, timeoutMs, opts.ca);
-    else if (target.protocol === 'ICMP') outcome = await icmpCheck(target.target, timeoutMs);
+    else if (target.protocol === 'ICMP') outcome = await icmpCheck(target.target, timeoutMs, opts.lookup ?? ((h) => dns.lookup(h)));
     else outcome = { ok: false, errorCode: 'NETWORK' };
   } catch {
     outcome = { ok: false, errorCode: 'NETWORK' };
