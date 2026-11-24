@@ -155,3 +155,46 @@ describe('create', () => {
     expect(repo.listColumn).not.toHaveBeenCalled();
   });
 });
+
+describe('el sistema del requerimiento (conector de Claude)', () => {
+  it('guarda la asignación cuando es del mismo cliente', async () => {
+    const m = makeService();
+    (m.repo as any).findClientSystem = jest.fn().mockResolvedValue({ id: 11, clientId: 7, isActive: 1 });
+    await m.service.create(1, { clientId: 7, title: 'Algo', clientSystemId: 11 } as any);
+    expect(m.itemRepoCreate).toHaveBeenCalledWith(expect.objectContaining({ clientSystemId: 11 }));
+  });
+
+  it('rechaza con 400 una asignación de otro cliente', async () => {
+    const m = makeService();
+    (m.repo as any).findClientSystem = jest.fn().mockResolvedValue({ id: 11, clientId: 99, isActive: 1 });
+    await expect(m.service.create(1, { clientId: 7, title: 'Algo', clientSystemId: 11 } as any)).rejects.toMatchObject({
+      status: 400,
+    });
+  });
+
+  it('al editar valida contra el cliente del requerimiento', async () => {
+    const m = makeService();
+    (m.repo as any).findById = jest.fn().mockResolvedValue({ id: 99, clientId: 7 });
+    (m.repo as any).update = jest.fn().mockResolvedValue({ id: 99 });
+    (m.repo as any).findClientSystem = jest.fn().mockResolvedValue({ id: 11, clientId: 8, isActive: 1 });
+    await expect(m.service.update(99, { clientSystemId: 11 } as any)).rejects.toMatchObject({ status: 400 });
+    (m.repo as any).findClientSystem = jest.fn().mockResolvedValue({ id: 11, clientId: 7, isActive: 1 });
+    await m.service.update(99, { clientSystemId: 11 } as any);
+    expect((m.repo as any).update).toHaveBeenCalledWith(99, expect.objectContaining({ clientSystemId: 11 }));
+  });
+
+  it('el DTO admite clientSystemId', async () => {
+    const dto = plainToInstance(CreateWorkItemDto, { clientId: 7, title: 'x', clientSystemId: 11 });
+    expect(await validate(dto, { whitelist: true, forbidNonWhitelisted: true })).toHaveLength(0);
+  });
+});
+
+describe('cambiar el cliente de un requerimiento', () => {
+  it('quita el sistema del cliente anterior si no se manda otro', async () => {
+    const m = makeService();
+    (m.repo as any).findById = jest.fn().mockResolvedValue({ id: 45, clientId: 7, clientSystemId: 11 });
+    (m.repo as any).update = jest.fn().mockResolvedValue({ id: 45 });
+    await m.service.update(45, { clientId: 8 } as any);
+    expect((m.repo as any).update).toHaveBeenCalledWith(45, expect.objectContaining({ clientId: 8, clientSystemId: null }));
+  });
+});

@@ -10,6 +10,7 @@ import { registerBulkSendJsonLimit } from './modules/portal/bulk-send-json-limit
 import { registerIngestJsonLimit } from './modules/monitoring/ingest/ingest-json-limit';
 import { registerProbeIngestJsonLimit } from './modules/availability/probe-ingest-json-limit';
 import { CorsIoAdapter } from './common/realtime/cors-io.adapter';
+import { registerGithubWebhookBody } from './modules/dev-connector/github-webhook-body';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
@@ -24,6 +25,8 @@ async function bootstrap(): Promise<void> {
   registerIngestJsonLimit(app);
   // Y la ingesta de la sonda: 1 MB, solo con token de sonda de forma válida.
   registerProbeIngestJsonLimit(app);
+  // Ídem para el webhook de GitHub: guarda el cuerpo crudo para verificar la firma HMAC.
+  registerGithubWebhookBody(app);
 
   const apiPrefix = config.get<string>('API_PREFIX', 'api/v1');
   app.setGlobalPrefix(apiPrefix);

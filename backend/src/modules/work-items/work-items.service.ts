@@ -38,6 +38,7 @@ export class WorkItemsService {
 
   async create(userId: number, dto: CreateWorkItemDto): Promise<WorkItem> {
     await this.clients.findByIdOrFail(dto.clientId);
+    if (dto.clientSystemId != null) await this.assertClientSystem(dto.clientId, dto.clientSystemId);
 
     const priority: WorkItemPriority = dto.priority ?? DEFAULT_PRIORITY;
 
@@ -65,6 +66,7 @@ export class WorkItemsService {
       const saved = await itemRepo.save(
         itemRepo.create({
           clientId: dto.clientId,
+          clientSystemId: dto.clientSystemId ?? null,
           title: dto.title.trim(),
           descriptionMd: dto.descriptionMd ?? null,
           acceptanceCriteria: dto.acceptanceCriteria ?? null,
@@ -118,10 +120,19 @@ export class WorkItemsService {
   }
 
   async update(id: number, dto: UpdateWorkItemDto): Promise<WorkItem> {
-    await this.findByIdOrFail(id);
+    const current = await this.findByIdOrFail(id);
     if (dto.clientId !== undefined) await this.clients.findByIdOrFail(dto.clientId);
+    if (dto.clientSystemId != null) {
+      await this.assertClientSystem(dto.clientId ?? current.clientId, dto.clientSystemId);
+    }
 
-    const updated = await this.repo.update(id, { ...dto } as Partial<WorkItem>);
+    const patch = { ...dto } as Partial<WorkItem>;
+    // Cambiar de cliente sin elegir sistema: el del cliente anterior ya no
+    // vale. Dejarlo haría que el repo de la otra empresa viera este requerimiento.
+    const clientChanged = dto.clientId !== undefined && Number(dto.clientId) !== Number(current.clientId);
+    if (clientChanged && dto.clientSystemId === undefined) patch.clientSystemId = null;
+
+    const updated = await this.repo.update(id, patch);
     return updated!;
   }
 
@@ -134,5 +145,20 @@ export class WorkItemsService {
       });
     }
     await this.repo.remove(id);
+  }
+
+  /**
+   * El sistema de un requerimiento tiene que ser una asignación activa de SU
+   * cliente: si no, el requerimiento aparecería en los repos de otra empresa.
+   * Lo usa también la aceptación desde el portal (controlador).
+   */
+  async assertClientSystem(clientId: number, clientSystemId: number): Promise<void> {
+    const cs = await this.repo.findClientSystem(clientSystemId);
+    if (!cs || !cs.isActive || Number(cs.clientId) !== Number(clientId)) {
+      throw new BadRequestException({
+        code: 'BAD_INPUT',
+        message: 'El sistema elegido no pertenece a este cliente o está inactivo.',
+      });
+    }
   }
 }

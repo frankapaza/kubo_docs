@@ -76,6 +76,16 @@ describe('WorkItemIntakeService.accept', () => {
     expect(patches[0]).toMatchObject({ status: 'PENDIENTE', priority: 'ALTA', dueDate: '2026-09-30' });
   });
 
+  it('guarda el sistema elegido al aceptar, y no lo toca si no viene', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-07T15:00:00Z'));
+    const con = makeService(fila({ status: 'SOLICITADO' }));
+    await con.service.accept(1, 5, { priority: 'ALTA', committedDate: '2026-09-30', clientSystemId: 11 });
+    expect(con.patches[0]).toMatchObject({ clientSystemId: 11 });
+    const sin = makeService(fila({ status: 'SOLICITADO' }));
+    await sin.service.accept(1, 5, { priority: 'ALTA', committedDate: '2026-09-30' });
+    expect(sin.patches[0]).not.toHaveProperty('clientSystemId');
+  });
+
   it('escribe el evento ACCEPTED con el actor interno', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-08-07T15:00:00Z'));
     const { service, eventos } = makeService(fila({ status: 'SOLICITADO' }));

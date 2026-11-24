@@ -47,6 +47,7 @@ import PortalMonthlyReportPage from './pages/portal/PortalMonthlyReportPage';
 import PortalHelpPage from './pages/portal/PortalHelpPage';
 import PortalUsersPage from './pages/portal/PortalUsersPage';
 import PortalAcceptInvitationPage from './pages/portal/PortalAcceptInvitationPage';
+import DevKeysPage from './pages/dev-connector/DevKeysPage';
 import { ProtectedRoute } from './auth/ProtectedRoute';
 import { PortalProtectedRoute } from './auth/PortalProtectedRoute';
 import { PortalAuthProvider } from './auth/PortalAuthContext';
@@ -153,6 +154,7 @@ export default function App() {
           <Route path="/monitoreo/errores/:errorId" element={<MonitoringErrorDetailPage />} />
           <Route path="/monitoreo/logs" element={<MonitoringLogsPage />} />
           <Route path="/monitoreo/instalaciones" element={<MonitoringInstallationsPage />} />
+          <Route path="/dev/claves" element={<DevKeysPage />} />
           <Route path="/work-items" element={<WorkItemsBoardPage />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agents/:type" element={<AgentChatPage />} />

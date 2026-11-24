@@ -103,3 +103,20 @@ describe('la migración 002 en una base nueva', () => {
     expect(texto.match(/ADD COLUMN DOCUMENT_NUMBER/g)).toHaveLength(1);
   });
 });
+
+describe('la migración del conector de tickets', () => {
+  const sql = () =>
+    readFileSync(join(MIGRACIONES, '031_conector_repos.sql'), 'utf8').toUpperCase();
+
+  it.each(['DROP TABLE', 'TRUNCATE', 'DELETE FROM'])('no contiene «%s»', (prohibido) => {
+    expect(sql()).not.toContain(prohibido);
+  });
+
+  it.each(['DEV_REPOS', 'DEV_KEYS', 'DEV_LINKS'])('crea %s', (tabla) => {
+    expect(sql()).toContain(`CREATE TABLE IF NOT EXISTS ${tabla}`);
+  });
+
+  it('da a work_items su sistema', () => {
+    expect(sql()).toMatch(/'WORK_ITEMS',\s*'CLIENT_SYSTEM_ID'/);
+  });
+});

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { workItemsApi } from '../../api/work-items.api';
 import { clientUsersApi } from '../../api/client-users.api';
 import type { Client, WorkItem, WorkItemPriority } from '../../api/types';
+import ClientSystemSelect from '../dev-connector/ClientSystemSelect';
 
 export interface RequirementIntakeInboxProps {
   /** Empresas activas, ya cargadas por WorkItemsBoardPage: evita pedirlas dos veces. */
@@ -104,6 +105,8 @@ function AcceptDialog({ item, onCancel, onAccepted }: AcceptDialogProps) {
   // decide dónde cae el requerimiento en la columna PENDIENTE.
   const [priority, setPriority] = useState<WorkItemPriority | ''>('');
   const [committedDate, setCommittedDate] = useState('');
+  // Opcional: el sistema decide desde qué repo lo ve Claude.
+  const [clientSystemId, setClientSystemId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -174,7 +177,11 @@ function AcceptDialog({ item, onCancel, onAccepted }: AcceptDialogProps) {
     // éxito invisible y produjo un reenvío duplicado.
     setError(null);
     try {
-      const updated = await workItemsApi.accept(item.id, { priority, committedDate });
+      const updated = await workItemsApi.accept(item.id, {
+        priority,
+        committedDate,
+        ...(clientSystemId != null ? { clientSystemId } : {}),
+      });
       if (!alive.current) return;
       onAccepted(updated);
     } catch (e: any) {
@@ -242,6 +249,14 @@ function AcceptDialog({ item, onCancel, onAccepted }: AcceptDialogProps) {
         <span style={{ fontSize: 11, color: '#6d7577', marginTop: -8, lineHeight: 1.5 }}>
           La fecha se le mostrará al cliente en su portal.
         </span>
+
+        <ClientSystemSelect
+          id="accept-wi-system"
+          clientId={item.clientId}
+          value={clientSystemId}
+          disabled={busy}
+          onChange={setClientSystemId}
+        />
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button type="button" onClick={onCancel} disabled={busy} style={cancelButtonStyle}>

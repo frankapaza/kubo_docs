@@ -14,6 +14,8 @@ export interface WorkItemListParams {
 
 export interface CreateWorkItemBody {
   clientId: number;
+  /** Asignación cliente-sistema (conector de Claude). `null` la quita al editar. */
+  clientSystemId?: number | null;
   title: string;
   descriptionMd?: string;
   acceptanceCriteria?: string[];
@@ -47,7 +49,7 @@ export const workItemsApi = {
     api.post<WorkItem>(`/work-items/${id}/priority`, body).then((r) => r.data),
 
   /** Aceptar fija prioridad y fecha comprometida y lo mete en PENDIENTE (tarea 9). */
-  accept: (id: number, body: { priority: WorkItemPriority; committedDate: string }) =>
+  accept: (id: number, body: { priority: WorkItemPriority; committedDate: string; clientSystemId?: number }) =>
     api.post<WorkItem>(`/work-items/${id}/accept`, body).then((r) => r.data),
 
   /** Rechazar exige motivo, igual que el resto de estados fuera de flujo. */

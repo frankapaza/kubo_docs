@@ -39,6 +39,7 @@ import { TicketMessagesModule } from './modules/ticket-messages/ticket-messages.
 import { InboundEmailModule } from './modules/inbound-email/inbound-email.module';
 import { MonitoringModule } from './modules/monitoring/monitoring.module';
 import { AvailabilityModule } from './modules/availability/availability.module';
+import { DevConnectorModule } from './modules/dev-connector/dev-connector.module';
 
 @Module({
   imports: [
@@ -83,6 +84,7 @@ import { AvailabilityModule } from './modules/availability/availability.module';
     InboundEmailModule,
     MonitoringModule,
     AvailabilityModule,
+    DevConnectorModule,
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },

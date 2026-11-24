@@ -33,6 +33,12 @@ interface AuditActor {
 const INGESTA_DE_MAQUINAS = /\/ingest\/(logs|probe\/batch)\/?(?:\?.*)?$/;
 
 /**
+ * `POST /api/v1/dev/github/webhook`: tráfico de máquina de GitHub, sin actor, y
+ * su JSON trae los correos de quienes hicieron commit. Mismo motivo que la ingesta.
+ */
+const WEBHOOK_DE_GITHUB = /\/dev\/github\/webhook\/?(?:\?.*)?$/;
+
+/**
  * Registra toda acción mutante (POST/PATCH/PUT/DELETE) en `audit_log`.
  * Lee `user` inyectado por `JwtAuthGuard` / `ClientJwtGuard` y resuelve la
  * acción desde la ruta.
@@ -52,7 +58,8 @@ export class AuditInterceptor implements NestInterceptor {
     // lote —hasta 2 MB, cientos por minuto— llenaría audit_log, y no es una
     // acción de nadie sino tráfico de máquina. Se compara el final del camino
     // para que valga con o sin el prefijo global.
-    if (INGESTA_DE_MAQUINAS.test(req.path ?? req.url ?? '')) return next.handle();
+    const path = req.path ?? req.url ?? '';
+    if (INGESTA_DE_MAQUINAS.test(path) || WEBHOOK_DE_GITHUB.test(path)) return next.handle();
     const method = req.method.toUpperCase();
     const isMutation = ['POST', 'PATCH', 'PUT', 'DELETE'].includes(method);
     const actor = AuditInterceptor.resolveActor(req.user);

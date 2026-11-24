@@ -626,6 +626,8 @@ export interface WorkItem {
   id: number;
   code: string | null;
   clientId: number;
+  /** Asignación cliente-sistema; sin ella Claude no ve el requerimiento. */
+  clientSystemId: number | null;
   projectId: number | null;
   title: string;
   descriptionMd: string | null;

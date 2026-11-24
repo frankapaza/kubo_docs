@@ -116,11 +116,15 @@ export class WorkItemsController {
    * usa— y está anotado como riesgo en la especificación.
    */
   @Post(':id/accept')
-  accept(
+  async accept(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: AcceptWorkItemDto,
   ): Promise<WorkItem> {
+    if (dto.clientSystemId != null) {
+      const item = await this.service.findByIdOrFail(id);
+      await this.service.assertClientSystem(item.clientId, dto.clientSystemId);
+    }
     return this.intake.accept(id, user.id, dto);
   }
 

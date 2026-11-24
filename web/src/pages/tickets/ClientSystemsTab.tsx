@@ -5,6 +5,7 @@ import { clientSystemsApi, systemsApi } from '../../api/tickets.api';
 import type { ClientSystem, System } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { canManageClientSystems } from '../../auth/permissions';
+import ClientSystemReposSection from '../dev-connector/ClientSystemReposSection';
 
 /**
  * Los sistemas asignados a un cliente. Vive dentro de la pestaña «Sistemas» de
@@ -219,9 +220,9 @@ export default function ClientSystemsTab({ clientId }: { clientId: number }) {
       {!loading &&
         !loadError &&
         systems.map((s) => (
+          <div key={s.id} style={{ borderBottom: '1px solid #f1f3f3' }}>
           <div
-            key={s.id}
-            style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 0', borderBottom: '1px solid #f1f3f3' }}
+            style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 0' }}
           >
             <span style={{ flex: 1, fontSize: 13, color: s.isActive ? '#15191a' : '#9aa0a1' }}>
               {s.name}
@@ -250,6 +251,9 @@ export default function ClientSystemsTab({ clientId }: { clientId: number }) {
                 </button>
               </>
             )}
+          </div>
+          {/* Repos de GitHub de esta asignación (conector de Claude). */}
+          <ClientSystemReposSection clientSystemId={s.id} systemName={s.name} />
           </div>
         ))}
     </div>

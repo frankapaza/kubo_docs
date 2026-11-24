@@ -69,6 +69,19 @@ export class WorkItemsRepository {
     return this.repo.findOne({ where: { id } });
   }
 
+  /**
+   * La asignación cliente-sistema, para validar `clientSystemId` sin que este
+   * módulo dependa de `TicketsModule` (que es quien la gestiona).
+   */
+  async findClientSystem(id: number): Promise<{ id: number; clientId: number; isActive: number } | null> {
+    const rows: Array<{ id: number; clientId: number; isActive: number }> = await this.repo.query(
+      'SELECT id, client_id AS clientId, is_active AS isActive FROM client_systems WHERE id = ? LIMIT 1',
+      [id],
+    );
+    const r = rows[0];
+    return r ? { id: Number(r.id), clientId: Number(r.clientId), isActive: Number(r.isActive) } : null;
+  }
+
   create(data: Partial<WorkItem>): Promise<WorkItem> {
     return this.repo.save(this.repo.create(data));
   }

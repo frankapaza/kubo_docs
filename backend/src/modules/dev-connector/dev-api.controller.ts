@@ -1,0 +1,45 @@
+import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+
+import { DevApiService } from './dev-api.service';
+import { DevKeyGuard, DevRequest } from './dev-key.guard';
+import { DevLinkDto, DevNoteDto, DevStatusDto } from './dto/dev-admin.dto';
+
+/**
+ * `/api/v1/dev/*`: lo que llama el MCP `kubo-devdocs`. Autentica la clave
+ * `kdev_` (no el JWT) y todo queda acotado a la asignación de esa clave.
+ */
+@Controller('dev')
+@UseGuards(DevKeyGuard)
+export class DevApiController {
+  constructor(private readonly api: DevApiService) {}
+
+  @Get('contexto')
+  contexto(@Req() req: DevRequest) {
+    return this.api.contexto(req.dev!);
+  }
+
+  @Get('pendientes')
+  pendientes(@Req() req: DevRequest) {
+    return this.api.pendientes(req.dev!);
+  }
+
+  @Get('items/:code')
+  item(@Req() req: DevRequest, @Param('code') code: string) {
+    return this.api.item(req.dev!, code);
+  }
+
+  @Post('items/:code/nota')
+  nota(@Req() req: DevRequest, @Param('code') code: string, @Body() dto: DevNoteDto) {
+    return this.api.nota(req.dev!, code, dto.texto);
+  }
+
+  @Post('items/:code/estado')
+  estado(@Req() req: DevRequest, @Param('code') code: string, @Body() dto: DevStatusDto) {
+    return this.api.estado(req.dev!, code, dto.estado);
+  }
+
+  @Post('items/:code/vinculos')
+  vincular(@Req() req: DevRequest, @Param('code') code: string, @Body() dto: DevLinkDto) {
+    return this.api.vincular(req.dev!, code, dto);
+  }
+}
