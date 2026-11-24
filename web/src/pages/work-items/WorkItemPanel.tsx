@@ -6,6 +6,8 @@ import { supportAgentsApi } from '../../api/tickets.api';
 import type { SupportAgentView, WorkItemDetail, WorkItemPriority } from '../../api/types';
 import { PRIORITY_STYLES, STATUS_LABELS } from './workitem-ui';
 import WorkItemTimeline from './WorkItemTimeline';
+import ClientSystemSelect from '../dev-connector/ClientSystemSelect';
+import CodeLinksPanel from '../dev-connector/CodeLinksPanel';
 
 export interface WorkItemPanelProps {
   workItemId: number;
@@ -181,6 +183,20 @@ export default function WorkItemPanel({ workItemId, onClose, onChanged }: WorkIt
     setBusy(false);
   };
 
+  const handleSystemChange = async (clientSystemId: number | null) => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      await workItemsApi.update(workItemId, { clientSystemId });
+    } catch (e: any) {
+      setActionError(e?.response?.data?.message ?? 'No se pudo cambiar el sistema.');
+      setBusy(false);
+      return;
+    }
+    await reloadAfterChange();
+    setBusy(false);
+  };
+
   const item = detail?.workItem ?? null;
   const label = item?.code ?? `#${workItemId}`;
 
@@ -328,6 +344,19 @@ export default function WorkItemPanel({ workItemId, onClose, onChanged }: WorkIt
                 ))}
               </select>
             </label>
+
+            <ClientSystemSelect
+              id="work-item-panel-system"
+              clientId={item.clientId}
+              value={item.clientSystemId ?? null}
+              disabled={busy}
+              onChange={handleSystemChange}
+            />
+
+            <section>
+              <h3 style={{ margin: '0 0 12px', fontSize: 12, fontWeight: 600, color: '#6d7577' }}>Código</h3>
+              <CodeLinksPanel target={{ workItemId }} />
+            </section>
 
             <section>
               <h3 style={{ margin: '0 0 12px', fontSize: 12, fontWeight: 600, color: '#6d7577' }}>Historial</h3>

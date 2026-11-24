@@ -4,6 +4,7 @@ import { workItemsApi } from '../../api/work-items.api';
 import { clientsApi } from '../../api/clients.api';
 import { supportAgentsApi } from '../../api/tickets.api';
 import type { Client, SupportAgentView, WorkItem, WorkItemPriority } from '../../api/types';
+import ClientSystemSelect from '../dev-connector/ClientSystemSelect';
 
 export interface NewWorkItemDialogProps {
   open: boolean;
@@ -40,6 +41,7 @@ const labelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 600, marginB
  */
 export default function NewWorkItemDialog({ open, onCancel, onCreated }: NewWorkItemDialogProps) {
   const [clientId, setClientId] = useState<number | ''>('');
+  const [clientSystemId, setClientSystemId] = useState<number | null>(null);
   const [title, setTitle] = useState('');
   const [descriptionMd, setDescriptionMd] = useState('');
   const [priority, setPriority] = useState<WorkItemPriority>('MEDIA');
@@ -58,6 +60,7 @@ export default function NewWorkItemDialog({ open, onCancel, onCreated }: NewWork
   useEffect(() => {
     if (!open) return;
     setClientId('');
+    setClientSystemId(null);
     setTitle('');
     setDescriptionMd('');
     setPriority('MEDIA');
@@ -118,6 +121,7 @@ export default function NewWorkItemDialog({ open, onCancel, onCreated }: NewWork
     try {
       const created = await workItemsApi.create({
         clientId: Number(clientId),
+        clientSystemId: clientSystemId ?? undefined,
         title: title.trim(),
         descriptionMd: descriptionMd.trim() || undefined,
         priority,
@@ -176,6 +180,8 @@ export default function NewWorkItemDialog({ open, onCancel, onCreated }: NewWork
               onChange={(e) => {
                 const v = e.target.value ? Number(e.target.value) : '';
                 setClientId(v);
+                // El sistema es de un cliente: al cambiar de cliente deja de valer.
+                setClientSystemId(null);
               }}
               style={inputStyle}
             >
@@ -185,6 +191,12 @@ export default function NewWorkItemDialog({ open, onCancel, onCreated }: NewWork
               ))}
             </select>
           </label>
+          <ClientSystemSelect
+            id="new-wi-system"
+            clientId={clientId === '' ? null : clientId}
+            value={clientSystemId}
+            onChange={setClientSystemId}
+          />
         </div>
 
         <label htmlFor="new-wi-title">

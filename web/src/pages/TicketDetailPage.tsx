@@ -10,6 +10,7 @@ import { systemLabel } from './tickets/system-field';
 import { STATUS_STYLES, PRIORITY_STYLES, STATUS_LABELS, ORIGIN_LABELS } from './tickets/ticket-ui';
 import TicketTimeline from './tickets/TicketTimeline';
 import TicketSlaClock from './tickets/TicketSlaClock';
+import CodeLinksPanel from './dev-connector/CodeLinksPanel';
 import ResolveDialog from './tickets/ResolveDialog';
 import AssignDialog from './tickets/AssignDialog';
 import OverridePriorityDialog from './tickets/OverridePriorityDialog';
@@ -352,6 +353,11 @@ export default function TicketDetailPage() {
           <section style={cardStyle}>
             <h2 style={{ margin: '0 0 12px', fontSize: 13, fontWeight: 600 }}>Historial</h2>
             <TicketTimeline events={lifecycleEvents} />
+          </section>
+
+          <section style={cardStyle}>
+            <h2 style={{ margin: '0 0 12px', fontSize: 13, fontWeight: 600 }}>Código</h2>
+            <CodeLinksPanel target={{ ticketId: id }} />
           </section>
         </div>
 
