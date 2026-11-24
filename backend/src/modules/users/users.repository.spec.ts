@@ -81,3 +81,12 @@ describe('UsersRepository.create/update', () => {
     expect(data.email).toBe('Alguien@Kuboti.com');
   });
 });
+
+describe('UsersRepository.listActiveAdmins', () => {
+  it('pide solo los ADMIN activos', async () => {
+    const { repo, typeormRepo } = makeRepo();
+    (typeormRepo as any).find = jest.fn().mockResolvedValue([{ id: 1 }]);
+    await expect(repo.listActiveAdmins()).resolves.toEqual([{ id: 1 }]);
+    expect((typeormRepo as any).find).toHaveBeenCalledWith({ where: { role: 'ADMIN', isActive: 1 } });
+  });
+});

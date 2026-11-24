@@ -26,4 +26,8 @@ export class MonitorProbe {
 
   @Column({ name: 'clock_skew_ms', type: 'int', nullable: true })
   clockSkewMs!: number | null;
+
+  /** Cuándo se avisó del silencio de la sonda; NULL = sin aviso pendiente. */
+  @Column({ name: 'silence_alerted_at', type: 'datetime', precision: 3, nullable: true })
+  silenceAlertedAt!: Date | null;
 }

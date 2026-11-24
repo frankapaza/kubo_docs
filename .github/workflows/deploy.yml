@@ -184,7 +184,8 @@ jobs:
                      028_tickets_archivados \
                      029_catalogo_de_sistemas \
                      030_logs_centralizados \
-                     031_disponibilidad_nucleo; do
+                     031_disponibilidad_nucleo \
+                     032_disponibilidad_escritorio; do
               echo "--- $m"
               sql_file "backend/sql/migrations/$m.sql"
             done

@@ -42,6 +42,11 @@ export class UsersRepository {
     return this.repo.find({ order: { id: 'ASC' } });
   }
 
+  /** Administradores activos: destinatarios de los avisos operativos del monitoreo. */
+  listActiveAdmins(): Promise<User[]> {
+    return this.repo.find({ where: { role: 'ADMIN', isActive: 1 } });
+  }
+
   /**
    * Se recorta y se pasa a minúsculas antes de comparar, igual que
    * `ClientUsersRepository.findByEmail`: sin esto, que una búsqueda insensible

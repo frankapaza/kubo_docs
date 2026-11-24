@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { EmailModule } from '../email/email.module';
 import { ClientsModule } from '../clients/clients.module';
 import { TicketsModule } from '../tickets/tickets.module';
 import { UsersModule } from '../users/users.module';
@@ -26,6 +27,7 @@ import { MonitorServer } from './entities/monitor-server.entity';
 import { MonitorService } from './entities/monitor-service.entity';
 import { IncidentCloser } from './incident-closer';
 import { ProbeRateLimiter } from './probe-rate-limiter';
+import { ProbeSilenceWatch } from './probe-silence.watch';
 import { ProbeTokenGuard } from './probe-token.guard';
 
 @Module({
@@ -45,6 +47,7 @@ import { ProbeTokenGuard } from './probe-token.guard';
     ClientsModule,
     TicketsModule,
     UsersModule,
+    EmailModule,
   ],
   controllers: [AvailabilityInventoryController, AvailabilityIngestController, AvailabilityStateController],
   providers: [
@@ -60,6 +63,8 @@ import { ProbeTokenGuard } from './probe-token.guard';
     // Evaluación y purga corren en el backend; el worker (kubo-01) solo mide.
     AvailabilityEvaluatorScheduler,
     AvailabilityPurgeService,
+    // Aviso por correo cuando una sonda calla 10 min (solo backend, con ScheduleModule).
+    ProbeSilenceWatch,
   ],
   exports: [
     AvailabilityInventoryService,

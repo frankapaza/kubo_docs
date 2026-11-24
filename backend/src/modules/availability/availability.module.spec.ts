@@ -9,6 +9,7 @@ import { TicketsRepository } from '../tickets/tickets.repository';
 import { AvailabilityTicketsService } from './availability-tickets.service';
 import { AvailabilityModule } from './availability.module';
 import { IncidentCloser } from './incident-closer';
+import { ProbeSilenceWatch } from './probe-silence.watch';
 
 describe('AvailabilityModule', () => {
   const providers = (Reflect.getMetadata('providers', AvailabilityModule) ?? []) as any[];
@@ -22,6 +23,10 @@ describe('AvailabilityModule', () => {
   it('el tick del evaluador y la purga se registran en el backend (AvailabilityModule)', () => {
     expect(providers).toContain(AvailabilityEvaluatorScheduler);
     expect(providers).toContain(AvailabilityPurgeService);
+  });
+
+  it('el vigilante de silencio de sondas corre en el backend', () => {
+    expect(providers).toContain(ProbeSilenceWatch);
   });
 
   it('el evaluador se resuelve sin sonda local (el cruce va por monitor_probe_orders)', async () => {

@@ -86,6 +86,8 @@ services:
       # MONITOREO a tickets.origin. Los logs en si van a Loki, no a MySQL.
       - ./backend/sql/migrations/030_logs_centralizados.sql:/docker-entrypoint-initdb.d/030_logs_centralizados.sql:ro
       - ./backend/sql/migrations/031_disponibilidad_nucleo.sql:/docker-entrypoint-initdb.d/031_disponibilidad_nucleo.sql:ro
+      # La 032 anade monitor_probes.silence_alerted_at (aviso por silencio de una sonda).
+      - ./backend/sql/migrations/032_disponibilidad_escritorio.sql:/docker-entrypoint-initdb.d/032_disponibilidad_escritorio.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s
