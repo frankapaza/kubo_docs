@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { CheckResult, ProbeSignal } from '@kubo/monitoring-core';
-import { Outbox } from '../src/outbox';
+import { DEAD_LETTER_MAX, Outbox } from '../src/outbox';
 
 const check = (over: Partial<CheckResult> = {}): CheckResult => ({
   id: randomUUID(),
@@ -155,6 +155,24 @@ describe('Outbox', () => {
     expect(dead[0]).toMatchObject({ kind: 'CHECK', id: c2.id, status: 400, error: '{"message":"durationMs"}' });
     expect(JSON.parse(dead[0].payload)).toEqual(c2);
     again.close();
+  });
+
+  it('dead_letter conserva como mucho 5000 filas: se borran las más antiguas', () => {
+    expect(DEAD_LETTER_MAX).toBe(5000);
+    const ob = new Outbox(':memory:');
+    const ids: string[] = [];
+    for (let i = 0; i < DEAD_LETTER_MAX + 3; i++) {
+      const c = check();
+      ids.push(c.id);
+      ob.enqueueCheck(c);
+      ob.deadLetter('CHECK', c.id, 400, 'x');
+    }
+    const dead = ob.deadLetters();
+    expect(dead).toHaveLength(DEAD_LETTER_MAX);
+    expect(dead[0].id).toBe(ids[3]);
+    expect(dead[dead.length - 1].id).toBe(ids[ids.length - 1]);
+    expect(ob.pendingCount()).toBe(0);
+    ob.close();
   });
 
   it('saveConfig reemplaza la anterior; sin config devuelve null', () => {

@@ -3,6 +3,9 @@ import type { CheckResult, ProbeSignal } from '@kubo/monitoring-core';
 
 export type Kind = 'CHECK' | 'SIGNAL';
 
+/** Filas que se conservan en dead_letter (se borran las más antiguas). */
+export const DEAD_LETTER_MAX = 5000;
+
 export type OutboxItem = { kind: 'CHECK'; item: CheckResult } | { kind: 'SIGNAL'; item: ProbeSignal };
 
 export function splitItems(items: OutboxItem[]): { checks: CheckResult[]; signals: ProbeSignal[] } {
@@ -122,7 +125,11 @@ export class Outbox {
           'INSERT INTO dead_letter (kind, id, payload, status, error, at) SELECT kind, id, payload, ?, ?, ? FROM outbox WHERE kind = ? AND id = ?',
         )
         .run(status, error.slice(0, 1000), new Date().toISOString(), kind, id);
-      if (moved.changes > 0) this.deleteStmt.run(kind, id);
+      if (moved.changes === 0) return;
+      this.deleteStmt.run(kind, id);
+      this.db
+        .prepare('DELETE FROM dead_letter WHERE seq <= (SELECT MAX(seq) FROM dead_letter) - ?')
+        .run(DEAD_LETTER_MAX);
     })();
   }
 

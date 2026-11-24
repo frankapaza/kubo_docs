@@ -16,7 +16,11 @@ El `sync` se hace en cada sondeo aunque el envío falle. Si la central rechaza u
 contenido (400 o 413), el motor lo parte por la mitad (siempre un prefijo, sin alterar el orden)
 hasta que lo acepte; un único check o señal que siga rechazado sale de la cola a la tabla
 `dead_letter` de `engine.db` (con el estado HTTP y un extracto de la respuesta) y queda en el
-registro como ERROR. Para revisarlos:
+registro como ERROR. Si se descartan 3 seguidos sin ningún envío aceptado en medio, el motor
+supone que la central rechaza todo (p. ej. contrato roto tras un despliegue): deja de descartar,
+el resto queda en cola, `central.rejecting` pasa a `true` en la API local, el sondeo cuenta como
+fallido y cada sondeo prueba un solo elemento hasta que la central lo acepte. `dead_letter`
+conserva como mucho 5000 filas (se borran las más antiguas). Para revisarlos:
 `sqlite3 engine.db "select kind,id,status,error,at from dead_letter"`.
 
 ## Compilar
@@ -108,7 +112,7 @@ curl.exe -H "X-Kubo-Secret: $(Get-Content $env:ProgramData\KUBO\Monitor\local-ap
 
 ```ts
 { engine: { version, startedAt },
-  central: { reachable, lastSyncAt, consecutiveFailures },
+  central: { reachable, lastSyncAt, consecutiveFailures, rejecting },
   officeOutage, pending,
   services: CombinedStateRow[] }   // con la central caída, la columna office es el estado local
 ```

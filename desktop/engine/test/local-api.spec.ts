@@ -6,7 +6,7 @@ import { startLocalApi } from '../src/local-api';
 
 const status: EngineStatus = {
   engine: { version: 'test', startedAt: '2026-11-23T15:00:00.000Z' },
-  central: { reachable: true, lastSyncAt: '2026-11-23T15:00:15.000Z', consecutiveFailures: 0 },
+  central: { reachable: true, lastSyncAt: '2026-11-23T15:00:15.000Z', consecutiveFailures: 0, rejecting: false },
   officeOutage: false,
   pending: 3,
   services: [],

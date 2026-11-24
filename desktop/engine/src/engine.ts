@@ -12,7 +12,13 @@ import { splitItems, type Outbox, type OutboxItem } from './outbox';
 
 export interface EngineStatus {
   engine: { version: string; startedAt: string };
-  central: { reachable: boolean; lastSyncAt: string | null; consecutiveFailures: number };
+  central: {
+    reachable: boolean;
+    lastSyncAt: string | null;
+    consecutiveFailures: number;
+    /** La central rechaza el contenido de los envíos (corte de dead_letter abierto). */
+    rejecting: boolean;
+  };
   officeOutage: boolean;
   pending: number;
   services: CombinedStateRow[];
@@ -47,6 +53,8 @@ export const UNREACHABLE_AFTER_FAILURES = 3;
 export const MAX_BATCHES_PER_TICK = 10;
 /** Respuestas que dependen del contenido del lote: se parte el lote en lugar de reintentarlo igual. */
 const CONTENT_REJECTED = new Set([400, 413]);
+/** Descartes seguidos (sin envío aceptado en medio) que abren el corte. */
+export const DEAD_LETTER_BREAKER = 3;
 
 const silent: EngineLogger = { info: () => undefined, warn: () => undefined, error: () => undefined };
 
@@ -95,6 +103,12 @@ export class Engine {
   private lastSyncAt: string | null = null;
   private consecutiveFailures = 0;
   private sendNotBefore = 0;
+  /** Tope del próximo envío mientras se biseca (se conserva entre sondeos). */
+  private bisectSize = Infinity;
+  /** Descartes a dead_letter seguidos sin envío aceptado en medio. */
+  private deadStreak = 0;
+  /** Corte abierto: la central rechaza todo; no se descarta nada más. */
+  private rejecting = false;
   private lastState: CombinedStateRow[] = [];
   private lastStateJson: string | null = null;
   private readonly local = new Map<number, LocalView>();
@@ -177,7 +191,7 @@ export class Engine {
         });
     return {
       engine: { version: this.version, startedAt: this.startedAt ?? this.clock.now().toISOString() },
-      central: { reachable, lastSyncAt: this.lastSyncAt, consecutiveFailures: this.consecutiveFailures },
+      central: { reachable, lastSyncAt: this.lastSyncAt, consecutiveFailures: this.consecutiveFailures, rejecting: this.rejecting },
       officeOutage: this.runner?.officeOutage() ?? false,
       pending: this.outbox.pendingCount(),
       services,
@@ -207,10 +221,13 @@ export class Engine {
 
   private async poll(gen: number): Promise<void> {
     const errors: string[] = [];
+    let rejected = false;
     try {
       await this.flush(gen);
     } catch (err) {
-      errors.push(`envío: ${errMsg(err)}`);
+      // El corte ya dejó su línea ERROR en este sondeo: cuenta como fallo, sin repetir el aviso.
+      if (err instanceof RejectingError) rejected = true;
+      else errors.push(`envío: ${errMsg(err)}`);
     }
     if (gen !== this.generation) return;
     try {
@@ -236,12 +253,13 @@ export class Engine {
       errors.push(`sync: ${errMsg(err)}`);
     }
 
-    if (errors.length === 0) {
+    if (errors.length === 0 && !rejected) {
       if (this.consecutiveFailures >= UNREACHABLE_AFTER_FAILURES) this.log.info('La central vuelve a responder.');
       this.consecutiveFailures = 0;
       return;
     }
     this.consecutiveFailures++;
+    if (errors.length === 0) return; // solo el rechazo: ya registrado por flush()
     const n = this.consecutiveFailures;
     const msg = `Sondeo fallido (${n} seguidos): ${errors.join('; ')}`;
     if (n === UNREACHABLE_AFTER_FAILURES) this.log.error(`${msg} — la central no responde.`);
@@ -253,13 +271,26 @@ export class Engine {
    * Envía la cola en lotes mientras quede algo y la central acepte. Lanza si la central
    * falla (red, 5xx, 401…). Con 400/413 parte el lote (prefijo de la mitad) y, si un
    * único elemento sigue rechazado, lo pasa a `dead_letter`.
+   *
+   * Corte: tras `DEAD_LETTER_BREAKER` descartes seguidos sin ningún envío aceptado en medio,
+   * la central probablemente rechaza todo (p. ej. contrato roto tras un despliegue): se deja
+   * de descartar, el resto queda en cola, `central.rejecting` pasa a true y el sondeo cuenta
+   * como fallido. Con el corte abierto se prueba un solo elemento por sondeo; si se acepta,
+   * se cierra y se sigue con normalidad.
+   *
+   * El tope de la bisección (`bisectSize`) se conserva entre envíos y sondeos mientras el
+   * elemento problemático siga en cabeza; vuelve al lote completo tras un descarte (el
+   * problemático ya salió) o cuando la cola queda vacía.
    */
   private async flush(gen: number): Promise<void> {
-    let size = Infinity; // tope del próximo intento (se reduce al bisecar)
     for (let sends = 0; sends < MAX_BATCHES_PER_TICK; sends++) {
       if (this.clock.now().getTime() < this.sendNotBefore) return;
       const all = this.outbox.peekItems(MAX_CHECKS_PER_BATCH, MAX_SIGNALS_PER_BATCH);
-      if (all.length === 0) return;
+      if (all.length === 0) {
+        this.bisectSize = Infinity;
+        return;
+      }
+      const size = this.rejecting ? 1 : this.bisectSize;
       const items: OutboxItem[] = all.slice(0, Math.min(all.length, size));
       const { checks, signals } = splitItems(items);
       try {
@@ -274,18 +305,30 @@ export class Engine {
           return;
         }
         if (err instanceof CentralHttpError && CONTENT_REJECTED.has(err.status)) {
+          const reason = (err.body || err.message).slice(0, 200);
+          if (this.rejecting) {
+            this.log.error(`La central sigue rechazando los envíos (HTTP ${err.status}: ${reason}); ${all.length}+ elementos esperan en cola.`);
+            throw new RejectingError(err.status);
+          }
           if (items.length > 1) {
-            size = Math.ceil(items.length / 2);
-            this.log.warn(`La central rechaza un lote de ${items.length} (HTTP ${err.status}): se reintenta con ${size}.`);
+            this.bisectSize = Math.ceil(items.length / 2);
+            this.log.warn(`La central rechaza un lote de ${items.length} (HTTP ${err.status}): se reintenta con ${this.bisectSize}.`);
             continue;
           }
           const bad = items[0];
-          const reason = err.body || err.message;
-          this.outbox.deadLetter(bad.kind, bad.item.id, err.status, reason);
+          this.outbox.deadLetter(bad.kind, bad.item.id, err.status, err.body || err.message);
+          this.deadStreak++;
+          this.bisectSize = Infinity;
           this.log.error(
-            `La central rechaza ${bad.kind === 'CHECK' ? 'el check' : 'la señal'} ${bad.item.id} (HTTP ${err.status}: ${reason.slice(0, 200)}): pasa a dead_letter.`,
+            `La central rechaza ${bad.kind === 'CHECK' ? 'el check' : 'la señal'} ${bad.item.id} (HTTP ${err.status}: ${reason}): pasa a dead_letter.`,
           );
-          size = Infinity;
+          if (this.deadStreak >= DEAD_LETTER_BREAKER) {
+            this.rejecting = true;
+            this.log.error(
+              `${this.deadStreak} descartes seguidos: la central parece rechazar todo. Se dejan de descartar elementos; el resto queda en cola.`,
+            );
+            throw new RejectingError(err.status);
+          }
           if (gen !== this.generation) return;
           continue;
         }
@@ -296,7 +339,11 @@ export class Engine {
         checks.map((c) => c.id),
         signals.map((s) => s.id),
       );
-      size = Infinity;
+      this.deadStreak = 0;
+      if (this.rejecting) {
+        this.rejecting = false;
+        this.log.info('La central vuelve a aceptar los envíos: se reanuda el envío normal.');
+      }
       if (gen !== this.generation) return;
     }
   }
@@ -348,6 +395,12 @@ export class Engine {
     for (const s of signals) {
       this.log.info(`Señal ${s.type}${s.serviceId === null ? '' : ` servicio ${s.serviceId}`} (${s.at}).`);
     }
+  }
+}
+
+class RejectingError extends Error {
+  constructor(readonly status: number) {
+    super(`la central rechaza los envíos (HTTP ${status})`);
   }
 }
 

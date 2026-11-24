@@ -48,6 +48,8 @@ class FakeCentral implements CentralApi {
   readonly poison = new Set<string>();
   /** Tope de elementos por lote: por encima, 413. */
   maxItems = Infinity;
+  /** Rechaza todo lote con 400 (p. ej. contrato roto tras un despliegue). */
+  rejectAll = false;
   sendAttempts = 0;
   configVersion = 'v1';
   config: ProbeConfig = { services: [svc(1)], schedule: DEFAULT_SCHEDULE, references: [] };
@@ -78,6 +80,7 @@ class FakeCentral implements CentralApi {
     if (batch.checks.length + batch.signals.length > this.maxItems) {
       throw new CentralHttpError(413, null, 'HTTP 413', '{"message":"request entity too large"}');
     }
+    if (this.rejectAll) throw new CentralHttpError(400, null, 'HTTP 400', '{"message":["property foo should not exist"]}');
     const bad = [...batch.checks, ...batch.signals].find((x) => this.poison.has(x.id));
     if (bad) throw new CentralHttpError(400, null, 'HTTP 400', `{"message":["${bad.id}: durationMs must be an integer"]}`);
     this.batches.push(batch);
@@ -376,6 +379,54 @@ describe('Engine', () => {
       expect(outbox.deadLetters()).toEqual([]);
       expect(engine.status().pending).toBe(0);
       expect(central.syncCalls).toEqual([null]);
+      // El tamaño reducido se conserva tras un envío aceptado: 5✕, 3✕, 2✓, 2✓, 1✓.
+      expect(central.sendAttempts).toBe(5);
+    });
+
+    it('si la central rechaza todo (400), como mucho 3 van a dead_letter: se abre el corte, el resto queda en cola y el sondeo falla; al aceptar de nuevo se cierra y se vacía', async () => {
+      const items = Array.from({ length: 10 }, (_, i) => ck(i));
+      for (const c of items) outbox.enqueueCheck(c);
+      central.rejectAll = true;
+      const errors: string[] = [];
+      const measured = fakeCheck(() => true);
+      const engine = new Engine({
+        config: engineConfig,
+        outbox,
+        central,
+        clock,
+        check: measured.fn,
+        version: 'test',
+        logger: { info: () => undefined, warn: () => undefined, error: (m) => errors.push(m) },
+      });
+      engines.push(engine);
+      engine.start();
+      await clock.advance(1);
+      await clock.advance(15000);
+      await clock.advance(15000);
+
+      expect(outbox.deadLetters().map((d) => d.id)).toEqual(items.slice(0, 3).map((c) => c.id));
+      // Lo medido mientras tanto (regular de las 15:00:37) también espera en cola.
+      expect(engine.status().pending).toBe(7 + measured.produced.length);
+      expect(engine.status().central.rejecting).toBe(true);
+      expect(engine.status().central.consecutiveFailures).toBeGreaterThanOrEqual(1);
+      expect(central.syncCalls.length).toBe(3); // el sync sigue
+
+      // Con el corte abierto: un solo envío de un elemento por sondeo y una sola línea ERROR.
+      const attempts = central.sendAttempts;
+      const errs = errors.length;
+      await clock.advance(15000);
+      expect(central.sendAttempts - attempts).toBe(1);
+      expect(errors.length - errs).toBe(1);
+      expect(outbox.deadLetters()).toHaveLength(3);
+      expect(engine.status().pending).toBe(7 + measured.produced.length);
+
+      central.rejectAll = false;
+      await clock.advance(15000);
+      expect(engine.status().central.rejecting).toBe(false);
+      expect(engine.status().central.consecutiveFailures).toBe(0);
+      expect(engine.status().pending).toBe(0);
+      expect(central.checks.map((c) => c.id)).toEqual([...items.slice(3), ...measured.produced].map((c) => c.id));
+      expect(outbox.deadLetters()).toHaveLength(3);
     });
 
     it('con el envío fallando siempre, el sync se hace en cada sondeo (config, órdenes y estado) y cuenta como fallo', async () => {
