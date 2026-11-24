@@ -40,6 +40,12 @@ export const DEFAULT_TRACKER: TrackerOptions = {
 
 export type TrackerState = 'OK' | 'VERIFYING' | 'FAILED' | 'DEGRADED';
 
+/**
+ * Invariantes: cada DEGRADED va seguido de exactamente un DEGRADATION_CLEARED, y cada
+ * CONFIRMED_FAILURE de exactamente un RECOVERED, antes del siguiente de su tipo.
+ * Contrato: mientras está en VERIFYING solo los resultados RETRY hacen avanzar el
+ * estado; el runner debe entregar siempre ambos reintentos.
+ */
 export class ServiceProbeTracker {
   private readonly opts: TrackerOptions;
   private st: TrackerState = 'OK';
@@ -106,12 +112,16 @@ export class ServiceProbeTracker {
     // OK o DEGRADED
     if (!r.ok) {
       if (r.kind !== 'REGULAR') return [];
+      const wasDegraded = this.st === 'DEGRADED';
       this.st = 'VERIFYING';
       this.firstFailureAt = r.startedAt;
       this.failedRetries = 0;
       this.slowStreak = 0;
       this.fastStreak = 0;
-      return [sig('VERIFYING', this.firstFailureAt)];
+      // Salir de DEGRADED cierra el incidente de degradación: CLEARED va antes que VERIFYING.
+      return wasDegraded
+        ? [sig('DEGRADATION_CLEARED'), sig('VERIFYING', this.firstFailureAt)]
+        : [sig('VERIFYING', this.firstFailureAt)];
     }
     if (!this.opts.trackDegradation || r.kind !== 'REGULAR') return [];
     const slow = r.durationMs > this.service.latencyThresholdMs;

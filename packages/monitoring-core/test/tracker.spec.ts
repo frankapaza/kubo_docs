@@ -108,4 +108,30 @@ describe('ServiceProbeTracker', () => {
     expect(t.onResult(res('MANUAL', false))).toEqual([]);
     expect(t.state()).toBe('OK');
   });
+
+  function degraded() {
+    const t = new ServiceProbeTracker(svc, { trackDegradation: true });
+    for (let i = 0; i < 3; i++) t.onResult(res('REGULAR', true, T0, 500));
+    return t;
+  }
+
+  it('DEGRADED + fallo regular + reintento correcto: CLEARED+VERIFYING y luego TRANSIENT', () => {
+    const t = degraded();
+    expect(t.state()).toBe('DEGRADED');
+    expect(types(t.onResult(res('REGULAR', false, T0)))).toEqual(['DEGRADATION_CLEARED', 'VERIFYING']);
+    expect(types(t.onResult(res('RETRY', true, T0 + 30000)))).toEqual(['TRANSIENT_FAILURE']);
+    expect(t.state()).toBe('OK');
+  });
+
+  it('DEGRADED + fallo + 2 reintentos fallidos + 2 correctos: sin segundo CLEARED', () => {
+    const t = degraded();
+    const all = [
+      ...t.onResult(res('REGULAR', false, T0)),
+      ...t.onResult(res('RETRY', false, T0 + 30000)),
+      ...t.onResult(res('RETRY', false, T0 + 60000)),
+      ...t.onResult(res('REGULAR', true)),
+      ...t.onResult(res('REGULAR', true)),
+    ];
+    expect(types(all)).toEqual(['DEGRADATION_CLEARED', 'VERIFYING', 'CONFIRMED_FAILURE', 'RECOVERED']);
+  });
 });
