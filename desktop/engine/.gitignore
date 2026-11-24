@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.db
+*.db-wal
+*.db-shm
+
+# Generado por el instalador (winsw.exe copiado y su XML)
+/service/
