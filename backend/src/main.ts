@@ -9,6 +9,7 @@ import { createGlobalValidationPipe } from './common/validation/validation-pipe.
 import { registerBulkSendJsonLimit } from './modules/portal/bulk-send-json-limit';
 import { registerIngestJsonLimit } from './modules/monitoring/ingest/ingest-json-limit';
 import { CorsIoAdapter } from './common/realtime/cors-io.adapter';
+import { registerGithubWebhookBody } from './modules/dev-connector/github-webhook-body';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
@@ -21,6 +22,8 @@ async function bootstrap(): Promise<void> {
   registerBulkSendJsonLimit(app);
   // Ídem para la ingesta de logs: 2 MB descomprimidos (el appender manda gzip).
   registerIngestJsonLimit(app);
+  // Ídem para el webhook de GitHub: guarda el cuerpo crudo para verificar la firma HMAC.
+  registerGithubWebhookBody(app);
 
   const apiPrefix = config.get<string>('API_PREFIX', 'api/v1');
   app.setGlobalPrefix(apiPrefix);

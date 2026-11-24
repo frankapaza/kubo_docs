@@ -12,6 +12,8 @@ import { DevConnectorRepository } from './dev-connector.repository';
 import { DevKeyGuard, DevRateLimiter } from './dev-key.guard';
 import { DevKeysService } from './dev-keys.service';
 import { DevReposService } from './dev-repos.service';
+import { GithubWebhookController } from './github-webhook.controller';
+import { GithubWebhookService } from './github-webhook.service';
 import { DevKey } from './entities/dev-key.entity';
 import { DevLink } from './entities/dev-link.entity';
 import { DevRepo } from './entities/dev-repo.entity';
@@ -24,12 +26,13 @@ import { DevRepo } from './entities/dev-repo.entity';
     TicketMessagesModule,
     WorkItemsModule,
   ],
-  controllers: [DevAdminController, DevApiController],
+  controllers: [DevAdminController, DevApiController, GithubWebhookController],
   providers: [
     DevConnectorRepository,
     DevKeysService,
     DevReposService,
     DevApiService,
+    GithubWebhookService,
     DevKeyGuard,
     // Estado en memoria del proceso: un solo limitador para todas las peticiones.
     { provide: FixedWindowLimiter, useClass: DevRateLimiter },
