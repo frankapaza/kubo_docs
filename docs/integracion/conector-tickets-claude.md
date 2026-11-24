@@ -1,11 +1,12 @@
 # Conector de tickets DevDocs ↔ Claude Code
 
-> **Estado (24/11/2026): DISEÑO APROBADO PENDIENTE, NO IMPLEMENTADO.**
-> Nada de lo que sigue funciona todavía: no existen las claves `kdev_`, los
-> endpoints `/api/v1/dev/*`, el webhook ni el MCP `kubo-devdocs`. Este documento
-> explica cómo funcionará y qué hay que hacer para integrar un cliente cuando
-> esté construido. Diseño completo:
-> `docs/superpowers/specs/2026-11-24-conector-tickets-claude-design.md`.
+> **Estado (24/11/2026): IMPLEMENTADO, PENDIENTE DE DESPLIEGUE.**
+> El código está en la rama `feat/conector-tickets-claude` de DevDocs
+> (migración `031_conector_repos.sql`, módulo `backend/src/modules/dev-connector`,
+> pantallas en `web/src/pages/dev-connector`) y el MCP en el repo
+> `kubo-devdocs-mcp`. Hasta que se despliegue DevDocs y se publique el repo del
+> MCP en GitHub, los pasos 1–5 no se pueden hacer en producción.
+> Diseño completo: `docs/superpowers/specs/2026-11-24-conector-tickets-claude-design.md`.
 
 ---
 
@@ -62,7 +63,7 @@ Repos:
 
 1. Crear el cliente **Cobros Seguros** (si no existe).
 2. Asignarle los sistemas: Cobranza, Administración, Legal.
-3. En cada sistema → **Repositorios** → registrar el repo (`cobrosseguros/cobranza`, …).
+3. En **Clientes → (cliente) → Sistemas**, bajo cada sistema → **Registrar repo** (`cobrosseguros/cobranza`, …).
    DevDocs muestra la **URL del webhook** y un **secreto** (una vez; copiarlo).
 
 ### Paso 2 — Admin de la organización `cobrosseguros` en GitHub (una vez por repo)
@@ -78,7 +79,7 @@ En `github.com/cobrosseguros/<repo>` → **Settings → Webhooks → Add webhook
 
 ### Paso 3 — Cada desarrollador, en DevDocs
 
-**Mis claves de desarrollo → Nueva clave** → elegir el repo. DevDocs muestra la
+Menú **Monitoreo → Claves de desarrollo → Nueva clave** → elegir el repo. DevDocs muestra la
 clave `kdev_…` **una sola vez** junto al comando del paso 5 listo para copiar.
 
 ### Paso 4 — Cada laptop, una sola vez: instalar el MCP
