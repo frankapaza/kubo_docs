@@ -150,6 +150,15 @@ describe('diffStates', () => {
       expect(diffStates(prev, next).map((e) => [e.kind, e.incidentKey, e.notify])).toEqual([['INCIDENT_UPGRADED', 9, true]]);
     });
 
+    it('ROUTE HIGH heredado → padre DOWN: UPGRADED con aviso (igual que ROUTE→DOWN de la misma clave)', () => {
+      const prev = [row(1, { status: 'ROUTE', incidentId: 7 }), row(2, { criticality: 'LOW' })];
+      const next = [
+        row(1, { status: 'DOWN', incidentId: 7, parentIncidentId: 9 }),
+        row(2, { status: 'DOWN', incidentId: 8, parentIncidentId: 9, criticality: 'LOW' }),
+      ];
+      expect(diffStates(prev, next).map((e) => [e.kind, e.incidentKey, e.notify])).toEqual([['INCIDENT_UPGRADED', 9, true]]);
+    });
+
     it('si solo parte de los servicios sigue caída bajo otra clave, la vieja sí se recupera y la nueva avisa (el aviso viejo quedó cerrado)', () => {
       const prev = [row(1, { status: 'DOWN', incidentId: 7, parentIncidentId: 5 }), row(2, { status: 'DOWN', incidentId: 8, parentIncidentId: 5 })];
       const next = [row(1, { status: 'DOWN', incidentId: 9 }), row(2)];

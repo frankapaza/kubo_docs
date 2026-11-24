@@ -111,8 +111,9 @@ function incidentServices(groups: Map<string, Group>): Map<number, string> {
  * Absorción (decisión 19): cuando la central reagrupa el incidente de un servicio bajo
  * uno de servidor, la clave cambia pero el servicio sigue caído. La clave vieja no se
  * da por recuperada si todos sus servicios siguen caídos bajo otra clave; la nueva se
- * anota como OPENED (o UPGRADED si todo lo heredado era ROUTE y ahora es DOWN) y solo
- * avisa si es Alta y ninguno de los grupos heredados era Alta (esos ya avisaron).
+ * anota como OPENED, que solo avisa si es Alta y ninguno de los grupos heredados (que no
+ * se recuperan ahora) era Alta, porque esos ya avisaron; o como UPGRADED si todo lo heredado
+ * era ROUTE y ahora es DOWN, que avisa como el ROUTE→DOWN de la misma clave (si es Alta).
  */
 export function diffStates(prev: CombinedStateRow[] | null, next: CombinedStateRow[]): EngineEventDraft[] {
   if (prev === null) return [];
@@ -155,8 +156,13 @@ export function diffStates(prev: CombinedStateRow[] | null, next: CombinedStateR
         // Solo cuenta el aviso de un grupo heredado que no se anuncia ahora como recuperado.
         const carriedHadHigh = carried.some(({ k, g }) => !recovered.has(k) && incidentRows(g).some((r) => r.criticality === 'HIGH'));
         const allRoute = carried.every(({ g }) => category(g) === 'ROUTE');
-        const e = toDraft(allRoute && nc === 'DOWN' ? 'INCIDENT_UPGRADED' : 'INCIDENT_OPENED', n!, nc);
-        out.push({ ...e, notify: e.criticality === 'HIGH' && !carriedHadHigh });
+        if (allRoute && nc === 'DOWN') {
+          // Se agravó (solo se había avisado «sin acceso»): avisa igual que el ROUTE→DOWN de la misma clave.
+          out.push(toDraft('INCIDENT_UPGRADED', n!, 'DOWN'));
+        } else {
+          const e = toDraft('INCIDENT_OPENED', n!, nc);
+          out.push({ ...e, notify: e.criticality === 'HIGH' && !carriedHadHigh });
+        }
       }
     } else if (pc === 'ROUTE' && nc === 'DOWN') out.push(toDraft('INCIDENT_UPGRADED', n!, 'DOWN'));
     if (nc === 'DEGRADED') out.push(toDraft('DEGRADED_STARTED', n!, 'DEGRADED'));
