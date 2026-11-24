@@ -27,7 +27,9 @@ export default function AvailabilityIncidentsPage() {
     });
 
   const items = list.data?.items ?? [];
-// Un hijo se agrupa bajo su padre por parentId; si el padre no está en la lista (otra pestaña o recorte), va suelto.  const ids = new Set(items.map((i) => i.id));  const topLevel = items.filter((i) => i.parentId === null || !ids.has(i.parentId));
+  // Un hijo se agrupa bajo su padre por parentId; si el padre no está en la lista (otra pestaña o recorte), va suelto.
+  const ids = new Set(items.map((i) => i.id));
+  const topLevel = items.filter((i) => i.parentId === null || !ids.has(i.parentId));
 
   const tabBtn = (t: Tab, label: string) => (
     <button
