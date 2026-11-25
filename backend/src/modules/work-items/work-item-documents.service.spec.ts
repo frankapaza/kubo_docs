@@ -101,3 +101,18 @@ describe('WorkItemDocumentsService.renderManualPdf', () => {
     expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
   });
 });
+
+describe('WorkItemDocumentsService: archivos de un requerimiento borrado', () => {
+  it('storageKeysOf + discardFiles borra cada archivo y no falla si uno no se puede borrar', async () => {
+    const rows = [
+      { id: 1, workItemId: 200, storageKey: 'work-items/200/a.pdf' },
+      { id: 2, workItemId: 200, storageKey: 'work-items/200/b.docx' },
+    ];
+    const { service, storage } = build({ rows });
+    const keys = await service.storageKeysOf(200);
+    expect(keys).toEqual(['work-items/200/a.pdf', 'work-items/200/b.docx']);
+    storage.remove.mockRejectedValueOnce(new Error('ENOENT'));
+    await expect(service.discardFiles(keys)).resolves.toBeUndefined();
+    expect(storage.remove).toHaveBeenCalledTimes(2);
+  });
+});

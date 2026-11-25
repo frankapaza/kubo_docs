@@ -9,6 +9,7 @@ import WorkItemTimeline from './WorkItemTimeline';
 import ClientSystemSelect from '../dev-connector/ClientSystemSelect';
 import CodeLinksPanel from '../dev-connector/CodeLinksPanel';
 import WorkItemDocumentsPanel from './WorkItemDocumentsPanel';
+import WorkItemConformityPanel from './WorkItemConformityPanel';
 
 export interface WorkItemPanelProps {
   workItemId: number;
@@ -357,6 +358,16 @@ export default function WorkItemPanel({ workItemId, onClose, onChanged }: WorkIt
             <section>
               <h3 style={{ margin: '0 0 12px', fontSize: 12, fontWeight: 600, color: '#6d7577' }}>Documentos</h3>
               <WorkItemDocumentsPanel workItemId={workItemId} onChanged={reloadAfterChange} />
+            </section>
+
+            <section>
+              <h3 style={{ margin: '0 0 12px', fontSize: 12, fontWeight: 600, color: '#6d7577' }}>Acta de conformidad</h3>
+              <WorkItemConformityPanel
+                workItemId={workItemId}
+                clientId={item.clientId}
+                status={item.status}
+                onChanged={reloadAfterChange}
+              />
             </section>
 
             <section>

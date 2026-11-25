@@ -388,7 +388,8 @@ export type DocumentType =
   | 'SOW'
   | 'TDR'
   | 'ADDENDUM'
-  | 'OTHER';
+  | 'OTHER'
+  | 'ACTA_CONFORMIDAD';
 
 export const DOCUMENT_TYPES: DocumentType[] = [
   'CONTRACT',
@@ -408,6 +409,7 @@ export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
   TDR: 'TDR',
   ADDENDUM: 'Addendum',
   OTHER: 'Otro',
+  ACTA_CONFORMIDAD: 'Acta de conformidad',
 };
 
 export type CommercialDocumentStatus =

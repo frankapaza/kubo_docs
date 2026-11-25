@@ -112,3 +112,40 @@ export const workItemDocsApi = {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   },
 };
+
+export interface ConformityActa {
+  documentId: number;
+  title: string;
+  status: 'DRAFT' | 'SENT' | 'SIGNED' | 'EXPIRED' | 'CANCELLED';
+  createdAt: string;
+  signatories: Array<{
+    id: number;
+    fullName: string;
+    email: string | null;
+    role: string | null;
+    status: 'PENDING' | 'SIGNED' | string;
+    signedAt: string | null;
+    tokenExpiresAt: string | null;
+  }>;
+  emailError?: string;
+}
+
+export interface CreateConformityBody {
+  signerName: string;
+  signerEmail: string;
+  signerDocumentNumber?: string;
+  signerRole?: string;
+  observaciones?: string;
+}
+
+/** Acta de conformidad de un requerimiento: se firma por enlace y, al firmarse, el requerimiento se cierra. */
+export const conformityApi = {
+  get: (workItemId: number) =>
+    api.get<{ acta: ConformityActa | null }>(`/work-items/${workItemId}/conformity`).then((r) => r.data.acta),
+  create: (workItemId: number, body: CreateConformityBody) =>
+    api.post<ConformityActa>(`/work-items/${workItemId}/conformity`, body).then((r) => r.data),
+  resend: (workItemId: number) =>
+    api.post<ConformityActa>(`/work-items/${workItemId}/conformity/resend`).then((r) => r.data),
+  cancel: (workItemId: number) =>
+    api.delete<{ ok: true }>(`/work-items/${workItemId}/conformity`).then((r) => r.data),
+};

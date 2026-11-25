@@ -46,7 +46,8 @@ export interface WorkItemDocView {
 
 export interface WorkItemDocUpload {
   workItemId: number;
-  actorUserId: number;
+  /** `null` cuando lo sube el sistema (el acta firmada por el cliente). */
+  actorUserId: number | null;
   kind: WorkItemDocKind;
   buffer: Buffer;
   filename: string;
@@ -175,6 +176,23 @@ export class WorkItemDocumentsService {
       payload: { documentId: Number(row.id), kind: row.kind },
     });
     return toView(saved as WorkItemAttachment);
+  }
+
+  /**
+   * Las claves de los archivos de un requerimiento, para borrarlos cuando se
+   * borra el requerimiento: las filas se van solas (ON DELETE CASCADE), los
+   * archivos no. Se leen ANTES de borrar el requerimiento.
+   */
+  async storageKeysOf(workItemId: number): Promise<string[]> {
+    const rows = await this.repo.find({ where: { workItemId } });
+    return rows.map((r) => r.storageKey);
+  }
+
+  /** Borra los archivos; uno que falle se registra y no detiene a los demás. */
+  async discardFiles(keys: string[]): Promise<void> {
+    for (const key of keys) {
+      await this.storage.remove(key).catch((e) => this.logger.error(`No se pudo borrar el archivo «${key}».`, e as Error));
+    }
   }
 
   async remove(workItemId: number, docId: number, actorUserId: number): Promise<void> {

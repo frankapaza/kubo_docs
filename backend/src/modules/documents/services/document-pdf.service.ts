@@ -13,6 +13,7 @@ const DOCUMENT_TYPE_LABEL: Record<string, string> = {
   TDR: 'Términos de Referencia',
   ADDENDUM: 'Addendum',
   OTHER: 'Documento',
+  ACTA_CONFORMIDAD: 'Acta de conformidad',
 };
 
 const STATUS_LABEL: Record<string, string> = {

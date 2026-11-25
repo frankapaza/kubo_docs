@@ -35,3 +35,37 @@ CREATE TABLE IF NOT EXISTS work_item_attachments (
   CONSTRAINT fk_work_item_attachments_item FOREIGN KEY (work_item_id)
     REFERENCES work_items (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------------------------------------------------------
+--  Acta de conformidad: es un documento comercial (tipo ACTA_CONFORMIDAD) que
+--  el cliente firma por enlace; `work_items.conformity_document_id` lo enlaza.
+--  Ampliar un ENUM agregando un valor al final no toca las filas existentes.
+--  Las guardas permiten volver a ejecutar el archivo sin error.
+-- ----------------------------------------------------------------------------
+
+DROP PROCEDURE IF EXISTS kubo_migracion_032;
+DELIMITER //
+CREATE PROCEDURE kubo_migracion_032()
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.TABLES
+              WHERE TABLE_SCHEMA = 'kubo_devdocs' AND TABLE_NAME = 'commercial_documents') THEN
+    ALTER TABLE commercial_documents MODIFY COLUMN type
+      ENUM('CONTRACT','QUOTE','NDA','SOW','TDR','ADDENDUM','OTHER','ACTA_CONFORMIDAD') NOT NULL DEFAULT 'OTHER';
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.TABLES
+              WHERE TABLE_SCHEMA = 'kubo_devdocs' AND TABLE_NAME = 'document_templates') THEN
+    ALTER TABLE document_templates MODIFY COLUMN type
+      ENUM('CONTRACT','QUOTE','NDA','SOW','TDR','ADDENDUM','OTHER','ACTA_CONFORMIDAD') NOT NULL DEFAULT 'OTHER';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS
+                  WHERE TABLE_SCHEMA = 'kubo_devdocs' AND TABLE_NAME = 'work_items'
+                    AND COLUMN_NAME = 'conformity_document_id') THEN
+    ALTER TABLE work_items ADD COLUMN conformity_document_id BIGINT UNSIGNED NULL
+      COMMENT 'acta de conformidad (commercial_documents) enviada a firma';
+  END IF;
+END //
+DELIMITER ;
+
+CALL kubo_migracion_032();
+
+DROP PROCEDURE IF EXISTS kubo_migracion_032;

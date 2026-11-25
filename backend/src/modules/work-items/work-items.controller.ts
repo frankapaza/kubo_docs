@@ -9,6 +9,7 @@ import { WorkItem } from './entities/work-item.entity';
 import { WorkItemsService } from './work-items.service';
 import { WorkItemBoardService } from './work-item-board.service';
 import { WorkItemIntakeService } from './work-item-intake.service';
+import { WorkItemDocumentsService } from './work-item-documents.service';
 import { CreateWorkItemDto } from './dto/create-work-item.dto';
 import { UpdateWorkItemDto } from './dto/update-work-item.dto';
 import { MoveWorkItemDto } from './dto/move-work-item.dto';
@@ -26,6 +27,7 @@ export class WorkItemsController {
     private readonly service: WorkItemsService,
     private readonly board: WorkItemBoardService,
     private readonly intake: WorkItemIntakeService,
+    private readonly docs: WorkItemDocumentsService,
   ) {}
 
   @Get()
@@ -64,7 +66,10 @@ export class WorkItemsController {
 
   @Delete(':id')
   async remove(@Param('id', ParseIntPipe) id: number): Promise<{ ok: true }> {
+    // Las claves antes de borrar: la cascada se lleva las filas, no los archivos.
+    const keys = await this.docs.storageKeysOf(id);
     await this.service.remove(id);
+    await this.docs.discardFiles(keys);
     return { ok: true };
   }
 

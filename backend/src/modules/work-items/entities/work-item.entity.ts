@@ -85,6 +85,10 @@ export class WorkItem {
   @Column({ name: 'closed_at', type: 'datetime', nullable: true })
   closedAt!: Date | null;
 
+  /** Acta de conformidad (documento comercial) enviada a firma. Migración 032. */
+  @Column({ name: 'conformity_document_id', type: 'bigint', unsigned: true, nullable: true })
+  conformityDocumentId!: number | null;
+
   /** Nulo cuando lo creó un usuario de cliente desde el portal. */
   @Column({ name: 'created_by', type: 'bigint', unsigned: true, nullable: true })
   createdBy!: number | null;

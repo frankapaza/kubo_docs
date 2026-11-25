@@ -148,7 +148,7 @@ En el detalle del requerimiento (tablero → clic en la tarjeta) está la secci�
 |---|---|---|
 | Al aceptar | **Especificación del requerimiento**: objetivo, alcance (y lo que no incluye), reglas de negocio, pantallas, criterios de aceptación | El analista o el cliente la sube |
 | Al entregar a Pruebas | **Manual de usuario**: paso a paso para el usuario final | Claude lo redacta (`entregar_requerimiento`); queda como **borrador** hasta que alguien pulse **Aprobar** |
-| Al cerrar | **Acta de conformidad** firmada por el cliente | Se sube al cerrar (próxima etapa: generarla y firmarla desde DevDocs) |
+| Al cerrar | **Acta de conformidad** firmada por el cliente | DevDocs la genera (sección **Acta de conformidad**, con el RQ en Pruebas) y la envía al cliente para firmar por enlace; al firmar, el PDF firmado queda en Documentos y el RQ pasa a **Cerrado** solo |
 
 La Especificación es **recomendada**: si falta, DevDocs lo avisa en el panel y
 Claude lo advierte al tomar el requerimiento.
@@ -178,8 +178,14 @@ Claude lo advierte al tomar el requerimiento.
 4. Con el cambio en el ambiente de pruebas: *"Entrega el RQ-0045"* → Claude lo
    pasa a **Pruebas**, deja la evidencia en el historial y el **Manual de
    usuario** en Documentos como borrador.
-5. Una persona revisa y **aprueba** el manual, el cliente prueba y, con su
-   **Acta de conformidad**, se cierra en DevDocs.
+5. Una persona revisa y **aprueba** el manual.
+6. El cliente prueba. En el requerimiento, sección **Acta de conformidad**:
+   elegir quién firma por el cliente y pulsar **Generar y enviar a firma**.
+   DevDocs arma el acta con los criterios de aceptación, el código entregado y
+   los documentos vigentes, y le manda el enlace por correo (vale 7 días; se
+   puede **Reenviar** o **Anular**).
+7. Cuando el cliente firma, el acta firmada queda en Documentos y el
+   requerimiento se **cierra solo**.
 
 ## 7. Bloque para el `CLAUDE.md` del repo
 
