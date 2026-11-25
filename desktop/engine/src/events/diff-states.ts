@@ -1,5 +1,5 @@
 import type { Criticality } from '@kubo/monitoring-core';
-import type { CombinedStateRow } from '../central-client';
+import type { CombinedStateRow, ServerAlert, ServerAlertKind } from '../central-client';
 
 export type EngineEventKind =
   | 'INCIDENT_OPENED'
@@ -11,7 +11,9 @@ export type EngineEventKind =
   | 'OFFICE_OUTAGE_ENDED'
   | 'CENTRAL_UNREACHABLE'
   | 'CENTRAL_BACK'
-  | 'CENTRAL_REJECTING';
+  | 'CENTRAL_REJECTING'
+  | 'SERVER_ALERT_STARTED'
+  | 'SERVER_ALERT_CLEARED';
 
 export interface EngineEvent {
   /** Autoincremental del diario. */
@@ -28,6 +30,11 @@ export interface EngineEvent {
   /** La más alta de los afectados. */
   criticality: Criticality | null;
   ticketCode: string | null;
+  /** Solo en las alertas de servidor; null en el resto. */
+  serverId: number | null;
+  alertKind: ServerAlertKind | null;
+  /** «C: 9 % libre» o «sin datos desde 14:32»; null fuera de las alertas de servidor. */
+  detail: string | null;
   /** Regla de la tabla «Notificaciones de Windows». */
   notify: boolean;
 }
@@ -86,6 +93,9 @@ function toDraft(kind: EngineEventKind, g: Group, cat: 'DOWN' | 'ROUTE' | 'DEGRA
     serviceNames: [...new Set(rows.map((r) => r.serviceName))].sort((a, b) => a.localeCompare(b)),
     criticality,
     ticketCode: rows.find((r) => r.ticketCode !== null)?.ticketCode ?? g.rows.find((r) => r.ticketCode !== null)?.ticketCode ?? null,
+    serverId: null,
+    alertKind: null,
+    detail: null,
     notify,
   };
 }
@@ -176,5 +186,61 @@ export function diffStates(prev: CombinedStateRow[] | null, next: CombinedStateR
     } else if (pc === 'ROUTE' && nc === 'DOWN') out.push(toDraft('INCIDENT_UPGRADED', n!, 'DOWN'));
     if (nc === 'DEGRADED') out.push(toDraft('DEGRADED_STARTED', n!, 'DEGRADED'));
   }
+  return out;
+}
+
+/**
+ * Mantenimiento en el motor (decisión 5): una fila con `maintenance` se «congela» en la fila
+ * previa del mismo servicio (sin fila previa, la misma fila en OK y sin incidentes). Conserva
+ * `maintenance: true` para que el widget la cuente aparte. El motor compara y guarda el resultado:
+ * no hay avisos al entrar ni durante la ventana; al salir, `diffStates` ve el cambio real.
+ */
+export function maskMaintenance(prev: CombinedStateRow[] | null, next: CombinedStateRow[]): CombinedStateRow[] {
+  const before = new Map((prev ?? []).map((r) => [r.serviceId, r]));
+  return next.map((r): CombinedStateRow => {
+    if (r.maintenance !== true) return r;
+    const p = before.get(r.serviceId);
+    return p ? { ...p, maintenance: true } : { ...r, status: 'OK', incidentId: null, parentIncidentId: null };
+  });
+}
+
+/**
+ * Clave de una alerta de servidor: `serverId:kind:unidad`. La unidad es el detalle sin cifras
+ * («C: 9 % libre» → «C:»), así un 9 % → 8 % en la misma unidad no es una alerta nueva; el
+ * agente mudo no tiene unidad (la hora del detalle tampoco cuenta).
+ */
+export function serverAlertKey(a: Pick<ServerAlert, 'serverId' | 'kind' | 'detail'>): string {
+  const unit = a.kind === 'DISK_LOW' ? a.detail.replace(/\s*\d+\s*%\s*libre\s*$/, '').trim() : '';
+  return `${a.serverId}:${a.kind}:${unit}`;
+}
+
+function alertDraft(kind: 'SERVER_ALERT_STARTED' | 'SERVER_ALERT_CLEARED', a: ServerAlert): EngineEventDraft {
+  return {
+    kind,
+    incidentKey: null,
+    incidentKind: null,
+    serverName: a.serverName,
+    serviceNames: [],
+    criticality: null,
+    ticketCode: null,
+    serverId: a.serverId,
+    alertKind: a.kind,
+    detail: a.detail,
+    // Decisión 11: solo el disco bajo da notificación de Windows; el agente mudo va por correo.
+    notify: kind === 'SERVER_ALERT_STARTED' && a.kind === 'DISK_LOW',
+  };
+}
+
+/**
+ * Eventos entre dos listas de alertas de servidor. Pura. Con `prev === null` (primer arranque sin
+ * alertas guardadas) no emite nada. Las que desaparecen salen como CLEARED con su último detalle.
+ */
+export function diffServerAlerts(prev: ServerAlert[] | null, next: ServerAlert[]): EngineEventDraft[] {
+  if (prev === null) return [];
+  const before = new Map(prev.map((a) => [serverAlertKey(a), a]));
+  const after = new Map(next.map((a) => [serverAlertKey(a), a]));
+  const out: EngineEventDraft[] = [];
+  for (const [k, a] of before) if (!after.has(k)) out.push(alertDraft('SERVER_ALERT_CLEARED', a));
+  for (const [k, a] of after) if (!before.has(k)) out.push(alertDraft('SERVER_ALERT_STARTED', a));
   return out;
 }

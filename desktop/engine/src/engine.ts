@@ -7,9 +7,9 @@ import {
   type Clock,
   type ProbeSignal,
 } from '@kubo/monitoring-core';
-import { CentralHttpError, type CentralApi, type CombinedStateRow, type ProbeConfig, type ProbeView } from './central-client';
+import { CentralHttpError, type CentralApi, type CombinedStateRow, type ProbeConfig, type ProbeView, type ServerAlert } from './central-client';
 import type { EngineConfig } from './config';
-import { diffStates, type EngineEvent, type EngineEventDraft } from './events/diff-states';
+import { diffServerAlerts, diffStates, maskMaintenance, type EngineEvent, type EngineEventDraft } from './events/diff-states';
 import { splitItems, type Outbox, type OutboxItem } from './outbox';
 
 export interface EngineStatus {
@@ -25,7 +25,10 @@ export interface EngineStatus {
   };
   officeOutage: boolean;
   pending: number;
+  /** Estado combinado; los servicios en mantenimiento van congelados en su fila previa (`maintenance: true`). */
   services: CombinedStateRow[];
+  /** Avisos de servidor vigentes (los del último sync que los traía). */
+  serverAlerts: ServerAlert[];
 }
 
 export interface EngineLogger {
@@ -66,6 +69,8 @@ export const DEAD_LETTER_BREAKER = 3;
 export const UNREACHABLE_VERDICT_GRACE_MS = 2 * 60_000;
 /** Clave de la tabla `kv` con las marcas del diario (sobreviven a un reinicio). */
 export const JOURNAL_FLAGS_KEY = 'journal';
+/** Clave de la tabla `kv` con las últimas alertas de servidor recibidas (siembran la comparación al reiniciar). */
+export const SERVER_ALERTS_KEY = 'serverAlerts';
 
 /** «La central no responde» alcanzado, a la espera del veredicto de oficina para decidir si avisa. */
 interface UnreachablePending {
@@ -152,6 +157,12 @@ export class Engine {
    * primer estado no genera eventos.
    */
   private freshState: CombinedStateRow[] | null = null;
+  /**
+   * Últimas alertas de servidor recibidas (o las guardadas de la ejecución anterior). Null si nunca
+   * hubo: entonces las primeras no generan eventos.
+   */
+  private lastAlerts: ServerAlert[] | null = null;
+  private lastAlertsJson: string | null = null;
   /** Caída de oficina según el diario (una entrada por transición, aunque el runner se sustituya). */
   private outageJournaled = false;
   /** El runner actual ya declaró START o END (tiene veredicto propio sobre la caída de oficina). */
@@ -225,6 +236,7 @@ export class Engine {
         this.log.warn('Estado combinado guardado ilegible: se ignora.');
       }
     }
+    this.loadAlerts();
     // Tras stop(): el runner se conserva (trackers y pruebas en vuelo) y se reanuda.
     this.runner?.start();
     this.schedule(0);
@@ -264,6 +276,7 @@ export class Engine {
       officeOutage: this.runner && this.runnerHasOutageVerdict ? this.runner.officeOutage() : this.outageJournaled,
       pending: this.outbox.pendingCount(),
       services,
+      serverAlerts: this.lastAlerts ?? [],
     };
   }
 
@@ -290,6 +303,9 @@ export class Engine {
       serviceNames: [],
       criticality: null,
       ticketCode: null,
+      serverId: null,
+      alertKind: null,
+      detail: null,
       notify,
     });
   }
@@ -342,6 +358,34 @@ export class Engine {
     else if (this.outageJournaled) this.journalUnreachable(false);
     else p.sawOutage = true; // su START llega con el siguiente resultado y lo decide (onResult)
     this.saveFlags();
+  }
+
+  private loadAlerts(): void {
+    const raw = this.outbox.loadKv(SERVER_ALERTS_KEY);
+    if (raw === null) return;
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) throw new Error('no es una lista');
+      this.lastAlerts = parsed as ServerAlert[];
+      this.lastAlertsJson = raw;
+    } catch {
+      this.log.warn('Alertas de servidor guardadas ilegibles: se ignoran.');
+    }
+  }
+
+  /**
+   * Anota los cambios de las alertas de servidor y guarda las nuevas. Una central anterior no
+   * envía `serverAlerts`: se desconocen, no «ninguna», así que se conserva lo anterior sin eventos.
+   */
+  private applyAlerts(next: ServerAlert[] | undefined): void {
+    if (!Array.isArray(next)) return;
+    for (const e of diffServerAlerts(this.lastAlerts, next)) this.journal(e);
+    this.lastAlerts = next;
+    const json = JSON.stringify(next);
+    if (json !== this.lastAlertsJson) {
+      this.outbox.saveKv(SERVER_ALERTS_KEY, json);
+      this.lastAlertsJson = json;
+    }
   }
 
   private loadFlags(): void {
@@ -423,10 +467,13 @@ export class Engine {
         this.runner.runNow(o.serviceId, o.kind, o.id);
       }
       // Solo contra el último estado fresco, nunca contra el superpuesto con el local (decisión 2).
-      for (const e of diffStates(this.freshState, res.state)) this.journal(e);
-      this.freshState = res.state;
-      this.lastState = res.state;
-      const stateJson = JSON.stringify(res.state);
+      // Los servicios en mantenimiento se congelan antes de comparar y así se guardan (decisión 5).
+      const state = maskMaintenance(this.freshState, res.state);
+      for (const e of diffStates(this.freshState, state)) this.journal(e);
+      this.freshState = state;
+      this.lastState = state;
+      this.applyAlerts(res.serverAlerts);
+      const stateJson = JSON.stringify(state);
       if (stateJson !== this.lastStateJson) {
         this.outbox.saveState(stateJson);
         this.lastStateJson = stateJson;

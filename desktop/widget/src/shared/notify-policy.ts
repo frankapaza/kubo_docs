@@ -1,5 +1,5 @@
 import type { EngineEvent } from './types';
-import { limaTime } from './widget-model';
+import { ALERT_LABEL, limaTime, serverAlertKey, serverUrl } from './widget-model';
 
 export interface Toast {
   title: string;
@@ -28,11 +28,14 @@ function titleFor(e: EngineEvent): string | null {
     case 'CENTRAL_UNREACHABLE': return 'La central no responde';
     case 'CENTRAL_BACK': return 'La central vuelve a responder';
     case 'CENTRAL_REJECTING': return 'La central rechaza los envíos';
+    // El motor solo marca `notify` en el disco bajo (decisión 11); el CLEARED nunca avisa.
+    case 'SERVER_ALERT_STARTED': return e.alertKind ? ALERT_LABEL[e.alertKind] : null;
     default: return null;
   }
 }
 
 function bodyFor(e: EngineEvent): string {
+  if (e.kind === 'SERVER_ALERT_STARTED') return [e.serverName, e.detail].filter((x) => x).join(' · ');
   const parts: string[] = [];
   if (e.serviceNames.length > 0) parts.push(e.serviceNames.join(', '));
   if (e.ticketCode) parts.push(e.ticketCode);
@@ -52,14 +55,19 @@ export function toastsFor(events: EngineEvent[], centralUrl: string, recent: Map
     if (!e.notify) continue;
     const title = titleFor(e);
     if (title === null) continue;
-    const dedupeKey = `${e.kind}:${e.incidentKey ?? ''}`;
+    const isAlert = e.kind === 'SERVER_ALERT_STARTED' && e.serverId != null && e.alertKind != null;
+    const dedupeKey = isAlert
+      ? `${e.kind}:${serverAlertKey(e.serverId!, e.alertKind!, e.detail ?? '')}`
+      : `${e.kind}:${e.incidentKey ?? ''}`;
     const last = recent.get(dedupeKey);
     if (last !== undefined && now - last < DEDUPE_WINDOW_MS) continue;
     recent.set(dedupeKey, now);
     out.push({
       title,
       body: bodyFor(e),
-      url: e.incidentKey !== null ? `${centralUrl}/monitoreo/incidentes/${e.incidentKey}` : boardUrl(centralUrl),
+      url: isAlert
+        ? serverUrl(centralUrl, e.serverId!)
+        : e.incidentKey !== null ? `${centralUrl}/monitoreo/incidentes/${e.incidentKey}` : boardUrl(centralUrl),
       dedupeKey,
     });
   }

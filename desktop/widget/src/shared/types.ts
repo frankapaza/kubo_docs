@@ -2,7 +2,7 @@
  * Tipos copiados a mano del motor (el widget no importa de desktop/engine):
  * - desktop/engine/src/engine.ts             -> EngineStatus
  * - desktop/engine/src/events/diff-states.ts -> EngineEvent, EngineEventKind
- * - desktop/engine/src/central-client.ts     -> CombinedStateRow, ProbeView, CombinedStatus
+ * - desktop/engine/src/central-client.ts     -> CombinedStateRow, ProbeView, CombinedStatus, ServerAlert
  * - packages/monitoring-core/src/tracker.ts  -> TrackerState
  * - packages/monitoring-core/src/types.ts    -> Criticality
  * Si cambian allí, actualizar aquí.
@@ -31,6 +31,18 @@ export interface CombinedStateRow {
   incidentId: number | null;
   parentIncidentId: number | null;
   ticketCode: string | null;
+  /** En una ventana de mantenimiento (el motor congela la fila). Ausente en un motor anterior. */
+  maintenance?: boolean;
+}
+
+export type ServerAlertKind = 'DISK_LOW' | 'AGENT_SILENT';
+
+export interface ServerAlert {
+  serverId: number;
+  serverName: string;
+  kind: ServerAlertKind;
+  /** «C: 9 % libre» o «sin datos desde 14:32». */
+  detail: string;
 }
 
 export interface EngineStatus {
@@ -46,6 +58,8 @@ export interface EngineStatus {
   officeOutage: boolean;
   pending: number;
   services: CombinedStateRow[];
+  /** Avisos de servidor vigentes. Ausente en un motor anterior. */
+  serverAlerts?: ServerAlert[];
 }
 
 export type EngineEventKind =
@@ -58,7 +72,9 @@ export type EngineEventKind =
   | 'OFFICE_OUTAGE_ENDED'
   | 'CENTRAL_UNREACHABLE'
   | 'CENTRAL_BACK'
-  | 'CENTRAL_REJECTING';
+  | 'CENTRAL_REJECTING'
+  | 'SERVER_ALERT_STARTED'
+  | 'SERVER_ALERT_CLEARED';
 
 export interface EngineEvent {
   id: number;
@@ -72,7 +88,12 @@ export interface EngineEvent {
   serviceNames: string[];
   criticality: Criticality | null;
   ticketCode: string | null;
+  /** Solo en las alertas de servidor (null o ausente en el resto y en un motor anterior). */
+  serverId?: number | null;
+  alertKind?: ServerAlertKind | null;
+  detail?: string | null;
   notify: boolean;
 }
 
 export type Corner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+

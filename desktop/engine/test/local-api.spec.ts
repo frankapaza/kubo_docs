@@ -12,6 +12,7 @@ const status: EngineStatus = {
   officeOutage: false,
   pending: 3,
   services: [],
+  serverAlerts: [{ serverId: 3, serverName: 'srv-b', kind: 'DISK_LOW', detail: 'C: 9 % libre' }],
 };
 
 const allEvents: EngineEvent[] = Array.from({ length: 600 }, (_, i) => ({
@@ -24,6 +25,9 @@ const allEvents: EngineEvent[] = Array.from({ length: 600 }, (_, i) => ({
   serviceNames: [],
   criticality: null,
   ticketCode: null,
+  serverId: null,
+  alertKind: null,
+  detail: null,
   notify: false,
 }));
 

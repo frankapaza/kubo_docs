@@ -1,5 +1,5 @@
-import type { CombinedStateRow } from '../src/central-client';
-import { diffStates } from '../src/events/diff-states';
+import type { CombinedStateRow, ServerAlert } from '../src/central-client';
+import { diffServerAlerts, diffStates, maskMaintenance } from '../src/events/diff-states';
 
 const row = (serviceId: number, over: Partial<CombinedStateRow> = {}): CombinedStateRow => ({
   serviceId,
@@ -33,6 +33,9 @@ describe('diffStates', () => {
         serviceNames: ['svc-1'],
         criticality: 'HIGH',
         ticketCode: 'KT-1',
+        serverId: null,
+        alertKind: null,
+        detail: null,
         notify: true,
       },
     ]);
@@ -73,6 +76,9 @@ describe('diffStates', () => {
         serviceNames: ['svc-1', 'svc-2'],
         criticality: 'HIGH',
         ticketCode: 'KT-1',
+        serverId: null,
+        alertKind: null,
+        detail: null,
         notify: true,
       },
     ]);
@@ -105,6 +111,9 @@ describe('diffStates', () => {
         serviceNames: ['svc-1'],
         criticality: 'HIGH',
         ticketCode: null,
+        serverId: null,
+        alertKind: null,
+        detail: null,
         notify: false,
       },
     ]);
@@ -217,5 +226,95 @@ describe('diffStates', () => {
       ];
       expect(diffStates(prev, next).map((e) => [e.kind, e.incidentKey, e.criticality, e.notify])).toEqual([['INCIDENT_OPENED', 9, 'HIGH', true]]);
     });
+  });
+});
+
+describe('maskMaintenance (decisión 5)', () => {
+  it('una fila en mantenimiento se reemplaza por la fila previa del mismo servicio (conserva la marca)', () => {
+    const prev = [row(1, { status: 'DOWN', incidentId: 5 })];
+    const masked = maskMaintenance(prev, [row(1, { maintenance: true })]);
+    expect(masked).toEqual([row(1, { status: 'DOWN', incidentId: 5, maintenance: true })]);
+  });
+
+  it('sin fila previa se usa la misma fila en OK, sin incidentes', () => {
+    const masked = maskMaintenance(null, [row(1, { status: 'DOWN', incidentId: 5, parentIncidentId: 4, maintenance: true })]);
+    expect(masked).toEqual([row(1, { status: 'OK', incidentId: null, parentIncidentId: null, maintenance: true })]);
+  });
+
+  it('las filas sin mantenimiento (o de una central vieja sin el campo) pasan tal cual', () => {
+    const next = [row(1, { status: 'DOWN', incidentId: 5 }), row(2, { maintenance: false })];
+    expect(maskMaintenance([row(1)], next)).toEqual(next);
+  });
+
+  it('un servicio caído que entra en mantenimiento no genera INCIDENT_RECOVERED', () => {
+    const prev = [row(1, { status: 'DOWN', incidentId: 5 })];
+    const next = maskMaintenance(prev, [row(1, { maintenance: true })]);
+    expect(diffStates(prev, next)).toEqual([]);
+  });
+
+  it('un incidente abierto durante la ventana no avisa hasta que maintenance pasa a false, y ahí sí', () => {
+    let prev: CombinedStateRow[] = [row(1)];
+    const during = maskMaintenance(prev, [row(1, { status: 'DOWN', incidentId: 8, maintenance: true })]);
+    expect(diffStates(prev, during)).toEqual([]);
+    prev = during;
+    const still = maskMaintenance(prev, [row(1, { status: 'DOWN', incidentId: 8, maintenance: true })]);
+    expect(diffStates(prev, still)).toEqual([]);
+    prev = still;
+    const after = maskMaintenance(prev, [row(1, { status: 'DOWN', incidentId: 8, maintenance: false })]);
+    expect(diffStates(prev, after).map((e) => [e.kind, e.incidentKey, e.notify])).toEqual([['INCIDENT_OPENED', 8, true]]);
+  });
+});
+
+describe('diffServerAlerts (decisión 11)', () => {
+  const disk = (detail = 'C: 9 % libre', serverId = 3): ServerAlert => ({ serverId, serverName: 'srv-b', kind: 'DISK_LOW', detail });
+  const silent: ServerAlert = { serverId: 4, serverName: 'srv-c', kind: 'AGENT_SILENT', detail: 'sin datos desde 14:32' };
+
+  it('prev null (primer arranque sin estado guardado) → ningún evento', () => {
+    expect(diffServerAlerts(null, [disk(), silent])).toEqual([]);
+  });
+
+  it('aparece un DISK_LOW → SERVER_ALERT_STARTED con notify true', () => {
+    expect(diffServerAlerts([], [disk()])).toEqual([
+      {
+        kind: 'SERVER_ALERT_STARTED',
+        incidentKey: null,
+        incidentKind: null,
+        serverName: 'srv-b',
+        serviceNames: [],
+        criticality: null,
+        ticketCode: null,
+        serverId: 3,
+        alertKind: 'DISK_LOW',
+        detail: 'C: 9 % libre',
+        notify: true,
+      },
+    ]);
+  });
+
+  it('aparece un AGENT_SILENT → STARTED con notify false', () => {
+    const ev = diffServerAlerts([], [silent]);
+    expect(ev.map((e) => [e.kind, e.serverId, e.alertKind, e.detail, e.notify])).toEqual([
+      ['SERVER_ALERT_STARTED', 4, 'AGENT_SILENT', 'sin datos desde 14:32', false],
+    ]);
+  });
+
+  it('desaparece → SERVER_ALERT_CLEARED con notify false y el detalle previo', () => {
+    const ev = diffServerAlerts([disk(), silent], []);
+    expect(ev.map((e) => [e.kind, e.serverId, e.alertKind, e.detail, e.notify])).toEqual([
+      ['SERVER_ALERT_CLEARED', 3, 'DISK_LOW', 'C: 9 % libre', false],
+      ['SERVER_ALERT_CLEARED', 4, 'AGENT_SILENT', 'sin datos desde 14:32', false],
+    ]);
+  });
+
+  it('C: de 9 % a 8 % no emite; la hora de AGENT_SILENT tampoco cuenta', () => {
+    expect(diffServerAlerts([disk('C: 9 % libre'), silent], [disk('C: 8 % libre'), { ...silent, detail: 'sin datos desde 22/11 14:32' }])).toEqual([]);
+  });
+
+  it('otra unidad u otro servidor sí es una alerta nueva', () => {
+    const ev = diffServerAlerts([disk('C: 9 % libre')], [disk('C: 8 % libre'), disk('D: 5 % libre'), disk('C: 7 % libre', 5)]);
+    expect(ev.map((e) => [e.kind, e.serverId, e.detail])).toEqual([
+      ['SERVER_ALERT_STARTED', 3, 'D: 5 % libre'],
+      ['SERVER_ALERT_STARTED', 5, 'C: 7 % libre'],
+    ]);
   });
 });

@@ -16,9 +16,19 @@ export const EVENTS_TABLE_SQL = `
     service_names TEXT NOT NULL,
     criticality   TEXT,
     ticket_code   TEXT,
-    notify        INTEGER NOT NULL
+    notify        INTEGER NOT NULL,
+    server_id     INTEGER,
+    alert_kind    TEXT,
+    detail        TEXT
   );
 `;
+
+/** Columnas añadidas después de la primera versión: una base existente se amplía al abrirla. */
+const ADDED_COLUMNS: [string, string][] = [
+  ['server_id', 'INTEGER'],
+  ['alert_kind', 'TEXT'],
+  ['detail', 'TEXT'],
+];
 
 interface Row {
   id: number;
@@ -31,6 +41,9 @@ interface Row {
   criticality: EngineEvent['criticality'];
   ticket_code: string | null;
   notify: number;
+  server_id: number | null;
+  alert_kind: EngineEvent['alertKind'];
+  detail: string | null;
 }
 
 const toEvent = (r: Row): EngineEvent => ({
@@ -43,6 +56,9 @@ const toEvent = (r: Row): EngineEvent => ({
   serviceNames: JSON.parse(r.service_names) as string[],
   criticality: r.criticality,
   ticketCode: r.ticket_code,
+  serverId: r.server_id ?? null,
+  alertKind: r.alert_kind ?? null,
+  detail: r.detail ?? null,
   notify: r.notify === 1,
 });
 
@@ -60,9 +76,11 @@ export class EventJournal {
 
   constructor(private readonly db: Database.Database) {
     db.exec(EVENTS_TABLE_SQL);
+    const have = new Set((db.prepare('PRAGMA table_info(events)').all() as { name: string }[]).map((c) => c.name));
+    for (const [name, type] of ADDED_COLUMNS) if (!have.has(name)) db.exec(`ALTER TABLE events ADD COLUMN ${name} ${type}`);
     this.insertStmt = db.prepare(
-      `INSERT INTO events (at, kind, incident_key, incident_kind, server_name, service_names, criticality, ticket_code, notify)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO events (at, kind, incident_key, incident_kind, server_name, service_names, criticality, ticket_code, notify, server_id, alert_kind, detail)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     this.pruneRowsStmt = db.prepare('DELETE FROM events WHERE id <= ? - ?');
     this.pruneAgeStmt = db.prepare('DELETE FROM events WHERE at < ?');
@@ -83,6 +101,9 @@ export class EventJournal {
         e.criticality,
         e.ticketCode,
         e.notify ? 1 : 0,
+        e.serverId,
+        e.alertKind,
+        e.detail,
       );
       const id = Number(res.lastInsertRowid);
       this.pruneRowsStmt.run(id, EVENTS_MAX_ROWS);

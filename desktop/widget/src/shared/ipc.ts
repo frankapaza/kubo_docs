@@ -12,6 +12,7 @@ export type IpcChannel =
   | 'widget:summary'
   | 'widget:health'
   | 'widget:open-incident'
+  | 'widget:open-server'
   | 'widget:open-dashboard'
   | 'widget:dismiss-summary'
   | 'widget:close-health'
@@ -24,6 +25,8 @@ export interface WidgetApi {
   onSummary(cb: (summary: LoginSummary | null) => void): () => void;
   onHealth(cb: (rows: HealthRows | null) => void): () => void;
   openIncident(id: number): void;
+  /** Ficha del servidor (filas de alerta de servidor). */
+  openServer(id: number): void;
   openDashboard(): void;
   dismissSummary(): void;
   closeHealth(): void;

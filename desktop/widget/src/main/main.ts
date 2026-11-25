@@ -116,6 +116,9 @@ function start(): void {
   on('widget:open-incident', (id) => {
     if (typeof id === 'number' && Number.isSafeInteger(id) && id > 0) openCentral(`/monitoreo/incidentes/${id}`);
   });
+  on('widget:open-server', (id) => {
+    if (typeof id === 'number' && Number.isSafeInteger(id) && id > 0) openCentral(`/monitoreo/servidores?serverId=${id}`);
+  });
   on('widget:open-dashboard', () => openCentral('/monitoreo/estado'));
   on('widget:dismiss-summary', () => {
     summary = null;

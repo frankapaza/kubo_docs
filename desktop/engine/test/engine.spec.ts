@@ -10,7 +10,7 @@ import {
   type ProbeSignal,
   type ServiceTarget,
 } from '@kubo/monitoring-core';
-import { CentralHttpError, type CentralApi, type ProbeBatch, type ProbeConfig, type SyncResponse, type CombinedStateRow } from '../src/central-client';
+import { CentralHttpError, type CentralApi, type ProbeBatch, type ProbeConfig, type SyncResponse, type CombinedStateRow, type ServerAlert } from '../src/central-client';
 import { Engine } from '../src/engine';
 import type { EngineConfig } from '../src/config';
 import { Outbox } from '../src/outbox';
@@ -55,6 +55,8 @@ class FakeCentral implements CentralApi {
   config: ProbeConfig = { services: [svc(1)], schedule: DEFAULT_SCHEDULE, references: [] };
   orders: SyncResponse['orders'] = [];
   state: CombinedStateRow[] = [row(1)];
+  /** undefined = central vieja, sin el campo. */
+  serverAlerts: ServerAlert[] | undefined = undefined;
   readonly checks: CheckResult[] = [];
   readonly signals: ProbeSignal[] = [];
   readonly syncCalls: (string | null)[] = [];
@@ -70,6 +72,7 @@ class FakeCentral implements CentralApi {
       config: configVersion === this.configVersion ? null : this.config,
       orders,
       state: this.state,
+      ...(this.serverAlerts === undefined ? {} : { serverAlerts: this.serverAlerts }),
     };
   }
 
@@ -933,6 +936,105 @@ describe('Engine', () => {
         await clock.advance(15_000);
         expect(notified(engine)).toEqual(['OFFICE_OUTAGE_STARTED', 'CENTRAL_UNREACHABLE']);
         expect(kinds(engine).slice(-1)).toEqual(['CENTRAL_BACK']);
+      });
+    });
+
+    describe('alertas de servidor y mantenimiento', () => {
+      const disk = (detail = 'C: 9 % libre'): ServerAlert => ({ serverId: 10, serverName: 'srv', kind: 'DISK_LOW', detail });
+      const alertEvents = (e: Engine) =>
+        e.events(0, 500).events.map((x) => [x.kind, x.serverId, x.alertKind, x.detail, x.notify]);
+      const reopen = (e: Engine) => {
+        e.stop();
+        outbox.close();
+        outbox = new Outbox(join(dir, 'engine.db'));
+      };
+
+      it('primer arranque: las alertas ya activas no avisan; una nueva → STARTED; al irse → CLEARED; status las incluye', async () => {
+        central.serverAlerts = [disk()];
+        const engine = make(fakeCheck(() => true).fn);
+        engine.start();
+        await clock.advance(1);
+        expect(alertEvents(engine)).toEqual([]);
+        expect(engine.status().serverAlerts).toEqual([disk()]);
+        const silentAlert: ServerAlert = { serverId: 11, serverName: 'srv-2', kind: 'AGENT_SILENT', detail: 'sin datos desde 14:32' };
+        central.serverAlerts = [disk('C: 8 % libre'), silentAlert];
+        await clock.advance(15000);
+        expect(alertEvents(engine)).toEqual([['SERVER_ALERT_STARTED', 11, 'AGENT_SILENT', 'sin datos desde 14:32', false]]);
+        expect(engine.status().serverAlerts).toEqual([disk('C: 8 % libre'), silentAlert]);
+        central.serverAlerts = [];
+        await clock.advance(15000);
+        expect(alertEvents(engine).slice(1)).toEqual([
+          ['SERVER_ALERT_CLEARED', 10, 'DISK_LOW', 'C: 8 % libre', false],
+          ['SERVER_ALERT_CLEARED', 11, 'AGENT_SILENT', 'sin datos desde 14:32', false],
+        ]);
+      });
+
+      it('tras reiniciar, las alertas guardadas siembran la comparación: no se repite el aviso; la que se fue mientras tanto → CLEARED', async () => {
+        central.serverAlerts = [];
+        const engine = make(fakeCheck(() => true).fn);
+        engine.start();
+        await clock.advance(1);
+        central.serverAlerts = [disk(), disk('D: 5 % libre')];
+        await clock.advance(15000);
+        expect(alertEvents(engine).map((x) => [x[0], x[4]])).toEqual([['SERVER_ALERT_STARTED', true], ['SERVER_ALERT_STARTED', true]]);
+        reopen(engine);
+        central.serverAlerts = [disk()];
+        const e2 = make(fakeCheck(() => true).fn, outbox);
+        e2.start();
+        await clock.advance(1);
+        expect(alertEvents(e2).slice(2)).toEqual([['SERVER_ALERT_CLEARED', 10, 'DISK_LOW', 'D: 5 % libre', false]]);
+      });
+
+      it('una central vieja sin serverAlerts no emite CLEARED: se conserva lo anterior', async () => {
+        central.serverAlerts = [];
+        const engine = make(fakeCheck(() => true).fn);
+        engine.start();
+        await clock.advance(1);
+        central.serverAlerts = [disk()];
+        await clock.advance(15000);
+        central.serverAlerts = undefined;
+        await clock.advance(30000);
+        expect(alertEvents(engine).map((x) => x[0])).toEqual(['SERVER_ALERT_STARTED']);
+        expect(engine.status().serverAlerts).toEqual([disk()]);
+      });
+
+      it('central vieja desde el principio: sin alertas en status ni eventos', async () => {
+        const engine = make(fakeCheck(() => true).fn);
+        engine.start();
+        await clock.advance(1);
+        expect(engine.status().serverAlerts).toEqual([]);
+        await clock.advance(15000);
+        expect(alertEvents(engine)).toEqual([]);
+      });
+
+      it('mantenimiento: un servicio caído que entra en la ventana no da RECOVERED; se guarda el estado enmascarado; al salir caído con otro incidente, OPENED sin repetir el aviso (decisión 19)', async () => {
+        central.state = [{ ...row(1), status: 'DOWN', incidentId: 5 }];
+        const engine = make(fakeCheck(() => true).fn);
+        engine.start();
+        await clock.advance(1);
+        central.state = [{ ...row(1), maintenance: true }];
+        await clock.advance(15000);
+        expect(kinds(engine)).toEqual([]);
+        const frozen = { ...row(1), status: 'DOWN', incidentId: 5, maintenance: true };
+        expect(engine.status().services).toEqual([frozen]);
+        expect(JSON.parse(outbox.loadState()!)).toEqual([frozen]);
+        central.state = [{ ...row(1), status: 'DOWN', incidentId: 9, maintenance: false }];
+        await clock.advance(15000);
+        // Para quien mira, el servicio siguió caído: ya se avisó al entrar, no hay RECOVERED intermedio.
+        expect(engine.events(0, 500).events.map((e) => [e.kind, e.incidentKey, e.notify])).toEqual([['INCIDENT_OPENED', 9, false]]);
+      });
+
+      it('mantenimiento: un incidente abierto durante la ventana avisa recién al salir de ella', async () => {
+        const engine = make(fakeCheck(() => true).fn);
+        engine.start();
+        await clock.advance(1);
+        central.state = [{ ...row(1), status: 'DOWN', incidentId: 7, maintenance: true }];
+        await clock.advance(30000);
+        expect(kinds(engine)).toEqual([]);
+        expect(engine.status().services).toEqual([{ ...row(1), maintenance: true }]);
+        central.state = [{ ...row(1), status: 'DOWN', incidentId: 7 }];
+        await clock.advance(15000);
+        expect(engine.events(0, 500).events.map((e) => [e.kind, e.incidentKey, e.notify])).toEqual([['INCIDENT_OPENED', 7, true]]);
       });
     });
 

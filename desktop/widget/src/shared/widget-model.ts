@@ -1,4 +1,4 @@
-import type { CombinedStateRow, EngineStatus, ProbeView } from './types';
+import type { CombinedStateRow, EngineStatus, ProbeView, ServerAlert, ServerAlertKind } from './types';
 
 export type Tone = 'ok' | 'red' | 'amber' | 'grey';
 
@@ -8,7 +8,41 @@ export interface WidgetRow {
   title: string;
   detail: string;
   incidentId: number | null;
+  /** Solo en las filas de alerta de servidor: el clic abre la ficha del servidor. */
+  serverId?: number;
   children: WidgetRow[];
+}
+
+/** Texto de cada tipo de alerta de servidor (fila del widget y notificación). */
+export const ALERT_LABEL: Record<ServerAlertKind, string> = {
+  DISK_LOW: 'Disco con poco espacio',
+  AGENT_SILENT: 'Agente sin datos',
+};
+
+/**
+ * Clave de una alerta de servidor (la misma regla que `serverAlertKey` del motor): la unidad sin
+ * cifras para el disco («C: 9 % libre» → «C:»), vacía para el agente mudo.
+ */
+export function serverAlertKey(serverId: number, kind: ServerAlertKind, detail: string): string {
+  const unit = kind === 'DISK_LOW' ? detail.replace(/\s*\d+\s*%\s*libre\s*$/, '').trim() : '';
+  return `${serverId}:${kind}:${unit}`;
+}
+
+/** Ficha del servidor en la web (`centralUrl` ya viene sin barra final). */
+export function serverUrl(centralUrl: string, serverId: number): string {
+  return `${centralUrl}/monitoreo/servidores?serverId=${serverId}`;
+}
+
+function alertRow(a: ServerAlert): WidgetRow {
+  return {
+    key: `a:${serverAlertKey(a.serverId, a.kind, a.detail)}`,
+    tone: 'amber',
+    title: `${ALERT_LABEL[a.kind]} · ${a.serverName} · ${a.detail}`,
+    detail: '',
+    incidentId: null,
+    serverId: a.serverId,
+    children: [],
+  };
 }
 
 export interface WidgetModel {
@@ -74,6 +108,8 @@ function problemRows(status: EngineStatus): WidgetRow[] {
   const servers = new Map<number, { rows: WidgetRow[]; src: CombinedStateRow[] }>();
   const rows: WidgetRow[] = [];
   for (const r of status.services) {
+    // En mantenimiento no es un problema: la barra solo los cuenta (decisión 5).
+    if (r.maintenance === true) continue;
     const tone = rowTone(r);
     if (tone === null) continue;
     const child = serviceRow(r, tone);
@@ -105,7 +141,7 @@ function problemRows(status: EngineStatus): WidgetRow[] {
     const lead = g.src.find((r) => rowTone(r) === 'red') ?? g.src[0];
     row.detail = withTicket(marks(lead), g.src.find((r) => r.ticketCode)?.ticketCode ?? null);
   }
-  const extra: WidgetRow[] = [];
+  const extra: WidgetRow[] = (status.serverAlerts ?? []).map(alertRow);
   // Sin internet en la oficina tampoco hay central: es el mismo corte, solo la fila de oficina.
   // `reachable` solo cuenta fallos reales de red: si es false, la central no responde aunque el corte
   // de rechazo siga abierto; si responde y rechaza, «rechaza».
@@ -133,7 +169,9 @@ export function deriveModel(reach: EngineReach, now: Date): WidgetModel {
     case 'forbidden': return { tone: 'grey', headline: 'Sin permiso para leer el monitor', time, rows: [], expanded: false };
   }
   const rows = problemRows(reach.status);
-  if (rows.length === 0) return { tone: 'ok', headline: 'KUBO · Todo operativo', time, rows, expanded: false };
+  const inMaintenance = reach.status.services.filter((r) => r.maintenance === true).length;
+  const tail = inMaintenance > 0 ? ` · ${inMaintenance} en mantenimiento` : '';
+  if (rows.length === 0) return { tone: 'ok', headline: `KUBO · Todo operativo${tail}`, time, rows, expanded: false };
   const n = rows.length;
-  return { tone: worst(rows.map((r) => r.tone)), headline: `KUBO · ${n} ${n === 1 ? 'problema' : 'problemas'}`, time, rows, expanded: true };
+  return { tone: worst(rows.map((r) => r.tone)), headline: `KUBO · ${n} ${n === 1 ? 'problema' : 'problemas'}${tail}`, time, rows, expanded: true };
 }

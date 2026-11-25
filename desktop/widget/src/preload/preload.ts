@@ -17,6 +17,7 @@ const api: WidgetApi = {
   onSummary: (cb) => listen('widget:summary', cb),
   onHealth: (cb) => listen('widget:health', cb),
   openIncident: (id) => send('widget:open-incident', id),
+  openServer: (id) => send('widget:open-server', id),
   openDashboard: () => send('widget:open-dashboard'),
   dismissSummary: () => send('widget:dismiss-summary'),
   closeHealth: () => send('widget:close-health'),

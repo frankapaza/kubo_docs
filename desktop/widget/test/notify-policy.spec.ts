@@ -65,6 +65,37 @@ describe('toastsFor', () => {
     expect(t[0].title).toBe('Sin internet en la oficina');
     expect(t[0].url).toBe(`${CENTRAL}/monitoreo/estado`);
   });
+
+  describe('alertas de servidor', () => {
+    const alert = (p: Partial<EngineEvent>) => ev({
+      kind: 'SERVER_ALERT_STARTED', incidentKey: null, incidentKind: null, serverName: 'SRV-02', serviceNames: [], criticality: null,
+      serverId: 3, alertKind: 'DISK_LOW', detail: 'C: 9 % libre', notify: true, ...p,
+    });
+
+    it('DISK_LOW: «Disco con poco espacio», cuerpo «servidor · detalle» y la ficha del servidor', () => {
+      const t = toastsFor([alert({})], CENTRAL, new Map(), T0);
+      expect(t).toEqual([{
+        title: 'Disco con poco espacio',
+        body: 'SRV-02 · C: 9 % libre',
+        url: `${CENTRAL}/monitoreo/servidores?serverId=3`,
+        dedupeKey: 'SERVER_ALERT_STARTED:3:DISK_LOW:C:',
+      }]);
+      expect(isAllowedUrl(t[0].url, CENTRAL)).toBe(true);
+    });
+
+    it('dos servidores o dos unidades no se deduplican entre sí', () => {
+      const t = toastsFor([alert({ id: 1 }), alert({ id: 2, detail: 'D: 4 % libre' }), alert({ id: 3, serverId: 5 })], CENTRAL, new Map(), T0);
+      expect(t).toHaveLength(3);
+    });
+
+    it('AGENT_SILENT y CLEARED no avisan', () => {
+      const events = [
+        alert({ alertKind: 'AGENT_SILENT', detail: 'sin datos desde 14:32', notify: false }),
+        alert({ id: 2, kind: 'SERVER_ALERT_CLEARED', notify: false }),
+      ];
+      expect(toastsFor(events, CENTRAL, new Map(), T0)).toEqual([]);
+    });
+  });
 });
 
 describe('isAllowedUrl', () => {

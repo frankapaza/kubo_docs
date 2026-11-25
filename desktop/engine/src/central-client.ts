@@ -23,6 +23,22 @@ export interface CombinedStateRow {
   incidentId: number | null;
   parentIncidentId: number | null;
   ticketCode: string | null;
+  /**
+   * El servicio está en una ventana de mantenimiento activa. Opcional: una central anterior
+   * no lo envía (equivale a false).
+   */
+  maintenance?: boolean;
+}
+
+export type ServerAlertKind = 'DISK_LOW' | 'AGENT_SILENT';
+
+/** Aviso de servidor (`backend/.../domain/server-alerts.ts`, decisión 11). */
+export interface ServerAlert {
+  serverId: number;
+  serverName: string;
+  kind: ServerAlertKind;
+  /** «C: 9 % libre» o «sin datos desde 14:32». */
+  detail: string;
 }
 
 export interface ProbeConfig {
@@ -37,6 +53,8 @@ export interface SyncResponse {
   config: ProbeConfig | null;
   orders: { id: number; serviceId: number; kind: 'MANUAL' | 'CROSS' }[];
   state: CombinedStateRow[];
+  /** Avisos de servidor vigentes. Ausente en una central anterior: se desconoce (no es «ninguno»). */
+  serverAlerts?: ServerAlert[];
 }
 
 export interface ProbeBatch {

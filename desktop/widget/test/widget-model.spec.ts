@@ -1,5 +1,5 @@
 import { deriveModel } from '../src/shared/widget-model';
-import type { CombinedStateRow, EngineStatus, ProbeView, TrackerState } from '../src/shared/types';
+import type { CombinedStateRow, EngineStatus, ProbeView, ServerAlert, TrackerState } from '../src/shared/types';
 
 const NOW = new Date('2026-11-24T15:07:00Z'); // 10:07 en Lima
 
@@ -16,7 +16,7 @@ function status(services: CombinedStateRow[], over: Partial<EngineStatus> = {}):
   return {
     engine: { version: '1', startedAt: '2026-11-24T00:00:00Z' }, centralUrl: 'https://c.example',
     central: { reachable: true, lastSyncAt: null, consecutiveFailures: 0, rejecting: false },
-    officeOutage: false, pending: 0, services, ...over,
+    officeOutage: false, pending: 0, services, serverAlerts: [], ...over,
   };
 }
 
@@ -129,5 +129,49 @@ describe('deriveModel', () => {
     const m = ok(status([row({ status: 'DOWN', incidentId: 1, office: pv('FAILED') })], { officeOutage: true }));
     expect(m.tone).toBe('red');
     expect(m.rows[0].tone).toBe('red');
+  });
+});
+
+describe('deriveModel: alertas de servidor y mantenimiento', () => {
+  const disk: ServerAlert = { serverId: 3, serverName: 'SRV-02', kind: 'DISK_LOW', detail: 'C: 9 % libre' };
+  const silent: ServerAlert = { serverId: 4, serverName: 'SRV-03', kind: 'AGENT_SILENT', detail: 'sin datos desde 14:32' };
+
+  it('una alerta de disco: barra ámbar y fila ámbar con el servidor y el detalle', () => {
+    const m = ok(status([row({})], { serverAlerts: [disk] }));
+    expect(m).toMatchObject({ tone: 'amber', headline: 'KUBO · 1 problema', expanded: true });
+    expect(m.rows).toEqual([
+      { key: 'a:3:DISK_LOW:C:', tone: 'amber', title: 'Disco con poco espacio · SRV-02 · C: 9 % libre', detail: '', incidentId: null, serverId: 3, children: [] },
+    ]);
+  });
+
+  it('agente sin datos: fila ámbar; el rojo de un servicio va primero', () => {
+    const m = ok(status([row({ status: 'DOWN', incidentId: 7, office: pv('FAILED') })], { serverAlerts: [silent] }));
+    expect(m.tone).toBe('red');
+    expect(m.rows.map((r) => [r.tone, r.title])).toEqual([
+      ['red', 'ERP'],
+      ['amber', 'Agente sin datos · SRV-03 · sin datos desde 14:32'],
+    ]);
+    expect(m.headline).toBe('KUBO · 2 problemas');
+  });
+
+  it('un motor anterior sin serverAlerts se ve como hoy', () => {
+    const s = status([row({})]);
+    delete (s as Partial<EngineStatus>).serverAlerts;
+    expect(ok(s)).toMatchObject({ tone: 'ok', headline: 'KUBO · Todo operativo', rows: [] });
+  });
+
+  it('los servicios en mantenimiento no son filas de problema; la barra los cuenta', () => {
+    const m = ok(status([
+      row({ serviceId: 1, status: 'DOWN', incidentId: 7, office: pv('FAILED'), maintenance: true }),
+      row({ serviceId: 2, serviceName: 'API', maintenance: true }),
+      row({ serviceId: 3, serviceName: 'Web' }),
+    ]));
+    expect(m).toMatchObject({ tone: 'ok', headline: 'KUBO · Todo operativo · 2 en mantenimiento', rows: [], expanded: false });
+  });
+
+  it('con problemas y mantenimiento, la barra suma «· N en mantenimiento»', () => {
+    const m = ok(status([row({ serviceId: 1, maintenance: true }), row({ serviceId: 2, serviceName: 'API', status: 'DOWN', incidentId: 8 })]));
+    expect(m.headline).toBe('KUBO · 1 problema · 1 en mantenimiento');
+    expect(m.rows.map((r) => r.title)).toEqual(['API']);
   });
 });

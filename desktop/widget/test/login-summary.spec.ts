@@ -114,4 +114,31 @@ describe('summarize', () => {
     expect([s.opened, s.recovered]).toEqual([1, 1]);
     expect(s.lines[0]).toBe('1 incidente abierto: API');
   });
+
+  describe('alertas de servidor', () => {
+    const ALERT: WidgetRow = { key: 'a:3:DISK_LOW:C:', tone: 'amber', title: 'Disco con poco espacio · SRV-02 · C: 9 % libre', detail: '', incidentId: null, serverId: 3, children: [] };
+    const started = (p: Partial<EngineEvent>) => ev({
+      kind: 'SERVER_ALERT_STARTED', incidentKey: null, incidentKind: null, serverName: 'SRV-02', serviceNames: [], criticality: null,
+      serverId: 3, alertKind: 'DISK_LOW', detail: 'C: 9 % libre', ...p,
+    });
+
+    it('cuenta las alertas que siguen activas', () => {
+      const s = summarize([ev({ id: 1 })], SINCE, model([ROW, ALERT]))!;
+      expect(s.serverAlerts).toBe(1);
+      expect(s.lines.at(-1)).toBe('Siguen activos: API, Disco con poco espacio · SRV-02 · C: 9 % libre');
+    });
+
+    it('las alertas aparecidas desde la última sesión cuentan una vez por servidor, tipo y unidad', () => {
+      const events = [
+        started({ id: 1 }),
+        started({ id: 2, kind: 'SERVER_ALERT_CLEARED', at: '2026-11-24T06:00:00Z' }),
+        started({ id: 3, detail: 'C: 8 % libre', at: '2026-11-24T07:00:00Z' }),
+        started({ id: 4, serverId: 4, serverName: 'SRV-03', alertKind: 'AGENT_SILENT', detail: 'sin datos desde 01:10', notify: false }),
+      ];
+      const s = summarize(events, SINCE, model([ALERT]))!;
+      expect(s).not.toBeNull();
+      expect(s.alertsStarted).toBe(2);
+      expect(s.lines).toEqual(['2 avisos de servidor: SRV-02, SRV-03', 'Sigue activo: Disco con poco espacio · SRV-02 · C: 9 % libre']);
+    });
+  });
 });

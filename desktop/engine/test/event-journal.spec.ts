@@ -11,6 +11,9 @@ const ev = (at: string, over: Partial<EngineEvent> = {}): Omit<EngineEvent, 'id'
   serviceNames: [],
   criticality: null,
   ticketCode: null,
+  serverId: null,
+  alertKind: null,
+  detail: null,
   notify: true,
   ...over,
 });
@@ -52,6 +55,9 @@ describe('EventJournal', () => {
       serviceNames: ['a', 'b'],
       criticality: 'HIGH',
       ticketCode: 'KT-1',
+      serverId: null,
+      alertKind: null,
+      detail: null,
       notify: true,
     });
   });
@@ -80,5 +86,28 @@ describe('EventJournal', () => {
     const keep = j.append(ev('2026-10-30T00:00:00.000Z'));
     const last = j.append(ev('2026-11-24T10:00:00.000Z'));
     expect(j.after(0, 10).map((e) => e.id)).toEqual([keep.id, last.id]);
+  });
+
+  it('las alertas de servidor guardan serverId, alertKind y detail', () => {
+    const a = j.append(ev('2026-11-24T10:00:00.000Z', { kind: 'SERVER_ALERT_STARTED', serverName: 'srv', serverId: 3, alertKind: 'DISK_LOW', detail: 'C: 9 % libre' }));
+    expect(j.after(0, 10)).toEqual([a]);
+    expect(a).toMatchObject({ serverId: 3, alertKind: 'DISK_LOW', detail: 'C: 9 % libre', notify: true });
+  });
+
+  it('una base con la tabla vieja (sin las columnas de alertas) se amplía y sus eventos leen null', () => {
+    const old = new Database(':memory:');
+    old.exec(`CREATE TABLE events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT NOT NULL, incident_key INTEGER,
+      incident_kind TEXT, server_name TEXT, service_names TEXT NOT NULL, criticality TEXT, ticket_code TEXT, notify INTEGER NOT NULL)`);
+    old.prepare("INSERT INTO events (at, kind, service_names, notify) VALUES ('2026-11-24T10:00:00.000Z', 'CENTRAL_BACK', '[]', 0)").run();
+    const j2 = new EventJournal(old);
+    const b = j2.append(ev('2026-11-24T10:01:00.000Z', { kind: 'SERVER_ALERT_CLEARED', serverId: 4, alertKind: 'AGENT_SILENT', detail: 'sin datos desde 14:32', notify: false }));
+    expect(j2.after(0, 10)).toEqual([
+      expect.objectContaining({ id: 1, kind: 'CENTRAL_BACK', serverId: null, alertKind: null, detail: null }),
+      b,
+    ]);
+    // Abrirla otra vez no vuelve a añadir las columnas.
+    expect(() => new EventJournal(old)).not.toThrow();
+    old.close();
   });
 });

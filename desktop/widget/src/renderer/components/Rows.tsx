@@ -2,7 +2,8 @@ import type { WidgetRow } from '../../shared/widget-model';
 import { TONE_COLORS } from '../palette';
 
 function open(row: WidgetRow): void {
-  if (row.incidentId !== null) window.kubo.openIncident(row.incidentId);
+  if (row.serverId !== undefined) window.kubo.openServer(row.serverId);
+  else if (row.incidentId !== null) window.kubo.openIncident(row.incidentId);
   else window.kubo.openDashboard();
 }
 
@@ -20,7 +21,7 @@ function Row({ row, child = false, unfolded = false, onToggle }: RowProps) {
     <>
       <div className={`row${child ? ' child' : ''}`} style={{ background: c.bg }}>
         <span className="mark" style={{ color: c.fg }}>{row.tone === 'red' ? '✕' : '!'}</span>
-        <button type="button" className="row-main" onClick={() => open(row)} title="Abrir el incidente en la web">
+        <button type="button" className="row-main" onClick={() => open(row)} title={row.serverId !== undefined ? 'Abrir el servidor en la web' : 'Abrir el incidente en la web'}>
           <span className="row-title" style={{ color: c.fg }}>{row.title}</span>
           <span className="row-detail">{row.detail || (hasChildren ? `${row.children.length} servicios` : '')}</span>
         </button>
