@@ -8,6 +8,8 @@ import { clientUsersApi } from '../../api/client-users.api';
 interface Props {
   open: boolean;
   currentClientId: number | null;
+  /** Cuántos tickets se mueven a la vez (selección en la bandeja). Por defecto, 1. */
+  count?: number;
   onCancel: () => void;
   onConfirm: (v: { clientId: number; systemId: number | null; clientUserId: number | null }) => void;
 }
@@ -22,7 +24,7 @@ const labelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 600, display
  * cliente nuevo tiene alguno activo; el usuario es a quien le llegarán los
  * avisos del ticket por correo (puede quedar en «ninguno»).
  */
-export default function ChangeClientDialog({ open, currentClientId, onCancel, onConfirm }: Props) {
+export default function ChangeClientDialog({ open, currentClientId, count = 1, onCancel, onConfirm }: Props) {
   const [clientId, setClientId] = useState<number | ''>('');
   const [systemId, setSystemId] = useState<number | ''>('');
   const [clientUserId, setClientUserId] = useState<number | ''>('');
@@ -81,7 +83,7 @@ export default function ChangeClientDialog({ open, currentClientId, onCancel, on
         style={{ background: '#fff', borderRadius: 10, padding: 22, width: 480, maxWidth: '92vw', display: 'flex', flexDirection: 'column', gap: 14 }}
       >
         <h2 id="client-dialog-title" style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
-          Cambiar cliente
+          {count > 1 ? `Cambiar cliente de ${count} tickets` : 'Cambiar cliente'}
         </h2>
 
         <label htmlFor="change-client">
@@ -132,7 +134,7 @@ export default function ChangeClientDialog({ open, currentClientId, onCancel, on
         )}
 
         <p style={{ margin: 0, fontSize: 12, color: '#6d7577', lineHeight: 1.5 }}>
-          El ticket conserva su código, estado, conversación y SLA. Deja de verse en el portal del cliente anterior y
+          {count > 1 ? 'Cada ticket' : 'El ticket'} conserva su código, estado, conversación y SLA. Deja de verse en el portal del cliente anterior y
           pasa a verse en el del nuevo. Si tenía un proyecto del cliente anterior, se suelta.
         </p>
 
@@ -157,7 +159,7 @@ export default function ChangeClientDialog({ open, currentClientId, onCancel, on
               background: ready ? '#15191a' : '#c9cdce', color: '#fff', cursor: ready ? 'pointer' : 'not-allowed',
             }}
           >
-            Mover ticket
+            {count > 1 ? `Mover ${count} tickets` : 'Mover ticket'}
           </button>
         </div>
       </div>
