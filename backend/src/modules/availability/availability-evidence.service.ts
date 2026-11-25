@@ -1,6 +1,7 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
+import { promises as fsp } from 'fs';
 import { extname } from 'path';
 import { In, Repository } from 'typeorm';
 import { IStorageService, STORAGE_SERVICE } from '../audio/interfaces/storage.interface';
@@ -44,6 +45,8 @@ const notFound = (message: string) => new NotFoundException({ code: 'NOT_FOUND',
 /** Evidencia (p. ej. un WinMTR) adjunta a un incidente. */
 @Injectable()
 export class AvailabilityEvidenceService {
+  private readonly logger = new Logger(AvailabilityEvidenceService.name);
+
   constructor(
     @InjectRepository(MonitorEvidence) private readonly evidence: Repository<MonitorEvidence>,
     @InjectRepository(MonitorIncident) private readonly incidents: Repository<MonitorIncident>,
@@ -114,14 +117,20 @@ export class AvailabilityEvidenceService {
   async openFile(id: number): Promise<{ fileName: string; mimeType: string; sizeBytes: number; stream: NodeJS.ReadableStream }> {
     const row = await this.evidence.findOne({ where: { id } });
     if (!row) throw notFound('Evidencia no encontrada');
+    // Fila sin archivo (p. ej. limpieza manual del disco): 404 antes de tocar las cabeceras.
+    const present = await fsp.stat(this.storage.getPath(row.storageKey)).then((s) => s.isFile(), () => false);
+    if (!present) {
+      throw new NotFoundException({ code: 'EVIDENCIA_SIN_ARCHIVO', message: 'El archivo de esta evidencia ya no está disponible' });
+    }
     return { fileName: row.fileName, mimeType: row.mimeType, sizeBytes: row.sizeBytes, stream: this.storage.createReadStream(row.storageKey) };
   }
 
   async remove(id: number): Promise<void> {
     const row = await this.evidence.findOne({ where: { id } });
     if (!row) throw notFound('Evidencia no encontrada');
-    await this.storage.remove(row.storageKey);
+    // Primero la fila: si la base falla no queda una fila apuntando a un archivo borrado.
     await this.evidence.delete({ id });
+    await this.storage.remove(row.storageKey).catch((e) => this.logger.warn(`No se pudo borrar el archivo ${row.storageKey}: ${e?.message ?? e}`));
   }
 
   private async userNames(ids: Array<number | null>): Promise<Map<number, string>> {

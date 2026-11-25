@@ -1,5 +1,5 @@
 import {
-  Body, CallHandler, Controller, Delete, ExecutionContext, Get, HttpCode, Injectable, NestInterceptor, Param,
+  Body, CallHandler, Controller, Delete, ExecutionContext, Get, HttpCode, Injectable, Logger, NestInterceptor, Param,
   ParseIntPipe, PayloadTooLargeException, Post, Res, UploadedFile, UseGuards, UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -52,6 +52,11 @@ export class AvailabilityEvidenceController {
     res.setHeader('Content-Type', f.mimeType);
     res.setHeader('Content-Disposition', contentDisposition(f.fileName));
     res.setHeader('X-Content-Type-Options', 'nosniff');
+    f.stream.on('error', (e) => {
+      // Las cabeceras ya salieron (el archivo desapareció a mitad): solo queda cortar la conexión.
+      new Logger('AvailabilityEvidenceController').warn(`Fallo leyendo evidencia ${id}: ${e.message}`);
+      res.destroy();
+    });
     f.stream.pipe(res);
   }
 

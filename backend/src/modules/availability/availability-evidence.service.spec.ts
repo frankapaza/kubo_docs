@@ -73,6 +73,7 @@ describe('AvailabilityEvidenceService', () => {
     const { svc, rows, storage, evidence } = make();
     rows.push({ id: 9, storageKey: 'k/1.txt' });
     await svc.remove(9);
+    expect(evidence.delete.mock.invocationCallOrder[0]).toBeLessThan(storage.remove.mock.invocationCallOrder[0]);
     expect(storage.remove).toHaveBeenCalledWith('k/1.txt');
     expect(evidence.delete).toHaveBeenCalledWith({ id: 9 });
     await expect(svc.remove(77)).rejects.toBeInstanceOf(NotFoundException);
@@ -89,6 +90,23 @@ describe('AvailabilityEvidenceService', () => {
     expect(m.get(6)).toHaveLength(1);
     expect(m.has(7)).toBe(false);
     expect((await svc.listForIncidents([])).size).toBe(0);
+  });
+});
+
+describe('AvailabilityEvidenceService.openFile', () => {
+  it('fila sin archivo da 404 EVIDENCIA_SIN_ARCHIVO', async () => {
+    const { svc, rows, storage } = make();
+    rows.push({ id: 9, storageKey: 'k/1.txt', fileName: 'a.txt', mimeType: 'text/plain', sizeBytes: 1 });
+    (storage as any).getPath = () => require('path').join(require('os').tmpdir(), 'no-existe-evid.txt');
+    const err: any = await svc.openFile(9).catch((e) => e);
+    expect(err).toBeInstanceOf(NotFoundException);
+    expect(err.getResponse().code).toBe('EVIDENCIA_SIN_ARCHIVO');
+  });
+  it('con archivo devuelve el stream', async () => {
+    const { svc, rows, storage } = make();
+    rows.push({ id: 9, storageKey: 'k/1.txt', fileName: 'a.txt', mimeType: 'text/plain', sizeBytes: 1 });
+    (storage as any).getPath = () => __filename;
+    expect((await svc.openFile(9)).stream).toBe('STREAM');
   });
 });
 

@@ -277,6 +277,14 @@ describe('AvailabilityStateService incidentes', () => {
     expect(d.incident).toMatchObject({ id: 510, ticketCode: 'TK-901' });
   });
 
+  it('detalle: incluye la evidencia que devuelve listForIncidents', async () => {
+    const { svc } = make();
+    const ev = [{ id: 1, fileName: 'w.txt', origin: 'OFICINA', capturedAt: T0, notes: null, sizeBytes: 3, createdByName: 'Ana' }];
+    (svc as any).evidence.listForIncidents.mockResolvedValueOnce(new Map([[510, ev]]));
+    expect((await svc.incidentDetail(510)).evidence).toEqual(ev);
+    expect((await svc.incidentDetail(500)).evidence).toEqual([]);
+  });
+
   it('detalle: un diagnóstico de otro tipo no vale y se usa el texto del tipo; 404 si no existe', async () => {
     const { svc } = make();
     const d = await svc.incidentDetail(500);
