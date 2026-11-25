@@ -6,6 +6,7 @@ import { Repository } from 'typeorm';
 import { ClientsService } from '../clients/clients.service';
 import { ClientSystemsRepository } from '../tickets/client-systems.repository';
 import { CheckResult, runCheck } from './core';
+import { serviceShapeError } from './domain/service-shape';
 import { buildInstallScript } from './domain/agent-install-script';
 import { MonitorProbe } from './entities/monitor-probe.entity';
 import { MonitorEntityStatus, MonitorServer } from './entities/monitor-server.entity';
@@ -230,10 +231,9 @@ export class AvailabilityInventoryService {
   // ---- Auxiliares ----
 
   private validateShape(protocol: string, target: string, port: number | null): void {
-    if (protocol === 'HTTPS' && !target.startsWith('https://')) throw badInput('Un servicio HTTPS exige un target que empiece por https://');
-    if (protocol === 'TCP' && (port === null || !Number.isInteger(port) || port < 1 || port > 65535)) {
-      throw badInput('Un servicio TCP exige un puerto entre 1 y 65535');
-    }
+    const err = serviceShapeError(protocol, target, port);
+    if (err === 'HTTPS_URL') throw badInput('Un servicio HTTPS exige un target que empiece por https://');
+    if (err === 'TCP_PORT') throw badInput('Un servicio TCP exige un puerto entre 1 y 65535');
   }
 
   private async validateSystem(clientId: number, systemId: number | null): Promise<void> {

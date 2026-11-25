@@ -19,6 +19,7 @@ import { AvailabilityIngestController } from './availability-ingest.controller';
 import { AvailabilitySyncService } from './availability-sync.service';
 import { AvailabilityIngestService } from './availability-ingest.service';
 import { AvailabilityInventoryController } from './availability-inventory.controller';
+import { AvailabilityImportService } from './availability-import.service';
 import { AvailabilityInventoryService } from './availability-inventory.service';
 import { AvailabilityMaintenanceController } from './availability-maintenance.controller';
 import { AvailabilityMaintenanceService } from './availability-maintenance.service';
@@ -92,6 +93,7 @@ import { ProbeTokenGuard } from './probe-token.guard';
   ],
   providers: [
     AvailabilityInventoryService,
+    AvailabilityImportService,
     AvailabilityIngestService,
     AvailabilitySyncService,
     AvailabilityStateService,

@@ -5,6 +5,8 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
 import { AvailabilityAgentService } from './availability-agent.service';
+import { AvailabilityImportService } from './availability-import.service';
+import { ImportCsvDto } from './dto/import.dto';
 import { AvailabilityInventoryService } from './availability-inventory.service';
 import { CreateServerDto, CreateServiceDto, TestServiceDto, UpdateServerDto, UpdateServiceDto } from './dto/inventory.dto';
 
@@ -14,6 +16,7 @@ export class AvailabilityInventoryController {
   constructor(
     private readonly inventory: AvailabilityInventoryService,
     private readonly agent: AvailabilityAgentService,
+    private readonly importer: AvailabilityImportService,
   ) {}
 
   @Get('servers')
@@ -76,6 +79,22 @@ export class AvailabilityInventoryController {
   @Patch('services/:id')
   updateService(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateServiceDto, @CurrentUser() user: AuthUser) {
     return this.inventory.updateService(id, dto, user.id);
+  }
+
+  /** Vista previa de la importación CSV: no escribe nada. */
+  @Roles('ADMIN')
+  @Post('import/preview')
+  @HttpCode(200)
+  importPreview(@Body() dto: ImportCsvDto) {
+    return this.importer.preview(dto.csv);
+  }
+
+  /** Vuelve a validar y crea las filas nuevas en una sola transacción. */
+  @Roles('ADMIN')
+  @Post('import/commit')
+  @HttpCode(200)
+  importCommit(@Body() dto: ImportCsvDto) {
+    return this.importer.commit(dto.csv);
   }
 
   @Get('probes')

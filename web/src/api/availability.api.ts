@@ -321,7 +321,26 @@ function filenameFrom(headers: unknown): string | null {
   return name || null;
 }
 
+export interface ImportRowResult {
+  line: number;
+  status: 'NEW' | 'DUPLICATE' | 'INVALID';
+  errors: string[];
+  serverAction: 'CREATE' | 'REUSE' | null;
+  data: {
+    clientId: number;
+    server: { name: string; host: string };
+    service: { name: string; protocol: Protocol; target: string; port: number | null };
+  } | null;
+}
+export interface ImportPreview { rows: ImportRowResult[]; summary: { new: number; duplicate: number; invalid: number } }
+export interface ImportCommitResult { createdServers: number; createdServices: number; skipped: number }
+
 export const availabilityApi = {
+  importPreview: (csv: string) =>
+    api.post<ImportPreview>('/availability/import/preview', { csv }).then((r) => r.data),
+  importCommit: (csv: string) =>
+    api.post<ImportCommitResult>('/availability/import/commit', { csv }).then((r) => r.data),
+
   state: (params: StateFilter = {}) =>
     api.get<StateRow[]>('/availability/state', { params }).then((r) => r.data),
 

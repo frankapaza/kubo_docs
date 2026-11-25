@@ -10,6 +10,7 @@ import type { ClientSystem } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { askConfirm } from '../../ui/ConfirmDialog';
 import { toast } from '../../ui/Toast';
+import ImportCsvPanel from './ImportCsvPanel';
 import { parseWatchList, validateWatchList } from './report-format';
 import {
   apiMessage, btn, btnPrimary, CRITICALITY_LABELS, inputStyle, labelStyle, PROTOCOL_OPTIONS, tableWrap, td, th,
@@ -28,6 +29,7 @@ export default function AvailabilityInventoryPage() {
   const queryClient = useQueryClient();
   const [clientFilter, setClientFilter] = useState<number | ''>('');
   const [panel, setPanel] = useState<Panel | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const clients = useQuery({ queryKey: ['availability', 'clients'], queryFn: () => clientsApi.list(), staleTime: 5 * 60_000 });
   const servers = useQuery({ queryKey: ['availability', 'servers'], queryFn: availabilityApi.listServers });
@@ -112,9 +114,12 @@ export default function AvailabilityInventoryPage() {
             <option value="">Todos los clientes</option>
             {(clients.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.razonSocial}</option>)}
           </select>
+          {isAdmin && <button type="button" style={btn} onClick={() => setImporting((v) => !v)}>Importar CSV</button>}
           {isAdmin && <button type="button" style={btnPrimary} onClick={() => setPanel({ kind: 'server', server: null })}>Nuevo servidor</button>}
         </div>
       </div>
+
+      {isAdmin && importing && <ImportCsvPanel onDone={reload} onClose={() => setImporting(false)} />}
 
       {!isAdmin && (
         <div style={{ fontSize: 12, color: '#6d7577' }}>Solo un administrador puede modificar el inventario.</div>
