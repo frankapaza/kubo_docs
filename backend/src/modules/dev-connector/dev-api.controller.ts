@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, ParseIntPipe, Post, Req, UseGuards } from
 
 import { DevApiService } from './dev-api.service';
 import { DevKeyGuard, DevRequest } from './dev-key.guard';
-import { DevLinkDto, DevNoteDto, DevResolveDto, DevStatusDto } from './dto/dev-admin.dto';
+import { DevDeliverDto, DevLinkDto, DevNoteDto, DevResolveDto, DevStatusDto } from './dto/dev-admin.dto';
 
 /**
  * `/api/v1/dev/*`: lo que llama el MCP `kubo-devdocs`. Autentica la clave
@@ -41,6 +41,11 @@ export class DevApiController {
   @Post('items/:code/resolver')
   resolver(@Req() req: DevRequest, @Param('code') code: string, @Body() dto: DevResolveDto) {
     return this.api.resolver(req.dev!, code, dto);
+  }
+
+  @Post('items/:code/entregar')
+  entregar(@Req() req: DevRequest, @Param('code') code: string, @Body() dto: DevDeliverDto) {
+    return this.api.entregar(req.dev!, code, dto);
   }
 
   @Post('items/:code/borrador')

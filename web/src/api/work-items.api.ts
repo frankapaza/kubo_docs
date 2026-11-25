@@ -56,3 +56,59 @@ export const workItemsApi = {
   reject: (id: number, body: { reason: string }) =>
     api.post<WorkItem>(`/work-items/${id}/reject`, body).then((r) => r.data),
 };
+
+export type WorkItemDocKind = 'ESPECIFICACION' | 'MANUAL_USUARIO' | 'ACTA_CONFORMIDAD' | 'OTRO';
+
+export const WORK_ITEM_DOC_KIND_LABELS: Record<WorkItemDocKind, string> = {
+  ESPECIFICACION: 'Especificación del requerimiento',
+  MANUAL_USUARIO: 'Manual de usuario',
+  ACTA_CONFORMIDAD: 'Acta de conformidad',
+  OTRO: 'Otro',
+};
+
+export interface WorkItemDoc {
+  id: number;
+  workItemId: number;
+  kind: WorkItemDocKind;
+  kindLabel: string;
+  status: 'BORRADOR' | 'VIGENTE';
+  source: 'WEB' | 'CLAUDE';
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  uploadedByUserId: number | null;
+  approvedByUserId: number | null;
+  approvedAt: string | null;
+  createdAt: string;
+}
+
+/** Documentos de un requerimiento: Especificación, Manual de usuario, Acta de conformidad y otros. */
+export const workItemDocsApi = {
+  list: (workItemId: number) =>
+    api.get<WorkItemDoc[]>(`/work-items/${workItemId}/documents`).then((r) => r.data),
+
+  upload: (workItemId: number, kind: WorkItemDocKind, file: File) => {
+    const form = new FormData();
+    form.append('kind', kind);
+    form.append('file', file, file.name);
+    return api.post<WorkItemDoc>(`/work-items/${workItemId}/documents`, form).then((r) => r.data);
+  },
+
+  approve: (workItemId: number, docId: number) =>
+    api.post<WorkItemDoc>(`/work-items/${workItemId}/documents/${docId}/approve`).then((r) => r.data),
+
+  remove: (workItemId: number, docId: number) =>
+    api.delete<{ ok: true }>(`/work-items/${workItemId}/documents/${docId}`).then((r) => r.data),
+
+  download: async (workItemId: number, doc: WorkItemDoc) => {
+    const res = await api.get(`/work-items/${workItemId}/documents/${doc.id}/download`, { responseType: 'blob' });
+    const url = URL.createObjectURL(new Blob([res.data], { type: doc.mimeType }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = doc.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  },
+};

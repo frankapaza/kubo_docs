@@ -68,3 +68,15 @@ export class DevResolveDto {
   @IsString() @MinLength(1) @MaxLength(5_000)
   accionCorrectiva!: string;
 }
+
+/** Entregar un requerimiento a PRUEBAS: evidencia y manual de usuario (Markdown). */
+export class DevDeliverDto {
+  @IsString() @MinLength(1) @MaxLength(20_000)
+  solucion!: string;
+
+  @IsString() @MinLength(1) @MaxLength(10_000)
+  comoProbar!: string;
+
+  @IsString() @MinLength(1) @MaxLength(60_000)
+  manual!: string;
+}

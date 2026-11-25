@@ -28,7 +28,9 @@ const RQ = {
   assigneeUserId: 9, title: 'Exportar a Excel', descriptionMd: 'detalle', acceptanceCriteria: null, dueDate: null,
 };
 
-function build(over: { ticket?: object | null; rq?: object | null; open?: object[]; files?: object[] } = {}) {
+function build(
+  over: { ticket?: object | null; rq?: object | null; open?: object[]; files?: object[]; docs?: object[]; docBuffer?: Buffer } = {},
+) {
   const data = {
     findTicketByCode: jest.fn().mockResolvedValue(over.ticket === undefined ? TICKET : over.ticket),
     findWorkItemByCode: jest.fn().mockResolvedValue(over.rq === undefined ? RQ : over.rq),
@@ -47,7 +49,19 @@ function build(over: { ticket?: object | null; rq?: object | null; open?: object
     })),
   };
   const transitions = { transition: jest.fn().mockResolvedValue({ ...TICKET, status: 'EN_ATENCION' }) };
-  const board = { move: jest.fn().mockResolvedValue({ ...RQ, status: 'EN_PROCESO' }) };
+  const board = {
+    move: jest.fn().mockImplementation(async (i: { toStatus: string }) => ({ ...RQ, status: i.toStatus })),
+    assign: jest.fn().mockResolvedValue({ ...RQ, assigneeUserId: 9 }),
+  };
+  const docs = {
+    list: jest.fn().mockResolvedValue(over.docs ?? []),
+    readBuffer: jest.fn().mockImplementation(async (_w: number, id: number) => ({
+      doc: (over.docs ?? []).find((d) => (d as { id: number }).id === id),
+      buffer: over.docBuffer ?? Buffer.from('%PDF-1.7'),
+    })),
+    renderManualPdf: jest.fn().mockResolvedValue(Buffer.from('%PDF-manual')),
+    upload: jest.fn().mockResolvedValue({ id: 31 }),
+  };
   const wiEvents = {
     record: jest.fn().mockResolvedValue({ id: 1 }),
     listByItem: jest.fn().mockResolvedValue([]),
@@ -58,9 +72,9 @@ function build(over: { ticket?: object | null; rq?: object | null; open?: object
   };
   const service = new DevApiService(
     data as never, messages as never, attachments as never, transitions as never, board as never, wiEvents as never,
-    assignment as never,
+    assignment as never, docs as never,
   );
-  return { service, data, messages, attachments, transitions, board, wiEvents, assignment };
+  return { service, data, messages, attachments, transitions, board, wiEvents, assignment, docs };
 }
 
 describe('DevApiService', () => {
@@ -207,11 +221,6 @@ describe('adjuntos', () => {
     expect(attachments.download).not.toHaveBeenCalled();
   });
 
-  it('un requerimiento no tiene adjuntos: 404', async () => {
-    const { service } = build();
-    await expect(service.adjunto(P, 'RQ-0045', 77)).rejects.toBeInstanceOf(NotFoundException);
-  });
-
   it('más de 5 MB responde 400 y no lo lee', async () => {
     const { service, attachments } = build({ files: [{ ...FILE, size: 6 * 1024 * 1024 }] });
     await expect(service.adjunto(P, 'KB-0210', 77)).rejects.toBeInstanceOf(BadRequestException);
@@ -256,10 +265,6 @@ describe('tomar', () => {
     await expect(service.tomar(P, 'KB-0210')).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('un requerimiento no se toma desde Claude: 400', async () => {
-    const { service } = build();
-    await expect(service.tomar(P, 'RQ-0045')).rejects.toBeInstanceOf(BadRequestException);
-  });
 });
 
 describe('resolver', () => {
@@ -313,5 +318,132 @@ describe('borrador de respuesta', () => {
   it('un ticket cerrado no admite borradores: 409', async () => {
     const { service } = build({ ticket: { ...TICKET, status: 'CERRADO' } });
     await expect(service.borrador(P, 'KB-0210', 'x')).rejects.toBeInstanceOf(ConflictException);
+  });
+});
+
+describe('requerimientos: documentos', () => {
+  const ESPEC = {
+    id: 41, kind: 'ESPECIFICACION', kindLabel: 'Especificación del requerimiento', status: 'VIGENTE',
+    filename: 'espec.docx', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    sizeBytes: 900,
+  };
+
+  it('el detalle de un RQ lista sus documentos con tipo y estado', async () => {
+    const { service } = build({ docs: [ESPEC] });
+    const r = await service.item(P, 'RQ-0045');
+    expect(r.adjuntos).toEqual([
+      {
+        id: 41, nombre: 'espec.docx', tipo: ESPEC.mimeType, tamanoBytes: 900,
+        documento: 'Especificación del requerimiento', estado: 'VIGENTE',
+      },
+    ]);
+  });
+
+  it('ver un PDF de un RQ devuelve su base64', async () => {
+    const { service, docs } = build({ docs: [{ ...ESPEC, filename: 'espec.pdf', mimeType: 'application/pdf' }] });
+    const out = await service.adjunto(P, 'RQ-0045', 41);
+    expect(docs.readBuffer).toHaveBeenCalledWith(200, 41);
+    expect(out.base64).toBe(Buffer.from('%PDF-1.7').toString('base64'));
+    expect(out.texto).toBeUndefined();
+  });
+
+  it('un documento que no es de ese RQ responde 404 sin leerlo', async () => {
+    const { service, docs } = build({ docs: [ESPEC] });
+    await expect(service.adjunto(P, 'RQ-0045', 99)).rejects.toBeInstanceOf(NotFoundException);
+    expect(docs.readBuffer).not.toHaveBeenCalled();
+  });
+
+  it('un documento de más de 5 MB responde 400 sin leerlo', async () => {
+    const { service, docs } = build({ docs: [{ ...ESPEC, sizeBytes: 6 * 1024 * 1024 }] });
+    await expect(service.adjunto(P, 'RQ-0045', 41)).rejects.toBeInstanceOf(BadRequestException);
+    expect(docs.readBuffer).not.toHaveBeenCalled();
+  });
+});
+
+describe('tomar un requerimiento', () => {
+  it('libre y PENDIENTE: se lo asigna y lo pasa a EN_PROCESO', async () => {
+    const { service, board } = build({ rq: { ...RQ, assigneeUserId: null } });
+    const out = await service.tomar(P, 'RQ-0045');
+    expect(board.assign).toHaveBeenCalledWith({ workItemId: 200, actorUserId: 9, assigneeUserId: 9 });
+    expect(board.move).toHaveBeenCalledWith(
+      expect.objectContaining({ workItemId: 200, actorUserId: 9, toStatus: 'EN_PROCESO', toIndex: 0 }),
+    );
+    expect(out).toMatchObject({ codigo: 'RQ-0045', estado: 'EN_PROCESO' });
+  });
+
+  it('avisa si no tiene Especificación vigente', async () => {
+    const sin = await build().service.tomar(P, 'RQ-0045');
+    expect(sin.aviso).toMatch(/Especificación/);
+    const con = await build({ docs: [{ id: 1, kind: 'ESPECIFICACION', status: 'VIGENTE' }] }).service.tomar(P, 'RQ-0045');
+    expect(con.aviso).toBeUndefined();
+  });
+
+  it('ya EN_PROCESO y mío: no lo toca', async () => {
+    const { service, board } = build({ rq: { ...RQ, status: 'EN_PROCESO' } });
+    const out = await service.tomar(P, 'RQ-0045');
+    expect(board.assign).not.toHaveBeenCalled();
+    expect(board.move).not.toHaveBeenCalled();
+    expect(out.estado).toBe('EN_PROCESO');
+  });
+
+  it('de otra persona: 409 sin tocarlo', async () => {
+    const { service, board } = build({ rq: { ...RQ, assigneeUserId: 77 } });
+    await expect(service.tomar(P, 'RQ-0045')).rejects.toBeInstanceOf(ConflictException);
+    expect(board.assign).not.toHaveBeenCalled();
+  });
+
+  it('SOLICITADO (sin aceptar): 409, la aceptación es de una persona', async () => {
+    const { service, board } = build({ rq: { ...RQ, status: 'SOLICITADO', assigneeUserId: null } });
+    await expect(service.tomar(P, 'RQ-0045')).rejects.toThrow(/acept/i);
+    expect(board.assign).not.toHaveBeenCalled();
+  });
+
+  it('en PRUEBAS o CERRADO: 409', async () => {
+    const { service } = build({ rq: { ...RQ, status: 'PRUEBAS' } });
+    await expect(service.tomar(P, 'RQ-0045')).rejects.toBeInstanceOf(ConflictException);
+  });
+});
+
+describe('entregar un requerimiento', () => {
+  const E = { solucion: 'Botón Exportar en Pagos (PR #12)', comoProbar: 'Pagos → Exportar', manual: '# Exportar\n\n1. Abre Pagos' };
+
+  it('genera el manual en PDF como borrador, deja la evidencia y lo pasa a PRUEBAS', async () => {
+    const { service, docs, wiEvents, board } = build({ rq: { ...RQ, status: 'EN_PROCESO' } });
+    const out = await service.entregar(P, 'RQ-0045', E);
+    expect(docs.renderManualPdf).toHaveBeenCalledWith(expect.stringContaining('RQ-0045'), E.manual);
+    expect(docs.upload).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workItemId: 200, actorUserId: 9, kind: 'MANUAL_USUARIO', status: 'BORRADOR', source: 'CLAUDE',
+        filename: 'RQ-0045 - Manual de usuario.pdf',
+      }),
+    );
+    expect(wiEvents.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workItemId: 200, type: 'COMMENT', reason: expect.stringContaining('Pagos → Exportar'),
+      }),
+    );
+    expect(board.move).toHaveBeenCalledWith(expect.objectContaining({ toStatus: 'PRUEBAS' }));
+    expect(out).toEqual({ codigo: 'RQ-0045', estado: 'PRUEBAS', manualId: 31 });
+  });
+
+  it('sin evidencia o sin manual: 400 y no toca nada', async () => {
+    const { service, board, docs } = build({ rq: { ...RQ, status: 'EN_PROCESO' } });
+    await expect(service.entregar(P, 'RQ-0045', { ...E, manual: '  ' })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.entregar(P, 'RQ-0045', { ...E, comoProbar: '' })).rejects.toBeInstanceOf(BadRequestException);
+    expect(docs.upload).not.toHaveBeenCalled();
+    expect(board.move).not.toHaveBeenCalled();
+  });
+
+  it('no es mío o no está EN_PROCESO: 409', async () => {
+    const otro = build({ rq: { ...RQ, status: 'EN_PROCESO', assigneeUserId: 77 } });
+    await expect(otro.service.entregar(P, 'RQ-0045', E)).rejects.toBeInstanceOf(ConflictException);
+    const pendiente = build({ rq: { ...RQ, status: 'PENDIENTE' } });
+    await expect(pendiente.service.entregar(P, 'RQ-0045', E)).rejects.toBeInstanceOf(ConflictException);
+    expect(pendiente.docs.upload).not.toHaveBeenCalled();
+  });
+
+  it('un ticket no se entrega: 400 (se resuelve)', async () => {
+    const { service } = build();
+    await expect(service.entregar(P, 'KB-0210', E)).rejects.toBeInstanceOf(BadRequestException);
   });
 });

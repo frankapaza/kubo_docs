@@ -10,6 +10,8 @@ import { WorkItemStatus } from '../work-items/domain/work-item-board';
 import { WorkItem } from '../work-items/entities/work-item.entity';
 import { WorkItemBoardService } from '../work-items/work-item-board.service';
 import { WorkItemEventsService } from '../work-items/work-item-events.service';
+import { DOCX_MIME, docxText } from '../work-items/domain/work-item-docs';
+import { WorkItemDocumentsService } from '../work-items/work-item-documents.service';
 import { DevConnectorRepository, OpenItemRow } from './dev-connector.repository';
 import { DevPrincipal } from './dev-keys.service';
 import { ItemKind, agentTargets, canAgentTransition, normalizeCode, priorityRank } from './domain/dev-rules';
@@ -62,7 +64,8 @@ export interface ItemView {
   criteriosAceptacion: string[];
   vence: string | null;
   conversacion: MensajeView[];
-  adjuntos: Array<{ id: number; nombre: string; tipo: string; tamanoBytes: number }>;
+  /** En un RQ, además, qué documento es (Especificación, Manual…) y si es borrador o vigente. */
+  adjuntos: Array<{ id: number; nombre: string; tipo: string; tamanoBytes: number; documento?: string; estado?: string }>;
   codigoVinculado: Array<{ tipo: DevLinkKind; ref: string; titulo: string | null; url: string | null; estado: string | null }>;
   /** Solo tickets. */
   modulo?: string | null;
@@ -90,14 +93,17 @@ export class DevApiService {
     private readonly board: WorkItemBoardService,
     private readonly wiEvents: WorkItemEventsService,
     private readonly assignment: TicketAssignmentService,
+    private readonly docs: WorkItemDocumentsService,
   ) {}
 
   /**
    * Asignarse un ticket y ponerlo en atención (el «Tomar» de la web). Solo si
    * está libre o ya es del dueño de la clave: quitárselo a otro es cosa del líder.
    */
-  async tomar(p: DevPrincipal, rawCode: string): Promise<{ codigo: string; estado: string }> {
-    const t = await this.ticketOnly(p, rawCode, 'tomar');
+  async tomar(p: DevPrincipal, rawCode: string): Promise<{ codigo: string; estado: string; aviso?: string }> {
+    const r = await this.resolve(p, rawCode);
+    if (r.kind === 'RQ') return this.tomarRequerimiento(p, r.item);
+    const t = r.ticket;
     const assignee = t.assigneeUserId;
     if (assignee != null && !isMine(assignee, p.userId)) {
       throw new ConflictException({
@@ -184,13 +190,131 @@ export class DevApiService {
     return { ok: true };
   }
 
-  /** Las tres de arriba solo existen para tickets. */
+  /**
+   * Tomar un requerimiento: asignárselo y pasarlo a EN_PROCESO. Solo si ya fue
+   * aceptado (PENDIENTE): aceptar fija la fecha comprometida con el cliente y
+   * eso lo decide una persona. Avisa si falta la Especificación vigente.
+   */
+  private async tomarRequerimiento(p: DevPrincipal, w: WorkItem): Promise<{ codigo: string; estado: string; aviso?: string }> {
+    if (w.assigneeUserId != null && !isMine(w.assigneeUserId, p.userId)) {
+      throw new ConflictException({
+        code: 'CONFLICT',
+        message: 'Este requerimiento ya está asignado a otra persona: pide que te lo reasignen en DevDocs.',
+      });
+    }
+    if (w.status === 'SOLICITADO') {
+      throw new ConflictException({
+        code: 'CONFLICT',
+        message: 'El requerimiento aún no fue aceptado: acéptalo en DevDocs (fija la fecha comprometida) y luego tómalo.',
+      });
+    }
+    if (w.status !== 'PENDIENTE' && w.status !== 'EN_PROCESO') {
+      throw new ConflictException({ code: 'CONFLICT', message: `Un requerimiento en ${w.status} no se puede tomar.` });
+    }
+
+    let estado: string = w.status;
+    if (w.assigneeUserId == null) {
+      await this.board.assign({ workItemId: Number(w.id), actorUserId: p.userId, assigneeUserId: p.userId });
+    }
+    if (w.status === 'PENDIENTE') {
+      const moved = await this.board.move({
+        workItemId: Number(w.id),
+        actorUserId: p.userId,
+        toStatus: 'EN_PROCESO',
+        toIndex: 0,
+      });
+      estado = moved.status;
+    }
+
+    const docs = await this.docs.list(Number(w.id));
+    const tieneEspec = docs.some((d) => d.kind === 'ESPECIFICACION' && d.status === 'VIGENTE');
+    return {
+      codigo: w.code!,
+      estado,
+      ...(tieneEspec
+        ? {}
+        : { aviso: 'Este requerimiento no tiene Especificación adjunta: trabaja con la descripción y los criterios, y confirma el alcance si hay dudas.' }),
+    };
+  }
+
+  /**
+   * Entregar un requerimiento a PRUEBAS. Exige lo que hizo, cómo probarlo y el
+   * Manual de usuario (Markdown): el manual se guarda como PDF en BORRADOR
+   * hasta que una persona lo aprueba en DevDocs. Cerrar sigue siendo de una
+   * persona (con la conformidad del cliente).
+   */
+  async entregar(
+    p: DevPrincipal,
+    rawCode: string,
+    e: { solucion: string; comoProbar: string; manual: string },
+  ): Promise<{ codigo: string; estado: string; manualId: number }> {
+    const solucion = String(e?.solucion ?? '').trim();
+    const comoProbar = String(e?.comoProbar ?? '').trim();
+    const manual = String(e?.manual ?? '').trim();
+    if (!solucion || !comoProbar || !manual) {
+      throw new BadRequestException({
+        code: 'BAD_INPUT',
+        message: 'Para entregar hacen falta qué se hizo, cómo probarlo y el manual de usuario.',
+      });
+    }
+    const r = await this.resolve(p, rawCode);
+    if (r.kind !== 'RQ') {
+      throw new BadRequestException({
+        code: 'BAD_INPUT',
+        message: 'Solo los requerimientos (RQ-) se entregan; un ticket se resuelve con resolver_ticket.',
+      });
+    }
+    const w = r.item;
+    if (!isMine(w.assigneeUserId, p.userId)) {
+      throw new ConflictException({
+        code: 'CONFLICT',
+        message: 'Este requerimiento no está asignado a ti: tómalo primero (herramienta tomar_requerimiento).',
+      });
+    }
+    if (w.status !== 'EN_PROCESO') {
+      throw new ConflictException({
+        code: 'CONFLICT',
+        message: `Solo se entrega un requerimiento EN_PROCESO; este está en ${w.status}.`,
+      });
+    }
+
+    const code = w.code!;
+    const pdf = await this.docs.renderManualPdf(`${code} · ${w.title}`, manual);
+    const doc = await this.docs.upload({
+      workItemId: Number(w.id),
+      actorUserId: p.userId,
+      kind: 'MANUAL_USUARIO',
+      status: 'BORRADOR',
+      source: 'CLAUDE',
+      buffer: pdf,
+      filename: `${code} - Manual de usuario.pdf`,
+    });
+    await this.wiEvents.record({
+      workItemId: Number(w.id),
+      type: 'COMMENT',
+      actorUserId: p.userId,
+      reason:
+        `**Entrega a pruebas** · vía Claude (${p.repoFullName})\n\n` +
+        `**Qué se hizo**\n${solucion}\n\n**Cómo probarlo**\n${comoProbar}\n\n` +
+        '_El manual de usuario quedó como borrador: revísalo y apruébalo en Documentos._',
+      payload: { via: 'claude', entrega: true, manualId: Number(doc.id) },
+    });
+    const moved = await this.board.move({
+      workItemId: Number(w.id),
+      actorUserId: p.userId,
+      toStatus: 'PRUEBAS',
+      toIndex: 0,
+    });
+    return { codigo: code, estado: moved.status, manualId: Number(doc.id) };
+  }
+
+  /** resolver y borrador solo existen para tickets. */
   private async ticketOnly(p: DevPrincipal, rawCode: string, que: string): Promise<Ticket> {
     const r = await this.resolve(p, rawCode);
     if (r.kind !== 'KB') {
       throw new BadRequestException({
         code: 'BAD_INPUT',
-        message: `Desde Claude solo se puede ${que} en tickets (KB-); los requerimientos se gestionan en DevDocs.`,
+        message: `Desde Claude solo se puede ${que} en tickets (KB-). En un requerimiento usa tomar_requerimiento y entregar_requerimiento.`,
       });
     }
     return r.ticket;
@@ -262,9 +386,10 @@ export class DevApiService {
     }
 
     const w = r.item;
-    const [events, links] = await Promise.all([
+    const [events, links, docs] = await Promise.all([
       this.wiEvents.listByItem(Number(w.id)),
       this.data.listLinks({ workItemId: Number(w.id) }),
+      this.docs.list(Number(w.id)),
     ]);
     return {
       tipo: 'REQUERIMIENTO',
@@ -284,7 +409,14 @@ export class DevApiService {
           visibilidad: 'INTERNA' as const,
           texto: e.reason!,
         })),
-      adjuntos: [],
+      adjuntos: docs.map((d) => ({
+        id: d.id,
+        nombre: d.filename,
+        tipo: d.mimeType,
+        tamanoBytes: d.sizeBytes,
+        documento: d.kindLabel,
+        estado: d.status,
+      })),
       codigoVinculado: links.map(linkView),
     };
   }
@@ -298,9 +430,9 @@ export class DevApiService {
     p: DevPrincipal,
     rawCode: string,
     attachmentId: number,
-  ): Promise<{ id: number; nombre: string; tipo: string; tamanoBytes: number; base64: string }> {
+  ): Promise<{ id: number; nombre: string; tipo: string; tamanoBytes: number; base64: string; texto?: string }> {
     const r = await this.resolve(p, rawCode);
-    if (r.kind !== 'KB') throw new NotFoundException({ ...ADJUNTO_NOT_FOUND });
+    if (r.kind === 'RQ') return this.documentoRequerimiento(r.item, attachmentId);
     const staff = { kind: 'STAFF' as const, userId: p.userId };
     const meta = (await this.attachments.list(staff, r.ticket.id)).find((f) => Number(f.id) === Number(attachmentId));
     if (!meta) throw new NotFoundException({ ...ADJUNTO_NOT_FOUND });
@@ -315,6 +447,31 @@ export class DevApiService {
     for await (const c of d.stream as AsyncIterable<Buffer | string>) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
     const buf = Buffer.concat(chunks);
     return { id: Number(meta.id), nombre: d.filename, tipo: d.mimeType, tamanoBytes: buf.length, base64: buf.toString('base64') };
+  }
+
+  /**
+   * Un documento del requerimiento para Claude. Un Word viaja además como
+   * texto (`texto`): Claude no lee .docx, y así no hace falta abrirlo.
+   */
+  private async documentoRequerimiento(w: WorkItem, docId: number) {
+    const meta = (await this.docs.list(Number(w.id))).find((d) => Number(d.id) === Number(docId));
+    if (!meta) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Ese documento no existe en este requerimiento.' });
+    if (meta.sizeBytes > MAX_ADJUNTO_BYTES) {
+      throw new BadRequestException({
+        code: 'BAD_INPUT',
+        message: `El documento pasa de ${MAX_ADJUNTO_BYTES / (1024 * 1024)} MB: descárgalo desde DevDocs.`,
+      });
+    }
+    const { buffer } = await this.docs.readBuffer(Number(w.id), meta.id);
+    const texto = meta.mimeType === DOCX_MIME ? docxText(buffer) ?? undefined : undefined;
+    return {
+      id: meta.id,
+      nombre: meta.filename,
+      tipo: meta.mimeType,
+      tamanoBytes: buffer.length,
+      base64: buffer.toString('base64'),
+      ...(texto !== undefined ? { texto } : {}),
+    };
   }
 
   /** Nota que el cliente no ve. Se permite en cualquier ítem del alcance, sea de quien sea. */
@@ -356,7 +513,7 @@ export class DevApiService {
     if (!canAgentTransition(kind, from, target)) {
       throw new ConflictException({
         code: 'CONFLICT',
-        message: `Desde Claude no se puede pasar de ${from} a ${target}. Permitido: ${agentTargets(kind).join(', ')} (según el estado actual). Resolver o cerrar se hace en DevDocs.`,
+        message: `Desde Claude no se puede pasar de ${from} a ${target}. Permitido: ${agentTargets(kind).join(', ')} (según el estado actual). Para resolver un ticket usa resolver_ticket; para entregar un RQ a Pruebas, entregar_requerimiento. Cerrar se hace en DevDocs.`,
       });
     }
 
