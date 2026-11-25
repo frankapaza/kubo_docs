@@ -28,6 +28,8 @@ set -e
 # al arrancar ("aplicar la migracion 032"). La 033 anade
 # monitor_probes.silence_alerted_at (aviso por silencio de una sonda). El worker solo mide; la
 # evaluacion de incidentes y la purga corren en el backend.
+# Migracion 034 (034_disponibilidad_informe): tablas del informe mensual,
+# evidencias, mantenimientos y agente de servidor; aplicarla igual, a mano.
 cd /home/kubo/kubo
 git pull
 docker compose build backend monitor-worker web

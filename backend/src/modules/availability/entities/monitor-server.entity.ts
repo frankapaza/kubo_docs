@@ -35,6 +35,20 @@ export class MonitorServer {
   @Column({ name: 'agent_last_seen_at', type: 'datetime', precision: 3, nullable: true })
   agentLastSeenAt!: Date | null;
 
+  /** Servicios de Windows que el agente debe vigilar. */
+  @Column({ name: 'agent_watch_services', type: 'json', nullable: true })
+  agentWatchServices!: string[] | null;
+
+  @Column({ name: 'agent_token_created_at', type: 'datetime', precision: 3, nullable: true })
+  agentTokenCreatedAt!: Date | null;
+
+  /** Cuándo se avisó del silencio del agente; NULL = sin aviso pendiente. */
+  @Column({ name: 'agent_silence_alerted_at', type: 'datetime', precision: 3, nullable: true })
+  agentSilenceAlertedAt!: Date | null;
+
+  @Column({ name: 'agent_version', type: 'varchar', length: 40, nullable: true })
+  agentVersion!: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

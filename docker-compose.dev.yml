@@ -70,9 +70,10 @@ services:
       - ./backend/sql/migrations/031_conector_repos.sql:/docker-entrypoint-initdb.d/040_mig_031.sql:ro
       - ./backend/sql/migrations/032_disponibilidad_nucleo.sql:/docker-entrypoint-initdb.d/041_mig_032.sql:ro
       - ./backend/sql/migrations/033_disponibilidad_escritorio.sql:/docker-entrypoint-initdb.d/042_mig_033.sql:ro
+      - ./backend/sql/migrations/034_disponibilidad_informe.sql:/docker-entrypoint-initdb.d/043_mig_034.sql:ro
       # Seeds — van detrás de todas las migraciones, así que el seed se
       # renumera cada vez que entra una migración nueva.
-      - ./backend/sql/seed_document_templates.sql:/docker-entrypoint-initdb.d/043_seed_templates.sql:ro
+      - ./backend/sql/seed_document_templates.sql:/docker-entrypoint-initdb.d/044_seed_templates.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s

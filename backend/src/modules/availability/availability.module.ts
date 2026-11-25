@@ -15,6 +15,14 @@ import { AvailabilityEvaluatorScheduler } from './availability-evaluator.schedul
 import { AvailabilityStateController } from './availability-state.controller';
 import { AvailabilityStateService } from './availability-state.service';
 import { AvailabilityPurgeService } from './availability-purge.service';
+import { MonitorAgentDailyRollup } from './entities/monitor-agent-daily-rollup.entity';
+import { MonitorAgentSample } from './entities/monitor-agent-sample.entity';
+import { MonitorDailyRollup } from './entities/monitor-daily-rollup.entity';
+import { MonitorEvidence } from './entities/monitor-evidence.entity';
+import { MonitorMaintenance } from './entities/monitor-maintenance.entity';
+import { MonitorMonthlyReport } from './entities/monitor-monthly-report.entity';
+import { MonitorProbeGap } from './entities/monitor-probe-gap.entity';
+import { MonitorRollupDay } from './entities/monitor-rollup-day.entity';
 import { MonitorCheck } from './entities/monitor-check.entity';
 import { MonitorIncidentEvent } from './entities/monitor-incident-event.entity';
 import { MonitorIncident } from './entities/monitor-incident.entity';
@@ -43,6 +51,14 @@ import { ProbeTokenGuard } from './probe-token.guard';
       MonitorIncident,
       MonitorIncidentEvent,
       MonitorOfficeOutage,
+      MonitorAgentDailyRollup,
+      MonitorAgentSample,
+      MonitorDailyRollup,
+      MonitorEvidence,
+      MonitorMaintenance,
+      MonitorMonthlyReport,
+      MonitorProbeGap,
+      MonitorRollupDay,
     ]),
     ClientsModule,
     TicketsModule,

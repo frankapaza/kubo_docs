@@ -89,6 +89,8 @@ services:
       - ./backend/sql/migrations/032_disponibilidad_nucleo.sql:/docker-entrypoint-initdb.d/032_disponibilidad_nucleo.sql:ro
       # La 033 anade monitor_probes.silence_alerted_at (aviso por silencio de una sonda).
       - ./backend/sql/migrations/033_disponibilidad_escritorio.sql:/docker-entrypoint-initdb.d/033_disponibilidad_escritorio.sql:ro
+      # La 034 crea las tablas del informe mensual, evidencias, mantenimiento y agente.
+      - ./backend/sql/migrations/034_disponibilidad_informe.sql:/docker-entrypoint-initdb.d/034_disponibilidad_informe.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s

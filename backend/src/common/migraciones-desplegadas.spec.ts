@@ -58,7 +58,11 @@ describe('no hay dos migraciones con el mismo número', () => {
 });
 
 describe('las migraciones de disponibilidad están en las tres listas de despliegue', () => {
-  const NOMBRES = ['032_disponibilidad_nucleo', '033_disponibilidad_escritorio'];
+  const NOMBRES = [
+    '032_disponibilidad_nucleo',
+    '033_disponibilidad_escritorio',
+    '034_disponibilidad_informe',
+  ];
   it.each(LISTAS_DE_DESPLIEGUE)('%s las nombra', (lista) => {
     const texto = readFileSync(lista, 'utf8');
     for (const nombre of NOMBRES) expect(texto).toContain(nombre);
@@ -141,5 +145,11 @@ describe('la migración del conector de tickets', () => {
 
   it('da a work_items su sistema', () => {
     expect(sql()).toMatch(/'WORK_ITEMS',\s*'CLIENT_SYSTEM_ID'/);
+  });
+});
+
+describe('deploy.sh nombra la migración 034 (aviso de aplicarla a mano)', () => {
+  it('la menciona', () => {
+    expect(readFileSync(join(RAIZ, 'deploy.sh'), 'utf8')).toContain('034_disponibilidad_informe');
   });
 });
