@@ -8,6 +8,7 @@ import { CombinedStateRow, CombinedStatus } from './domain/combined-state';
 import { buildCombinedRows } from './domain/combined-state-builder';
 import { activeMaintenanceWindows } from './domain/maintenance-repo';
 import { MonitorMaintenance } from './entities/monitor-maintenance.entity';
+import { AvailabilityEvidenceService, EvidenceView } from './availability-evidence.service';
 import { toCsv } from './domain/csv';
 import { diagnosisFromEvent } from './domain/diagnose';
 import { ticketCodesForIncidents } from './incident-ticket-codes';
@@ -99,6 +100,7 @@ export interface IncidentDetail {
   checks: { office: CheckRow[]; datacenter: CheckRow[] };
   diagnosis: string;
   winmtrTarget: string;
+  evidence: EvidenceView[];
 }
 
 export interface AckResult {
@@ -125,6 +127,7 @@ export class AvailabilityStateService {
     private readonly clients: ClientsService,
     private readonly tickets: TicketsRepository,
     @InjectRepository(MonitorMaintenance) private readonly maintenance: Repository<MonitorMaintenance>,
+    private readonly evidence: AvailabilityEvidenceService,
   ) {}
 
   // ---------------------------------------------------------------- estado
@@ -227,10 +230,11 @@ export class AvailabilityStateService {
     const inc = await this.incidents.findOne({ where: { id } });
     if (!inc) throw notFound('Incidente no encontrado');
     const children = await this.incidents.find({ where: { parentId: id }, order: { confirmedAt: 'ASC' } });
-    const [[row, ...childRows], events, server] = await Promise.all([
+    const [[row, ...childRows], events, server, evidence] = await Promise.all([
       this.toRows([inc, ...children]),
       this.events.find({ where: { incidentId: id }, order: { at: 'ASC', id: 'ASC' } }),
       this.servers.findOne({ where: { id: n(inc.serverId) } }),
+      this.evidence.listForIncidents([id]),
     ]);
 
     const lastDiagnosis = [...events].filter((e) => DIAGNOSIS_EVENTS.includes(e.type)).sort((a, b) => n(b.id) - n(a.id))[0];
@@ -255,6 +259,7 @@ export class AvailabilityStateService {
       },
       diagnosis: diagnosisFromEvent(inc.kind, lastDiagnosis),
       winmtrTarget: server?.host ?? '',
+      evidence: evidence.get(id) ?? [],
     };
   }
 

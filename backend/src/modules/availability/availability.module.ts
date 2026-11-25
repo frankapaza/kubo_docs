@@ -1,5 +1,9 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { StorageModule } from '../../common/storage/storage.module';
+import { User } from '../users/entities/user.entity';
+import { AvailabilityEvidenceController } from './availability-evidence.controller';
+import { AvailabilityEvidenceService } from './availability-evidence.service';
 import { EmailModule } from '../email/email.module';
 import { ClientsModule } from '../clients/clients.module';
 import { TicketsModule } from '../tickets/tickets.module';
@@ -57,6 +61,7 @@ import { ProbeTokenGuard } from './probe-token.guard';
       MonitorAgentSample,
       MonitorDailyRollup,
       MonitorEvidence,
+      User,
       MonitorMaintenance,
       MonitorMonthlyReport,
       MonitorProbeGap,
@@ -66,18 +71,21 @@ import { ProbeTokenGuard } from './probe-token.guard';
     TicketsModule,
     UsersModule,
     EmailModule,
+    StorageModule,
   ],
   controllers: [
     AvailabilityInventoryController,
     AvailabilityIngestController,
     AvailabilityStateController,
     AvailabilityMaintenanceController,
+    AvailabilityEvidenceController,
   ],
   providers: [
     AvailabilityInventoryService,
     AvailabilityIngestService,
     AvailabilitySyncService,
     AvailabilityStateService,
+    AvailabilityEvidenceService,
     AvailabilityMaintenanceService,
     ProbeTokenGuard,
     ProbeRateLimiter,

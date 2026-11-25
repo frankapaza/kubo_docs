@@ -92,6 +92,19 @@ export interface IncidentDetail {
   checks: { office: CheckRow[]; datacenter: CheckRow[] };
   diagnosis: string;
   winmtrTarget: string;
+  evidence: EvidenceView[];
+}
+
+export type EvidenceOrigin = 'OFICINA' | 'SERVIDOR' | 'OTRO';
+
+export interface EvidenceView {
+  id: number;
+  capturedAt: string;
+  origin: EvidenceOrigin;
+  notes: string | null;
+  fileName: string;
+  sizeBytes: number;
+  createdByName: string | null;
 }
 
 export interface AckResult {
@@ -207,6 +220,23 @@ export const availabilityApi = {
 
   acknowledge: (id: number) =>
     api.post<AckResult>(`/availability/incidents/${id}/ack`).then((r) => r.data),
+
+  uploadEvidence: (incidentId: number, file: File, body: { origin: EvidenceOrigin; notes?: string; capturedAt?: string }) => {
+    const fd = new FormData();
+    fd.append('origin', body.origin);
+    if (body.notes) fd.append('notes', body.notes);
+    if (body.capturedAt) fd.append('capturedAt', body.capturedAt);
+    fd.append('file', file);
+    return api.post<EvidenceView>(`/availability/incidents/${incidentId}/evidence`, fd).then((r) => r.data);
+  },
+
+  /** Descarga la evidencia con la sesión del usuario (fetch autenticado + blob). */
+  downloadEvidence: async (e: { id: number; fileName: string }): Promise<void> => {
+    const res = await api.get<Blob>(`/availability/evidence/${e.id}/file`, { responseType: 'blob' });
+    saveAttachmentToDisk(res.data, filenameFrom(res.headers) ?? e.fileName);
+  },
+
+  deleteEvidence: (id: number) => api.delete(`/availability/evidence/${id}`).then(() => undefined),
 
   addNote: (id: number, text: string) =>
     api.post<IncidentEvent>(`/availability/incidents/${id}/notes`, { text }).then((r) => r.data),

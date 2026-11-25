@@ -126,7 +126,7 @@ const make = () => {
   const maintenance = repoOf([]);
   const svc = new AvailabilityStateService(
     servers as any, services as any, probes as any, states as any, incidents as any, events as any, checks as any, orders as any,
-    clients as any, tickets as any, maintenance as any,
+    clients as any, tickets as any, maintenance as any, { listForIncidents: jest.fn(async () => new Map()) } as any,
   );
   jest.useFakeTimers().setSystemTime(now);
   return { svc, services, orders, incidents, events, tickets, maintenance };

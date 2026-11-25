@@ -2,11 +2,19 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 
-import { availabilityApi, CheckRow, IncidentEvent } from '../../api/availability.api';
+import { availabilityApi, CheckRow, EvidenceOrigin, EvidenceView, IncidentEvent } from '../../api/availability.api';
+import { useAuth } from '../../auth/AuthContext';
+import { askConfirm } from '../../ui/ConfirmDialog';
 import { toast } from '../../ui/Toast';
 import {
-  apiMessage, btn, btnPrimary, EVENT_LABELS, fmtCheck, fmtDateTime, fmtDuration, inputStyle, INCIDENT_KIND_LABELS, STATUS_COLORS,
+  apiMessage, btn, btnPrimary, EVENT_LABELS, fmtCheck, fmtDateTime, fmtDuration, inputStyle, INCIDENT_KIND_LABELS, labelStyle, STATUS_COLORS,
 } from './availability-ui';
+
+const ORIGIN_LABELS: Record<EvidenceOrigin, string> = { OFICINA: 'Oficina', SERVIDOR: 'Servidor', OTRO: 'Otro' };
+const EVIDENCE_ACCEPT = '.txt,.html,.htm,.csv,.png,.jpg';
+const EVIDENCE_MAX_BYTES = 2 * 1024 * 1024;
+
+const fmtSize = (b: number): string => (b < 1024 ? `${b} B` : b < 1024 * 1024 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1024 / 1024).toFixed(1)} MB`);
 
 const card: React.CSSProperties = { border: '1px solid #e6e9ea', borderRadius: 8, padding: 14, background: '#fff' };
 const h2: React.CSSProperties = { fontSize: 14, fontWeight: 600, margin: '0 0 8px' };
@@ -40,6 +48,12 @@ export default function AvailabilityIncidentDetailPage() {
   const queryClient = useQueryClient();
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
+  const [showEvidenceForm, setShowEvidenceForm] = useState(false);
+  const [evFile, setEvFile] = useState<File | null>(null);
+  const [evOrigin, setEvOrigin] = useState<EvidenceOrigin>('OFICINA');
+  const [evNotes, setEvNotes] = useState('');
 
   const detail = useQuery({
     queryKey: ['availability', 'incident', incidentId],
@@ -75,6 +89,51 @@ export default function AvailabilityIncidentDetailPage() {
       toast.error(apiMessage(e, 'No se pudo guardar la nota.'));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const uploadEvidence = async () => {
+    if (!evFile) return;
+    if (evFile.size > EVIDENCE_MAX_BYTES) {
+      toast.error('El archivo supera el máximo de 2 MB.');
+      return;
+    }
+    setBusy(true);
+    try {
+      await availabilityApi.uploadEvidence(incidentId, evFile, { origin: evOrigin, notes: evNotes.trim() || undefined });
+      toast.success('Evidencia adjuntada.');
+      setEvFile(null);
+      setEvNotes('');
+      setShowEvidenceForm(false);
+      reload();
+    } catch (e) {
+      toast.error(apiMessage(e, 'No se pudo adjuntar la evidencia.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const downloadEvidence = async (ev: EvidenceView) => {
+    try {
+      await availabilityApi.downloadEvidence(ev);
+    } catch (e) {
+      toast.error(apiMessage(e, 'No se pudo descargar la evidencia.'));
+    }
+  };
+
+  const deleteEvidence = async (ev: EvidenceView) => {
+    const ok = await askConfirm({
+      title: 'Eliminar evidencia',
+      message: `Se elimina «${ev.fileName}» de este incidente. ¿Continuar?`,
+      tone: 'danger',
+      confirmText: 'Eliminar',
+    });
+    if (!ok) return;
+    try {
+      await availabilityApi.deleteEvidence(ev.id);
+      reload();
+    } catch (e) {
+      toast.error(apiMessage(e, 'No se pudo eliminar la evidencia.'));
     }
   };
 
@@ -119,6 +178,9 @@ export default function AvailabilityIncidentDetailPage() {
           <button type="button" style={btn} onClick={() => copyTarget(d.winmtrTarget)} disabled={!d.winmtrTarget}>
             Copiar destino WinMTR
           </button>
+          <button type="button" style={btn} onClick={() => setShowEvidenceForm((v) => !v)}>
+            Adjuntar WinMTR
+          </button>
           {inc.acknowledgedAt ? (
             <span style={{ fontSize: 12, color: '#6d7577' }}>Reconocido {fmtDateTime(inc.acknowledgedAt)}</span>
           ) : (
@@ -158,6 +220,49 @@ export default function AvailabilityIncidentDetailPage() {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {(d.evidence.length > 0 || showEvidenceForm) && (
+        <div style={card}>
+          <h2 style={h2}>Evidencia WinMTR</h2>
+          {showEvidenceForm && (
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>
+              <label>
+                <span style={labelStyle}>Archivo (máx. 2 MB)</span>
+                <input type="file" accept={EVIDENCE_ACCEPT} onChange={(e) => setEvFile(e.target.files?.[0] ?? null)} style={{ fontSize: 12 }} />
+              </label>
+              <label>
+                <span style={labelStyle}>Origen</span>
+                <select value={evOrigin} onChange={(e) => setEvOrigin(e.target.value as EvidenceOrigin)} style={inputStyle}>
+                  {(Object.keys(ORIGIN_LABELS) as EvidenceOrigin[]).map((o) => <option key={o} value={o}>{ORIGIN_LABELS[o]}</option>)}
+                </select>
+              </label>
+              <label style={{ flex: 1, minWidth: 200 }}>
+                <span style={labelStyle}>Notas</span>
+                <input value={evNotes} onChange={(e) => setEvNotes(e.target.value)} maxLength={1000} style={inputStyle} />
+              </label>
+              <button type="button" style={btnPrimary} onClick={uploadEvidence} disabled={busy || !evFile}>Subir</button>
+            </div>
+          )}
+          {d.evidence.length === 0 ? (
+            <div style={{ fontSize: 12, color: '#6d7577' }}>Sin evidencia adjunta.</div>
+          ) : (
+            <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
+              {d.evidence.map((ev) => (
+                <li key={ev.id} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button type="button" onClick={() => downloadEvidence(ev)} className="text-blue-700 hover:underline" style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 13 }}>
+                    {ev.fileName}
+                  </button>
+                  <span style={{ color: '#6d7577', fontSize: 12 }}>
+                    {ORIGIN_LABELS[ev.origin]} · {fmtDateTime(ev.capturedAt)} · {fmtSize(ev.sizeBytes)}{ev.createdByName ? ` · ${ev.createdByName}` : ''}
+                  </span>
+                  {ev.notes && <span style={{ fontSize: 12 }}>{ev.notes}</span>}
+                  {isAdmin && <button type="button" style={btn} onClick={() => deleteEvidence(ev)}>Eliminar</button>}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
