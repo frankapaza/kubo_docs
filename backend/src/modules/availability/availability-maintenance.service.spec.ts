@@ -135,6 +135,15 @@ describe('AvailabilityMaintenanceService.create', () => {
     expect(maint.rows[1].startsAt).toEqual(new Date('2026-11-24T15:10:00.000Z'));
   });
 
+  it('inicio más de 15 min en el pasado -> 400 BAD_INPUT «No se pueden crear mantenimientos en el pasado»; 15 min justos se acepta', async () => {
+    const { svc, maint } = make();
+    const err: any = await svc.create({ serverId: 10, startsAt: plus(-16), endsAt: plus(60), reason: 'abc' }, 7).catch((e) => e);
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect(err.getResponse()).toEqual({ code: 'BAD_INPUT', message: 'No se pueden crear mantenimientos en el pasado' });
+    expect(maint.rows).toHaveLength(0);
+    await expect(svc.create({ serverId: 10, startsAt: plus(-15), endsAt: plus(60), reason: 'abc' }, 7)).resolves.toBeDefined();
+  });
+
   it('exactamente 7 días se acepta', async () => {
     const { svc } = make();
     await expect(svc.create({ serverId: 10, startsAt: plus(0), endsAt: plus(7 * 24 * 60), reason: 'abc' }, 7)).resolves.toBeDefined();

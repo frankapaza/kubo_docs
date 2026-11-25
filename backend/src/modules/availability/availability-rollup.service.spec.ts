@@ -187,6 +187,20 @@ describe('AvailabilityRollupService.rollupDay', () => {
     expect(repo(MonitorDailyRollup).rows.some((r) => r.id === 999)).toBe(true);
     expect(repo(MonitorProbeGap).rows.some((r) => r.id === 999)).toBe(true);
   });
+
+  it('un servicio archivado después del día conserva su resumen si tuvo checks ese día', async () => {
+    const { svc, repo } = seed();
+    // Servicio 3 (ARCHIVED) midió el día 20; el 5 (ARCHIVED) solo midió el 19.
+    repo(MonitorService).rows.push({ id: 5, status: 'ARCHIVED', createdAt: new Date('2026-01-01T00:00:00Z') });
+    repo(MonitorCheck).rows.push(
+      { probeId: 10, id: 'a3', serviceId: 3, kind: 'REGULAR', startedAt: z('07:00'), ok: true, durationMs: 10 },
+      { probeId: 10, id: 'a5', serviceId: 5, kind: 'REGULAR', startedAt: new Date('2026-11-19T12:00:00Z'), ok: true, durationMs: 10 },
+    );
+    await svc.rollupDay(DAY, NOW);
+    const rows = repo(MonitorDailyRollup).rows;
+    expect(rows.map((r) => [r.serviceId, r.probeId]).sort()).toEqual([[1, 10], [2, 10], [3, 10]]);
+    expect(rows.find((r) => r.serviceId === 3)).toMatchObject({ executed: 1, succeeded: 1, expected: 720 });
+  });
 });
 
 describe('AvailabilityRollupService.rollupDay (agente)', () => {
@@ -245,6 +259,37 @@ describe('AvailabilityRollupService.ensureRange', () => {
     const spy = jest.spyOn(svc, 'rollupDay').mockRejectedValueOnce(new Error('db')).mockResolvedValue();
     await expect(svc.ensureRange('2026-11-20', '2026-11-22', NOW)).resolves.toBeUndefined();
     expect(spy).toHaveBeenCalledTimes(3);
+  });
+
+  it('dos ensureRange simultáneos (informe y resumen al arrancar) nunca calculan la misma fecha en paralelo', async () => {
+    const { svc } = seed();
+    const active = new Map<string, number>();
+    let maxSameDate = 0;
+    let maxOverall = 0;
+    const calls: string[] = [];
+    const tick = () => new Promise<void>((r) => setImmediate(r));
+    jest.spyOn(svc as any, 'computeDay').mockImplementation(async (...args: unknown[]) => {
+      const d = args[0] as string;
+      calls.push(d);
+      active.set(d, (active.get(d) ?? 0) + 1);
+      maxSameDate = Math.max(maxSameDate, active.get(d)!);
+      maxOverall = Math.max(maxOverall, [...active.values()].reduce((a, b) => a + b, 0));
+      await tick();
+      await tick();
+      active.set(d, active.get(d)! - 1);
+    });
+    await Promise.all([svc.ensureRange('2026-11-20', '2026-11-22', NOW), svc.ensureRange('2026-11-20', '2026-11-22', NOW)]);
+    expect(calls).toHaveLength(6);
+    expect(maxSameDate).toBe(1);
+    expect(maxOverall).toBe(1);
+  });
+
+  it('un cálculo que falla no bloquea el cerrojo para los siguientes', async () => {
+    const { svc } = seed();
+    const spy = jest.spyOn(svc as any, 'computeDay').mockRejectedValueOnce(new Error('db')).mockResolvedValue(undefined);
+    await expect(svc.rollupDay('2026-11-20', NOW)).rejects.toThrow('db');
+    await expect(svc.rollupDay('2026-11-21', NOW)).resolves.toBeUndefined();
+    expect(spy).toHaveBeenCalledTimes(2);
   });
 });
 

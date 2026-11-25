@@ -10,6 +10,8 @@ const notFound = () => new NotFoundException({ code: 'NOT_FOUND', message: 'Mant
 
 /** Duración máxima de una ventana. */
 export const MAINTENANCE_MAX_MS = 7 * 24 * 60 * 60_000;
+/** El inicio puede estar como mucho este tiempo en el pasado al crear la ventana. */
+export const MAINTENANCE_PAST_TOLERANCE_MS = 15 * 60_000;
 const REASON_MIN = 3;
 const REASON_MAX = 255;
 /** Sin rango, la lista muestra las ventanas que terminaron hace 30 días o menos (y las vigentes y futuras). */
@@ -87,6 +89,8 @@ export class AvailabilityMaintenanceService {
     const endsAt = parseDate(input.endsAt, 'endsAt');
     if (endsAt.getTime() <= startsAt.getTime()) throw badInput('El fin debe ser posterior al inicio');
     if (endsAt.getTime() <= now.getTime()) throw badInput('El fin debe ser posterior a la hora actual');
+    // Una ventana retroactiva ocultaría caídas ya medidas en el informe; se toleran 15 min de margen.
+    if (startsAt.getTime() < now.getTime() - MAINTENANCE_PAST_TOLERANCE_MS) throw badInput('No se pueden crear mantenimientos en el pasado');
     if (endsAt.getTime() - startsAt.getTime() > MAINTENANCE_MAX_MS) throw badInput('La ventana no puede durar más de 7 días');
     const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
     if (reason.length < REASON_MIN || reason.length > REASON_MAX) {

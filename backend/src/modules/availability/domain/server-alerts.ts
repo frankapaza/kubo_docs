@@ -1,5 +1,6 @@
 import { AgentDisk } from '../entities/monitor-agent-sample.entity';
 import { limaDateOf } from './expected-slots';
+import { activeWindowFor, MaintenanceWindow } from './maintenance';
 import { PROBE_SILENCE_MS } from './probe-silence';
 
 export type ServerAlertKind = 'DISK_LOW' | 'AGENT_SILENT';
@@ -40,11 +41,15 @@ function limaTime(at: Date, now: Date): string {
  *   desde la última muestra (o desde la emisión del token si nunca reportó).
  * - `DISK_LOW`: una unidad con menos del 10 % libre en la última muestra. Solo
  *   si el agente no está mudo: con datos viejos el aviso no sería fiable.
+ *
+ * Un servidor cubierto en `now` por una ventana de mantenimiento del servidor
+ * (no de uno de sus servicios) no avisa nada: en mantenimiento no se notifica.
  */
-export function serverAlertsFor(servers: ServerAlertInput[], now: Date): ServerAlert[] {
+export function serverAlertsFor(servers: ServerAlertInput[], now: Date, maintenance: MaintenanceWindow[] = []): ServerAlert[] {
   const out: ServerAlert[] = [];
   for (const s of servers) {
     if (!s.hasAgent) continue;
+    if (activeWindowFor({ serviceId: null, serverId: s.id }, now, maintenance)) continue;
     const ref = s.agentLastSeenAt ?? s.agentTokenCreatedAt;
     if (ref && now.getTime() - ref.getTime() > PROBE_SILENCE_MS) {
       out.push({ serverId: s.id, serverName: s.name, kind: 'AGENT_SILENT', detail: `sin datos desde ${limaTime(ref, now)}` });

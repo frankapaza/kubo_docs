@@ -191,6 +191,7 @@ describe('UpdateServerDto.agentWatchServices', () => {
   const check = async (v: unknown) => validate(plainToInstance(UpdateServerDto, { agentWatchServices: v }));
   it('acepta nombres de servicio válidos y null', async () => {
     expect(await check(['W3SVC', 'MSSQL_X', 'Servicio de prueba-1.2'])).toHaveLength(0);
+    expect(await check(['MSSQL$SQLEXPRESS'])).toHaveLength(0);
     expect(await check(null)).toHaveLength(0);
   });
   it.each([

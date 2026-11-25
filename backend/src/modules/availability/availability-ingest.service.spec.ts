@@ -317,6 +317,26 @@ describe('AvailabilityIngestService.sync', () => {
       expect(res.serverAlerts[1].detail).toMatch(/^sin datos desde \d{2}:\d{2}$|^sin datos desde \d{2}\/\d{2} \d{2}:\d{2}$/);
     });
 
+    it('mantenimiento del servidor activo: no avisa ni silencio ni disco; uno de servicio o futuro no los oculta', async () => {
+      const { svc, probe } = makeSvc({
+        servers: [
+          srv(10),
+          srv(11, { agentLastSeenAt: new Date(now - 30 * 60_000) }),
+          srv(12, { agentLastSeenAt: new Date(now - 30 * 60_000) }),
+          srv(14),
+        ],
+        agentSamples: [lowC(10), lowC(11), lowC(12), lowC(14)],
+        maintenance: [
+          { id: 1, serverId: 10, serviceId: null, startsAt: new Date(now - 60_000), endsAt: new Date(now + 3600_000), reason: 'x' },
+          { id: 2, serverId: 11, serviceId: null, startsAt: new Date(now - 60_000), endsAt: new Date(now + 3600_000), reason: 'x' },
+          { id: 3, serverId: null, serviceId: 100, startsAt: new Date(now - 60_000), endsAt: new Date(now + 3600_000), reason: 'servicio' },
+          { id: 4, serverId: 14, serviceId: null, startsAt: new Date(now + 60_000), endsAt: new Date(now + 3600_000), reason: 'futura' },
+        ],
+      });
+      const res = await svc.sync(probe, null);
+      expect(res.serverAlerts.map((a) => [a.serverId, a.kind])).toEqual([[12, 'AGENT_SILENT'], [14, 'DISK_LOW']]);
+    });
+
     it('sin repositorio de muestras (worker) avisa el silencio pero no el disco', async () => {
       const { svc, probe } = makeSvc({ servers: [srv(10), srv(11, { agentLastSeenAt: new Date(now - 30 * 60_000) })] });
       const res = await svc.sync(probe, null);

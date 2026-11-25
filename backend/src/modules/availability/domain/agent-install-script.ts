@@ -59,6 +59,7 @@ export function buildInstallScript(centralUrl: string, token: string): string {
     '  Invoke-Sc "create KuboAgent $binPath start= auto obj= LocalSystem DisplayName= `"KUBO Agent`""',
     '}',
     `Invoke-Sc 'failure KuboAgent reset= 86400 actions= restart/60000/restart/60000/restart/60000'`,
+    `Invoke-Sc 'failureflag KuboAgent 1'`,
     '',
     'Start-Service -Name KuboAgent',
     `Write-Host 'Agente de KUBO instalado y en marcha.'`,

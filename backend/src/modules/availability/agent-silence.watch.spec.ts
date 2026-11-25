@@ -12,7 +12,7 @@ const silent = (over: any = {}) => ({
   ...over,
 });
 
-const make = (opts: { servers?: any[]; admins?: any[]; sendFails?: boolean; affected?: number } = {}) => {
+const make = (opts: { servers?: any[]; admins?: any[]; sendFails?: boolean; affected?: number; maintenance?: any[] } = {}) => {
   const servers = opts.servers ?? [silent()];
   const repo = {
     find: jest.fn(async ({ where }: any) =>
@@ -23,9 +23,10 @@ const make = (opts: { servers?: any[]; admins?: any[]; sendFails?: boolean; affe
   const users = { listActiveAdmins: jest.fn().mockResolvedValue(opts.admins ?? [{ email: 'a@k.com' }]) };
   const email = { send: opts.sendFails ? jest.fn().mockRejectedValue(new Error('smtp')) : jest.fn().mockResolvedValue(undefined) };
   const config = { get: jest.fn().mockReturnValue('https://app.kubo.test/') };
-  const watch = new AgentSilenceWatch(repo as any, users as any, email as any, config as any);
+  const maintenance = { find: jest.fn(async () => opts.maintenance ?? []) };
+  const watch = new AgentSilenceWatch(repo as any, users as any, email as any, config as any, maintenance as any);
   watch.startedAt = new Date(NOW.getTime() - 10 * 60_000);
-  return { watch, repo, users, email };
+  return { watch, repo, users, email, maintenance };
 };
 
 describe('AgentSilenceWatch', () => {
@@ -94,5 +95,49 @@ describe('AgentSilenceWatch', () => {
       await expect(watch.check(NOW)).resolves.toBeUndefined();
       expect(repo.update).not.toHaveBeenCalled();
     }
+  });
+
+  describe('mantenimiento del servidor', () => {
+    const win = (over: any = {}) => ({
+      id: 1, serverId: 10, serviceId: null, reason: 'parche',
+      startsAt: new Date(NOW.getTime() - 30 * 60_000), endsAt: new Date(NOW.getTime() + 30 * 60_000), ...over,
+    });
+
+    it('con una ventana del servidor activa no envía el aviso ni marca; al terminar la ventana sí avisa', async () => {
+      const { watch, repo, email, maintenance } = make({ maintenance: [win()] });
+      await watch.check(NOW);
+      expect(maintenance.find).toHaveBeenCalledTimes(1);
+      expect(email.send).not.toHaveBeenCalled();
+      expect(repo.update).not.toHaveBeenCalled();
+      maintenance.find.mockResolvedValue([]);
+      await watch.check(new Date(NOW.getTime() + 31 * 60_000));
+      expect(email.send.mock.calls[0][0].subject).toBe('[KUBO Monitoreo] El agente de srv-app no reporta');
+    });
+
+    it('una ventana de un servicio o de otro servidor no silencia el aviso', async () => {
+      const { watch, email } = make({ maintenance: [win({ serverId: null, serviceId: 100 }), win({ serverId: 11 })] });
+      await watch.check(NOW);
+      expect(email.send).toHaveBeenCalledTimes(1);
+    });
+
+    it('si vuelve durante la ventana avisa la vuelta solo si el aviso se había enviado', async () => {
+      const back = { agentLastSeenAt: new Date(NOW.getTime() - 5000) };
+      const sent = make({ servers: [silent({ ...back, agentSilenceAlertedAt: new Date(NOW.getTime() - 40 * 60_000) })], maintenance: [win()] });
+      await sent.watch.check(NOW);
+      expect(sent.email.send.mock.calls[0][0].subject).toBe('[KUBO Monitoreo] El agente de srv-app volvió a reportar');
+      const muted = make({ servers: [silent()], maintenance: [win()] });
+      await muted.watch.check(NOW);
+      const server = silent(back);
+      const later = make({ servers: [server], maintenance: [win()] });
+      await later.watch.check(NOW);
+      expect(muted.email.send).not.toHaveBeenCalled();
+      expect(later.email.send).not.toHaveBeenCalled();
+    });
+
+    it('lee las ventanas una sola vez por pasada', async () => {
+      const { watch, maintenance } = make({ servers: [silent({ id: 1 }), silent({ id: 2 }), silent({ id: 3 })] });
+      await watch.check(NOW);
+      expect(maintenance.find).toHaveBeenCalledTimes(1);
+    });
   });
 });

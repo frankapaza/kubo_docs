@@ -53,7 +53,8 @@ export class UpdateServerDto {
   @IsString({ each: true })
   @MinLength(1, { each: true })
   @MaxLength(256, { each: true })
-  @Matches(/^[A-Za-z0-9_.\- ]+$/, { each: true })
+  // `$` aparece en instancias con nombre, p. ej. `MSSQL$SQLEXPRESS`.
+  @Matches(/^[A-Za-z0-9_.$\- ]+$/, { each: true })
   agentWatchServices?: string[] | null;
 }
 

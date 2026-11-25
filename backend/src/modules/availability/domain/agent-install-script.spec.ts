@@ -22,6 +22,8 @@ describe('buildInstallScript', () => {
     expect(script).toContain(`$binPath = 'binPath= "\\"' + $exe + '\\""'`);
     expect(script).toMatch(/create KuboAgent \$binPath start= auto obj= LocalSystem/);
     expect(script).toContain('failure KuboAgent reset= 86400 actions= restart/60000/restart/60000/restart/60000');
+    expect(script).toContain("Invoke-Sc 'failureflag KuboAgent 1'");
+    expect(script.indexOf('failureflag KuboAgent 1')).toBeGreaterThan(script.indexOf('failure KuboAgent reset='));
     expect(script).toContain('Start-Service -Name KuboAgent');
   });
 

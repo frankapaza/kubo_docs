@@ -71,12 +71,13 @@ export function parseWatchList(text: string): string[] {
   return [...new Set(text.split(',').map((s) => s.trim()).filter(Boolean))];
 }
 
-export const WATCH_SERVICE_RE = /^[A-Za-z0-9_.\- ]+$/;
+/** Igual que el backend; `$` aparece en instancias con nombre, p. ej. `MSSQL$SQLEXPRESS`. */
+export const WATCH_SERVICE_RE = /^[A-Za-z0-9_.$\- ]+$/;
 export const MAX_WATCH_SERVICES = 50;
 
 /** Mensaje de error de la lista, o null si es válida. */
 export function validateWatchList(list: string[]): string | null {
   if (list.length > MAX_WATCH_SERVICES) return `Máximo ${MAX_WATCH_SERVICES} servicios.`;
   const bad = list.find((s) => !WATCH_SERVICE_RE.test(s));
-  return bad ? `«${bad}» tiene caracteres no permitidos (solo letras, números, espacio, _ . -).` : null;
+  return bad ? `«${bad}» tiene caracteres no permitidos (solo letras, números, espacio, _ . - $).` : null;
 }

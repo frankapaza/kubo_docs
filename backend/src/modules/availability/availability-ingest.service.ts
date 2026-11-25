@@ -10,6 +10,7 @@ import { ServerAlert, serverAlertsFor } from './domain/server-alerts';
 import { latestAgentDisks } from './domain/agent-disks-repo';
 import { MonitorAgentSample } from './entities/monitor-agent-sample.entity';
 import { activeMaintenanceWindows } from './domain/maintenance-repo';
+import { MaintenanceWindow } from './domain/maintenance';
 import { MonitorMaintenance } from './entities/monitor-maintenance.entity';
 import { MonitorCheck } from './entities/monitor-check.entity';
 import { MonitorIncident } from './entities/monitor-incident.entity';
@@ -147,6 +148,8 @@ export class AvailabilityIngestService {
     const targets = activeServices.map(toTarget).sort((a, b) => a.id - b.id);
     const schedule = DEFAULT_SCHEDULE;
     const references = PROBE_REFERENCES.map((r) => ({ ...r }));
+    // Una sola lectura de ventanas activas para el estado y los avisos de servidor.
+    const maintenance = this.maintenance ? await activeMaintenanceWindows(this.maintenance, now) : [];
 
     const current = createHash('sha256')
       .update(JSON.stringify({ s: targets.map(canonicalTarget), c: canonicalSchedule(schedule), r: references.map(canonicalTarget) }))
@@ -156,13 +159,16 @@ export class AvailabilityIngestService {
       configVersion: current,
       config: configVersion === current ? null : { services: targets, schedule, references },
       orders: await this.takeOrders(Number(probe.id), now),
-      state: await this.combinedState(activeServices, schedule, now),
-      serverAlerts: await this.serverAlerts(now),
+      state: await this.combinedState(activeServices, schedule, now, maintenance),
+      serverAlerts: await this.serverAlerts(now, maintenance),
     };
   }
 
-  /** Avisos de servidor para el widget: solo servidores `ACTIVE`; los que no tienen token no avisan. */
-  private async serverAlerts(now: Date): Promise<ServerAlert[]> {
+  /**
+   * Avisos de servidor para el widget: solo servidores `ACTIVE`; los que no tienen token
+   * no avisan, ni los cubiertos por un mantenimiento del servidor.
+   */
+  private async serverAlerts(now: Date, maintenance: MaintenanceWindow[]): Promise<ServerAlert[]> {
     const servers = await this.servers.find({ where: { status: 'ACTIVE' }, order: { id: 'ASC' } });
     const withAgent = servers.filter((s) => s.agentTokenHash).map((s) => Number(s.id));
     const disks = this.agentSamples ? await latestAgentDisks(this.agentSamples, withAgent) : new Map();
@@ -176,6 +182,7 @@ export class AvailabilityIngestService {
         lastDisks: disks.get(Number(s.id)) ?? null,
       })),
       now,
+      maintenance,
     );
   }
 
@@ -197,14 +204,18 @@ export class AvailabilityIngestService {
     return rows.map((o) => ({ id: Number(o.id), serviceId: Number(o.serviceId), kind: o.kind }));
   }
 
-  private async combinedState(activeServices: MonitorService[], schedule: ScheduleConfig, now: Date): Promise<CombinedStateRow[]> {
+  private async combinedState(
+    activeServices: MonitorService[],
+    schedule: ScheduleConfig,
+    now: Date,
+    maintenance: MaintenanceWindow[],
+  ): Promise<CombinedStateRow[]> {
     if (activeServices.length === 0) return [];
-    const [servers, probes, states, incidents, maintenance] = await Promise.all([
+    const [servers, probes, states, incidents] = await Promise.all([
       this.servers.find(),
       this.probes.find(),
       this.states.find(),
       this.incidents.find({ where: { recoveredAt: IsNull() } }),
-      this.maintenance ? activeMaintenanceWindows(this.maintenance, now) : Promise.resolve([]),
     ]);
     // `ticketCode` lo completa `AvailabilitySyncService` (solo backend; el worker no tiene tickets).
     return buildCombinedRows({ services: activeServices, servers, probes, states, openIncidents: incidents, schedule, now, maintenance });

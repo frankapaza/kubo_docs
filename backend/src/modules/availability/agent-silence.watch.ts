@@ -7,7 +7,10 @@ import { formatPeruDateTime } from '../../common/peru-date-time';
 import { EmailService } from '../email/email.service';
 import { escapeHtml } from '../notifications/domain/template-renderer';
 import { UsersRepository } from '../users/users.repository';
+import { activeWindowFor } from './domain/maintenance';
+import { activeMaintenanceWindows } from './domain/maintenance-repo';
 import { silenceDecision } from './domain/probe-silence';
+import { MonitorMaintenance } from './entities/monitor-maintenance.entity';
 import { MonitorServer } from './entities/monitor-server.entity';
 import { STARTUP_GRACE_MS } from './probe-silence.watch';
 
@@ -23,6 +26,10 @@ const DEFAULT_FRONTEND_URL = 'http://localhost:5173';
  * Mismas protecciones: `agent_silence_alerted_at` se fija solo tras enviar, el
  * indicador `running` evita pasadas simultáneas, la actualización es
  * condicional y `unwritten` recuerda lo enviado si la marca no se pudo escribir.
+ *
+ * Mantenimiento: mientras una ventana del servidor (no de un servicio) lo cubre,
+ * no se avisa el silencio ni se marca; si sigue mudo al terminar la ventana, se
+ * avisa entonces. La vuelta solo se avisa si el aviso llegó a enviarse.
  */
 @Injectable()
 export class AgentSilenceWatch {
@@ -40,6 +47,7 @@ export class AgentSilenceWatch {
     private readonly users: UsersRepository,
     private readonly email: EmailService,
     private readonly config: ConfigService,
+    @InjectRepository(MonitorMaintenance) private readonly maintenance: Repository<MonitorMaintenance>,
   ) {}
 
   @Cron('0 * * * * *')
@@ -57,6 +65,9 @@ export class AgentSilenceWatch {
 
   async check(now: Date): Promise<void> {
     const servers = await this.servers.find({ where: { status: 'ACTIVE', agentTokenHash: Not(IsNull()) } });
+    if (servers.length === 0) return;
+    // Una sola lectura de ventanas activas por pasada.
+    const windows = await activeMaintenanceWindows(this.maintenance, now);
     for (const server of servers) {
       const id = Number(server.id);
       try {
@@ -69,6 +80,8 @@ export class AgentSilenceWatch {
           continue;
         }
         if (decision === 'ALERT' && now.getTime() - this.startedAt.getTime() < STARTUP_GRACE_MS) continue;
+        // En mantenimiento del servidor no se notifica; la vuelta (RECOVERED) implica un aviso ya enviado.
+        if (decision === 'ALERT' && activeWindowFor({ serviceId: null, serverId: id }, now, windows)) continue;
         await this.notify(server, decision, now);
       } catch (e) {
         this.logger.error(`Aviso del agente de ${server.name} fallido: ${(e as Error).message}`);

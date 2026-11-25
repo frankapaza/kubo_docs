@@ -73,4 +73,13 @@ describe('serverAlertsFor', () => {
     );
     expect(alerts).toEqual([]);
   });
+
+  it('una ventana de mantenimiento del servidor activa oculta sus avisos; una de servicio no', () => {
+    const silent = base({ id: 1, agentLastSeenAt: new Date(NOW.getTime() - 30 * 60_000) });
+    const low = base({ id: 2, name: 'srv-db', lastDisks: [{ name: 'C:', totalBytes: 1000, freeBytes: 10 }] });
+    const win = (over: any) => ({ id: 1, serverId: null, serviceId: null, startsAt: new Date(NOW.getTime() - 60_000), endsAt: new Date(NOW.getTime() + 60_000), reason: 'x', ...over });
+    expect(serverAlertsFor([silent, low], NOW, [win({ serverId: 1 }), win({ serverId: 2 })])).toEqual([]);
+    expect(serverAlertsFor([silent, low], NOW, [win({ serviceId: 5 })]).map((a) => a.kind)).toEqual(['AGENT_SILENT', 'DISK_LOW']);
+    expect(serverAlertsFor([silent, low], NOW, [win({ serverId: 1, endsAt: NOW })]).map((a) => a.kind)).toEqual(['AGENT_SILENT', 'DISK_LOW']);
+  });
 });

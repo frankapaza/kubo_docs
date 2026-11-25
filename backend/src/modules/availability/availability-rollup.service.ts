@@ -48,6 +48,8 @@ const maxDate = (a: Date, b: Date) => (a.getTime() >= b.getTime() ? a : b);
 export class AvailabilityRollupService implements OnApplicationBootstrap {
   private readonly logger = new Logger(AvailabilityRollupService.name);
   private running = false;
+  /** Cerrojo en proceso compartido por todos los `rollupDay`: un día a la vez. */
+  private dayLock: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly ds: DataSource) {}
 
@@ -98,8 +100,19 @@ export class AvailabilityRollupService implements OnApplicationBootstrap {
     }
   }
 
-  /** Recalcula una fecha: borra e inserta sus resúmenes y huecos en una sola transacción. Idempotente. */
-  async rollupDay(date: string, now: Date): Promise<void> {
+  /**
+   * Recalcula una fecha: borra e inserta sus resúmenes y huecos en una sola transacción. Idempotente.
+   * Los cálculos van en fila (`dayLock`): al arrancar, la pasada de resúmenes y la puesta al día de
+   * los informes llaman a la vez a `ensureRange` y podrían calcular la misma fecha en paralelo.
+   */
+  rollupDay(date: string, now: Date): Promise<void> {
+    const job = this.dayLock.then(() => this.computeDay(date, now));
+    // Un fallo no corta la fila: el siguiente cálculo espera solo a que este termine.
+    this.dayLock = job.catch(() => undefined);
+    return job;
+  }
+
+  private async computeDay(date: string, now: Date): Promise<void> {
     const { from, to } = limaDayBounds(date);
     const until = minDate(to, now);
 
@@ -133,10 +146,25 @@ export class AvailabilityRollupService implements OnApplicationBootstrap {
     to: Date,
     until: Date,
   ): Promise<{ rollups: RollupRow[]; gaps: GapRow[] }> {
-    const services = await this.ds.getRepository(MonitorService).find({
+    const checksRepo = this.ds.getRepository(MonitorCheck);
+    const live = await this.ds.getRepository(MonitorService).find({
       where: { status: In(['ACTIVE', 'PAUSED']), createdAt: LessThan(to) },
       order: { id: 'ASC' },
     });
+    // Un servicio archivado después del día conserva su resumen al recalcular: entra si midió ese día.
+    const archived = await this.ds.getRepository(MonitorService).find({
+      where: { status: 'ARCHIVED', createdAt: LessThan(to) },
+      order: { id: 'ASC' },
+    });
+    const measured: MonitorService[] = [];
+    for (const s of archived) {
+      const hit = await checksRepo.findOne({
+        where: { serviceId: s.id, startedAt: And(MoreThanOrEqual(from), LessThan(to)) },
+        select: { probeId: true, id: true },
+      });
+      if (hit) measured.push(s);
+    }
+    const services = [...live, ...measured].sort((a, b) => Number(a.id) - Number(b.id));
     const probes = await this.ds.getRepository(MonitorProbe).find({ order: { id: 'ASC' } });
     const minutes = await this.serviceMinutes(services.map((s) => Number(s.id)), from, until);
     const outages = await this.ds.getRepository(MonitorOfficeOutage).find({
@@ -149,7 +177,6 @@ export class AvailabilityRollupService implements OnApplicationBootstrap {
 
     const rollups: RollupRow[] = [];
     const gaps: GapRow[] = [];
-    const checksRepo = this.ds.getRepository(MonitorCheck);
     for (const probe of probes) {
       const probeId = Number(probe.id);
       // Una sonda que aún no reportaba ese día (o nunca) no tiene resumen ni huecos.
