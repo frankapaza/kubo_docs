@@ -1,6 +1,6 @@
 # Monitoreo de disponibilidad · Lista de despliegue a producción
 
-Para el responsable. Cubre la Entrega 1 (núcleo: central, sonda `kubo-01`, motor de la oficina) y la Entrega 2 (widget de escritorio y aviso por silencio de una sonda), ya integradas con `main` (conector de tickets).
+Para el responsable. Cubre la Entrega 1 (núcleo: central, sonda `kubo-01`, motor de la oficina), la Entrega 2 (widget de escritorio y aviso por silencio de una sonda) y la Entrega 3 (informe mensual, mantenimientos, WinMTR, importación CSV y agente de servidor), ya integradas con `main` (conector de tickets).
 
 **Migraciones implicadas, en este orden:**
 
@@ -9,8 +9,9 @@ Para el responsable. Cubre la Entrega 1 (núcleo: central, sonda `kubo-01`, moto
 | 031 | `backend/sql/migrations/031_conector_repos.sql` | conector (ya en `main`) | tablas `dev_repos`, `dev_keys`, `dev_links`; `work_items.client_system_id` |
 | 032 | `backend/sql/migrations/032_disponibilidad_nucleo.sql` | monitoreo (antes 031) | tablas `monitor_*`, sondas `kubo-01` y `oficina-01`, usuario de sistema `monitoreo@sistema.kubo` (inactivo, sin contraseña válida) |
 | 033 | `backend/sql/migrations/033_disponibilidad_escritorio.sql` | monitoreo (antes 032) | columna `monitor_probes.silence_alerted_at` |
+| 034 | `backend/sql/migrations/034_disponibilidad_informe.sql` | monitoreo (Entrega 3) | 8 tablas (resúmenes diarios, informe mensual, evidencia, mantenimientos, muestras y resúmenes del agente…), 4 columnas del agente en `monitor_servers` e índice `idx_monitor_checks_probe_started` en `monitor_checks` |
 
-Las tres son aditivas e idempotentes (guardadas con `information_schema`, `CREATE TABLE IF NOT EXISTS`, `INSERT ... WHERE NOT EXISTS` / `INSERT IGNORE`): volver a aplicarlas no hace nada. Ninguna siembra plantillas de aviso, así que el control «Plantillas de aviso: 9» de `deploy.yml` no cambia. La 033 necesita la 032 (altera `monitor_probes`).
+Las cuatro son aditivas e idempotentes (guardadas con `information_schema`, `CREATE TABLE IF NOT EXISTS`, `INSERT ... WHERE NOT EXISTS` / `INSERT IGNORE`): volver a aplicarlas no hace nada. Ninguna siembra plantillas de aviso, así que el control «Plantillas de aviso: 9» de `deploy.yml` no cambia. La 033 necesita la 032 (altera `monitor_probes`) y la 034 también (altera `monitor_servers` y `monitor_checks`).
 
 ---
 
@@ -33,18 +34,19 @@ Las tres son aditivas e idempotentes (guardadas con `information_schema`, `CREAT
   ls -l $HOME/respaldo-pre-monitoreo-*.sql   # que no pese casi nada = no siga
   ```
 
-## 2. Migraciones 031 (conector), 032 y 033
+## 2. Migraciones 031 (conector), 032, 033 y 034
 
-**Camino normal: `deploy.yml`.** En su paso 4 aplica, en orden, `010 … 030`, `031_conector_repos`, `032_disponibilidad_nucleo`, `033_disponibilidad_escritorio` (la 011 no: sigue siendo manual). Con `set -e`, cualquier fallo corta el despliegue **antes** de reconstruir: la versión vieja sigue sirviendo.
+**Camino normal: `deploy.yml`.** En su paso 4 aplica, en orden, `010 … 030`, `031_conector_repos`, `032_disponibilidad_nucleo`, `033_disponibilidad_escritorio`, `034_disponibilidad_informe` (la 011 no: sigue siendo manual). Con `set -e`, cualquier fallo corta el despliegue **antes** de reconstruir: la versión vieja sigue sirviendo.
 
-- [ ] Revise en el log de la acción que aparecen `--- 031_conector_repos`, `--- 032_disponibilidad_nucleo` y `--- 033_disponibilidad_escritorio` sin error, y que el paso 5 dice «Eventos pendientes de notificar: 0» y «Plantillas de aviso: 9».
+- [ ] **Respaldo antes de la 034** (ver paso 1; `deploy.yml` lo hace solo). La 034 crea un índice en `monitor_checks`, que puede ser la tabla más grande: en un VPS con muchos checks tarda y bloquea escrituras un momento, así que conviene desplegar en una hora tranquila.
+- [ ] Revise en el log de la acción que aparecen `--- 031_conector_repos`, `--- 032_disponibilidad_nucleo`, `--- 033_disponibilidad_escritorio` y `--- 034_disponibilidad_informe` sin error, y que el paso 5 dice «Eventos pendientes de notificar: 0» y «Plantillas de aviso: 9».
 
 **Camino manual** (si se despliega con `deploy.sh`, que **no** aplica migraciones):
 
 ```bash
 cd /home/kubo/kubo
 git pull
-for m in 031_conector_repos 032_disponibilidad_nucleo 033_disponibilidad_escritorio; do
+for m in 031_conector_repos 032_disponibilidad_nucleo 033_disponibilidad_escritorio 034_disponibilidad_informe; do
   echo "--- $m"
   docker compose exec -T mysql \
     sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' \
@@ -62,6 +64,11 @@ done
   SELECT email, is_active FROM users WHERE email='monitoreo@sistema.kubo';  -- 1 fila, is_active 0
   SELECT COUNT(*) FROM information_schema.COLUMNS
    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='monitor_probes' AND COLUMN_NAME='silence_alerted_at';  -- 1
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+   WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='monitor_servers' AND COLUMN_NAME IN
+     ('agent_watch_services','agent_token_created_at','agent_silence_alerted_at','agent_version');  -- 4
+  SELECT COUNT(*) FROM information_schema.STATISTICS
+   WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='monitor_checks' AND INDEX_NAME='idx_monitor_checks_probe_started';  -- >= 1
   SQL
   ```
 
@@ -110,9 +117,18 @@ Instrucciones en `desktop/widget/README.md` («Empaquetado»).
 - [ ] Ejecútelo **con la sesión del usuario indicado en `--user`** en la PC de la oficina. Queda registrado para arrancar con la sesión; una sola instancia.
 - [ ] Compruebe: barra «KUBO · Todo operativo · hh:mm», icono en la bandeja, y «Probar notificación» desde el menú de la bandeja muestra un aviso de Windows.
 
-## 9. Cargar `VMI2571371` en Inventario
+## 9. Variable `FRONTEND_URL` y publicación del agente
 
-Solo con su visto bueno tras leer `2026-11-23-monitoreo-entrega-1-aceptacion.md` («Cambios respecto al plan», «Limitaciones conocidas») y `2026-11-24-monitoreo-entrega-2-aceptacion.md`, y con los pendientes que allí bloquean la carga ya hechos (servicio de Windows en la oficina y la prueba de corte de internet).
+- [ ] **`FRONTEND_URL` debe ser la URL pública** (`https://docs.kuboti.com`, sin barra final). La central la escribe en el script de instalación del agente (`install-kubo-agent.ps1`) y en los enlaces de los correos de silencio. Si falta, usa `http://localhost:5173` y el agente instalado no podrá reportar. Revise el `.env` del VPS **antes** de emitir el primer token (no se reproduce aquí).
+- [ ] **El agente no lo despliega CI ni `deploy.yml`.** Se compila localmente (`cd agent`; `powershell -ExecutionPolicy Bypass -File .uild.ps1`; genera `agentpublishkubo-agent.exe` y su SHA-256) y el personal lo copia al servidor junto con `install-kubo-agent.ps1`. Anote el SHA-256 de la versión que instala. No está en CI: `dotnet test` se corre a mano en Windows.
+- [ ] **Autorización del cliente.** Instalar el agente en un servidor de Contacto Eficaz (incluido `VMI2571371`) requiere su **autorización por escrito** antes de empezar. Sin ella no se instala.
+- [ ] **Primero en un servidor de prueba:** instalar con el script, comprobar que la muestra aparece en Monitoreo → Servidores, revocar el token (el agente registra 401 en el Visor de eventos) y desinstalar (`uninstall-kubo-agent.ps1`). Pasos y pruebas de disco y de silencio: `2026-11-24-monitoreo-entrega-3-aceptacion.md`, sección 4.
+- [ ] Tras instalar, **borre `install-kubo-agent.ps1`** del servidor y de donde se descargó: contiene el token en claro.
+- [ ] Informe: el cron del día 1 lo genera el backend; si el backend estuvo apagado ese día, `catchUp` lo rehace al arrancar. Revise el informe del mes en curso (parcial) durante los siete días de revisión.
+
+## 10. Cargar `VMI2571371` en Inventario
+
+Solo con su visto bueno tras leer `2026-11-23-monitoreo-entrega-1-aceptacion.md` («Cambios respecto al plan», «Limitaciones conocidas») `2026-11-24-monitoreo-entrega-2-aceptacion.md` y `2026-11-24-monitoreo-entrega-3-aceptacion.md`, y con los pendientes que allí bloquean la carga ya hechos (servicio de Windows en la oficina, la prueba de corte de internet y, para el agente, la prueba en un servidor de prueba y la autorización escrita del cliente).
 
 - [ ] **Monitoreo → Inventario** (`/monitoreo/inventario`): alta del servidor `VMI2571371` y sus servicios.
 - [ ] En `/monitoreo/estado` aparecen y pasan a «operativo» en unos minutos; el widget de la oficina los muestra.
@@ -124,8 +140,8 @@ Solo con su visto bueno tras leer `2026-11-23-monitoreo-entrega-1-aceptacion.md`
 **Falla una migración (paso 2).**
 - Con `deploy.yml`: el `set -e` corta antes de reconstruir; la versión anterior sigue sirviendo. Lea el error en el log de la acción, corríjalo y vuelva a lanzar (`workflow_dispatch`): las migraciones ya aplicadas no hacen nada la segunda vez.
 - A mano: el bucle se detiene en la que falla (`|| break`); no levante el backend nuevo. Las ya aplicadas no estorban a la versión vieja (solo añaden tablas y columnas nulables).
-- Si una ejecución se cortó a medias puede quedar un procedimiento auxiliar (`kubo_add_column_031`, `kubo_add_index_031`, `kubo_upgrade_032`, `kubo_add_column_033`): cada migración hace `DROP PROCEDURE IF EXISTS` al empezar, así que basta con reaplicarla.
-- La 033 depende de la 032: no la aplique sola.
+- Si una ejecución se cortó a medias puede quedar un procedimiento auxiliar (`kubo_add_column_031`, `kubo_add_index_031`, `kubo_upgrade_032`, `kubo_add_column_033`, y los de la 034 `kubo_*_034`): cada migración hace `DROP PROCEDURE IF EXISTS` al empezar, así que basta con reaplicarla.
+- La 033 y la 034 dependen de la 032: no las aplique solas.
 - Restaurar el respaldo solo hace falta si algo tocó datos existentes, que no es el caso de estas migraciones. Si aun así se decide, pare antes el backend y el worker para que nada escriba mientras se restaura (`docker compose stop backend monitor-worker`) y levántelos al terminar. Restaurar el volcado no elimina las tablas que crearon las migraciones nuevas (`monitor_*`, `dev_*`): quedan ahí, lo cual es inofensivo.
 
   ```bash
