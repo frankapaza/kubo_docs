@@ -5,6 +5,7 @@ import { DIAGNOSIS_LABELS } from './domain/diagnose';
 import { MonitorCheck } from './entities/monitor-check.entity';
 import { MonitorIncidentEvent } from './entities/monitor-incident-event.entity';
 import { MonitorIncident } from './entities/monitor-incident.entity';
+import { MonitorMaintenance } from './entities/monitor-maintenance.entity';
 import { MonitorOfficeOutage } from './entities/monitor-office-outage.entity';
 import { MonitorProbeOrder } from './entities/monitor-probe-order.entity';
 import { MonitorProbeSignal } from './entities/monitor-probe-signal.entity';
@@ -562,6 +563,67 @@ describe('AvailabilityEvaluatorService', () => {
       expect.objectContaining({ diagnosis: DIAGNOSIS_LABELS.ROUTE, criticality: 'HIGH' }),
     );
     expect(t.incidents()[0].ticketId).toBe(901);
+  });
+
+  describe('ventanas de mantenimiento', () => {
+    const maintenance = (t: ReturnType<typeof setup>, over: Row) =>
+      t.db.add(MonitorMaintenance, { id: 1, serverId: null, serviceId: null, startsAt: at(-600), endsAt: at(600), reason: 'Parche mensual', createdBy: 7, ...over });
+
+    it('DOWN confirmado durante una ventana activa del servidor: sin ticket y un solo MAINTENANCE_SUPPRESSED aunque el barrido corra 3 veces', async () => {
+      const t = setup();
+      maintenance(t, { serverId: 10 });
+      await t.officeDownWithCross(100, T0, false);
+      await t.evaluator.tick(at(30));
+      await t.evaluator.tick(at(35));
+      await t.evaluator.tick(at(40));
+      const inc = t.incidents()[0];
+      expect(inc).toMatchObject({ kind: 'DOWN', recoveredAt: null, ticketId: null });
+      expect(t.tickets.ensureTicket).not.toHaveBeenCalled();
+      const suppressed = t.events(inc.id).filter((e) => e.type === 'MAINTENANCE_SUPPRESSED');
+      expect(suppressed).toHaveLength(1);
+      expect(suppressed[0].detail).toMatchObject({ maintenanceId: 1, reason: 'Parche mensual' });
+    });
+
+    it('al pasar now por endsAt con el incidente abierto, el barrido crea el ticket', async () => {
+      const t = setup();
+      maintenance(t, { serviceId: 100 });
+      await t.officeDownWithCross(100, T0, false);
+      await t.evaluator.tick(at(599));
+      expect(t.tickets.ensureTicket).not.toHaveBeenCalled();
+      await t.evaluator.tick(at(600));
+      expect(t.tickets.ensureTicket).toHaveBeenCalledTimes(1);
+      expect(t.incidents()[0].ticketId).toBe(901);
+    });
+
+    it('una ventana de otro servicio no suprime el ticket', async () => {
+      const t = setup();
+      maintenance(t, { serviceId: 101 });
+      await t.officeDownWithCross(100, T0, false);
+      expect(t.tickets.ensureTicket).toHaveBeenCalledTimes(1);
+      expect(t.events().some((e) => e.type === 'MAINTENANCE_SUPPRESSED')).toBe(false);
+    });
+
+    it('las ventanas activas se leen una vez por tick, no por incidente', async () => {
+      const t = setup();
+      maintenance(t, { serverId: 10 });
+      maintenance(t, { id: 2, serverId: 11 });
+      for (const [serviceId, serverId] of [[100, 10], [103, 11]]) {
+        t.db.add(MonitorIncident, {
+          serviceId, serverId, parentId: null, kind: 'DOWN', firstFailureAt: T0, confirmedAt: T0, recoveredAt: null, closeReason: null, ticketId: null,
+        });
+      }
+      const repo = t.db.manager.getRepository;
+      let reads = 0;
+      (t.db.manager as any).getRepository = (e: any) => {
+        const r = repo(e);
+        if (e !== MonitorMaintenance) return r;
+        return { ...r, find: async (o: any) => (reads++, r.find(o)) };
+      };
+      await t.evaluator.tick(at(5));
+      expect(reads).toBe(1);
+      expect(t.tickets.ensureTicket).not.toHaveBeenCalled();
+      expect(t.events().filter((e) => e.type === 'MAINTENANCE_SUPPRESSED')).toHaveLength(2);
+    });
   });
 
   it('ensureTicket con 5xx se reintenta en el siguiente tick', async () => {

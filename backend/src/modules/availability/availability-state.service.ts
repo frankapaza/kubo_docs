@@ -6,6 +6,8 @@ import { TicketsRepository } from '../tickets/tickets.repository';
 import { DEFAULT_SCHEDULE } from './core';
 import { CombinedStateRow, CombinedStatus } from './domain/combined-state';
 import { buildCombinedRows } from './domain/combined-state-builder';
+import { activeMaintenanceWindows } from './domain/maintenance-repo';
+import { MonitorMaintenance } from './entities/monitor-maintenance.entity';
 import { toCsv } from './domain/csv';
 import { diagnosisFromEvent } from './domain/diagnose';
 import { ticketCodesForIncidents } from './incident-ticket-codes';
@@ -122,6 +124,7 @@ export class AvailabilityStateService {
     @InjectRepository(MonitorProbeOrder) private readonly orders: Repository<MonitorProbeOrder>,
     private readonly clients: ClientsService,
     private readonly tickets: TicketsRepository,
+    @InjectRepository(MonitorMaintenance) private readonly maintenance: Repository<MonitorMaintenance>,
   ) {}
 
   // ---------------------------------------------------------------- estado
@@ -131,14 +134,15 @@ export class AvailabilityStateService {
       throw badInput('Estado inválido');
     }
     const now = new Date();
-    const [services, servers, probes, states, open] = await Promise.all([
+    const [services, servers, probes, states, open, maintenance] = await Promise.all([
       this.services.find({ where: { status: 'ACTIVE' } }),
       this.servers.find(),
       this.probes.find(),
       this.states.find(),
       this.incidents.find({ where: { recoveredAt: IsNull() } }),
+      activeMaintenanceWindows(this.maintenance, now),
     ]);
-    let rows = buildCombinedRows({ services, servers, probes, states, openIncidents: open, schedule: DEFAULT_SCHEDULE, now });
+    let rows = buildCombinedRows({ services, servers, probes, states, openIncidents: open, schedule: DEFAULT_SCHEDULE, now, maintenance });
     if (filter.clientId !== undefined) rows = rows.filter((r) => r.clientId === filter.clientId);
     if (filter.serverId !== undefined) rows = rows.filter((r) => r.serverId === filter.serverId);
     if (filter.status !== undefined) rows = rows.filter((r) => r.status === filter.status);

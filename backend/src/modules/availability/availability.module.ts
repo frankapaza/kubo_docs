@@ -11,6 +11,8 @@ import { AvailabilitySyncService } from './availability-sync.service';
 import { AvailabilityIngestService } from './availability-ingest.service';
 import { AvailabilityInventoryController } from './availability-inventory.controller';
 import { AvailabilityInventoryService } from './availability-inventory.service';
+import { AvailabilityMaintenanceController } from './availability-maintenance.controller';
+import { AvailabilityMaintenanceService } from './availability-maintenance.service';
 import { AvailabilityEvaluatorScheduler } from './availability-evaluator.scheduler';
 import { AvailabilityStateController } from './availability-state.controller';
 import { AvailabilityStateService } from './availability-state.service';
@@ -65,12 +67,18 @@ import { ProbeTokenGuard } from './probe-token.guard';
     UsersModule,
     EmailModule,
   ],
-  controllers: [AvailabilityInventoryController, AvailabilityIngestController, AvailabilityStateController],
+  controllers: [
+    AvailabilityInventoryController,
+    AvailabilityIngestController,
+    AvailabilityStateController,
+    AvailabilityMaintenanceController,
+  ],
   providers: [
     AvailabilityInventoryService,
     AvailabilityIngestService,
     AvailabilitySyncService,
     AvailabilityStateService,
+    AvailabilityMaintenanceService,
     ProbeTokenGuard,
     ProbeRateLimiter,
     AvailabilityTicketsService,

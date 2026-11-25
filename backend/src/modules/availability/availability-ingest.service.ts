@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'node:crypto';
 import { In, IsNull, ObjectLiteral, Repository } from 'typeorm';
@@ -6,6 +6,8 @@ import { PROBE_REFERENCES } from './availability.constants';
 import { CheckResult, DEFAULT_SCHEDULE, intervalMsAt, ProbeSignal, ScheduleConfig, ServiceTarget } from './core';
 import { CombinedStateRow } from './domain/combined-state';
 import { buildCombinedRows } from './domain/combined-state-builder';
+import { activeMaintenanceWindows } from './domain/maintenance-repo';
+import { MonitorMaintenance } from './entities/monitor-maintenance.entity';
 import { MonitorCheck } from './entities/monitor-check.entity';
 import { MonitorIncident } from './entities/monitor-incident.entity';
 import { MonitorProbeOrder } from './entities/monitor-probe-order.entity';
@@ -60,6 +62,8 @@ export class AvailabilityIngestService {
     @InjectRepository(MonitorService) private readonly services: Repository<MonitorService>,
     @InjectRepository(MonitorServer) private readonly servers: Repository<MonitorServer>,
     @InjectRepository(MonitorIncident) private readonly incidents: Repository<MonitorIncident>,
+    // Opcional: el worker (kubo-01) solo mide y no registra `MonitorMaintenance`; sin él, `maintenance` va en false.
+    @Optional() @InjectRepository(MonitorMaintenance) private readonly maintenance?: Repository<MonitorMaintenance>,
   ) {}
 
   /**
@@ -169,14 +173,15 @@ export class AvailabilityIngestService {
 
   private async combinedState(activeServices: MonitorService[], schedule: ScheduleConfig, now: Date): Promise<CombinedStateRow[]> {
     if (activeServices.length === 0) return [];
-    const [servers, probes, states, incidents] = await Promise.all([
+    const [servers, probes, states, incidents, maintenance] = await Promise.all([
       this.servers.find(),
       this.probes.find(),
       this.states.find(),
       this.incidents.find({ where: { recoveredAt: IsNull() } }),
+      this.maintenance ? activeMaintenanceWindows(this.maintenance, now) : Promise.resolve([]),
     ]);
     // `ticketCode` lo completa `AvailabilitySyncService` (solo backend; el worker no tiene tickets).
-    return buildCombinedRows({ services: activeServices, servers, probes, states, openIncidents: incidents, schedule, now });
+    return buildCombinedRows({ services: activeServices, servers, probes, states, openIncidents: incidents, schedule, now, maintenance });
   }
 
   private async insertIgnore(repo: Repository<any>, entity: new () => ObjectLiteral, rows: ObjectLiteral[]): Promise<number> {

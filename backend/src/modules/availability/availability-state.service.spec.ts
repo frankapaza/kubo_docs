@@ -20,6 +20,7 @@ const matches = (row: any, where: any): boolean =>
       if (t === 'moreThanOrEqual') return num(val) >= num(x);
       if (t === 'lessThanOrEqual') return num(val) <= num(x);
       if (t === 'lessThan') return !isNullish(val) && num(val) < num(x);
+      if (t === 'moreThan') return !isNullish(val) && num(val) > num(x);
       if (t === 'not') return !(x instanceof FindOperator && x.type === 'isNull' ? isNullish(val) : num(val) === num(x));
       throw new Error(`operador no soportado: ${t}`);
     }
@@ -122,12 +123,13 @@ const make = () => {
   const tickets = {
     findCodesByIds: jest.fn(async (ids: number[]) => new Map([...new Set(ids)].map((id) => [id, `TK-${id}`] as [number, string]))),
   };
+  const maintenance = repoOf([]);
   const svc = new AvailabilityStateService(
     servers as any, services as any, probes as any, states as any, incidents as any, events as any, checks as any, orders as any,
-    clients as any, tickets as any,
+    clients as any, tickets as any, maintenance as any,
   );
   jest.useFakeTimers().setSystemTime(now);
-  return { svc, services, orders, incidents, events, tickets };
+  return { svc, services, orders, incidents, events, tickets, maintenance };
 };
 
 afterEach(() => jest.useRealTimers());
@@ -152,6 +154,17 @@ describe('AvailabilityStateService.state', () => {
     expect(rows.find((r) => r.serviceName === 'api')!.ticketCode).toBe('TK-900');
     expect(rows.find((r) => r.serviceName === 'db')!.ticketCode).toBe('TK-901');
     expect(rows.find((r) => r.serviceName === 'web')!.ticketCode).toBeNull();
+  });
+
+  it('marca maintenance solo en los servicios cubiertos por una ventana activa', async () => {
+    const { svc, maintenance } = make();
+    maintenance.rows.push(
+      // servidor 11 (db, ftp) en mantenimiento ahora; web con una ventana ya terminada
+      { id: 1, serverId: 11, serviceId: null, startsAt: ago(60_000), endsAt: new Date(T0.getTime() + 60_000), reason: 'parche' },
+      { id: 2, serverId: null, serviceId: 100, startsAt: ago(7200_000), endsAt: T0, reason: 'vieja' },
+    );
+    const rows = await svc.state({});
+    expect(Object.fromEntries(rows.map((r) => [r.serviceName, r.maintenance]))).toEqual({ api: false, db: true, ftp: true, web: false });
   });
 
   it('el filtro por cliente no devuelve servicios de otro cliente', async () => {

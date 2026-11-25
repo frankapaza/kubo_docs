@@ -5,6 +5,7 @@ import { MonitorProbe } from '../entities/monitor-probe.entity';
 import { MonitorServer } from '../entities/monitor-server.entity';
 import { MonitorService } from '../entities/monitor-service.entity';
 import { CombinedStateRow, combineStatus, ProbeView } from './combined-state';
+import { activeWindowFor, MaintenanceWindow } from './maintenance';
 
 export interface CombinedStateInput {
   services: MonitorService[];
@@ -15,6 +16,8 @@ export interface CombinedStateInput {
   openIncidents: MonitorIncident[];
   schedule: ScheduleConfig;
   now: Date;
+  /** Ventanas de mantenimiento (basta con las activas en `now`); sin ellas, `maintenance` queda en false. */
+  maintenance?: MaintenanceWindow[];
 }
 
 /** Estado combinado por servicio (`ticketCode` queda en null: lo rellenan quienes lo entregan, la API del personal y `sync`, con `ticketCodesForIncidents`). Lo comparten `sync` y la API del personal. */
@@ -56,6 +59,7 @@ export function buildCombinedRows(input: CombinedStateInput): CombinedStateRow[]
       incidentId: incident ? Number(incident.id) : null,
       parentIncidentId: incident?.parentId != null ? Number(incident.parentId) : null,
       ticketCode: null,
+      maintenance: activeWindowFor({ serviceId: id, serverId: Number(server.id) }, input.now, input.maintenance ?? []) !== null,
     });
   }
   return rows;

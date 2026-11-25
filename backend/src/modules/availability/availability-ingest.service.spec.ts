@@ -73,7 +73,7 @@ const SERVICE = {
   latencyThresholdMs: 1500, criticality: 'HIGH', status: 'ACTIVE',
 };
 
-const makeSvc = (seed: { services?: any[]; orders?: any[]; incidents?: any[]; states?: any[] } = {}) => {
+const makeSvc = (seed: { services?: any[]; orders?: any[]; incidents?: any[]; states?: any[]; maintenance?: any[] } = {}) => {
   const probe: any = { id: 1, code: 'oficina-01', kind: 'OFFICE', tokenHash: 'x', lastSeenAt: null, version: null, clockSkewMs: null };
   const probes = repoOf([probe, { id: 2, code: 'kubo-01', kind: 'DATACENTER' }]);
   const checks = repoOf([], (r) => `${r.probeId}|${r.id}`);
@@ -85,6 +85,7 @@ const makeSvc = (seed: { services?: any[]; orders?: any[]; incidents?: any[]; st
   const incidents = repoOf(seed.incidents ?? []);
   const svc = new AvailabilityIngestService(
     probes as any, checks as any, signals as any, orders as any, states as any, services as any, servers as any, incidents as any,
+    seed.maintenance ? ({ find: jest.fn(async () => seed.maintenance) } as any) : undefined,
   );
   return { svc, probe, probes, checks, signals, orders, states, services };
 };
@@ -262,8 +263,27 @@ describe('AvailabilityIngestService.sync', () => {
     expect(res.state).toHaveLength(1);
     expect(res.state[0]).toMatchObject({
       serviceId: 100, serverId: 10, clientId: 7, serviceName: 'web', serverName: 'srv-1', criticality: 'HIGH',
-      status: 'DOWN', incidentId: 50, parentIncidentId: 40, ticketCode: null, datacenter: null,
+      status: 'DOWN', incidentId: 50, parentIncidentId: 40, ticketCode: null, datacenter: null, maintenance: false,
     });
     expect(res.state[0].office).toMatchObject({ state: 'OK', lastLatencyMs: 10 });
+  });
+
+  it('state marca maintenance solo para los servicios cubiertos por una ventana activa', async () => {
+    const now = Date.now();
+    const { svc, probe } = makeSvc({
+      services: [{ ...SERVICE }, { ...SERVICE, id: 101, name: 'api' }],
+      maintenance: [
+        { id: 1, serverId: null, serviceId: 100, startsAt: new Date(now - 60_000), endsAt: new Date(now + 3600_000), reason: 'x' },
+        { id: 2, serverId: null, serviceId: 101, startsAt: new Date(now + 60_000), endsAt: new Date(now + 3600_000), reason: 'futura' },
+      ],
+    });
+    const res = await svc.sync(probe, null);
+    expect(res.state.map((r) => [r.serviceId, r.maintenance])).toEqual([[100, true], [101, false]]);
+  });
+
+  it('sin repositorio de mantenimiento (worker kubo-01) maintenance queda en false', async () => {
+    const { svc, probe } = makeSvc();
+    const res = await svc.sync(probe, null);
+    expect(res.state[0].maintenance).toBe(false);
   });
 });

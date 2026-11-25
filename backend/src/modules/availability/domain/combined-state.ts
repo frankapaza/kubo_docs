@@ -22,6 +22,8 @@ export interface CombinedStateRow {
   parentIncidentId: number | null;
   /** Lo rellena la API del personal (Task 12); la sonda no recibe tickets. */
   ticketCode: string | null;
+  /** Hay una ventana de mantenimiento activa que cubre al servicio (de él o de su servidor). */
+  maintenance: boolean;
 }
 
 /** Franjas sin comprobación tras las cuales una sonda se da por muda. */

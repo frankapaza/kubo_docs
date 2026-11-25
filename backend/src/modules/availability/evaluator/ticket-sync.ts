@@ -2,6 +2,9 @@ import { HttpException, Logger } from '@nestjs/common';
 import { DataSource, In, IsNull } from 'typeorm';
 import type { AvailabilityTicketsService, IncidentTicketContext } from '../availability-tickets.service';
 import { diagnosisFromEvent } from '../domain/diagnose';
+import { activeWindowFor, MaintenanceWindow } from '../domain/maintenance';
+import { activeMaintenanceWindows } from '../domain/maintenance-repo';
+import { MonitorMaintenance } from '../entities/monitor-maintenance.entity';
 import { MonitorIncidentEvent } from '../entities/monitor-incident-event.entity';
 import { MonitorIncident } from '../entities/monitor-incident.entity';
 import { MonitorServer } from '../entities/monitor-server.entity';
@@ -21,6 +24,9 @@ import {
 export const TICKET_RETRY_BASE_MS = 10_000;
 export const TICKET_RETRY_MAX_MS = 10 * 60_000;
 
+/** Evento que deja constancia de que el ticket no se creó por una ventana de mantenimiento activa. */
+export const MAINTENANCE_SUPPRESSED = 'MAINTENANCE_SUPPRESSED';
+
 const is4xx = (e: unknown): e is HttpException =>
   e instanceof HttpException && e.getStatus() >= 400 && e.getStatus() < 500;
 
@@ -33,10 +39,18 @@ const is4xx = (e: unknown): e is HttpException =>
  * exponencial por incidente (10 s, 20 s, 40 s… con tope de 10 min) y una sola
  * línea WARN por intento; la espera se olvida al primer éxito. Es en memoria:
  * un reinicio vuelve a intentar enseguida.
+ *
+ * Mantenimiento: mientras una ventana activa cubra al incidente (la del
+ * servicio o la de su servidor; un incidente de servidor solo mira las de
+ * servidor) el ticket no se crea y queda un evento `MAINTENANCE_SUPPRESSED`
+ * (uno solo desde el último cambio del incidente). Al terminar la ventana, el
+ * barrido lo crea. Las ventanas activas se leen una vez por `now` (por tick).
  */
 export class TicketSync {
   /** Incidente → fallos seguidos de ENSURE/REOPEN y cuándo puede volver a intentarse. */
   private readonly backoff = new Map<number, { failures: number; nextAt: number }>();
+  /** Ventanas activas leídas para un `now`: un tick usa el mismo `now` en las acciones y el barrido. */
+  private windows: { at: number; list: Promise<MaintenanceWindow[]> } | null = null;
 
   constructor(
     private readonly ds: DataSource,
@@ -112,6 +126,7 @@ export class TicketSync {
     const inc = await this.load(id);
     if (!inc || inc.recoveredAt !== null || inc.ticketId !== null || !isFailureKind(inc.kind)) return;
     if (await this.blockedBy4xx(id)) return;
+    if (await this.suppressedByMaintenance(inc, now)) return;
     const ctx = await this.context(inc, diagnosis);
     await this.guard4xx(id, now, async () => {
       const ticket = await this.tickets.ensureTicket(inc, ctx);
@@ -152,6 +167,38 @@ export class TicketSync {
       order: { id: 'DESC' },
     });
     return last?.type === TICKET_NOT_CREATED;
+  }
+
+  private activeWindows(now: Date): Promise<MaintenanceWindow[]> {
+    if (this.windows?.at !== now.getTime()) {
+      const list = activeMaintenanceWindows(this.ds.manager.getRepository(MonitorMaintenance), now);
+      // Si la lectura falla, el siguiente intento vuelve a consultar.
+      list.catch(() => {
+        if (this.windows?.list === list) this.windows = null;
+      });
+      this.windows = { at: now.getTime(), list };
+    }
+    return this.windows.list;
+  }
+
+  /** ¿Una ventana activa cubre al incidente? Registra el evento una vez desde el último cambio del incidente. */
+  private async suppressedByMaintenance(inc: MonitorIncident, now: Date): Promise<boolean> {
+    const target = { serviceId: numOrNull(inc.serviceId), serverId: num(inc.serverId) };
+    const window = activeWindowFor(target, now, await this.activeWindows(now));
+    if (!window) return false;
+    const id = num(inc.id);
+    const last = await this.ds.manager.getRepository(MonitorIncidentEvent).findOne({
+      where: { incidentId: id, type: In([MAINTENANCE_SUPPRESSED, ...TICKET_RESET_EVENTS]) },
+      order: { id: 'DESC' },
+    });
+    if (last?.type !== MAINTENANCE_SUPPRESSED) {
+      await addEvent(this.ds.manager, id, now, MAINTENANCE_SUPPRESSED, {
+        maintenanceId: window.id,
+        reason: window.reason,
+        endsAt: window.endsAt.toISOString(),
+      });
+    }
+    return true;
   }
 
   /** Guarda el ticket en el incidente y en sus hijos que no tengan otro (o que tuvieran el reemplazado). */

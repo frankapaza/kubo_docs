@@ -1,10 +1,13 @@
 import { BullModule } from '@nestjs/bullmq';
+import { Test } from '@nestjs/testing';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AvailabilityEvaluatorScheduler } from './availability-evaluator.scheduler';
 import { AvailabilityEvaluatorService } from './availability-evaluator.service';
 import { AvailabilityIngestService } from './availability-ingest.service';
 import { AvailabilityPurgeService } from './availability-purge.service';
-import { AvailabilityWorkerModule } from './availability-worker.module';
+import { AvailabilityWorkerModule, WORKER_ENTITIES } from './availability-worker.module';
+import { MonitorMaintenance } from './entities/monitor-maintenance.entity';
 import { DatacenterProbeService } from './datacenter-probe.service';
 import { AvailabilityModule } from './availability.module';
 import { TicketsModule } from '../tickets/tickets.module';
@@ -31,6 +34,14 @@ describe('AvailabilityWorkerModule (solo mide)', () => {
     for (const forbidden of [TicketsModule, TranscriptionsModule, BullModule, ScheduleModule, AvailabilityModule]) {
       expect(modules.has(forbidden)).toBe(false);
     }
+  });
+
+  it('la ingesta se resuelve con solo las entidades del worker (sin MonitorMaintenance)', async () => {
+    expect(WORKER_ENTITIES).not.toContain(MonitorMaintenance);
+    const moduleRef = await Test.createTestingModule({
+      providers: [AvailabilityIngestService, ...WORKER_ENTITIES.map((e) => ({ provide: getRepositoryToken(e), useValue: {} }))],
+    }).compile();
+    expect(moduleRef.get(AvailabilityIngestService)).toBeInstanceOf(AvailabilityIngestService);
   });
 
   it('solo registra la ingesta y la sonda: ni evaluador, ni tick, ni purga', () => {
