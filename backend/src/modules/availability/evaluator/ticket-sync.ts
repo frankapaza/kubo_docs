@@ -28,8 +28,32 @@ export const TICKET_RETRY_MAX_MS = 10 * 60_000;
 export const MAINTENANCE_SUPPRESSED = 'MAINTENANCE_SUPPRESSED';
 /** Se creó o reabrió el ticket que una ventana había frenado: cierra el `MAINTENANCE_SUPPRESSED` pendiente. */
 export const MAINTENANCE_RELEASED = 'MAINTENANCE_RELEASED';
-/** Eventos que deciden si un incidente con ticket tiene una reapertura pendiente por mantenimiento. */
+/** Eventos de la regla de un solo `MAINTENANCE_SUPPRESSED` (desde el último cambio del incidente). */
 const SUPPRESSION_EVENTS = [MAINTENANCE_SUPPRESSED, MAINTENANCE_RELEASED, TICKET_NOT_CREATED, ...TICKET_RESET_EVENTS];
+/**
+ * Supresión pendiente: un `MAINTENANCE_SUPPRESSED` sin `MAINTENANCE_RELEASED` ni
+ * `TICKET_NOT_CREATED` posterior (en el incidente o en su dueño). Los eventos de
+ * reinicio (`UPGRADED_TO_DOWN`, `PARENT_CREATED`…) no la cancelan.
+ */
+const PENDING_EVENTS = [MAINTENANCE_SUPPRESSED, MAINTENANCE_RELEASED, TICKET_NOT_CREATED];
+
+/**
+ * ¿Hay una supresión pendiente entre `events` (de `ownerId` y sus hijos)? Un
+ * cierre en el dueño cubre a los hijos: el ticket es del dueño. Los ids de
+ * evento son crecientes, así que sirven de orden.
+ */
+function hasPendingSuppression(events: MonitorIncidentEvent[], ownerId: number): boolean {
+  const closedAt = new Map<number, number>();
+  for (const e of events) {
+    if (e.type === MAINTENANCE_SUPPRESSED) continue;
+    const inc = num(e.incidentId);
+    closedAt.set(inc, Math.max(closedAt.get(inc) ?? 0, num(e.id)));
+  }
+  const ownerClosed = closedAt.get(ownerId) ?? 0;
+  return events.some(
+    (e) => e.type === MAINTENANCE_SUPPRESSED && num(e.id) > Math.max(ownerClosed, closedAt.get(num(e.incidentId)) ?? 0),
+  );
+}
 
 const is4xx = (e: unknown): e is HttpException =>
   e instanceof HttpException && e.getStatus() >= 400 && e.getStatus() < 500;
@@ -111,13 +135,14 @@ export class TicketSync {
    * por una ventana de mantenimiento que ya terminó.
    */
   async sweep(now: Date, attempted: Set<number>): Promise<void> {
+    // Todos los niveles: un hijo puede tener una reapertura pendiente que ahora es de su padre.
     const open = await this.ds.manager.getRepository(MonitorIncident).find({
-      where: { recoveredAt: IsNull(), parentId: IsNull(), kind: In(['DOWN', 'ROUTE']) },
+      where: { recoveredAt: IsNull(), kind: In(['DOWN', 'ROUTE']) },
       order: { id: 'ASC' },
     });
     const work = new Map<number, PostCommitAction['type']>();
-    for (const inc of open) if (inc.ticketId === null) work.set(num(inc.id), 'ENSURE_TICKET');
-    for (const inc of await this.deferredReopens(open, now)) work.set(num(inc.id), 'REOPEN_TICKET');
+    for (const inc of open) if (inc.parentId === null && inc.ticketId === null) work.set(num(inc.id), 'ENSURE_TICKET');
+    for (const inc of await this.deferredReopens(open, now)) if (!work.has(num(inc.id))) work.set(num(inc.id), 'REOPEN_TICKET');
     // Lo que ya no está pendiente (tiene ticket o se cerró) olvida su espera.
     for (const id of [...this.backoff.keys()]) if (!work.has(id)) this.backoff.delete(id);
     for (const [id, type] of work) {
@@ -129,22 +154,35 @@ export class TicketSync {
   }
 
   /**
-   * Incidentes con ticket cuyo último evento de supresión es `MAINTENANCE_SUPPRESSED`
-   * (la reapertura quedó pendiente) y que ya no cubre ninguna ventana. Una consulta de eventos.
+   * Dueños del ticket (incidentes abiertos de primer nivel) con una supresión
+   * pendiente, suya o de un hijo (tras `PARENT_CREATED` el ticket pasó al padre),
+   * que ya no cubre ninguna ventana. Una consulta de eventos.
    */
   private async deferredReopens(open: MonitorIncident[], now: Date): Promise<MonitorIncident[]> {
     const withTicket = open.filter((inc) => inc.ticketId !== null);
     if (withTicket.length === 0) return [];
+    const byId = new Map(open.map((inc) => [num(inc.id), inc]));
+    const ownerOf = (inc: MonitorIncident) => (inc.parentId === null ? num(inc.id) : num(inc.parentId));
+    const ids = new Set<number>();
+    for (const inc of withTicket) ids.add(num(inc.id)).add(ownerOf(inc));
     const events = await this.ds.manager.getRepository(MonitorIncidentEvent).find({
-      where: { incidentId: In(withTicket.map((inc) => num(inc.id))), type: In(SUPPRESSION_EVENTS) },
-      order: { id: 'DESC' },
+      where: { incidentId: In([...ids]), type: In(PENDING_EVENTS) },
     });
-    const latest = new Map<number, string>();
-    for (const e of events) if (!latest.has(num(e.incidentId))) latest.set(num(e.incidentId), e.type);
-    const candidates = withTicket.filter((inc) => latest.get(num(inc.id)) === MAINTENANCE_SUPPRESSED);
-    if (candidates.length === 0) return [];
+    if (!events.some((e) => e.type === MAINTENANCE_SUPPRESSED)) return [];
+    const byIncident = new Map<number, MonitorIncidentEvent[]>();
+    for (const e of events) byIncident.set(num(e.incidentId), [...(byIncident.get(num(e.incidentId)) ?? []), e]);
+    const owners = new Map<number, MonitorIncident>();
+    for (const inc of withTicket) {
+      const ownerId = ownerOf(inc);
+      const owner = byId.get(ownerId);
+      // Dueño cerrado (o que a su vez cuelga de otro): no hay ticket que reabrir.
+      if (!owner || owner.parentId !== null) continue;
+      const evs = [...(byIncident.get(num(inc.id)) ?? []), ...(ownerId === num(inc.id) ? [] : (byIncident.get(ownerId) ?? []))];
+      if (hasPendingSuppression(evs, ownerId)) owners.set(ownerId, owner);
+    }
+    if (owners.size === 0) return [];
     const windows = await this.activeWindows(now);
-    return candidates.filter(
+    return [...owners.values()].filter(
       (inc) => activeWindowFor({ serviceId: numOrNull(inc.serviceId), serverId: num(inc.serverId) }, now, windows) === null,
     );
   }
@@ -241,13 +279,23 @@ export class TicketSync {
     return true;
   }
 
-  /** Tras crear o reabrir: si había un `MAINTENANCE_SUPPRESSED` pendiente, lo cierra para que el barrido no lo vuelva a tomar. */
+  /**
+   * Tras crear o reabrir el ticket del dueño `id`: si había una supresión pendiente
+   * (suya o de un hijo), deja `MAINTENANCE_RELEASED` en el dueño para que el barrido
+   * no lo vuelva a tomar. El ticket ya quedó enlazado: si esto falla, solo se avisa
+   * en el log (no cuenta como fallo del ticket ni se reintenta la reapertura ahora).
+   */
   private async releaseIfSuppressed(id: number, now: Date): Promise<void> {
-    const last = await this.ds.manager.getRepository(MonitorIncidentEvent).findOne({
-      where: { incidentId: id, type: In(SUPPRESSION_EVENTS) },
-      order: { id: 'DESC' },
-    });
-    if (last?.type === MAINTENANCE_SUPPRESSED) await addEvent(this.ds.manager, id, now, MAINTENANCE_RELEASED);
+    try {
+      const m = this.ds.manager;
+      const children = await m.getRepository(MonitorIncident).find({ where: { parentId: id } });
+      const events = await m.getRepository(MonitorIncidentEvent).find({
+        where: { incidentId: In([id, ...children.map((c) => num(c.id))]), type: In(PENDING_EVENTS) },
+      });
+      if (hasPendingSuppression(events, id)) await addEvent(m, id, now, MAINTENANCE_RELEASED);
+    } catch (e) {
+      this.logger.warn(`No se pudo registrar ${MAINTENANCE_RELEASED} del incidente ${id}: ${(e as Error).message}`);
+    }
   }
 
   /** Guarda el ticket en el incidente y en sus hijos que no tengan otro (o que tuvieran el reemplazado). */

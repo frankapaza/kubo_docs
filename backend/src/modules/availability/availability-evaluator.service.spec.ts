@@ -644,6 +644,84 @@ describe('AvailabilityEvaluatorService', () => {
       expect(t.events().filter((e) => e.type === 'TICKET_NOT_CREATED')).toHaveLength(1);
     });
 
+    it('reapertura frenada y luego UPGRADED_TO_DOWN dentro de la ventana: al terminar se reabre una sola vez', async () => {
+      const t = setup();
+      await t.officeDownWithCross(100, T0, true); // ROUTE con ticket 901
+      const inc = t.incidents()[0];
+      t.state(DC, 100, 'OK');
+      t.signal(OFFICE, 'RECOVERED', 100, at(600));
+      await t.evaluator.tick(at(601));
+      expect(t.incidents()[0].recoveredAt).toEqual(at(600));
+      maintenance(t, { serviceId: 100, startsAt: at(1100), endsAt: at(2000) });
+
+      await t.officeDownWithCross(100, at(1200), true); // recae como ROUTE: reapertura frenada
+      t.signal(DC, 'CONFIRMED_FAILURE', 100, at(1300));
+      await t.evaluator.tick(at(1301));
+      expect(t.incidents()[0]).toMatchObject({ id: inc.id, kind: 'DOWN', recoveredAt: null });
+      const types = t.events(inc.id).map((e) => e.type);
+      expect(types.lastIndexOf('UPGRADED_TO_DOWN')).toBeGreaterThan(types.lastIndexOf('MAINTENANCE_SUPPRESSED'));
+      expect(t.tickets.reopenOrReplace).not.toHaveBeenCalled();
+
+      await t.evaluator.tick(at(2000));
+      expect(t.tickets.reopenOrReplace).toHaveBeenCalledTimes(1);
+      await t.evaluator.tick(at(2005));
+      await t.evaluator.tick(at(2100));
+      expect(t.tickets.reopenOrReplace).toHaveBeenCalledTimes(1);
+      expect(t.tickets.ensureTicket).toHaveBeenCalledTimes(1);
+    });
+
+    it('PARENT_CREATED dentro de la ventana: la reapertura pendiente del hijo se hace sobre el padre, una vez', async () => {
+      const t = setup();
+      maintenance(t, { serverId: 10, startsAt: at(-600), endsAt: at(600) });
+      const child = t.db.add(MonitorIncident, {
+        serviceId: 100, serverId: 10, parentId: null, kind: 'DOWN', firstFailureAt: T0, confirmedAt: T0,
+        recoveredAt: null, closeReason: null, ticketId: 901,
+      });
+      t.db.add(MonitorIncidentEvent, { incidentId: child.id, at: T0, type: 'REOPENED', detail: null, authorUserId: null });
+      t.db.add(MonitorIncidentEvent, { incidentId: child.id, at: T0, type: 'MAINTENANCE_SUPPRESSED', detail: null, authorUserId: null });
+      // Se crea el incidente de servidor: hereda el ticket y el hijo pasa a colgar de él.
+      const parent = t.db.add(MonitorIncident, {
+        serviceId: null, serverId: 10, parentId: null, kind: 'DOWN', firstFailureAt: T0, confirmedAt: T0,
+        recoveredAt: null, closeReason: null, ticketId: 901,
+      });
+      t.db.rows<MonitorIncident>(MonitorIncident).find((i) => i.id === child.id)!.parentId = parent.id;
+      t.db.add(MonitorIncidentEvent, { incidentId: parent.id, at: at(10), type: 'PARENT_CREATED', detail: null, authorUserId: null });
+
+      await t.evaluator.tick(at(300));
+      expect(t.tickets.reopenOrReplace).not.toHaveBeenCalled();
+      await t.evaluator.tick(at(600));
+      expect(t.tickets.reopenOrReplace).toHaveBeenCalledTimes(1);
+      expect(t.tickets.reopenOrReplace).toHaveBeenCalledWith(expect.objectContaining({ id: parent.id }), 901, expect.anything());
+      expect(t.events(parent.id).filter((e) => e.type === 'MAINTENANCE_RELEASED')).toHaveLength(1);
+      await t.evaluator.tick(at(605));
+      await t.evaluator.tick(at(700));
+      expect(t.tickets.reopenOrReplace).toHaveBeenCalledTimes(1);
+    });
+
+    it('si registrar MAINTENANCE_RELEASED falla, se avisa en el log y el ticket queda enlazado', async () => {
+      const t = setup();
+      maintenance(t, { serviceId: 100 });
+      await t.officeDownWithCross(100, T0, false);
+      const warn = jest.spyOn((t.evaluator as any).logger, 'warn').mockImplementation(() => undefined);
+      const repo = t.db.manager.getRepository;
+      (t.db.manager as any).getRepository = (e: any) => {
+        const r = repo(e);
+        if (e !== MonitorIncidentEvent) return r;
+        return {
+          ...r,
+          insert: async (row: any) => {
+            if (row.type === 'MAINTENANCE_RELEASED') throw new Error('se cayó la base');
+            return r.insert(row);
+          },
+        };
+      };
+      await t.evaluator.tick(at(600));
+      expect(t.tickets.ensureTicket).toHaveBeenCalledTimes(1);
+      expect(t.incidents()[0].ticketId).toBe(901);
+      expect(warn.mock.calls.some(([msg]) => String(msg).includes('MAINTENANCE_RELEASED'))).toBe(true);
+      expect(warn.mock.calls.some(([msg]) => String(msg).includes('ENSURE_TICKET'))).toBe(false);
+    });
+
     it('una ventana de otro servicio no suprime el ticket', async () => {
       const t = setup();
       maintenance(t, { serviceId: 101 });
