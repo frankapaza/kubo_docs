@@ -38,6 +38,8 @@ import AvailabilityIncidentsPage from './pages/availability/AvailabilityIncident
 import AvailabilityIncidentDetailPage from './pages/availability/AvailabilityIncidentDetailPage';
 import AvailabilityInventoryPage from './pages/availability/AvailabilityInventoryPage';
 import AvailabilityProbesPage from './pages/availability/AvailabilityProbesPage';
+import AvailabilityReportPage from './pages/availability/AvailabilityReportPage';
+import AvailabilityServersPage from './pages/availability/AvailabilityServersPage';
 import PortalLoginPage from './pages/portal/PortalLoginPage';
 import PortalTicketsListPage from './pages/portal/PortalTicketsListPage';
 import PortalTicketDetailPage from './pages/portal/PortalTicketDetailPage';
@@ -149,6 +151,8 @@ export default function App() {
           <Route path="/monitoreo/incidentes" element={<AvailabilityIncidentsPage />} />
           <Route path="/monitoreo/incidentes/:id" element={<AvailabilityIncidentDetailPage />} />
           <Route path="/monitoreo/inventario" element={<AvailabilityInventoryPage />} />
+          <Route path="/monitoreo/disponibilidad" element={<AvailabilityReportPage />} />
+          <Route path="/monitoreo/servidores" element={<AvailabilityServersPage />} />
           <Route path="/monitoreo/sondas" element={<AvailabilityProbesPage />} />
           <Route path="/monitoreo/errores" element={<MonitoringErrorsPage />} />
           <Route path="/monitoreo/errores/:errorId" element={<MonitoringErrorDetailPage />} />

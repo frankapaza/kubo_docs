@@ -5,6 +5,8 @@ import { availabilityApi, ProbeInfo } from '../../api/availability.api';
 import { useAuth } from '../../auth/AuthContext';
 import { askConfirm } from '../../ui/ConfirmDialog';
 import { toast } from '../../ui/Toast';
+import AgentsPanel from './AgentsPanel';
+import MaintenancePanel from './MaintenancePanel';
 import { apiMessage, btn, fmtDateTime, tableWrap, td, th } from './availability-ui';
 
 const KIND_LABELS: Record<ProbeInfo['kind'], string> = { OFFICE: 'Oficina (Perú)', DATACENTER: 'Centro de datos' };
@@ -116,6 +118,9 @@ export default function AvailabilityProbesPage() {
       )}
 
       <ProbeTokenDialog issued={issued} onClose={() => setIssued(null)} />
+
+      <AgentsPanel />
+      <MaintenancePanel />
     </div>
   );
 }

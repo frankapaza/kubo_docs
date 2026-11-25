@@ -10,6 +10,7 @@ import type { ClientSystem } from '../../api/types';
 import { useAuth } from '../../auth/AuthContext';
 import { askConfirm } from '../../ui/ConfirmDialog';
 import { toast } from '../../ui/Toast';
+import { parseWatchList, validateWatchList } from './report-format';
 import {
   apiMessage, btn, btnPrimary, CRITICALITY_LABELS, inputStyle, labelStyle, PROTOCOL_OPTIONS, tableWrap, td, th,
 } from './availability-ui';
@@ -231,6 +232,7 @@ function ServerForm({ server, clients, onCancel, onSaved }: {
   const [role, setRole] = useState(server?.role ?? '');
   const [provider, setProvider] = useState(server?.provider ?? '');
   const [region, setRegion] = useState(server?.region ?? '');
+  const [watch, setWatch] = useState((server?.agentWatchServices ?? []).join(', '));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -243,6 +245,15 @@ function ServerForm({ server, clients, onCancel, onSaved }: {
     const fields: ServerBody = { name: name.trim(), host: host.trim(), role: role.trim(), provider: provider.trim(), region: region.trim() };
     // Cadenas vacías fuera: el backend las trataría como un valor.
     for (const k of ['role', 'provider', 'region'] as const) if (fields[k] === '') delete fields[k];
+    const watchList = parseWatchList(watch);
+    const watchError = validateWatchList(watchList);
+    if (watchError) {
+      setError(watchError);
+      setBusy(false);
+      return;
+    }
+    // Solo se edita al actualizar; vacío = null quita todos.
+    if (server) fields.agentWatchServices = watchList.length > 0 ? watchList : null;
     try {
       if (server) await availabilityApi.updateServer(server.id, fields);
       else await availabilityApi.createServer({ ...fields, clientId: clientId as number });
@@ -270,6 +281,13 @@ function ServerForm({ server, clients, onCancel, onSaved }: {
       <label><span style={labelStyle}>Rol</span><input value={role} onChange={(e) => setRole(e.target.value)} maxLength={80} style={inputStyle} /></label>
       <label><span style={labelStyle}>Proveedor</span><input value={provider} onChange={(e) => setProvider(e.target.value)} maxLength={80} style={inputStyle} /></label>
       <label><span style={labelStyle}>Región</span><input value={region} onChange={(e) => setRegion(e.target.value)} maxLength={80} style={inputStyle} /></label>
+      {server && (
+        <label>
+          <span style={labelStyle}>Servicios de Windows que vigila el agente</span>
+          <input value={watch} onChange={(e) => setWatch(e.target.value)} placeholder="W3SVC, MSSQLSERVER" style={inputStyle} />
+          <span style={{ fontSize: 11, color: '#6d7577' }}>Nombres cortos separados por comas (máximo 50).</span>
+        </label>
+      )}
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
         <button type="button" style={btn} onClick={onCancel} disabled={busy}>Cancelar</button>
         <button type="button" style={btnPrimary} onClick={submit} disabled={!canSubmit}>{busy ? 'Guardando…' : 'Guardar'}</button>

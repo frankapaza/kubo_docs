@@ -137,6 +137,8 @@ export default function AppLayout() {
           {([
             ['/monitoreo/estado', 'Estado', ZapIcon],
             ['/monitoreo/incidentes', 'Incidentes', ClockIcon],
+            ['/monitoreo/servidores', 'Servidores', ArchiveIcon],
+            ['/monitoreo/disponibilidad', 'Disponibilidad', ClockIcon],
             ['/monitoreo/inventario', 'Inventario', ArchiveIcon],
             ['/monitoreo/sondas', 'Sondas', RefreshIcon],
           ] as const).map(([to, label, Icon]) => (

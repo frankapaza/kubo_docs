@@ -154,6 +154,11 @@ export default function AvailabilityStatePage() {
                         <span style={{ background: c.bg, color: c.fg, borderRadius: 4, padding: '2px 7px', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
                           {STATUS_LABELS[r.status]}
                         </span>
+                        {r.maintenance && (
+                          <span style={{ marginLeft: 6, background: '#e8efff', color: '#1d4ed8', borderRadius: 4, padding: '2px 7px', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                            En mantenimiento
+                          </span>
+                        )}
                       </td>
                       <td style={td}>
                         {r.incidentId !== null && (

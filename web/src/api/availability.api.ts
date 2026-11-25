@@ -29,6 +29,8 @@ export interface StateRow {
   incidentId: number | null;
   parentIncidentId: number | null;
   ticketCode: string | null;
+  /** Hay una ventana de mantenimiento activa que alcanza al servicio. */
+  maintenance: boolean;
 }
 
 export interface StateFilter {
@@ -122,6 +124,10 @@ export interface MonitorServer {
   provider: string | null;
   region: string | null;
   status: EntityStatus;
+  agentLastSeenAt: string | null;
+  agentTokenCreatedAt: string | null;
+  agentWatchServices: string[] | null;
+  agentVersion: string | null;
 }
 
 export interface MonitorService {
@@ -146,6 +152,7 @@ export interface ServerBody {
   provider?: string;
   region?: string;
   status?: EntityStatus;
+  agentWatchServices?: string[] | null;
 }
 
 export interface ServiceBody {
@@ -177,11 +184,126 @@ export interface ProbeInfo {
   hasToken: boolean;
 }
 
+export interface AgentDiskView {
+  name: string;
+  totalBytes: number;
+  freeBytes: number;
+  freePct: number | null;
+  daysToFull: number | null;
+}
+
+export interface AgentView {
+  lastSampleAt: string | null;
+  agentVersion: string | null;
+  cpuPct: number | null;
+  ramPct: number | null;
+  disks: AgentDiskView[];
+  iisPools: Array<{ name: string; state: string }> | null;
+  services: Array<{ name: string; status: string }>;
+  eventErrors24h: number;
+  series24h: Array<{ at: string; cpuPct: number; ramPct: number }>;
+}
+
+export type MaintenanceStatus = 'SCHEDULED' | 'ACTIVE' | 'ENDED';
+
+export interface MaintenanceView {
+  id: number;
+  serverId: number | null;
+  serviceId: number | null;
+  startsAt: string;
+  endsAt: string;
+  reason: string;
+  createdBy: number | null;
+  createdAt: string;
+  targetLabel: string;
+  status: MaintenanceStatus;
+}
+
+export interface MaintenanceBody {
+  serverId?: number;
+  serviceId?: number;
+  /** ISO con desfase explícito (p. ej. «…-05:00»). */
+  startsAt: string;
+  endsAt: string;
+  reason: string;
+}
+
+export interface ReportListItem {
+  month: string;
+  partial: boolean;
+  generatedAt: string;
+}
+
+/** Contenido congelado del informe mensual (copiado de AvailabilityReportData del backend). */
+export interface AvailabilityReportData {
+  version: 1;
+  clientId: number;
+  clientName: string;
+  month: string;
+  partial: boolean;
+  from: string;
+  to: string;
+  generatedAt: string;
+  criteria: string[];
+  totals: {
+    availabilityPct: number | null;
+    peruAccessPct: number | null;
+    mttrMinutes: number | null;
+    incidents: number;
+    downMinutes: number;
+    routeMinutes: number;
+    maintenanceMinutes: number;
+  };
+  services: Array<{
+    serviceId: number;
+    serviceName: string;
+    serverName: string;
+    systemName: string | null;
+    criticality: Criticality;
+    availabilityPct: number | null;
+    peruAccessPct: number | null;
+    downMinutes: number;
+    routeMinutes: number;
+    maintenanceMinutes: number;
+    incidents: number;
+    latency: { office: { p50: number | null; p95: number | null }; datacenter: { p50: number | null; p95: number | null } };
+    coverage: { office: number | null; datacenter: number | null };
+  }>;
+  incidents: Array<{
+    incidentId: number;
+    kind: 'DOWN' | 'ROUTE';
+    serverName: string;
+    serviceNames: string[];
+    firstFailureAt: string;
+    recoveredAt: string | null;
+    minutesInMonth: number;
+    ticketId: number | null;
+    ticketCode: string | null;
+    evidence: Array<{ id: number; origin: string; capturedAt: string; fileName: string }>;
+  }>;
+  noDataWindows: Array<{ probeCode: string; cause: 'OFFICE_OUTAGE' | 'PROBE_SILENT'; startedAt: string; endedAt: string; minutes: number }>;
+  maintenance: Array<{ targetLabel: string; startsAt: string; endsAt: string; reason: string; minutesInMonth: number }>;
+  servers: Array<{
+    serverName: string;
+    cpuP95: number | null;
+    ramP95: number | null;
+    disksAtClose: Array<{ name: string; freePct: number }>;
+  }>;
+}
+
 // MySQL entrega los bigint como texto: se normalizan los ids a número.
 const num = (v: unknown): number => Number(v);
 const numOrNull = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
 
-const normServer = (s: MonitorServer): MonitorServer => ({ ...s, id: num(s.id), clientId: num(s.clientId) });
+const normServer = (s: MonitorServer): MonitorServer => ({
+  ...s,
+  id: num(s.id),
+  clientId: num(s.clientId),
+  agentLastSeenAt: s.agentLastSeenAt ?? null,
+  agentTokenCreatedAt: s.agentTokenCreatedAt ?? null,
+  agentWatchServices: s.agentWatchServices ?? null,
+  agentVersion: s.agentVersion ?? null,
+});
 const normService = (s: MonitorService): MonitorService => ({
   ...s,
   id: num(s.id),
@@ -262,4 +384,33 @@ export const availabilityApi = {
     api.post<{ token: string }>(`/availability/probes/${id}/token`).then((r) => r.data),
   revokeProbeToken: (id: number) =>
     api.delete<void>(`/availability/probes/${id}/token`).then(() => undefined),
+
+  // ---- Agente de servidor ----
+  agentView: (serverId: number) => api.get<AgentView>(`/availability/servers/${serverId}/agent`).then((r) => r.data),
+  /** El token y el script salen una sola vez: no se guardan en la caché de react-query. */
+  issueAgentToken: (serverId: number) =>
+    api.post<{ token: string; installScript: string }>(`/availability/servers/${serverId}/agent-token`).then((r) => r.data),
+  revokeAgentToken: (serverId: number) =>
+    api.delete<void>(`/availability/servers/${serverId}/agent-token`).then(() => undefined),
+  /** Guarda el script de instalación (texto con el token) como archivo. */
+  saveInstallScript: (script: string): void => {
+    saveAttachmentToDisk(new Blob([script], { type: 'text/plain;charset=utf-8' }), 'install-kubo-agent.ps1');
+  },
+
+  // ---- Mantenimientos ----
+  listMaintenance: (params: { from?: string; to?: string } = {}) =>
+    api.get<MaintenanceView[]>('/availability/maintenance', { params }).then((r) =>
+      r.data.map((m) => ({ ...m, id: num(m.id), serverId: numOrNull(m.serverId), serviceId: numOrNull(m.serviceId) })),
+    ),
+  createMaintenance: (body: MaintenanceBody) => api.post<MaintenanceView>('/availability/maintenance', body).then((r) => r.data),
+  endMaintenance: (id: number) => api.post<MaintenanceView>(`/availability/maintenance/${id}/end`).then((r) => r.data),
+  deleteMaintenance: (id: number) => api.delete<void>(`/availability/maintenance/${id}`).then(() => undefined),
+
+  // ---- Informe mensual ----
+  listReports: (clientId: number) =>
+    api.get<ReportListItem[]>('/availability/reports', { params: { clientId } }).then((r) => r.data),
+  getReport: (clientId: number, month: string) =>
+    api.get<AvailabilityReportData>(`/availability/reports/${clientId}/${month}`).then((r) => r.data),
+  generateReport: (clientId: number, month: string) =>
+    api.post<AvailabilityReportData>(`/availability/reports/${clientId}/${month}/generate`).then((r) => r.data),
 };
