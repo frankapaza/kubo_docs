@@ -21,6 +21,7 @@ import { AvailabilityEvaluatorScheduler } from './availability-evaluator.schedul
 import { AvailabilityStateController } from './availability-state.controller';
 import { AvailabilityStateService } from './availability-state.service';
 import { AvailabilityPurgeService } from './availability-purge.service';
+import { AvailabilityRollupService } from './availability-rollup.service';
 import { MonitorAgentDailyRollup } from './entities/monitor-agent-daily-rollup.entity';
 import { MonitorAgentSample } from './entities/monitor-agent-sample.entity';
 import { MonitorDailyRollup } from './entities/monitor-daily-rollup.entity';
@@ -95,6 +96,8 @@ import { ProbeTokenGuard } from './probe-token.guard';
     // Evaluación y purga corren en el backend; el worker (kubo-01) solo mide.
     AvailabilityEvaluatorScheduler,
     AvailabilityPurgeService,
+    // Resúmenes diarios (00:30 Lima y al arrancar): base del informe mensual. Solo backend.
+    AvailabilityRollupService,
     // Aviso por correo cuando una sonda calla 10 min (solo backend, con ScheduleModule).
     ProbeSilenceWatch,
   ],

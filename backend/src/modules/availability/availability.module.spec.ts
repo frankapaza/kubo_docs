@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import { AvailabilityEvaluatorScheduler } from './availability-evaluator.scheduler';
 import { AvailabilityEvaluatorService } from './availability-evaluator.service';
 import { AvailabilityPurgeService } from './availability-purge.service';
+import { AvailabilityRollupService } from './availability-rollup.service';
 import { AvailabilityIngestController } from './availability-ingest.controller';
 import { AvailabilitySyncService } from './availability-sync.service';
 import { TicketsRepository } from '../tickets/tickets.repository';
@@ -23,6 +24,10 @@ describe('AvailabilityModule', () => {
   it('el tick del evaluador y la purga se registran en el backend (AvailabilityModule)', () => {
     expect(providers).toContain(AvailabilityEvaluatorScheduler);
     expect(providers).toContain(AvailabilityPurgeService);
+  });
+
+  it('los resúmenes diarios corren en el backend (cron en AvailabilityModule)', () => {
+    expect(providers).toContain(AvailabilityRollupService);
   });
 
   it('el vigilante de silencio de sondas corre en el backend', () => {
