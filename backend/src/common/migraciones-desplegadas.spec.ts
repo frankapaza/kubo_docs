@@ -153,3 +153,22 @@ describe('deploy.sh nombra la migración 034 (aviso de aplicarla a mano)', () =>
     expect(readFileSync(join(RAIZ, 'deploy.sh'), 'utf8')).toContain('034_disponibilidad_informe');
   });
 });
+
+describe('el bucle de migraciones de deploy.yml', () => {
+  /** Las palabras entre `for m in` y `; do`, con las continuaciones de línea resueltas. */
+  function palabras(): string[] {
+    const yml = readFileSync(LISTAS_DE_DESPLIEGUE[0], 'utf8').replace(/\r\n/g, '\n');
+    const m = yml.match(/for m in([\s\S]*?);\s*do/);
+    if (!m) throw new Error('No se encontró el bucle for m in de deploy.yml.');
+    // La barra invertida de continuación se quita; una «\n» literal queda como palabra y se detecta.
+    return m[1].replace(/\\\n/g, ' ').split(/\s+/).filter(Boolean);
+  }
+
+  it('solo contiene nombres de migración (ninguna palabra suelta)', () => {
+    for (const w of palabras()) expect(w).toMatch(/^\d{3}_[a-z0-9_]+$/);
+  });
+
+  it('incluye la 034', () => {
+    expect(palabras()).toContain('034_disponibilidad_informe');
+  });
+});

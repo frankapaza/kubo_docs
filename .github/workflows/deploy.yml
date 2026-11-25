@@ -186,7 +186,8 @@ jobs:
                      030_logs_centralizados \
                      031_conector_repos \
                      032_disponibilidad_nucleo \
-                     033_disponibilidad_escritorio \n                     034_disponibilidad_informe; do
+                     033_disponibilidad_escritorio \
+                     034_disponibilidad_informe; do
               echo "--- $m"
               sql_file "backend/sql/migrations/$m.sql"
             done
