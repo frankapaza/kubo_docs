@@ -27,6 +27,8 @@ import { AvailabilityStateController } from './availability-state.controller';
 import { AvailabilityStateService } from './availability-state.service';
 import { AvailabilityPurgeService } from './availability-purge.service';
 import { AvailabilityRollupService } from './availability-rollup.service';
+import { AvailabilityReportController } from './availability-report.controller';
+import { AvailabilityReportService } from './availability-report.service';
 import { MonitorAgentDailyRollup } from './entities/monitor-agent-daily-rollup.entity';
 import { MonitorAgentSample } from './entities/monitor-agent-sample.entity';
 import { MonitorDailyRollup } from './entities/monitor-daily-rollup.entity';
@@ -86,6 +88,7 @@ import { ProbeTokenGuard } from './probe-token.guard';
     AvailabilityStateController,
     AvailabilityMaintenanceController,
     AvailabilityEvidenceController,
+    AvailabilityReportController,
   ],
   providers: [
     AvailabilityInventoryService,
@@ -108,6 +111,8 @@ import { ProbeTokenGuard } from './probe-token.guard';
     AvailabilityPurgeService,
     // Resúmenes diarios (00:30 Lima y al arrancar): base del informe mensual. Solo backend.
     AvailabilityRollupService,
+    // Informe mensual (día 1 a las 08:00 Lima y recuperación al arrancar). Solo backend.
+    AvailabilityReportService,
     // Aviso por correo cuando una sonda calla 10 min (solo backend, con ScheduleModule).
     ProbeSilenceWatch,
     // Ídem cuando el agente de un servidor calla 10 min.

@@ -1,7 +1,8 @@
 import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 
-/** Contenido del informe mensual; la Task 6 le da su forma. */
-export type AvailabilityReportData = unknown;
+import type { AvailabilityReportData } from '../domain/availability-report';
+
+export type { AvailabilityReportData };
 
 /** Informe mensual congelado de un cliente. `month` es 'YYYY-MM'. */
 @Entity('monitor_monthly_reports')

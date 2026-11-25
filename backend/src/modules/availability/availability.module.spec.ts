@@ -76,3 +76,14 @@ describe('AvailabilityModule', () => {
     ).rejects.toThrow();
   });
 });
+
+describe('AvailabilityModule: informe mensual', () => {
+  it('el informe mensual (servicio con cron y controlador) vive en el backend, no en el worker', () => {
+    const { AvailabilityReportService } = require('./availability-report.service');
+    const { AvailabilityReportController } = require('./availability-report.controller');
+    const { AvailabilityWorkerModule } = require('./availability-worker.module');
+    expect(Reflect.getMetadata('providers', AvailabilityModule)).toContain(AvailabilityReportService);
+    expect(Reflect.getMetadata('controllers', AvailabilityModule)).toContain(AvailabilityReportController);
+    expect(Reflect.getMetadata('providers', AvailabilityWorkerModule) ?? []).not.toContain(AvailabilityReportService);
+  });
+});
