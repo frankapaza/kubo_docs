@@ -30,8 +30,8 @@ public interface IServiceReader
     IReadOnlyList<ServiceSample> Read(IReadOnlyList<string> names);
 }
 
-/// <summary>Errores y críticos del Visor de eventos (Sistema y Aplicación) desde un instante UTC.</summary>
+/// <summary>Errores y críticos del Visor de eventos (Sistema y Aplicación) creados en [<c>utc</c>, <c>untilUtc</c>).</summary>
 public interface IEventErrorReader
 {
-    EventErrorCounts CountSince(DateTime utc);
+    EventErrorCounts CountSince(DateTime utc, DateTime untilUtc);
 }

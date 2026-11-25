@@ -7,9 +7,8 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
-    <!-- Las DLL nativas también van dentro del .exe: se copia un único archivo al servidor. -->
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- Sin IncludeNativeLibrariesForSelfExtract ni compresión: nada se extrae a %TEMP% al arrancar
+         (para LocalSystem es C:\Windows\Temp, donde otro usuario podría dejar DLL plantadas). -->
     <AssemblyName>kubo-agent</AssemblyName>
     <RootNamespace>KuboAgent</RootNamespace>
     <Nullable>enable</Nullable>

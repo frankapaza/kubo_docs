@@ -40,7 +40,8 @@ public static class Program
                 Usage(Console.Out);
                 return 0;
             default:
-                Console.Error.WriteLine($"Orden desconocida: {args[0]}");
+                // No se repite lo escrito: podría ser un token pegado por error.
+                Console.Error.WriteLine("Orden desconocida.");
                 Usage(Console.Error);
                 return 2;
         }
@@ -65,7 +66,8 @@ public static class Program
             }
             else
             {
-                stderr.WriteLine($"Argumento no reconocido o sin valor: {args[i]}");
+                // No se repite el valor: podría ser el token.
+                stderr.WriteLine($"Argumento no reconocido o sin valor (posición {i + 1}).");
                 stderr.WriteLine("Uso: kubo-agent configure --central <https://...> --token <kma_...>");
                 return 2;
             }
@@ -158,6 +160,10 @@ public static class Program
         {
             config = AgentConfig.Load(AgentConfig.DefaultDirectory);
             token = config.GetToken();
+            if (!AgentConfig.IsValidToken(token))
+            {
+                throw new InvalidOperationException("El token guardado en agent.json no tiene la forma de un token de agente (kma_...). Vuelva a ejecutar el instalador.");
+            }
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException or FormatException or System.Security.Cryptography.CryptographicException)
         {
@@ -172,7 +178,9 @@ public static class Program
             builder.Services.AddHostedService(sp => new AgentWorker(
                 sp.GetRequiredService<SampleBuilder>(),
                 sp.GetRequiredService<CentralClient>(),
-                sp.GetRequiredService<ILogger<AgentWorker>>()));
+                sp.GetRequiredService<ILogger<AgentWorker>>(),
+                sp.GetRequiredService<IHostApplicationLifetime>(),
+                sp.GetRequiredService<IHostLifetime>()));
         }
 
         using var host = builder.Build();
@@ -187,7 +195,8 @@ public static class Program
         }
 
         await host.RunAsync().ConfigureAwait(false);
-        return 0;
+        // AgentWorker pone ExitCode = 1 si terminó por un error inesperado.
+        return Environment.ExitCode;
     }
 
     private static void Usage(TextWriter w)

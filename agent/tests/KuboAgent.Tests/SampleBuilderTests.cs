@@ -58,6 +58,8 @@ public class SampleBuilderTests
         Assert.Equal(new EventErrorCounts(2, 5), third.EventErrors);
         // La primera no consulta: solo fija la referencia. Cada consulta parte de la muestra anterior.
         Assert.Equal([T0, T0.AddSeconds(60)], events.Since);
+        // Ventanas contiguas sin solaparse: el límite superior de una es el inferior de la siguiente.
+        Assert.Equal([T0.AddSeconds(60), T0.AddSeconds(120)], events.Until);
     }
 
     [Fact]
@@ -123,8 +125,8 @@ public class SampleBuilderTests
     public void La_consulta_xpath_es_la_del_contrato()
     {
         Assert.Equal(
-            "*[System[(Level=1 or Level=2) and TimeCreated[@SystemTime>='2026-11-24T15:00:00.000Z']]]",
-            EventErrorReader.Query(T0));
+            "*[System[(Level=1 or Level=2) and TimeCreated[@SystemTime>='2026-11-24T15:00:00.000Z' and @SystemTime<'2026-11-24T15:01:00.000Z']]]",
+            EventErrorReader.Query(T0, T0.AddSeconds(60)));
     }
 
     private sealed class ThrowingCpu : ICpuReader

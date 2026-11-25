@@ -41,11 +41,13 @@ internal sealed class FakeServices : IServiceReader
 internal sealed class FakeEvents(int system, int application) : IEventErrorReader
 {
     public List<DateTime> Since { get; } = [];
+    public List<DateTime> Until { get; } = [];
     public Exception? Throw { get; set; }
 
-    public EventErrorCounts CountSince(DateTime utc)
+    public EventErrorCounts CountSince(DateTime utc, DateTime untilUtc)
     {
         Since.Add(utc);
+        Until.Add(untilUtc);
         if (Throw is not null) throw Throw;
         return new EventErrorCounts(system, application);
     }
@@ -88,4 +90,17 @@ internal sealed class WindowsFactAttribute : FactAttribute
     {
         if (!OperatingSystem.IsWindows()) Skip = "Solo Windows.";
     }
+}
+
+/// <summary>Logger que guarda lo registrado, para comprobar que los problemas repetidos no se registran en cada muestra.</summary>
+internal sealed class ListLogger<T> : Microsoft.Extensions.Logging.ILogger<T>
+{
+    public List<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> Entries { get; } = [];
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+    public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        => Entries.Add((logLevel, formatter(state, exception)));
 }

@@ -40,10 +40,18 @@ public sealed partial class AgentConfig
     /// </summary>
     public void Save(string directory, bool restrictAcl)
     {
+        // Una unión o enlace simbólico en la ruta (p. ej. %ProgramData%\KUBO creado antes por un usuario
+        // sin privilegios) llevaría la escritura del token y el cambio de permisos a otra carpeta.
+        RefuseReparsePoints(directory);
         var dir = Directory.CreateDirectory(directory);
+        RefuseReparsePoints(directory);
         if (restrictAcl) RestrictToSystemAndAdministrators(dir);
 
         var path = Path.Combine(directory, FileName);
+        if (File.Exists(path) && File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
+        {
+            throw new InvalidOperationException($"{path} es un enlace (punto de reanálisis): no se escribe la configuración ahí.");
+        }
         var temp = path + ".tmp";
         File.WriteAllText(temp, JsonSerializer.Serialize(this, Sampling.AgentJson.Indented));
         File.Move(temp, path, overwrite: true);
@@ -111,9 +119,23 @@ public sealed partial class AgentConfig
     [GeneratedRegex("^kma_[A-Za-z0-9_-]{16,256}$")]
     private static partial Regex TokenShape();
 
+    /// <summary>Rechaza la carpeta si ella o alguna carpeta existente que la contiene es un punto de reanálisis.</summary>
+    internal static void RefuseReparsePoints(string directory)
+    {
+        for (var current = new DirectoryInfo(Path.GetFullPath(directory)); current is not null; current = current.Parent)
+        {
+            if (current.Exists && current.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                throw new InvalidOperationException($"{current.FullName} es una unión o un enlace simbólico: no se escribe la configuración del agente a través de ella.");
+            }
+        }
+    }
+
     private static void RestrictToSystemAndAdministrators(DirectoryInfo dir)
     {
         var security = new DirectorySecurity();
+        // Dueño Administradores: quien creó la carpeta antes (si no era administrador) deja de poder cambiar sus permisos.
+        security.SetOwner(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null));
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
         foreach (var sid in new[] { WellKnownSidType.LocalSystemSid, WellKnownSidType.BuiltinAdministratorsSid })
         {

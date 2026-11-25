@@ -53,7 +53,7 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1      # genera agent\publish
    powershell -ExecutionPolicy Bypass -File .\install-kubo-agent.ps1
    ```
 
-   El script copia el ejecutable a `C:\Program Files\KUBO\Agent\`, ejecuta `kubo-agent.exe configure --central <url> --token <token>` (guarda `%ProgramData%\KUBO\Agent\agent.json` con el token protegido con DPAPI y acceso solo para SYSTEM y Administradores) y crea el servicio `KuboAgent` como LocalSystem, con inicio automático y reinicio ante fallos. Si el servicio ya existía, lo actualiza.
+   El script copia el ejecutable a `C:\Program Files\KUBO\Agent\`, ejecuta `kubo-agent.exe configure --central <url> --token <token>` (guarda `%ProgramData%\KUBO\Agent\agent.json` con el token protegido con DPAPI, dueño Administradores y acceso solo para SYSTEM y Administradores; si la carpeta o alguna de sus carpetas padre es una unión o un enlace simbólico, se niega a escribir) y crea el servicio `KuboAgent` como LocalSystem, con inicio automático y reinicio ante fallos. Si el servicio ya existía, lo actualiza.
 6. **Borre `install-kubo-agent.ps1`** del servidor (y de donde lo haya descargado): contiene el token en claro.
 7. En la web, el servidor debe aparecer con datos en **Monitoreo → Servidores** en uno o dos minutos.
 

@@ -38,6 +38,31 @@ public class AgentConfigTests
         Assert.Contains("kubo-agent configure", ex.Message);
     }
 
+    [WindowsFact]
+    public void Rechaza_escribir_a_traves_de_una_union()
+    {
+        using var dir = new TempDir();
+        var target = Path.Combine(dir.Path, "destino");
+        var link = Path.Combine(dir.Path, "union");
+        Directory.CreateDirectory(target);
+        // Una unión (junction) no requiere administrador.
+        var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{target}\"")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+        })!;
+        p.WaitForExit();
+        Assert.True(new DirectoryInfo(link).Attributes.HasFlag(FileAttributes.ReparsePoint));
+
+        var config = AgentConfig.Create("https://central.example.test", Token);
+        Assert.Throws<InvalidOperationException>(() => config.Save(link, restrictAcl: false));
+        Assert.Throws<InvalidOperationException>(() => config.Save(Path.Combine(link, "Agent"), restrictAcl: false));
+        Assert.Empty(Directory.GetFileSystemEntries(target));
+
+        Directory.Delete(link); // borra solo la unión, no el destino
+    }
+
     [Theory]
     [InlineData("https://docs.example.test", true)]
     [InlineData("https://docs.example.test/kubo/", true)]

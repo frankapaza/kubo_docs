@@ -30,6 +30,7 @@ public sealed class SampleBuilder
     private readonly IEventErrorReader _events;
     private readonly ILogger _logger;
     private DateTime? _eventsSince;
+    private readonly Dictionary<string, LogThrottle> _warnings = new();
 
     public SampleBuilder(
         string agentVersion,
@@ -77,7 +78,7 @@ public sealed class SampleBuilder
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "No se pudo leer el espacio de las unidades.");
+            Warn("disks", ex, "No se pudo leer el espacio de las unidades.");
             return [];
         }
     }
@@ -94,7 +95,7 @@ public sealed class SampleBuilder
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "No se pudo leer el estado de IIS.");
+            Warn("iis", ex, "No se pudo leer el estado de IIS.");
             return null;
         }
     }
@@ -116,7 +117,7 @@ public sealed class SampleBuilder
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "No se pudo leer el estado de los servicios de Windows.");
+            Warn("services", ex, "No se pudo leer el estado de los servicios de Windows.");
             return [];
         }
     }
@@ -130,16 +131,26 @@ public sealed class SampleBuilder
         }
         try
         {
-            var counts = _events.CountSince(since);
+            // Ventana [anterior, ahora): el límite superior es la referencia de la muestra siguiente,
+            // así un evento no se cuenta en dos muestras.
+            var counts = _events.CountSince(since, nowUtc);
             // Solo se avanza la referencia si se pudo contar: un fallo no pierde los errores del intervalo.
             _eventsSince = nowUtc;
             return new EventErrorCounts(Count(counts.System), Count(counts.Application));
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "No se pudo leer el Visor de eventos.");
+            Warn("events", ex, "No se pudo leer el Visor de eventos.");
             return new EventErrorCounts(0, 0);
         }
+    }
+
+    /// <summary>Un lector que falla en cada muestra se registra al empezar y luego una vez por hora.</summary>
+    private void Warn(string reader, Exception ex, string message)
+    {
+        if (!_warnings.TryGetValue(reader, out var throttle)) _warnings[reader] = throttle = new LogThrottle();
+        if (throttle.ShouldLog(ex.GetType().FullName ?? "", out var repeats))
+            _logger.LogWarning(ex, "{Message}{Suffix}", message, LogThrottle.Suffix(repeats));
     }
 
     private static double Pct(double value) =>

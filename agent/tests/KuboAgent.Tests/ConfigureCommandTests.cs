@@ -52,6 +52,18 @@ public class ConfigureCommandTests
     }
 
     [WindowsFact]
+    public void Un_argumento_no_reconocido_no_se_repite_en_la_salida()
+    {
+        using var dir = new TempDir();
+
+        var (code, output, err) = Run(dir.Path, Token, "--central", "https://central.example.test");
+
+        Assert.NotEqual(0, code);
+        Assert.DoesNotContain(Token, err);
+        Assert.DoesNotContain(Token, output);
+    }
+
+    [WindowsFact]
     public void Con_datos_validos_guarda_y_termina_con_0()
     {
         using var dir = new TempDir();

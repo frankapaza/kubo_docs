@@ -25,12 +25,18 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 
 $programa = 'C:\Program Files\KUBO\Agent'
 $datos = Join-Path $env:ProgramData 'KUBO\Agent'
+$exe = Join-Path $programa 'kubo-agent.exe'
 
 $servicio = Get-Service -Name KuboAgent -ErrorAction SilentlyContinue
 if ($servicio) {
   if ($servicio.Status -ne 'Stopped') {
-    Stop-Service -Name KuboAgent -Force
-    $servicio.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
+    try {
+      Stop-Service -Name KuboAgent -Force -ErrorAction Stop
+      $servicio.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(30))
+    } catch {
+      # Si no se detiene a tiempo se sigue igual: sc.exe delete lo marca para borrar y abajo se espera el proceso.
+      Write-Warning "El servicio KuboAgent no se detuvo a tiempo: $($_.Exception.Message)"
+    }
   }
   $p = Start-Process -FilePath 'sc.exe' -ArgumentList 'delete KuboAgent' -Wait -NoNewWindow -PassThru
   if ($p.ExitCode -ne 0) { throw "sc.exe delete KuboAgent terminó con código $($p.ExitCode)" }
@@ -39,9 +45,29 @@ if ($servicio) {
   Write-Host 'El servicio KuboAgent no estaba instalado.'
 }
 
+# El proceso puede tardar en salir después de detener el servicio: se espera hasta 30 s y, si sigue,
+# se termina. Solo el ejecutable instalado (no un "kubo-agent once" lanzado desde otra carpeta).
+$procesos = @(Get-Process -Name 'kubo-agent' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe })
+foreach ($proceso in $procesos) {
+  if (-not $proceso.WaitForExit(30000)) { Stop-Process -Id $proceso.Id -Force -ErrorAction SilentlyContinue }
+}
+
+# Borrado con reintentos: justo después de terminar el proceso, Windows puede tardar en soltar el .exe.
+function Remove-ConReintentos([string]$ruta) {
+  for ($intento = 1; $intento -le 5; $intento++) {
+    try {
+      Remove-Item -LiteralPath $ruta -Recurse -Force -ErrorAction Stop
+      return
+    } catch {
+      if ($intento -eq 5) { throw "No se pudo borrar ${ruta}: $($_.Exception.Message)" }
+      Start-Sleep -Seconds 2
+    }
+  }
+}
+
 foreach ($carpeta in $programa, $datos) {
   if (Test-Path -LiteralPath $carpeta) {
-    Remove-Item -LiteralPath $carpeta -Recurse -Force
+    Remove-ConReintentos $carpeta
     Write-Host "Eliminado: $carpeta"
   }
 }

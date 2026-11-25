@@ -19,10 +19,18 @@ public class WindowsReadersTests
     public void El_visor_de_eventos_se_consulta_con_la_xpath_sin_fallar()
     {
         // Solo lectura: cuenta los errores del último día en System y Application de esta PC.
-        var counts = new EventErrorReader().CountSince(DateTime.UtcNow.AddDays(-1));
+        var counts = new EventErrorReader().CountSince(DateTime.UtcNow.AddDays(-1), DateTime.UtcNow);
 
         Assert.InRange(counts.System, 0, EventErrorReader.MaxCount);
         Assert.InRange(counts.Application, 0, EventErrorReader.MaxCount);
+    }
+
+    [WindowsFact]
+    public void Una_ventana_futura_no_cuenta_nada()
+    {
+        var desde = DateTime.UtcNow.AddDays(1);
+
+        Assert.Equal(new EventErrorCounts(0, 0), new EventErrorReader().CountSince(desde, desde.AddHours(1)));
     }
 
     [WindowsFact]

@@ -6,13 +6,13 @@ namespace KuboAgent.Tests;
 
 public class AgentWorkerTests
 {
-    private static (AgentWorker Worker, FakeHandler Handler, FakeServices Services) Worker(ICpuReader? cpu = null)
+    private static (AgentWorker Worker, FakeHandler Handler, FakeServices Services) Worker(ICpuReader? cpu = null, Microsoft.Extensions.Logging.ILogger<AgentWorker>? logger = null)
     {
         var handler = new FakeHandler();
         var services = new FakeServices();
         var builder = new SampleBuilder("1.0.0", cpu ?? new FakeCpu(10), new FakeMemory(20), new FakeDisks(), new FakeIis(null), services, new FakeEvents(0, 0));
         var central = new CentralClient(handler, "https://central.example.test", "kma_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "1.0.0");
-        return (new AgentWorker(builder, central, NullLogger<AgentWorker>.Instance), handler, services);
+        return (new AgentWorker(builder, central, logger ?? NullLogger<AgentWorker>.Instance), handler, services);
     }
 
     [Fact]
@@ -71,6 +71,39 @@ public class AgentWorkerTests
         await worker.TickAsync(CancellationToken.None);
 
         Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task Un_error_inesperado_no_detiene_el_trabajador_y_se_registra_una_vez()
+    {
+        var logger = new ListLogger<AgentWorker>();
+        var (worker, handler, _) = Worker(logger: logger);
+        handler.Respond = _ => throw new InvalidOperationException("inesperado");
+
+        for (var i = 0; i < 5; i++) await worker.TickAsync(CancellationToken.None);
+
+        Assert.Equal(5, handler.Requests.Count);
+        Assert.Single(logger.Entries, e => e.Level == Microsoft.Extensions.Logging.LogLevel.Error);
+    }
+
+    [Fact]
+    public async Task Fallos_repetidos_de_muestra_o_de_respuesta_se_registran_una_vez()
+    {
+        var logger = new ListLogger<AgentWorker>();
+        var (worker, _, _) = Worker(new ThrowingCpu(), logger);
+        for (var i = 0; i < 5; i++) await worker.TickAsync(CancellationToken.None);
+        Assert.Single(logger.Entries);
+
+        var logger2 = new ListLogger<AgentWorker>();
+        var (worker2, handler2, _) = Worker(logger: logger2);
+        handler2.Respond = _ => FakeHandler.Json(HttpStatusCode.OK, "no es json");
+        for (var i = 0; i < 5; i++) await worker2.TickAsync(CancellationToken.None);
+        Assert.Single(logger2.Entries, e => e.Level == Microsoft.Extensions.Logging.LogLevel.Warning);
+
+        // Al volver la respuesta normal se registra la recuperación y el próximo problema se ve enseguida.
+        handler2.Respond = _ => FakeHandler.Json(HttpStatusCode.OK, """{"watchServices":[],"intervalSeconds":60}""");
+        await worker2.TickAsync(CancellationToken.None);
+        Assert.Contains(logger2.Entries, e => e.Message.Contains("reanudó"));
     }
 
     private sealed class ThrowingCpu : ICpuReader
