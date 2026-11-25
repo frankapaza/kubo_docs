@@ -48,6 +48,7 @@ export default function AvailabilityServersPage() {
             clientLabel={clientName.get(s.clientId) ?? ''}
             view={views[n]?.data}
             loading={views[n]?.isLoading ?? false}
+            failed={views[n]?.isError ?? false}
             highlighted={s.id === highlightId}
           />
         ))}
@@ -56,8 +57,8 @@ export default function AvailabilityServersPage() {
   );
 }
 
-function ServerCard({ server, clientLabel, view, loading, highlighted }: {
-  server: MonitorServer; clientLabel: string; view: AgentView | undefined; loading: boolean; highlighted: boolean;
+function ServerCard({ server, clientLabel, view, loading, failed, highlighted }: {
+  server: MonitorServer; clientLabel: string; view: AgentView | undefined; loading: boolean; failed: boolean; highlighted: boolean;
 }) {
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -82,6 +83,7 @@ function ServerCard({ server, clientLabel, view, loading, highlighted }: {
       </div>
 
       {loading && <div style={{ fontSize: 12, color: '#6d7577' }}>Cargando…</div>}
+      {failed && !view && <div role="alert" style={{ fontSize: 12, color: '#b3261e' }}>No se pudo cargar el estado del agente.</div>}
 
       {view && view.lastSampleAt && (
         <>

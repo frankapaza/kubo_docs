@@ -45,8 +45,8 @@ export function fmtMinutes(m: number | null | undefined): string {
   return r % 60 === 0 ? `${h} h` : `${h} h ${r % 60} min`;
 }
 
-/** Cuándo el agente deja de estar «Reportando»: 3 intervalos de 60 s. */
-export const AGENT_STALE_MS = 3 * 60_000;
+/** Cuándo el agente deja de estar «Reportando»: 10 min, igual que el silencio del backend (AGENT_SILENT). */
+export const AGENT_STALE_MS = 10 * 60_000;
 
 export type AgentStatus = { kind: 'reporting' } | { kind: 'silent'; since: string } | { kind: 'none' };
 

@@ -60,6 +60,9 @@ export default function AgentsPanel() {
   };
 
   const revoke = async (s: MonitorServer) => {
+    if (busyIds.has(s.id)) return;
+    setBusy(s.id, true);
+    try {
     const ok = await askConfirm({
       title: 'Revocar el token del agente',
       message: `El agente de «${s.name}» dejará de poder enviar muestras de inmediato.`,
@@ -74,6 +77,9 @@ export default function AgentsPanel() {
       toast.error(apiMessage(e, 'No se pudo revocar el token.'));
     }
     reload();
+    } finally {
+      setBusy(s.id, false);
+    }
   };
 
   const list = (servers.data ?? []).filter((s) => s.status !== 'ARCHIVED');
@@ -109,7 +115,7 @@ export default function AgentsPanel() {
                     {isAdmin && (
                       <div style={{ display: 'flex', gap: 6 }}>
                         <button type="button" style={btn} onClick={() => issue(s)} disabled={busyIds.has(s.id)}>Emitir token</button>
-                        {s.agentTokenCreatedAt && <button type="button" style={{ ...btn, color: '#b3261e' }} onClick={() => revoke(s)}>Revocar</button>}
+                        {s.agentTokenCreatedAt && <button type="button" style={{ ...btn, color: '#b3261e' }} onClick={() => revoke(s)} disabled={busyIds.has(s.id)}>Revocar</button>}
                       </div>
                     )}
                   </td>

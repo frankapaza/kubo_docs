@@ -37,6 +37,9 @@ export default function MaintenancePanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const activeServers = (servers.data ?? []).filter((s) => s.status !== 'ARCHIVED');
+  const activeServerIds = new Set(activeServers.map((s) => s.id));
+  const activeServices = (services.data ?? []).filter((v) => v.status !== 'ARCHIVED' && activeServerIds.has(v.serverId));
   const serverName = new Map((servers.data ?? []).map((s) => [s.id, s.name]));
   const canSubmit = !busy && target !== '' && startsAt !== '' && endsAt !== '' && reason.trim().length > 0;
 
@@ -115,10 +118,10 @@ export default function MaintenancePanel() {
             <select value={target} onChange={(e) => setTarget(e.target.value)} style={inputStyle}>
               <option value="">Elige…</option>
               <optgroup label="Servidor completo">
-                {(servers.data ?? []).map((s) => <option key={`s${s.id}`} value={`s:${s.id}`}>{s.name}</option>)}
+                {activeServers.map((s) => <option key={`s${s.id}`} value={`s:${s.id}`}>{s.name}</option>)}
               </optgroup>
               <optgroup label="Un servicio">
-                {(services.data ?? []).map((v) => <option key={`v${v.id}`} value={`v:${v.id}`}>{serverName.get(v.serverId) ?? '—'} · {v.name}</option>)}
+                {activeServices.map((v) => <option key={`v${v.id}`} value={`v:${v.id}`}>{serverName.get(v.serverId) ?? '—'} · {v.name}</option>)}
               </optgroup>
             </select>
           </label>

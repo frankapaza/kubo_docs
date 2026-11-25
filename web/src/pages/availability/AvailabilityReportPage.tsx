@@ -97,10 +97,10 @@ export default function AvailabilityReportPage() {
 
       {r && (
         <article style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <header style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <div style={{ fontSize: 18, fontWeight: 700 }}>{r.clientName} · {monthLabel(r.month)}</div>
             <div style={{ fontSize: 12, color: '#6d7577' }}>Generado el {fmtLima(r.generatedAt)} (hora de Lima)</div>
-          </header>
+          </div>
 
           {r.partial && (
             <div role="status" style={{ fontSize: 13, fontWeight: 600, borderRadius: 6, padding: '8px 10px', color: '#a35c00', background: '#fff4e0', border: '1px solid #f0d9a8' }}>
