@@ -164,7 +164,9 @@ export const REPORT_CRITERIA: string[] = [
   'Duración de un incidente: desde la primera falla hasta la recuperación, recortada a los límites del mes y descontando el mantenimiento superpuesto. Un incidente abierto cuenta hasta el cierre del informe.',
   'Un incidente que pasó de ROUTE a DOWN cuenta como ROUTE hasta ese momento y como DOWN desde entonces.',
   'Tiempo medio de recuperación = promedio de las duraciones de los incidentes DOWN y ROUTE de primer nivel cerrados en el mes (una caída de servidor cuenta una vez). Los abiertos al cierre no entran.',
-  'Cobertura de cada sonda = comprobaciones regulares ejecutadas ÷ esperadas, en porcentaje, hasta el día anterior a la generación. Vacía si la sonda no tiene resúmenes en el mes.',
+  'Para el tiempo medio de recuperación, cada duración se recorta al mes y se le descuenta el mantenimiento; los incidentes con 0 minutos en el mes (enteramente en mantenimiento) no entran.',
+  'Los minutos caído, en ROUTE y en mantenimiento del total del cliente son minutos-servicio: la suma de los minutos de cada servicio (una caída de servidor con tres servicios suma tres veces su duración).',
+  'Cobertura de cada sonda = comprobaciones regulares ejecutadas ÷ esperadas, en porcentaje con tope de 100, hasta el día anterior a la generación. Vacía si la sonda no tiene resúmenes en el mes.',
   'Latencia P50/P95: de los histogramas diarios de las comprobaciones exitosas, exacta a la cubeta.',
   'Los minutos sin datos desde la oficina no cuentan como caída.',
   'Durante esas ventanas sin datos decide la sonda del servidor; se listan aparte.',
@@ -372,13 +374,14 @@ function latencyOf(
   return { p50: percentileFromHistogram(h, 0.5, LATENCY_BUCKETS_MS), p95: percentileFromHistogram(h, 0.95, LATENCY_BUCKETS_MS) };
 }
 
-/** Σejecutadas ÷ Σesperadas en porcentaje (3 decimales). Sin resúmenes (sonda aún no desplegada) → null. */
+/** Σejecutadas ÷ Σesperadas en porcentaje (3 decimales, tope 100). Sin resúmenes (sonda aún no desplegada) → null. */
 function coverageOf(input: ReportInput, serviceId: number, kind: ReportProbe['kind'], probes: Map<number, ReportProbe>): number | null {
   const rows = rollupsOf(input, serviceId, kind, probes);
   const expected = rows.reduce((a, r) => a + Number(r.expected), 0);
   if (rows.length === 0 || expected <= 0) return null;
   const executed = rows.reduce((a, r) => a + Number(r.executed), 0);
-  return round((executed / expected) * 100, 3);
+  // Reintentos o franjas de más pueden pasar de lo esperado: la cobertura se topa en 100.
+  return round(Math.min(100, (executed / expected) * 100), 3);
 }
 
 /** Huecos de sonda recortados al mes; los contiguos de la misma sonda y causa (p. ej. cruzando medianoche) se unen. */

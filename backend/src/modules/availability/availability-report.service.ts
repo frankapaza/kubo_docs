@@ -98,7 +98,7 @@ export class AvailabilityReportService implements OnApplicationBootstrap {
     await this.runPass(new Date(), false);
   }
 
-  /** Si ya pasó el día 1 a las 08:00 de Lima, genera los informes del mes anterior que no tengan fila. */
+  /** Si ya pasó el día 1 a las 08:00 de Lima, genera los informes del mes anterior que no tengan fila cerrada (partial = false). */
   async catchUp(now: Date): Promise<void> {
     if (now.getTime() < reportTimeOf(now).getTime()) return;
     await this.runPass(now, true);
@@ -113,7 +113,11 @@ export class AvailabilityReportService implements OnApplicationBootstrap {
       const { from, to } = peruMonthBounds(year, mm);
       let clientIds = await this.clientsWithActivity(from, to);
       if (onlyMissing && clientIds.length) {
-        const existing = await this.reports.find({ where: { month, clientId: In(clientIds) }, select: { id: true, clientId: true } });
+        // Solo cuenta como hecho un informe cerrado: uno parcial (generado a mano durante el mes) se rehace.
+        const existing = await this.reports.find({
+          where: { month, clientId: In(clientIds), partial: false },
+          select: { id: true, clientId: true },
+        });
         const done = new Set(existing.map((r) => n(r.clientId)));
         clientIds = clientIds.filter((id) => !done.has(id));
       }

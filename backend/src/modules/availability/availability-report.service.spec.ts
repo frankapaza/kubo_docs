@@ -164,6 +164,21 @@ describe('AvailabilityReportService', () => {
     expect(repos.reports.rows.find((r) => r.clientId === 1)!.id).toBe(50);
   });
 
+  it('catchUp rehace un informe parcial del mes anterior y queda cerrado (partial = false)', async () => {
+    const { svc, repos } = build();
+    // Generado a mano durante octubre: quedó parcial.
+    await svc.generate(1, '2026-10', new Date('2026-10-20T15:00:00Z'), 3);
+    expect(repos.reports.rows[0].partial).toBe(true);
+    const gen = jest.spyOn(svc, 'generate');
+    await svc.catchUp(new Date('2026-11-02T15:00:00Z'));
+    expect(gen.mock.calls.map((c) => c[0])).toEqual([1, 2]);
+    const rows = repos.reports.rows.filter((r) => r.clientId === 1);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].partial).toBe(false);
+    expect(rows[0].data.partial).toBe(false);
+    expect(rows[0].data.to).toBe('2026-11-01T05:00:00.000Z');
+  });
+
   it('catchUp el día 1 a las 07:59 de Lima no genera; a las 08:00 sí', async () => {
     const { svc } = build();
     const gen = jest.spyOn(svc, 'generate');

@@ -262,5 +262,60 @@ describe('computeAvailabilityReport', () => {
     const r = computeAvailabilityReport(base());
     expect(r.criteria).toContain('Los minutos sin datos desde la oficina no cuentan como caída.');
     expect(r.criteria.join(' ')).toMatch(/1 − DOWN ÷ T/);
+    expect(r.criteria.join(' ')).toMatch(/minutos-servicio/);
+    expect(r.criteria.join(' ')).toMatch(/tope de 100/);
+    expect(r.criteria.join(' ')).toMatch(/0 minutos en el mes/);
+  });
+
+  const twoServices = [
+    { id: 100, name: 'Web', serverId: 10, systemName: null, criticality: 'HIGH' as const },
+    { id: 101, name: 'SQL', serverId: 10, systemName: null, criticality: 'MEDIUM' as const },
+  ];
+
+  it('totales del cliente con dos servicios de T distinto: 1 − ΣDOWN ÷ ΣT, no el promedio de porcentajes', () => {
+    const a = at('2026-09-05T10:00:00.000Z');
+    const b = at('2026-09-20T10:00:00.000Z');
+    const r = computeAvailabilityReport(
+      base({
+        services: twoServices,
+        incidents: [down(1, a, 60), down(2, b, 300, { serviceId: 101 })],
+        topIncidents: [top(1, a, 60), top(2, b, 300, { serviceId: 101, serviceNames: ['SQL'] })],
+        // Un día de mantenimiento solo para Web: T(Web) = 41760, T(SQL) = 43200.
+        maintenance: [{ id: 1, serverId: null, serviceId: 100, startsAt: at('2026-09-10T05:00:00.000Z'), endsAt: at('2026-09-11T05:00:00.000Z'), reason: 'Ventana' }],
+      }),
+    );
+    const pct = (x: number) => Math.round(x * 100_000) / 1000;
+    expect(r.services[0].availabilityPct).toBe(pct(1 - 60 / 41760));
+    expect(r.services[1].availabilityPct).toBe(pct(1 - 300 / 43200));
+    const expected = pct(1 - 360 / (41760 + 43200));
+    expect(r.totals.availabilityPct).toBe(expected);
+    const avgOfPcts = Math.round(((r.services[0].availabilityPct! + r.services[1].availabilityPct!) / 2) * 1000) / 1000;
+    expect(expected).not.toBe(avgOfPcts);
+    expect(r.totals.downMinutes).toBe(360);
+    expect(r.totals.maintenanceMinutes).toBe(1440);
+  });
+
+  it('caída de servidor con dos hijos: minutos por servicio de los hijos, el padre se lista y cuenta en el MTTR una vez', () => {
+    const s = at('2026-09-08T10:00:00.000Z');
+    const r = computeAvailabilityReport(
+      base({
+        services: twoServices,
+        incidents: [down(51, s, 60), down(52, s, 60, { serviceId: 101 })],
+        topIncidents: [top(50, s, 60, { serviceId: null, serviceNames: ['Web', 'SQL'], ticketId: 9, ticketCode: 'T-9' })],
+      }),
+    );
+    expect(r.services.map((x) => [x.downMinutes, x.incidents])).toEqual([[60, 1], [60, 1]]);
+    expect(r.totals.downMinutes).toBe(120); // minutos-servicio
+    expect(r.incidents).toHaveLength(1);
+    expect(r.incidents[0]).toMatchObject({ incidentId: 50, minutesInMonth: 60, serviceNames: ['Web', 'SQL'], ticketCode: 'T-9' });
+    expect(r.totals.incidents).toBe(1);
+    expect(r.totals.mttrMinutes).toBe(60);
+  });
+
+  it('la cobertura se topa en 100', () => {
+    const r = computeAvailabilityReport(
+      base({ rollups: [{ serviceId: 100, probeId: 2, date: '2026-09-01', expected: 360, executed: 370, latencyHist: [] }] }),
+    );
+    expect(r.services[0].coverage.datacenter).toBe(100);
   });
 });
