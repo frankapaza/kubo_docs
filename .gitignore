@@ -37,3 +37,8 @@ backend/sql/add_service_cols.sql
 tools/kubo-log-appender/**/bin/
 tools/kubo-log-appender/**/obj/
 tools/kubo-log-appender/out/
+
+# agente de servidor .NET: artefactos de compilacion y publicacion
+agent/**/bin/
+agent/**/obj/
+agent/publish/
