@@ -1,10 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash, randomBytes } from 'node:crypto';
 import { Repository } from 'typeorm';
 import { ClientsService } from '../clients/clients.service';
 import { ClientSystemsRepository } from '../tickets/client-systems.repository';
 import { CheckResult, runCheck } from './core';
+import { buildInstallScript } from './domain/agent-install-script';
 import { MonitorProbe } from './entities/monitor-probe.entity';
 import { MonitorEntityStatus, MonitorServer } from './entities/monitor-server.entity';
 import { MonitorService } from './entities/monitor-service.entity';
@@ -29,6 +31,9 @@ const toServerView = (s: MonitorServer): ServerView => {
   return view;
 };
 
+/** Igual que `ProbeSilenceWatch`: lo que se usa si `FRONTEND_URL` no está configurada. */
+const DEFAULT_FRONTEND_URL = 'http://localhost:5173';
+
 const badInput = (message: string) => new BadRequestException({ code: 'BAD_INPUT', message });
 const notFound = (what: string) => new NotFoundException({ code: 'NOT_FOUND', message: `${what} no encontrado` });
 
@@ -41,6 +46,7 @@ export class AvailabilityInventoryService {
     private readonly clients: ClientsService,
     private readonly clientSystems: ClientSystemsRepository,
     private readonly closer: IncidentCloser,
+    private readonly config: ConfigService,
   ) {}
 
   // ---- Servidores ----
@@ -67,6 +73,7 @@ export class AvailabilityInventoryService {
   async updateServer(id: number, dto: UpdateServerDto, actorUserId: number): Promise<ServerView> {
     const { status, ...fields } = dto;
     const server = await this.getServer(id);
+    if (fields.agentWatchServices) fields.agentWatchServices = [...new Set(fields.agentWatchServices)];
     Object.assign(server, fields);
     return this.applyServerStatus(server, status, actorUserId);
   }
@@ -184,6 +191,40 @@ export class AvailabilityInventoryService {
     probe.tokenHash = null;
     probe.tokenCreatedAt = null;
     await this.probes.save(probe);
+  }
+
+  // ---- Agente de servidor ----
+
+  /**
+   * Emite el token del agente (`kma_…`, se devuelve una sola vez; solo se
+   * guarda su sha256 hex) y el script de instalación con la URL de la central.
+   * Un token nuevo es una instalación nueva: el silencio se cuenta desde la
+   * emisión, no desde la última muestra del agente anterior.
+   */
+  async issueAgentToken(id: number): Promise<{ token: string; installScript: string }> {
+    const server = await this.getServer(id);
+    const token = `kma_${randomBytes(32).toString('base64url')}`;
+    server.agentTokenHash = createHash('sha256').update(token).digest('hex');
+    server.agentTokenCreatedAt = new Date();
+    server.agentLastSeenAt = null;
+    server.agentSilenceAlertedAt = null;
+    await this.servers.save(server);
+    return { token, installScript: buildInstallScript(this.centralUrl(), token) };
+  }
+
+  /** Sin token el servidor deja de dar `AGENT_SILENT` y el agente recibe 401. */
+  async revokeAgentToken(id: number): Promise<void> {
+    const server = await this.getServer(id);
+    server.agentTokenHash = null;
+    server.agentTokenCreatedAt = null;
+    server.agentSilenceAlertedAt = null;
+    await this.servers.save(server);
+  }
+
+  /** `FRONTEND_URL` sin barra final: la central a la que reporta el agente. */
+  private centralUrl(): string {
+    const url = (this.config.get<string>('FRONTEND_URL') || '').trim() || DEFAULT_FRONTEND_URL;
+    return url.replace(/\/+$/, '');
   }
 
   // ---- Auxiliares ----

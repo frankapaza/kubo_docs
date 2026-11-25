@@ -73,7 +73,9 @@ const SERVICE = {
   latencyThresholdMs: 1500, criticality: 'HIGH', status: 'ACTIVE',
 };
 
-const makeSvc = (seed: { services?: any[]; orders?: any[]; incidents?: any[]; states?: any[]; maintenance?: any[] } = {}) => {
+const makeSvc = (
+  seed: { services?: any[]; orders?: any[]; incidents?: any[]; states?: any[]; maintenance?: any[]; servers?: any[]; agentSamples?: any[] } = {},
+) => {
   const probe: any = { id: 1, code: 'oficina-01', kind: 'OFFICE', tokenHash: 'x', lastSeenAt: null, version: null, clockSkewMs: null };
   const probes = repoOf([probe, { id: 2, code: 'kubo-01', kind: 'DATACENTER' }]);
   const checks = repoOf([], (r) => `${r.probeId}|${r.id}`);
@@ -81,11 +83,18 @@ const makeSvc = (seed: { services?: any[]; orders?: any[]; incidents?: any[]; st
   const orders = repoOf(seed.orders ?? []);
   const states = repoOf(seed.states ?? [], (r) => `${r.probeId}|${r.serviceId}`);
   const services = repoOf(seed.services ?? [{ ...SERVICE }]);
-  const servers = repoOf([{ id: 10, clientId: 7, name: 'srv-1', host: 'h', status: 'ACTIVE' }]);
+  const servers = repoOf(seed.servers ?? [{ id: 10, clientId: 7, name: 'srv-1', host: 'h', status: 'ACTIVE' }]);
   const incidents = repoOf(seed.incidents ?? []);
   const svc = new AvailabilityIngestService(
     probes as any, checks as any, signals as any, orders as any, states as any, services as any, servers as any, incidents as any,
     seed.maintenance ? ({ find: jest.fn(async () => seed.maintenance) } as any) : undefined,
+    seed.agentSamples
+      ? ({
+          findOne: jest.fn(async ({ where }: any) =>
+            seed.agentSamples!.filter((r) => r.serverId === where.serverId).sort((a, b) => b.at - a.at)[0] ?? null,
+          ),
+        } as any)
+      : undefined,
   );
   return { svc, probe, probes, checks, signals, orders, states, services };
 };
@@ -279,6 +288,40 @@ describe('AvailabilityIngestService.sync', () => {
     });
     const res = await svc.sync(probe, null);
     expect(res.state.map((r) => [r.serviceId, r.maintenance])).toEqual([[100, true], [101, false]]);
+  });
+
+  describe('serverAlerts', () => {
+    const GB = 1024 ** 3;
+    const now = Date.now();
+    const srv = (id: number, over: any = {}) => ({
+      id, clientId: 7, name: `srv-${id}`, host: 'h', status: 'ACTIVE', agentTokenHash: 'h'.repeat(64),
+      agentLastSeenAt: new Date(now - 60_000), agentTokenCreatedAt: new Date(now - 86_400_000), ...over,
+    });
+    const lowC = (serverId: number) => ({
+      serverId, at: new Date(now - 60_000), disks: [{ name: 'C:', totalBytes: 100 * GB, freeBytes: 7 * GB }, { name: 'D:', totalBytes: 100 * GB, freeBytes: 50 * GB }],
+    });
+
+    it('disco bajo, agente mudo, sin token y servidor pausado', async () => {
+      const { svc, probe } = makeSvc({
+        servers: [
+          srv(10),
+          srv(11, { agentLastSeenAt: new Date(now - 30 * 60_000) }),
+          srv(12, { agentTokenHash: null, agentLastSeenAt: new Date(now - 30 * 60_000) }),
+          srv(13, { status: 'PAUSED', agentLastSeenAt: new Date(now - 30 * 60_000) }),
+        ],
+        agentSamples: [lowC(10), lowC(11), lowC(12), lowC(13), { ...lowC(10), at: new Date(now - 120_000), disks: [] }],
+      });
+      const res = await svc.sync(probe, null);
+      expect(res.serverAlerts.map((a) => [a.serverId, a.kind])).toEqual([[10, 'DISK_LOW'], [11, 'AGENT_SILENT']]);
+      expect(res.serverAlerts[0]).toEqual({ serverId: 10, serverName: 'srv-10', kind: 'DISK_LOW', detail: 'C: 7 % libre' });
+      expect(res.serverAlerts[1].detail).toMatch(/^sin datos desde \d{2}:\d{2}$|^sin datos desde \d{2}\/\d{2} \d{2}:\d{2}$/);
+    });
+
+    it('sin repositorio de muestras (worker) avisa el silencio pero no el disco', async () => {
+      const { svc, probe } = makeSvc({ servers: [srv(10), srv(11, { agentLastSeenAt: new Date(now - 30 * 60_000) })] });
+      const res = await svc.sync(probe, null);
+      expect(res.serverAlerts.map((a) => a.kind)).toEqual(['AGENT_SILENT']);
+    });
   });
 
   it('sin repositorio de mantenimiento (worker kubo-01) maintenance queda en false', async () => {

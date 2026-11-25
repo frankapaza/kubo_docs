@@ -4,13 +4,17 @@ import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
+import { AvailabilityAgentService } from './availability-agent.service';
 import { AvailabilityInventoryService } from './availability-inventory.service';
 import { CreateServerDto, CreateServiceDto, TestServiceDto, UpdateServerDto, UpdateServiceDto } from './dto/inventory.dto';
 
 @Controller('availability')
 @UseGuards(JwtAuthGuard, StaffOnlyGuard, RolesGuard)
 export class AvailabilityInventoryController {
-  constructor(private readonly inventory: AvailabilityInventoryService) {}
+  constructor(
+    private readonly inventory: AvailabilityInventoryService,
+    private readonly agent: AvailabilityAgentService,
+  ) {}
 
   @Get('servers')
   listServers() {
@@ -27,6 +31,27 @@ export class AvailabilityInventoryController {
   @Patch('servers/:id')
   updateServer(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateServerDto, @CurrentUser() user: AuthUser) {
     return this.inventory.updateServer(id, dto, user.id);
+  }
+
+  /** Estado del agente del servidor: última muestra, discos con tendencia y series de 24 h. */
+  @Get('servers/:id/agent')
+  agentView(@Param('id', ParseIntPipe) id: number) {
+    return this.agent.agentView(id, new Date());
+  }
+
+  /** Devuelve `{ token, installScript }`: el token se muestra una sola vez. */
+  @Roles('ADMIN')
+  @Post('servers/:id/agent-token')
+  @HttpCode(201)
+  issueAgentToken(@Param('id', ParseIntPipe) id: number) {
+    return this.inventory.issueAgentToken(id);
+  }
+
+  @Roles('ADMIN')
+  @Delete('servers/:id/agent-token')
+  @HttpCode(204)
+  async revokeAgentToken(@Param('id', ParseIntPipe) id: number): Promise<void> {
+    await this.inventory.revokeAgentToken(id);
   }
 
   @Get('services')

@@ -8,6 +8,8 @@ import { AvailabilityIngestService } from './availability-ingest.service';
 import { AvailabilityPurgeService } from './availability-purge.service';
 import { AvailabilityWorkerModule, WORKER_ENTITIES } from './availability-worker.module';
 import { MonitorMaintenance } from './entities/monitor-maintenance.entity';
+import { MonitorAgentSample } from './entities/monitor-agent-sample.entity';
+import { MonitorAgentDailyRollup } from './entities/monitor-agent-daily-rollup.entity';
 import { DatacenterProbeService } from './datacenter-probe.service';
 import { AvailabilityModule } from './availability.module';
 import { TicketsModule } from '../tickets/tickets.module';
@@ -38,6 +40,9 @@ describe('AvailabilityWorkerModule (solo mide)', () => {
 
   it('la ingesta se resuelve con solo las entidades del worker (sin MonitorMaintenance)', async () => {
     expect(WORKER_ENTITIES).not.toContain(MonitorMaintenance);
+    // El worker solo mide sondas: nada del agente de servidor.
+    expect(WORKER_ENTITIES).not.toContain(MonitorAgentSample);
+    expect(WORKER_ENTITIES).not.toContain(MonitorAgentDailyRollup);
     const moduleRef = await Test.createTestingModule({
       providers: [AvailabilityIngestService, ...WORKER_ENTITIES.map((e) => ({ provide: getRepositoryToken(e), useValue: {} }))],
     }).compile();

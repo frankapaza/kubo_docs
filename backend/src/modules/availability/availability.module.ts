@@ -8,6 +8,11 @@ import { EmailModule } from '../email/email.module';
 import { ClientsModule } from '../clients/clients.module';
 import { TicketsModule } from '../tickets/tickets.module';
 import { UsersModule } from '../users/users.module';
+import { AgentRateLimiter } from './agent-rate-limiter';
+import { AgentSilenceWatch } from './agent-silence.watch';
+import { AgentTokenGuard } from './agent-token.guard';
+import { AvailabilityAgentController } from './availability-agent.controller';
+import { AvailabilityAgentService } from './availability-agent.service';
 import { AvailabilityEvaluatorService } from './availability-evaluator.service';
 import { AvailabilityTicketsService } from './availability-tickets.service';
 import { AvailabilityIngestController } from './availability-ingest.controller';
@@ -77,6 +82,7 @@ import { ProbeTokenGuard } from './probe-token.guard';
   controllers: [
     AvailabilityInventoryController,
     AvailabilityIngestController,
+    AvailabilityAgentController,
     AvailabilityStateController,
     AvailabilityMaintenanceController,
     AvailabilityEvidenceController,
@@ -90,6 +96,10 @@ import { ProbeTokenGuard } from './probe-token.guard';
     AvailabilityMaintenanceService,
     ProbeTokenGuard,
     ProbeRateLimiter,
+    // Agente de servidor (solo backend: el worker sigue midiendo sondas y nada más).
+    AvailabilityAgentService,
+    AgentTokenGuard,
+    AgentRateLimiter,
     AvailabilityTicketsService,
     AvailabilityEvaluatorService,
     { provide: IncidentCloser, useExisting: AvailabilityEvaluatorService },
@@ -100,6 +110,8 @@ import { ProbeTokenGuard } from './probe-token.guard';
     AvailabilityRollupService,
     // Aviso por correo cuando una sonda calla 10 min (solo backend, con ScheduleModule).
     ProbeSilenceWatch,
+    // Ídem cuando el agente de un servidor calla 10 min.
+    AgentSilenceWatch,
   ],
   exports: [
     AvailabilityInventoryService,

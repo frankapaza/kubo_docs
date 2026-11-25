@@ -1,4 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { UpdateServerDto } from './dto/inventory.dto';
 import { createHash } from 'node:crypto';
 import { ROLES_KEY } from '../../common/decorators/roles.decorator';
 import { AvailabilityInventoryController } from './availability-inventory.controller';
@@ -30,6 +33,7 @@ const makeService = () => {
   const clients = { findByIdOrFail: jest.fn(async () => ({ id: 1 })) };
   const clientSystems = { findById: jest.fn(async (id: number) => (id === 5 ? { id: 5, clientId: 1 } : id === 6 ? { id: 6, clientId: 2 } : null)) };
   const closer = { closeForPause: jest.fn(async () => undefined) };
+  const config = { get: jest.fn((k: string): string | undefined => (k === 'FRONTEND_URL' ? 'https://docs.kubo.test/' : undefined)) };
   const svc = new AvailabilityInventoryService(
     repoOf(servers) as any,
     repoOf(services) as any,
@@ -37,8 +41,9 @@ const makeService = () => {
     clients as any,
     clientSystems as any,
     closer as any,
+    config as any,
   );
-  return { svc, probes, services, closer };
+  return { svc, probes, services, servers, closer, config };
 };
 
 const base = { serverId: 10, name: 'web', protocol: 'HTTPS' as const, target: 'https://x.test' };
@@ -136,14 +141,75 @@ describe('AvailabilityInventoryService', () => {
   });
 });
 
+describe('AvailabilityInventoryService: token del agente', () => {
+  it('emite kma_… una sola vez, guarda solo su sha256 y arma el script con FRONTEND_URL sin barra final', async () => {
+    const { svc, servers } = makeService();
+    servers[0].agentLastSeenAt = new Date('2026-01-01T00:00:00Z');
+    servers[0].agentSilenceAlertedAt = new Date('2026-01-01T00:20:00Z');
+    const { token, installScript } = await svc.issueAgentToken(10);
+    expect(token).toMatch(/^kma_[A-Za-z0-9_-]{43}$/);
+    expect(servers[0].agentTokenHash).toBe(createHash('sha256').update(token).digest('hex'));
+    expect(servers[0].agentTokenCreatedAt).toBeInstanceOf(Date);
+    // Token nuevo = instalación nueva: el silencio se cuenta desde la emisión.
+    expect(servers[0].agentLastSeenAt).toBeNull();
+    expect(servers[0].agentSilenceAlertedAt).toBeNull();
+    expect(installScript).toContain("$central = 'https://docs.kubo.test'");
+    expect(installScript).toContain(`$token = '${token}'`);
+    expect(JSON.stringify(await svc.listServers())).not.toContain(token);
+  });
+
+  it('sin FRONTEND_URL usa el valor por defecto de desarrollo', async () => {
+    const { svc, config } = makeService();
+    config.get.mockReturnValue(undefined);
+    const { installScript } = await svc.issueAgentToken(10);
+    expect(installScript).toContain("$central = 'http://localhost:5173'");
+  });
+
+  it('revocar pone el hash en nulo y limpia el aviso de silencio', async () => {
+    const { svc, servers } = makeService();
+    await svc.issueAgentToken(10);
+    servers[0].agentSilenceAlertedAt = new Date();
+    await svc.revokeAgentToken(10);
+    expect(servers[0].agentTokenHash).toBeNull();
+    expect(servers[0].agentTokenCreatedAt).toBeNull();
+    expect(servers[0].agentSilenceAlertedAt).toBeNull();
+  });
+
+  it('servidor inexistente -> 404', async () => {
+    const { svc } = makeService();
+    await expect(svc.issueAgentToken(99)).rejects.toMatchObject({ response: { code: 'NOT_FOUND' } });
+  });
+
+  it('updateServer guarda agentWatchServices sin repetidos', async () => {
+    const { svc, servers } = makeService();
+    await svc.updateServer(10, { agentWatchServices: ['W3SVC', 'MSSQLSERVER', 'W3SVC'] }, 7);
+    expect(servers[0].agentWatchServices).toEqual(['W3SVC', 'MSSQLSERVER']);
+  });
+});
+
+describe('UpdateServerDto.agentWatchServices', () => {
+  const check = async (v: unknown) => validate(plainToInstance(UpdateServerDto, { agentWatchServices: v }));
+  it('acepta nombres de servicio válidos y null', async () => {
+    expect(await check(['W3SVC', 'MSSQL_X', 'Servicio de prueba-1.2'])).toHaveLength(0);
+    expect(await check(null)).toHaveLength(0);
+  });
+  it.each([
+    ['más de 50', Array.from({ length: 51 }, (_, i) => `S${i}`)],
+    ['vacío', ['']],
+    ['más de 256', ['a'.repeat(257)]],
+    ['caracteres raros', ['W3SVC; rm']],
+    ['no es lista', 'W3SVC'],
+  ])('rechaza %s', async (_n, v) => expect((await check(v)).length).toBeGreaterThan(0));
+});
+
 describe('AvailabilityInventoryController roles', () => {
   const proto = AvailabilityInventoryController.prototype as any;
   const roles = (h: string) => Reflect.getMetadata(ROLES_KEY, proto[h]);
 
-  it.each(['createServer', 'updateServer', 'createService', 'testService', 'updateService', 'issueToken', 'revokeToken'])(
+  it.each(['createServer', 'updateServer', 'createService', 'testService', 'updateService', 'issueToken', 'revokeToken', 'issueAgentToken', 'revokeAgentToken'])(
     '%s exige ADMIN',
     (h) => expect(roles(h)).toEqual(['ADMIN']),
   );
 
-  it.each(['listServers', 'listServices', 'listProbes'])('%s queda abierto al personal', (h) => expect(roles(h)).toBeUndefined());
+  it.each(['listServers', 'listServices', 'listProbes', 'agentView'])('%s queda abierto al personal', (h) => expect(roles(h)).toBeUndefined());
 });

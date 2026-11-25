@@ -1,6 +1,8 @@
 import { FindOperator } from 'typeorm';
 import { AvailabilityRollupService } from './availability-rollup.service';
-import { LATENCY_BUCKETS_MS } from './domain/latency-histogram';
+import { LATENCY_BUCKETS_MS, PERCENT_BUCKETS } from './domain/latency-histogram';
+import { MonitorAgentDailyRollup } from './entities/monitor-agent-daily-rollup.entity';
+import { MonitorAgentSample } from './entities/monitor-agent-sample.entity';
 import { MonitorCheck } from './entities/monitor-check.entity';
 import { MonitorDailyRollup } from './entities/monitor-daily-rollup.entity';
 import { MonitorIncidentEvent } from './entities/monitor-incident-event.entity';
@@ -79,6 +81,8 @@ function fakeDs() {
     [MonitorDailyRollup, new FakeRepo()],
     [MonitorProbeGap, new FakeRepo()],
     [MonitorRollupDay, new FakeRepo('date')],
+    [MonitorAgentSample, new FakeRepo()],
+    [MonitorAgentDailyRollup, new FakeRepo()],
   ]);
   const manager = { getRepository: (e: any) => repos.get(e)! };
   const ds = { getRepository: manager.getRepository, transaction: jest.fn(async (fn: any) => fn(manager)) };
@@ -185,6 +189,42 @@ describe('AvailabilityRollupService.rollupDay', () => {
   });
 });
 
+describe('AvailabilityRollupService.rollupDay (agente)', () => {
+  const disks = (free: number) => [{ name: 'C:', totalBytes: 100, freeBytes: free }];
+
+  it('por servidor con muestras: cantidad, histogramas de CPU y RAM y discos de la última muestra del día', async () => {
+    const { svc, repo } = seed();
+    repo(MonitorAgentSample).rows.push(
+      { id: 1, serverId: 5, at: z('06:00'), cpuPct: 3, ramPct: 50, disks: disks(40) },
+      { id: 2, serverId: 5, at: z('23:59'), cpuPct: 97.5, ramPct: 100, disks: disks(30) },
+      { id: 3, serverId: 5, at: z('12:00'), cpuPct: 10, ramPct: 52, disks: disks(35) },
+      { id: 4, serverId: 6, at: new Date('2026-11-21T05:00:00.000Z'), cpuPct: 1, ramPct: 1, disks: disks(1) }, // día siguiente
+      { id: 5, serverId: 5, at: new Date('2026-11-20T04:59:59.000Z'), cpuPct: 1, ramPct: 1, disks: disks(1) }, // día anterior
+    );
+    await svc.rollupDay(DAY, NOW);
+    const rows = repo(MonitorAgentDailyRollup).rows;
+    expect(rows).toHaveLength(1);
+    const r = rows[0];
+    expect(r).toMatchObject({ serverId: 5, date: DAY, samples: 3, disksClose: disks(30) });
+    expect(r.cpuHist).toHaveLength(PERCENT_BUCKETS.length);
+    expect(r.cpuHist[0]).toBe(1); // 3 %
+    expect(r.cpuHist[2]).toBe(1); // 10 %
+    expect(r.cpuHist[19]).toBe(1); // 97,5 %
+    expect(r.ramHist[10]).toBe(2); // 50 y 52 %
+    expect(r.ramHist[20]).toBe(1); // 100 %
+  });
+
+  it('es idempotente y no toca otras fechas', async () => {
+    const { svc, repo } = seed();
+    repo(MonitorAgentSample).rows.push({ id: 1, serverId: 5, at: z('06:00'), cpuPct: 3, ramPct: 50, disks: disks(40) });
+    repo(MonitorAgentDailyRollup).rows.push({ id: 999, serverId: 5, date: '2026-11-19' });
+    await svc.rollupDay(DAY, NOW);
+    await svc.rollupDay(DAY, NOW);
+    expect(repo(MonitorAgentDailyRollup).rows.filter((r) => r.date === DAY)).toHaveLength(1);
+    expect(repo(MonitorAgentDailyRollup).rows.some((r) => r.id === 999)).toBe(true);
+  });
+});
+
 describe('AvailabilityRollupService.ensureRange', () => {
   it('salta los días ya marcados, el día en curso y los de hace más de 89 días', async () => {
     const { svc, repo } = seed();
@@ -209,16 +249,54 @@ describe('AvailabilityRollupService.ensureRange', () => {
 });
 
 describe('AvailabilityRollupService.run', () => {
-  it('pide desde hoy − 89 hasta ayer', async () => {
+  it('completa los días viejos que falten y recalcula siempre ayer y anteayer (datos tardíos)', async () => {
     const { svc } = seed();
-    const spy = jest.spyOn(svc, 'ensureRange').mockResolvedValue();
+    const order: string[] = [];
+    const ensure = jest.spyOn(svc, 'ensureRange').mockImplementation(async (a, b) => void order.push(`range ${a}..${b}`));
+    const day = jest.spyOn(svc, 'rollupDay').mockImplementation(async (d) => void order.push(d));
     jest.useFakeTimers({ now: NOW, doNotFake: ['nextTick', 'setImmediate'] });
     try {
       await svc.run();
     } finally {
       jest.useRealTimers();
     }
-    expect(spy).toHaveBeenCalledWith('2026-08-26', '2026-11-22', NOW);
+    expect(ensure).toHaveBeenCalledWith('2026-08-26', '2026-11-20', NOW);
+    expect(day.mock.calls).toEqual([['2026-11-21', NOW], ['2026-11-22', NOW]]);
+    expect(order).toEqual(['range 2026-08-26..2026-11-20', '2026-11-21', '2026-11-22']);
+  });
+
+  it('recalcula ayer y anteayer aunque ya estén en monitor_rollup_days, e incluye checks subidos tarde', async () => {
+    const { svc, repo } = seed();
+    repo(MonitorProbe).rows = [{ id: 10, code: 'oficina-01' }];
+    repo(MonitorService).rows = [{ id: 1, status: 'ACTIVE', createdAt: new Date('2026-01-01T00:00:00Z') }];
+    repo(MonitorCheck).rows = [];
+    const y = '2026-11-22';
+    const at = new Date('2026-11-22T12:00:00.000Z');
+    repo(MonitorCheck).rows.push({ probeId: 10, id: 'a', serviceId: 1, kind: 'REGULAR', startedAt: at, ok: true, durationMs: 10 });
+    const ensure = jest.spyOn(svc, 'ensureRange').mockResolvedValue();
+    jest.useFakeTimers({ now: NOW, doNotFake: ['nextTick', 'setImmediate'] });
+    try {
+      await svc.run();
+      const first = repo(MonitorDailyRollup).rows.find((r) => r.date === y)!;
+      expect(first.executed).toBe(1);
+      // La sonda de la oficina sube tarde lo que guardó durante un corte.
+      repo(MonitorCheck).rows.push({ probeId: 10, id: 'b', serviceId: 1, kind: 'REGULAR', startedAt: new Date(at.getTime() + 120_000), ok: true, durationMs: 10 });
+      await svc.run();
+    } finally {
+      jest.useRealTimers();
+    }
+    expect(ensure).toHaveBeenCalledTimes(2);
+    const rows = repo(MonitorDailyRollup).rows.filter((r) => r.date === y);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].executed).toBe(2);
+  });
+
+  it('un día reciente que falla se registra y no detiene el otro', async () => {
+    const { svc } = seed();
+    jest.spyOn(svc, 'ensureRange').mockResolvedValue();
+    const day = jest.spyOn(svc, 'rollupDay').mockRejectedValueOnce(new Error('db')).mockResolvedValue();
+    await expect(svc.run()).resolves.toBeUndefined();
+    expect(day).toHaveBeenCalledTimes(2);
   });
 
   it('no corre dos pasadas a la vez y no lanza si falla', async () => {

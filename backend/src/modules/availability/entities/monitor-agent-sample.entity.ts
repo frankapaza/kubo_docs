@@ -8,6 +8,27 @@ export interface AgentDisk {
   freeBytes: number;
 }
 
+/** Grupo de aplicaciones de IIS y su estado («Started», «Stopped», …). */
+export interface AgentIisPool {
+  name: string;
+  state: string;
+}
+
+/** Servicio de Windows vigilado y su estado («Running», «Stopped», …). */
+export interface AgentServiceStatus {
+  name: string;
+  status: string;
+}
+
+/**
+ * Lo que se guarda en `iis`: `pools` es null si el servidor no tiene IIS. Va
+ * envuelto porque la columna es JSON NOT NULL y TypeORM escribe un null de
+ * JavaScript como NULL de SQL.
+ */
+export interface AgentIisState {
+  pools: AgentIisPool[] | null;
+}
+
 /** Muestra periódica del agente de un servidor. */
 @Entity('monitor_agent_samples')
 @Index('idx_monitor_agent_samples', ['serverId', 'at'])
@@ -30,13 +51,12 @@ export class MonitorAgentSample {
   @Column({ type: 'json' })
   disks!: AgentDisk[];
 
-  /** Estado de IIS; la Task 6 lo tipa. */
   @Column({ type: 'json' })
-  iis!: unknown;
+  iis!: AgentIisState;
 
-  /** Servicios de Windows vigilados; la Task 6 lo tipa. */
+  /** Servicios de Windows vigilados. */
   @Column({ type: 'json' })
-  services!: unknown;
+  services!: AgentServiceStatus[];
 
   @Column({ name: 'event_errors', type: 'int', default: 0 })
   eventErrors!: number;

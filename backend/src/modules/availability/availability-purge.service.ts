@@ -4,6 +4,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { ObjectLiteral, Repository } from 'typeorm';
 import { IStorageService, STORAGE_SERVICE } from '../audio/interfaces/storage.interface';
 import { limaDateOf } from './domain/expected-slots';
+import { MonitorAgentDailyRollup } from './entities/monitor-agent-daily-rollup.entity';
+import { MonitorAgentSample } from './entities/monitor-agent-sample.entity';
 import { MonitorCheck } from './entities/monitor-check.entity';
 import { MonitorDailyRollup } from './entities/monitor-daily-rollup.entity';
 import { MonitorEvidence } from './entities/monitor-evidence.entity';
@@ -15,6 +17,8 @@ import { MonitorProbeSignal } from './entities/monitor-probe-signal.entity';
 import { MonitorRollupDay } from './entities/monitor-rollup-day.entity';
 
 export const PURGE_RETENTION_DAYS = 90;
+/** Muestras crudas del agente: 30 días (el informe usa sus resúmenes diarios). */
+export const AGENT_SAMPLE_RETENTION_DAYS = 30;
 /** Resúmenes, huecos, informes e incidentes recuperados se guardan 12 meses. */
 export const REPORT_RETENTION_DAYS = 365;
 export const PURGE_BATCH_SIZE = 5000;
@@ -30,12 +34,15 @@ export interface PurgeResult {
   gaps: number;
   reports: number;
   incidents: number;
+  agentSamples: number;
+  agentRollups: number;
 }
 
 /**
  * Purga diaria (03:00 Lima). Corre en el backend.
+ * - 30 días: muestras del agente.
  * - 90 días: checks y señales procesadas.
- * - 12 meses: resúmenes diarios, días resumidos, huecos de sonda, informes
+ * - 12 meses: resúmenes diarios (de sonda y de agente), días resumidos, huecos de sonda, informes
  *   mensuales e incidentes recuperados (con su evidencia y eventos). Los
  *   tickets nunca se tocan.
  */
@@ -53,6 +60,8 @@ export class AvailabilityPurgeService {
     @InjectRepository(MonitorIncident) private readonly incidents: Repository<MonitorIncident>,
     @InjectRepository(MonitorIncidentEvent) private readonly events: Repository<MonitorIncidentEvent>,
     @InjectRepository(MonitorEvidence) private readonly evidence: Repository<MonitorEvidence>,
+    @InjectRepository(MonitorAgentSample) private readonly agentSamples: Repository<MonitorAgentSample>,
+    @InjectRepository(MonitorAgentDailyRollup) private readonly agentRollups: Repository<MonitorAgentDailyRollup>,
     @Inject(STORAGE_SERVICE) private readonly storage: IStorageService,
   ) {}
 
@@ -62,7 +71,8 @@ export class AvailabilityPurgeService {
       const r = await this.purge(new Date());
       this.logger.log(
         `Purga de disponibilidad: ${r.checks} checks, ${r.signals} señales, ${r.rollups} resúmenes, ` +
-          `${r.rollupDays} días resumidos, ${r.gaps} huecos, ${r.reports} informes y ${r.incidents} incidentes borrados`,
+          `${r.rollupDays} días resumidos, ${r.gaps} huecos, ${r.reports} informes, ${r.incidents} incidentes, ` +
+          `${r.agentSamples} muestras y ${r.agentRollups} resúmenes del agente borrados`,
       );
     } catch (e) {
       this.logger.error(`Purga de disponibilidad fallida: ${(e as Error).message}`);
@@ -85,7 +95,11 @@ export class AvailabilityPurgeService {
     const gaps = await this.deleteInBatches(this.gaps, 'date < ?', cutoffDate);
     const reports = await this.deleteInBatches(this.reports, 'month < ?', cutoffDate.slice(0, 7));
     const incidents = await this.purgeIncidents(yearCutoff);
-    return { checks, signals, rollups, rollupDays, gaps, reports, incidents };
+
+    const agentCutoff = new Date(now.getTime() - AGENT_SAMPLE_RETENTION_DAYS * DAY_MS);
+    const agentSamples = await this.deleteInBatches(this.agentSamples, 'at < ?', agentCutoff);
+    const agentRollups = await this.deleteInBatches(this.agentRollups, 'date < ?', cutoffDate);
+    return { checks, signals, rollups, rollupDays, gaps, reports, incidents, agentSamples, agentRollups };
   }
 
   /** `DELETE ... LIMIT 5000` repetido hasta que un lote sale incompleto (o vacío). */

@@ -1,5 +1,8 @@
-import { IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsEnum, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { Type } from 'class-transformer';
+
+/** Servicios de Windows que puede vigilar el agente de un servidor. */
+export const MAX_AGENT_WATCH_SERVICES = 50;
 
 export const ENTITY_STATUSES = ['ACTIVE', 'PAUSED', 'ARCHIVED'] as const;
 export type EntityStatusValue = (typeof ENTITY_STATUSES)[number];
@@ -42,6 +45,16 @@ export class UpdateServerDto {
 
   @IsOptional() @IsEnum(ENTITY_STATUSES)
   status?: EntityStatusValue;
+
+  /** Servicios de Windows que vigila el agente (nombre corto, p. ej. `W3SVC`); null los quita todos. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_AGENT_WATCH_SERVICES)
+  @IsString({ each: true })
+  @MinLength(1, { each: true })
+  @MaxLength(256, { each: true })
+  @Matches(/^[A-Za-z0-9_.\- ]+$/, { each: true })
+  agentWatchServices?: string[] | null;
 }
 
 export class CreateServiceDto {

@@ -6,6 +6,9 @@ import { PROBE_REFERENCES } from './availability.constants';
 import { CheckResult, DEFAULT_SCHEDULE, intervalMsAt, ProbeSignal, ScheduleConfig, ServiceTarget } from './core';
 import { CombinedStateRow } from './domain/combined-state';
 import { buildCombinedRows } from './domain/combined-state-builder';
+import { ServerAlert, serverAlertsFor } from './domain/server-alerts';
+import { latestAgentDisks } from './domain/agent-disks-repo';
+import { MonitorAgentSample } from './entities/monitor-agent-sample.entity';
 import { activeMaintenanceWindows } from './domain/maintenance-repo';
 import { MonitorMaintenance } from './entities/monitor-maintenance.entity';
 import { MonitorCheck } from './entities/monitor-check.entity';
@@ -36,6 +39,8 @@ export interface SyncResponse {
   config: { services: ServiceTarget[]; schedule: ScheduleConfig; references: ServiceTarget[] } | null;
   orders: { id: number; serviceId: number; kind: 'MANUAL' | 'CROSS' }[];
   state: CombinedStateRow[];
+  /** Avisos de agente (mudo, disco bajo) de los servidores `ACTIVE`. */
+  serverAlerts: ServerAlert[];
 }
 
 const toTarget = (s: MonitorService): ServiceTarget => ({
@@ -64,6 +69,8 @@ export class AvailabilityIngestService {
     @InjectRepository(MonitorIncident) private readonly incidents: Repository<MonitorIncident>,
     // Opcional: el worker (kubo-01) solo mide y no registra `MonitorMaintenance`; sin él, `maintenance` va en false.
     @Optional() @InjectRepository(MonitorMaintenance) private readonly maintenance?: Repository<MonitorMaintenance>,
+    // Opcional por lo mismo: el worker no registra las muestras del agente; sin ellas no hay `DISK_LOW`.
+    @Optional() @InjectRepository(MonitorAgentSample) private readonly agentSamples?: Repository<MonitorAgentSample>,
   ) {}
 
   /**
@@ -150,7 +157,26 @@ export class AvailabilityIngestService {
       config: configVersion === current ? null : { services: targets, schedule, references },
       orders: await this.takeOrders(Number(probe.id), now),
       state: await this.combinedState(activeServices, schedule, now),
+      serverAlerts: await this.serverAlerts(now),
     };
+  }
+
+  /** Avisos de servidor para el widget: solo servidores `ACTIVE`; los que no tienen token no avisan. */
+  private async serverAlerts(now: Date): Promise<ServerAlert[]> {
+    const servers = await this.servers.find({ where: { status: 'ACTIVE' }, order: { id: 'ASC' } });
+    const withAgent = servers.filter((s) => s.agentTokenHash).map((s) => Number(s.id));
+    const disks = this.agentSamples ? await latestAgentDisks(this.agentSamples, withAgent) : new Map();
+    return serverAlertsFor(
+      servers.map((s) => ({
+        id: Number(s.id),
+        name: s.name,
+        hasAgent: !!s.agentTokenHash,
+        agentLastSeenAt: s.agentLastSeenAt ?? null,
+        agentTokenCreatedAt: s.agentTokenCreatedAt ?? null,
+        lastDisks: disks.get(Number(s.id)) ?? null,
+      })),
+      now,
+    );
   }
 
   /** Las órdenes pendientes de la sonda, marcadas como entregadas: cada una sale una sola vez. */

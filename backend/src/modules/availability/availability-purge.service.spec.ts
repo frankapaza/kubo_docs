@@ -8,7 +8,10 @@ const repo = (table: string, batches: number[] = []) =>
   }) as any;
 
 type Repos = Partial<
-  Record<'checks' | 'signals' | 'rollups' | 'rollupDays' | 'gaps' | 'reports' | 'incidents' | 'events' | 'evidence', any>
+  Record<
+    'checks' | 'signals' | 'rollups' | 'rollupDays' | 'gaps' | 'reports' | 'incidents' | 'events' | 'evidence' | 'agentSamples' | 'agentRollups',
+    any
+  >
 >;
 
 function make(r: Repos = {}, storage: any = { remove: jest.fn().mockResolvedValue(undefined) }) {
@@ -22,6 +25,8 @@ function make(r: Repos = {}, storage: any = { remove: jest.fn().mockResolvedValu
     incidents: r.incidents ?? { metadata: { tableName: 'monitor_incidents' }, query: jest.fn().mockResolvedValue([]) },
     events: r.events ?? repo('monitor_incident_events'),
     evidence: r.evidence ?? { metadata: { tableName: 'monitor_evidence' }, query: jest.fn().mockResolvedValue([]) },
+    agentSamples: r.agentSamples ?? repo('monitor_agent_samples'),
+    agentRollups: r.agentRollups ?? repo('monitor_agent_daily_rollups'),
   };
   const svc = new AvailabilityPurgeService(
     all.checks,
@@ -33,6 +38,8 @@ function make(r: Repos = {}, storage: any = { remove: jest.fn().mockResolvedValu
     all.incidents,
     all.events,
     all.evidence,
+    all.agentSamples,
+    all.agentRollups,
     storage,
   );
   return { svc, ...all, storage };
@@ -82,6 +89,27 @@ describe('AvailabilityPurgeService', () => {
     expect((checks.query.mock.calls[0][1][0] as Date).toISOString()).toBe('2026-03-03T00:00:00.000Z');
   });
 
+  it('borra las muestras del agente de más de 30 días y deja las de 29', async () => {
+    // Tabla en memoria de instantes: `DELETE ... WHERE at < ?` con el corte que recibe.
+    const NOW = new Date('2026-06-01T12:00:00Z');
+    const ats = [31, 30.01, 29.99, 1].map((d) => new Date(NOW.getTime() - d * 86_400_000));
+    const rows = [...ats];
+    const agentSamples = {
+      metadata: { tableName: 'monitor_agent_samples' },
+      query: jest.fn().mockImplementation(async (sql: string, [cut]: [Date]) => {
+        expect(sql).toBe('DELETE FROM `monitor_agent_samples` WHERE at < ? LIMIT 5000');
+        const before = rows.length;
+        for (let i = rows.length - 1; i >= 0; i--) if (rows[i] < cut) rows.splice(i, 1);
+        return { affectedRows: before - rows.length };
+      }),
+    };
+    const { svc } = make({ agentSamples });
+    const r = await svc.purge(NOW);
+    expect(rows).toEqual(ats.slice(2));
+    expect(r).toMatchObject({ agentSamples: 2 });
+    expect((agentSamples.query.mock.calls[0][1][0] as Date).toISOString()).toBe('2026-05-02T12:00:00.000Z');
+  });
+
   it('la tarea programada no lanza si la base falla', async () => {
     const c = repo('monitor_checks');
     c.query.mockRejectedValue(new Error('db'));
@@ -102,6 +130,14 @@ describe('AvailabilityPurgeService', () => {
       const r = await svc.purge(NOW);
       for (const t of [rollups, rollupDays, gaps]) expect(t.rows).toEqual(['2025-06-01', '2025-07-01', '2026-05-31']);
       expect(r).toMatchObject({ rollups: 2, rollupDays: 2, gaps: 2 });
+    });
+
+    it('borra los resúmenes diarios del agente de más de 12 meses', async () => {
+      const agentRollups = tableRepo('monitor_agent_daily_rollups', 'date', ['2025-05-31', '2025-06-01']);
+      const { svc } = make({ agentRollups });
+      const r = await svc.purge(NOW);
+      expect(agentRollups.rows).toEqual(['2025-06-01']);
+      expect(r).toMatchObject({ agentRollups: 1 });
     });
 
     it('borra informes mensuales de meses anteriores al mes de corte', async () => {

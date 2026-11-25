@@ -11,6 +11,11 @@ import { AvailabilityTicketsService } from './availability-tickets.service';
 import { AvailabilityModule } from './availability.module';
 import { IncidentCloser } from './incident-closer';
 import { ProbeSilenceWatch } from './probe-silence.watch';
+import { AgentSilenceWatch } from './agent-silence.watch';
+import { AgentRateLimiter } from './agent-rate-limiter';
+import { AgentTokenGuard } from './agent-token.guard';
+import { AvailabilityAgentController } from './availability-agent.controller';
+import { AvailabilityAgentService } from './availability-agent.service';
 
 describe('AvailabilityModule', () => {
   const providers = (Reflect.getMetadata('providers', AvailabilityModule) ?? []) as any[];
@@ -32,6 +37,11 @@ describe('AvailabilityModule', () => {
 
   it('el vigilante de silencio de sondas corre en el backend', () => {
     expect(providers).toContain(ProbeSilenceWatch);
+  });
+
+  it('la ingesta del agente y su vigilante de silencio viven en el backend', () => {
+    for (const p of [AgentSilenceWatch, AvailabilityAgentService, AgentTokenGuard, AgentRateLimiter]) expect(providers).toContain(p);
+    expect(Reflect.getMetadata('controllers', AvailabilityModule)).toContain(AvailabilityAgentController);
   });
 
   it('el evaluador se resuelve sin sonda local (el cruce va por monitor_probe_orders)', async () => {

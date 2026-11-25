@@ -23,7 +23,7 @@ async function bootstrap(): Promise<void> {
   registerBulkSendJsonLimit(app);
   // Ídem para la ingesta de logs: 2 MB descomprimidos (el appender manda gzip).
   registerIngestJsonLimit(app);
-  // Y la ingesta de la sonda: 1 MB, solo con token de sonda de forma válida.
+  // Y la ingesta de la sonda (1 MB, token kmp_) y la del agente (64 KB, token kma_).
   registerProbeIngestJsonLimit(app);
   // Ídem para el webhook de GitHub: guarda el cuerpo crudo para verificar la firma HMAC.
   registerGithubWebhookBody(app);

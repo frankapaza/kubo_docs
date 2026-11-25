@@ -3,8 +3,10 @@ import { Cron } from '@nestjs/schedule';
 import { And, Between, DataSource, EntityManager, In, IsNull, LessThan, MoreThan, MoreThanOrEqual } from 'typeorm';
 import { addDays, expectedSlots, limaDateOf, limaDayBounds } from './domain/expected-slots';
 import { incidentIntervals } from './domain/incident-intervals';
-import { histogramOf, percentileFromHistogram } from './domain/latency-histogram';
+import { histogramOf, PERCENT_BUCKETS, percentileFromHistogram } from './domain/latency-histogram';
 import { probeGaps, subtractIntervals } from './domain/probe-gaps';
+import { MonitorAgentDailyRollup } from './entities/monitor-agent-daily-rollup.entity';
+import { MonitorAgentSample } from './entities/monitor-agent-sample.entity';
 import { MonitorCheck } from './entities/monitor-check.entity';
 import { MonitorDailyRollup } from './entities/monitor-daily-rollup.entity';
 import { MonitorIncidentEvent } from './entities/monitor-incident-event.entity';
@@ -17,11 +19,17 @@ import { MonitorService } from './entities/monitor-service.entity';
 
 /** Días hacia atrás que se resumen (los checks se purgan a los 90). */
 export const ROLLUP_LOOKBACK_DAYS = 89;
+/**
+ * Días completos más recientes que la pasada recalcula siempre, aunque ya estén
+ * resumidos: la sonda de la oficina sube tarde lo que guardó durante un corte.
+ */
+export const ROLLUP_RECOMPUTE_DAYS = 2;
 const INSERT_CHUNK = 500;
 const MIN_MS = 60_000;
 
 type RollupRow = Omit<MonitorDailyRollup, 'id'>;
 type GapRow = Omit<MonitorProbeGap, 'id'>;
+type AgentRollupRow = Omit<MonitorAgentDailyRollup, 'id'>;
 type ServiceMinutes = { down: number; route: number };
 type Interval = [Date, Date];
 
@@ -55,7 +63,16 @@ export class AvailabilityRollupService implements OnApplicationBootstrap {
     try {
       const now = new Date();
       const today = limaDateOf(now);
-      await this.ensureRange(addDays(today, -ROLLUP_LOOKBACK_DAYS), addDays(today, -1), now);
+      // Los días viejos solo si faltan; ayer y anteayer siempre (datos tardíos).
+      await this.ensureRange(addDays(today, -ROLLUP_LOOKBACK_DAYS), addDays(today, -ROLLUP_RECOMPUTE_DAYS - 1), now);
+      for (let back = ROLLUP_RECOMPUTE_DAYS; back >= 1; back--) {
+        const d = addDays(today, -back);
+        try {
+          await this.rollupDay(d, now);
+        } catch (e) {
+          this.logger.error(`Resumen de disponibilidad del ${d} fallido: ${(e as Error).message}`);
+        }
+      }
     } catch (e) {
       this.logger.error(`Resumen diario de disponibilidad fallido: ${(e as Error).message}`);
     } finally {
@@ -88,18 +105,20 @@ export class AvailabilityRollupService implements OnApplicationBootstrap {
 
     // Paso 1: disponibilidad por servicio y sonda, y huecos por sonda.
     const { rollups, gaps } = await this.computeProbeRollups(date, from, to, until);
-    // (La Task 5 añade aquí el paso de los resúmenes del agente.)
+    // Paso 2: recursos del agente por servidor.
+    const agentRollups = await this.computeAgentRollups(date, from, to);
 
     await this.ds.transaction(async (m) => {
       await this.replaceRows(m, MonitorDailyRollup, date, rollups);
       await this.replaceRows(m, MonitorProbeGap, date, gaps);
+      await this.replaceRows(m, MonitorAgentDailyRollup, date, agentRollups);
       await m.getRepository(MonitorRollupDay).save({ date, computedAt: now });
     });
   }
 
-  private async replaceRows<T extends RollupRow | GapRow>(
+  private async replaceRows<T extends RollupRow | GapRow | AgentRollupRow>(
     m: EntityManager,
-    entity: typeof MonitorDailyRollup | typeof MonitorProbeGap,
+    entity: typeof MonitorDailyRollup | typeof MonitorProbeGap | typeof MonitorAgentDailyRollup,
     date: string,
     rows: T[],
   ): Promise<void> {
@@ -182,6 +201,36 @@ export class AvailabilityRollupService implements OnApplicationBootstrap {
       gaps.push(...this.probeDayGaps(probeId, date, maxDate(from, firstAt), until, checks, outages));
     }
     return { rollups, gaps };
+  }
+
+  /**
+   * Resumen del agente por servidor con muestras ese día: cantidad, histogramas
+   * de CPU y RAM (`PERCENT_BUCKETS`) y los discos de la última muestra del día.
+   */
+  private async computeAgentRollups(date: string, from: Date, to: Date): Promise<AgentRollupRow[]> {
+    const samples = await this.ds.getRepository(MonitorAgentSample).find({
+      where: { at: And(MoreThanOrEqual(from), LessThan(to)) },
+      order: { serverId: 'ASC', at: 'ASC' },
+      select: { id: true, serverId: true, at: true, cpuPct: true, ramPct: true, disks: true },
+    });
+    const byServer = new Map<number, MonitorAgentSample[]>();
+    for (const s of samples) {
+      const sid = Number(s.serverId);
+      (byServer.get(sid) ?? byServer.set(sid, []).get(sid)!).push(s);
+    }
+    const out: AgentRollupRow[] = [];
+    for (const [serverId, rows] of [...byServer].sort((a, b) => a[0] - b[0])) {
+      const last = rows.reduce((a, s) => (new Date(s.at).getTime() >= new Date(a.at).getTime() ? s : a));
+      out.push({
+        serverId,
+        date,
+        samples: rows.length,
+        cpuHist: histogramOf(rows.map((s) => Number(s.cpuPct)), PERCENT_BUCKETS),
+        ramHist: histogramOf(rows.map((s) => Number(s.ramPct)), PERCENT_BUCKETS),
+        disksClose: last.disks ?? [],
+      });
+    }
+    return out;
   }
 
   /** Huecos de la sonda: caídas de oficina recortadas al día y silencios fuera de ellas. */
