@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, LessThan, MoreThan, Repository } from 'typeorm';
+import { In, LessThan, MoreThan, MoreThanOrEqual, Repository } from 'typeorm';
 import { MonitorMaintenance } from './entities/monitor-maintenance.entity';
 import { MonitorServer } from './entities/monitor-server.entity';
 import { MonitorService } from './entities/monitor-service.entity';
@@ -12,6 +12,10 @@ const notFound = () => new NotFoundException({ code: 'NOT_FOUND', message: 'Mant
 export const MAINTENANCE_MAX_MS = 7 * 24 * 60 * 60_000;
 const REASON_MIN = 3;
 const REASON_MAX = 255;
+/** Sin rango, la lista muestra las ventanas que terminaron hace 30 días o menos (y las vigentes y futuras). */
+export const MAINTENANCE_LIST_DEFAULT_DAYS = 30;
+/** ISO 8601 con hora y zona explícita (`Z` o `±hh:mm`): sin zona, `new Date` usaría la hora local del servidor. */
+const ISO_WITH_OFFSET = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:?\d{2})$/;
 
 export type MaintenanceStatus = 'SCHEDULED' | 'ACTIVE' | 'ENDED';
 
@@ -46,7 +50,9 @@ const nOrNull = (v: unknown): number | null => (v === null || v === undefined ? 
 const given = (v: unknown): boolean => v !== null && v !== undefined;
 
 function parseDate(value: string, field: string): Date {
-  const d = typeof value === 'string' && value.trim() !== '' ? new Date(value) : new Date(NaN);
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!ISO_WITH_OFFSET.test(text)) throw badInput(`Fecha inválida en ${field}: usa ISO 8601 con zona (Z o ±hh:mm)`);
+  const d = new Date(text);
   if (Number.isNaN(d.getTime())) throw badInput(`Fecha inválida en ${field}`);
   return d;
 }
@@ -60,14 +66,18 @@ export class AvailabilityMaintenanceService {
     @InjectRepository(MonitorService) private readonly services: Repository<MonitorService>,
   ) {}
 
-  /** Las ventanas que se superponen con `[from, to)`; sin rango, todas. Las más recientes primero. */
+  /**
+   * Las ventanas que se superponen con `[from, to)`. Sin `from`, las que terminaron
+   * hace 30 días o menos (no se devuelve todo el historial). Las más recientes primero.
+   */
   async list(range: MaintenanceRange): Promise<MaintenanceView[]> {
+    const now = new Date();
     const where: Record<string, unknown> = {};
     if (range.from !== undefined) where.endsAt = MoreThan(parseDate(range.from, 'from'));
+    else where.endsAt = MoreThanOrEqual(new Date(now.getTime() - MAINTENANCE_LIST_DEFAULT_DAYS * 24 * 60 * 60_000));
     if (range.to !== undefined) where.startsAt = LessThan(parseDate(range.to, 'to'));
     const rows = await this.maintenance.find({ where, order: { startsAt: 'DESC', id: 'DESC' } });
-    rows.sort((a, b) => b.startsAt.getTime() - a.startsAt.getTime() || Number(b.id) - Number(a.id));
-    return this.toViews(rows, new Date());
+    return this.toViews(rows, now);
   }
 
   async create(input: MaintenanceInput, userId: number): Promise<MaintenanceView> {

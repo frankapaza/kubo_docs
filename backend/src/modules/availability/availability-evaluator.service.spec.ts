@@ -593,6 +593,55 @@ describe('AvailabilityEvaluatorService', () => {
       await t.evaluator.tick(at(600));
       expect(t.tickets.ensureTicket).toHaveBeenCalledTimes(1);
       expect(t.incidents()[0].ticketId).toBe(901);
+      expect(t.events(t.incidents()[0].id).filter((e) => e.type === 'MAINTENANCE_RELEASED')).toHaveLength(1);
+      // Ya con ticket, el barrido no lo toma como reapertura pendiente.
+      await t.evaluator.tick(at(605));
+      await t.evaluator.tick(at(610));
+      expect(t.tickets.reopenOrReplace).not.toHaveBeenCalled();
+      expect(t.tickets.ensureTicket).toHaveBeenCalledTimes(1);
+    });
+
+    it('recaída con ticket CERRADO durante una ventana: no se reabre; al terminar la ventana el barrido lo reabre una sola vez', async () => {
+      const t = setup();
+      await t.officeDownWithCross(100, T0, false);
+      const inc = t.incidents()[0];
+      t.state(DC, 100, 'OK');
+      t.signal(OFFICE, 'RECOVERED', 100, at(600));
+      await t.evaluator.tick(at(601));
+      maintenance(t, { serverId: 10, startsAt: at(1100), endsAt: at(2000) });
+
+      await t.officeDownWithCross(100, at(1200), false);
+      expect(t.incidents()[0]).toMatchObject({ id: inc.id, recoveredAt: null, ticketId: 901 });
+      await t.evaluator.tick(at(1300));
+      await t.evaluator.tick(at(1400));
+      expect(t.tickets.reopenOrReplace).not.toHaveBeenCalled();
+      expect(t.events(inc.id).filter((e) => e.type === 'MAINTENANCE_SUPPRESSED')).toHaveLength(1);
+
+      t.tickets.reopenOrReplace.mockResolvedValueOnce({ id: 950, status: 'NUEVO' });
+      await t.evaluator.tick(at(2000));
+      expect(t.tickets.reopenOrReplace).toHaveBeenCalledTimes(1);
+      expect(t.tickets.reopenOrReplace).toHaveBeenCalledWith(expect.objectContaining({ id: inc.id }), 901, expect.anything());
+      expect(t.incidents()[0].ticketId).toBe(950);
+      await t.evaluator.tick(at(2005));
+      await t.evaluator.tick(at(2010));
+      expect(t.tickets.reopenOrReplace).toHaveBeenCalledTimes(1);
+      expect(t.tickets.ensureTicket).toHaveBeenCalledTimes(1);
+    });
+
+    it('reapertura diferida con 4xx: TICKET_NOT_CREATED y el barrido no insiste', async () => {
+      const t = setup();
+      await t.officeDownWithCross(100, T0, false);
+      t.state(DC, 100, 'OK');
+      t.signal(OFFICE, 'RECOVERED', 100, at(600));
+      await t.evaluator.tick(at(601));
+      maintenance(t, { serviceId: 100, startsAt: at(1100), endsAt: at(2000) });
+      await t.officeDownWithCross(100, at(1200), false);
+      t.tickets.reopenOrReplace.mockRejectedValue(new BadRequestException({ code: 'SISTEMA_AJENO', message: 'x' }));
+      await t.evaluator.tick(at(2000));
+      await t.evaluator.tick(at(2005));
+      await t.evaluator.tick(at(2100));
+      expect(t.tickets.reopenOrReplace).toHaveBeenCalledTimes(1);
+      expect(t.events().filter((e) => e.type === 'TICKET_NOT_CREATED')).toHaveLength(1);
     });
 
     it('una ventana de otro servicio no suprime el ticket', async () => {

@@ -17,6 +17,8 @@ const matches = (row: any, where: any): boolean =>
           return t(row[k]) <= t(x);
         case 'moreThan':
           return t(row[k]) > t(x);
+        case 'moreThanOrEqual':
+          return t(row[k]) >= t(x);
         case 'in':
           return (x as any[]).map(Number).includes(Number(row[k]));
         default:
@@ -30,7 +32,17 @@ const repoOf = (rows: any[]) => {
   let nextId = 1;
   return {
     rows,
-    find: jest.fn(async (opts: any = {}) => rows.filter((r) => matches(r, opts.where)).map((r) => ({ ...r }))),
+    find: jest.fn(async (opts: any = {}) => {
+      const out = rows.filter((r) => matches(r, opts.where)).map((r) => ({ ...r }));
+      const keys = Object.entries(opts.order ?? {}) as [string, string][];
+      return out.sort((a, b) => {
+        for (const [k, dir] of keys) {
+          const c = t(a[k]) < t(b[k]) ? -1 : t(a[k]) > t(b[k]) ? 1 : 0;
+          if (c !== 0) return dir === 'DESC' ? -c : c;
+        }
+        return 0;
+      });
+    }),
     findOne: jest.fn(async (opts: any) => {
       const r = rows.find((x) => matches(x, opts.where));
       return r ? { ...r } : null;
@@ -107,9 +119,20 @@ describe('AvailabilityMaintenanceService.create', () => {
     ['motivo corto', { startsAt: plus(0), endsAt: plus(60), reason: ' ab ' }],
     ['motivo largo', { startsAt: plus(0), endsAt: plus(60), reason: 'x'.repeat(256) }],
     ['fecha inválida', { startsAt: 'mañana', endsAt: plus(60), reason: 'abc' }],
+    ['inicio sin zona horaria', { startsAt: '2026-11-24T15:10:00', endsAt: plus(60), reason: 'abc' }],
+    ['fin sin zona horaria', { startsAt: plus(0), endsAt: '2026-11-24T16:00:00.000', reason: 'abc' }],
+    ['solo fecha', { startsAt: plus(0), endsAt: '2026-11-25', reason: 'abc' }],
   ])('%s -> 400 BAD_INPUT', async (_name, body) => {
     const { svc } = make();
     await expectCode(svc.create({ serverId: 10, ...body } as any, 7), BadRequestException, 'BAD_INPUT');
+  });
+
+  it('acepta Z y desfases ±hh:mm (Lima -05:00)', async () => {
+    const { svc, maint } = make();
+    await svc.create({ serverId: 10, startsAt: '2026-11-24T10:10:00-05:00', endsAt: '2026-11-24T16:00:00Z', reason: 'abc' }, 7);
+    expect(maint.rows[0].startsAt).toEqual(new Date('2026-11-24T15:10:00.000Z'));
+    await svc.create({ serverId: 10, startsAt: '2026-11-24T20:40:00.000+05:30', endsAt: '2026-11-24T16:30:00+0000', reason: 'abc' }, 7);
+    expect(maint.rows[1].startsAt).toEqual(new Date('2026-11-24T15:10:00.000Z'));
   });
 
   it('exactamente 7 días se acepta', async () => {
@@ -155,6 +178,8 @@ describe('AvailabilityMaintenanceService.remove / end / list', () => {
       { id: 2, serverId: 10, serviceId: null, startsAt: new Date(plus(-30)), endsAt: new Date(plus(30)), reason: 'actual', createdBy: 7, createdAt: NOW },
       { id: 3, serverId: null, serviceId: 100, startsAt: new Date(plus(60)), endsAt: new Date(plus(90)), reason: 'futura', createdBy: 7, createdAt: NOW },
     );
+    maint.rows.push({ id: 4, serverId: 10, serviceId: null, startsAt: new Date(plus(-40 * 24 * 60)), endsAt: new Date(plus(-31 * 24 * 60)), reason: 'de hace más de 30 días', createdBy: 7, createdAt: NOW });
+    // Sin rango: solo las que terminaron hace 30 días o menos.
     expect((await svc.list({})).map((v) => v.id)).toEqual([3, 2, 1]);
     expect((await svc.list({ from: plus(-100), to: plus(60) })).map((v) => v.id)).toEqual([2]);
     await expectCode(svc.list({ from: 'ayer' }), BadRequestException, 'BAD_INPUT');

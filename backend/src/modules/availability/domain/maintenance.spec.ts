@@ -33,6 +33,14 @@ describe('activeWindowFor', () => {
     expect(activeWindowFor({ serviceId: null, serverId: 10 }, at('10:30'), [w])).toBe(w);
   });
 
+  it('con varias ventanas que cubren, devuelve la que termina más tarde', () => {
+    const short = win({ id: 1, serviceId: 100, endsAt: at('10:45') });
+    const long = win({ id: 2, serverId: 10, endsAt: at('12:00') });
+    const mid = win({ id: 3, serverId: 10, endsAt: at('11:00') });
+    expect(activeWindowFor({ serviceId: 100, serverId: 10 }, at('10:30'), [short, long, mid])).toBe(long);
+    expect(activeWindowFor({ serviceId: 100, serverId: 10 }, at('10:30'), [mid, short])).toBe(mid);
+  });
+
   it('intervalo semiabierto: en startsAt está activa, en endsAt exacto devuelve null', () => {
     const w = win({ serverId: 10 });
     expect(activeWindowFor({ serviceId: 100, serverId: 10 }, at('10:00'), [w])).toBe(w);

@@ -22,10 +22,18 @@ function covers(w: MaintenanceWindow, target: MaintenanceTarget): boolean {
   return w.serverId !== null && w.serverId !== undefined && Number(w.serverId) === target.serverId;
 }
 
-/** La ventana activa en `at` que cubre al objetivo, o null. Intervalo semiabierto `[startsAt, endsAt)`. */
+/**
+ * La ventana activa en `at` que cubre al objetivo, o null. Intervalo semiabierto
+ * `[startsAt, endsAt)`. Si cubren varias, la que termina más tarde.
+ */
 export function activeWindowFor(target: MaintenanceTarget, at: Date, windows: MaintenanceWindow[]): MaintenanceWindow | null {
   const t = at.getTime();
-  return windows.find((w) => w.startsAt.getTime() <= t && t < w.endsAt.getTime() && covers(w, target)) ?? null;
+  let best: MaintenanceWindow | null = null;
+  for (const w of windows) {
+    if (!(w.startsAt.getTime() <= t && t < w.endsAt.getTime() && covers(w, target))) continue;
+    if (!best || w.endsAt.getTime() > best.endsAt.getTime()) best = w;
+  }
+  return best;
 }
 
 /**

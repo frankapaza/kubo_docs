@@ -26,6 +26,10 @@ export const TICKET_RETRY_MAX_MS = 10 * 60_000;
 
 /** Evento que deja constancia de que el ticket no se creó por una ventana de mantenimiento activa. */
 export const MAINTENANCE_SUPPRESSED = 'MAINTENANCE_SUPPRESSED';
+/** Se creó o reabrió el ticket que una ventana había frenado: cierra el `MAINTENANCE_SUPPRESSED` pendiente. */
+export const MAINTENANCE_RELEASED = 'MAINTENANCE_RELEASED';
+/** Eventos que deciden si un incidente con ticket tiene una reapertura pendiente por mantenimiento. */
+const SUPPRESSION_EVENTS = [MAINTENANCE_SUPPRESSED, MAINTENANCE_RELEASED, TICKET_NOT_CREATED, ...TICKET_RESET_EVENTS];
 
 const is4xx = (e: unknown): e is HttpException =>
   e instanceof HttpException && e.getStatus() >= 400 && e.getStatus() < 500;
@@ -42,9 +46,13 @@ const is4xx = (e: unknown): e is HttpException =>
  *
  * Mantenimiento: mientras una ventana activa cubra al incidente (la del
  * servicio o la de su servidor; un incidente de servidor solo mira las de
- * servidor) el ticket no se crea y queda un evento `MAINTENANCE_SUPPRESSED`
- * (uno solo desde el último cambio del incidente). Al terminar la ventana, el
- * barrido lo crea. Las ventanas activas se leen una vez por `now` (por tick).
+ * servidor) el ticket no se crea ni se reabre y queda un evento
+ * `MAINTENANCE_SUPPRESSED` (uno solo desde el último cambio del incidente). Al
+ * terminar la ventana, el barrido lo crea o lo reabre y deja
+ * `MAINTENANCE_RELEASED`, para no volver a tomarlo. Comentarios y prioridad
+ * sobre un ticket ya existente sí se aplican: los tickets son internos y
+ * comentar no es abrir un ticket. Las ventanas activas se leen una vez por
+ * `now` (por tick).
  */
 export class TicketSync {
   /** Incidente → fallos seguidos de ENSURE/REOPEN y cuándo puede volver a intentarse. */
@@ -73,6 +81,7 @@ export class TicketSync {
           await this.reopen(a.incidentId, now);
           this.backoff.delete(a.incidentId);
           return;
+        // COMMENT y RAISE_PRIORITY siguen durante el mantenimiento: no abren ticket (son internos).
         case 'COMMENT': {
           const ticketId = await this.ticketOf(a.incidentId);
           if (ticketId !== null) await this.tickets.comment(ticketId, a.text, { incidentId: a.incidentId });
@@ -96,21 +105,48 @@ export class TicketSync {
     }
   }
 
-  /** Recuperación tras una caída del worker: incidentes DOWN/ROUTE abiertos (de primer nivel) sin ticket. */
+  /**
+   * Recuperación tras una caída del worker: incidentes DOWN/ROUTE abiertos (de
+   * primer nivel) sin ticket, y los que tienen ticket con una reapertura frenada
+   * por una ventana de mantenimiento que ya terminó.
+   */
   async sweep(now: Date, attempted: Set<number>): Promise<void> {
-    const pending = await this.ds.manager.getRepository(MonitorIncident).find({
-      where: { recoveredAt: IsNull(), ticketId: IsNull(), parentId: IsNull(), kind: In(['DOWN', 'ROUTE']) },
+    const open = await this.ds.manager.getRepository(MonitorIncident).find({
+      where: { recoveredAt: IsNull(), parentId: IsNull(), kind: In(['DOWN', 'ROUTE']) },
       order: { id: 'ASC' },
     });
-    const ids = new Set(pending.map((inc) => num(inc.id)));
+    const work = new Map<number, PostCommitAction['type']>();
+    for (const inc of open) if (inc.ticketId === null) work.set(num(inc.id), 'ENSURE_TICKET');
+    for (const inc of await this.deferredReopens(open, now)) work.set(num(inc.id), 'REOPEN_TICKET');
     // Lo que ya no está pendiente (tiene ticket o se cerró) olvida su espera.
-    for (const id of [...this.backoff.keys()]) if (!ids.has(id)) this.backoff.delete(id);
-    for (const id of ids) {
+    for (const id of [...this.backoff.keys()]) if (!work.has(id)) this.backoff.delete(id);
+    for (const [id, type] of work) {
       if (attempted.has(id)) continue;
       const wait = this.backoff.get(id);
       if (wait && now.getTime() < wait.nextAt) continue;
-      await this.apply({ type: 'ENSURE_TICKET', incidentId: id }, now, attempted);
+      await this.apply({ type, incidentId: id } as PostCommitAction, now, attempted);
     }
+  }
+
+  /**
+   * Incidentes con ticket cuyo último evento de supresión es `MAINTENANCE_SUPPRESSED`
+   * (la reapertura quedó pendiente) y que ya no cubre ninguna ventana. Una consulta de eventos.
+   */
+  private async deferredReopens(open: MonitorIncident[], now: Date): Promise<MonitorIncident[]> {
+    const withTicket = open.filter((inc) => inc.ticketId !== null);
+    if (withTicket.length === 0) return [];
+    const events = await this.ds.manager.getRepository(MonitorIncidentEvent).find({
+      where: { incidentId: In(withTicket.map((inc) => num(inc.id))), type: In(SUPPRESSION_EVENTS) },
+      order: { id: 'DESC' },
+    });
+    const latest = new Map<number, string>();
+    for (const e of events) if (!latest.has(num(e.incidentId))) latest.set(num(e.incidentId), e.type);
+    const candidates = withTicket.filter((inc) => latest.get(num(inc.id)) === MAINTENANCE_SUPPRESSED);
+    if (candidates.length === 0) return [];
+    const windows = await this.activeWindows(now);
+    return candidates.filter(
+      (inc) => activeWindowFor({ serviceId: numOrNull(inc.serviceId), serverId: num(inc.serverId) }, now, windows) === null,
+    );
   }
 
   private async load(id: number): Promise<MonitorIncident | null> {
@@ -131,18 +167,22 @@ export class TicketSync {
     await this.guard4xx(id, now, async () => {
       const ticket = await this.tickets.ensureTicket(inc, ctx);
       await this.link(id, null, num(ticket.id));
+      await this.releaseIfSuppressed(id, now);
     });
   }
 
   private async reopen(id: number, now: Date): Promise<void> {
     const inc = await this.load(id);
-    if (!inc || !isFailureKind(inc.kind)) return;
+    if (!inc || inc.recoveredAt !== null || !isFailureKind(inc.kind)) return;
     const current = numOrNull(inc.ticketId);
     if (current === null) return this.ensure(id, now);
+    // Reabrir (o reemplazar un ticket cerrado) también es abrir un ticket: se frena en mantenimiento.
+    if (await this.suppressedByMaintenance(inc, now)) return;
     const ctx = await this.context(inc);
     await this.guard4xx(id, now, async () => {
       const ticket = await this.tickets.reopenOrReplace(inc, current, ctx);
       if (num(ticket.id) !== current) await this.link(id, current, num(ticket.id));
+      await this.releaseIfSuppressed(id, now);
     });
   }
 
@@ -188,7 +228,7 @@ export class TicketSync {
     if (!window) return false;
     const id = num(inc.id);
     const last = await this.ds.manager.getRepository(MonitorIncidentEvent).findOne({
-      where: { incidentId: id, type: In([MAINTENANCE_SUPPRESSED, ...TICKET_RESET_EVENTS]) },
+      where: { incidentId: id, type: In(SUPPRESSION_EVENTS) },
       order: { id: 'DESC' },
     });
     if (last?.type !== MAINTENANCE_SUPPRESSED) {
@@ -199,6 +239,15 @@ export class TicketSync {
       });
     }
     return true;
+  }
+
+  /** Tras crear o reabrir: si había un `MAINTENANCE_SUPPRESSED` pendiente, lo cierra para que el barrido no lo vuelva a tomar. */
+  private async releaseIfSuppressed(id: number, now: Date): Promise<void> {
+    const last = await this.ds.manager.getRepository(MonitorIncidentEvent).findOne({
+      where: { incidentId: id, type: In(SUPPRESSION_EVENTS) },
+      order: { id: 'DESC' },
+    });
+    if (last?.type === MAINTENANCE_SUPPRESSED) await addEvent(this.ds.manager, id, now, MAINTENANCE_RELEASED);
   }
 
   /** Guarda el ticket en el incidente y en sus hijos que no tengan otro (o que tuvieran el reemplazado). */
