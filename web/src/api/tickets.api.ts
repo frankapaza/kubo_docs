@@ -68,6 +68,10 @@ export const ticketsApi = {
   changeClient: (id: number, body: { clientId: number; systemId: number | null; clientUserId: number | null }) =>
     api.post<Ticket>(`/tickets/${id}/client`, body).then((r) => r.data),
 
+  /** Solo ADMIN: resuelve y cierra un ticket ya atendido con una observación general. */
+  conclude: (id: number, body: { solucion: string; rootCause?: string; correctiveAction?: string }) =>
+    api.post<Ticket>(`/tickets/${id}/conclude`, body).then((r) => r.data),
+
   transition: (
     id: number,
     body: {

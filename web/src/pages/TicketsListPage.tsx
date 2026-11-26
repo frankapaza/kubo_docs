@@ -9,6 +9,7 @@ import { toast } from '../ui/Toast';
 import { STATUS_STYLES, PRIORITY_STYLES, STATUS_LABELS, slaBarColor } from './tickets/ticket-ui';
 import NewTicketDialog from './tickets/NewTicketDialog';
 import ChangeClientDialog from './tickets/ChangeClientDialog';
+import ConcludeTicketsDialog, { ConcludeValues } from './tickets/ConcludeTicketsDialog';
 import { useAuth } from '../auth/AuthContext';
 import { canManageUsers } from '../auth/permissions';
 
@@ -39,6 +40,8 @@ export default function TicketsListPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [moveOpen, setMoveOpen] = useState(false);
   const [moving, setMoving] = useState(false);
+  const [busyLabel, setBusyLabel] = useState('Moviendo tickets…');
+  const [concludeOpen, setConcludeOpen] = useState(false);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [filter, setFilter] = useState<Chip>('Todos');
   const [qInput, setQInput] = useState('');
@@ -164,6 +167,7 @@ export default function TicketsListPage() {
   // informa cuáles no se movieron y quedan seleccionados para reintentar.
   const moveSelected = async (v: { clientId: number; systemId: number | null; clientUserId: number | null }) => {
     setMoveOpen(false);
+    setBusyLabel('Moviendo tickets…');
     setMoving(true);
     const failed: { t: Ticket; msg: string }[] = [];
     let ok = 0;
@@ -183,6 +187,35 @@ export default function TicketsListPage() {
       const first = failed[0];
       toast.error(
         `${failed.length} no se movieron (siguen seleccionados). ${first.t.code ?? `#${first.t.id}`}: ${first.msg}`,
+      );
+    }
+  };
+
+  // Concluir en lote: POST /tickets/:id/conclude ticket por ticket, mismo
+  // criterio que mover. Los cerrados ya no se pueden concluir y se saltan.
+  const concludeSelected = async (v: ConcludeValues) => {
+    setConcludeOpen(false);
+    setBusyLabel('Concluyendo tickets…');
+    setMoving(true);
+    const failed: { t: Ticket; msg: string }[] = [];
+    let ok = 0;
+    for (const t of visibleSelected) {
+      if (t.status === 'CERRADO') continue;
+      try {
+        await ticketsApi.conclude(t.id, v);
+        ok++;
+      } catch (err) {
+        failed.push({ t, msg: errMsg(err) ?? 'error' });
+      }
+    }
+    setMoving(false);
+    setSelected(new Set(failed.map((f) => f.t.id)));
+    onChanged();
+    if (ok) toast.success(`${ok} ticket${ok === 1 ? '' : 's'} concluido${ok === 1 ? '' : 's'} (resuelto y cerrado)`);
+    if (failed.length) {
+      const first = failed[0];
+      toast.error(
+        `${failed.length} no se concluyeron (siguen seleccionados). ${first.t.code ?? `#${first.t.id}`}: ${first.msg}`,
       );
     }
   };
@@ -263,7 +296,7 @@ export default function TicketsListPage() {
         {isAdmin && (visibleSelected.length > 0 || moving) && (
           <div style={{ padding: '10px 18px', borderBottom: '1px solid #eceeef', background: '#f4f7f7', display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}>
             <span style={{ fontWeight: 600 }}>
-              {moving ? 'Moviendo tickets…' : `${visibleSelected.length} seleccionado${visibleSelected.length === 1 ? '' : 's'}`}
+              {moving ? busyLabel : `${visibleSelected.length} seleccionado${visibleSelected.length === 1 ? '' : 's'}`}
             </span>
             <button
               type="button"
@@ -272,6 +305,15 @@ export default function TicketsListPage() {
               style={{ fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 6, border: 'none', background: moving ? '#c9cdce' : '#15191a', color: '#fff', cursor: moving ? 'not-allowed' : 'pointer' }}
             >
               Cambiar cliente
+            </button>
+            <button
+              type="button"
+              disabled={moving || visibleSelected.every((t) => t.status === 'CERRADO')}
+              onClick={() => setConcludeOpen(true)}
+              title="Resolver y cerrar los seleccionados con una observación general"
+              style={{ fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 6, border: '1px solid #15191a', background: '#fff', color: '#15191a', cursor: moving ? 'not-allowed' : 'pointer' }}
+            >
+              Concluir
             </button>
             <button
               type="button"
@@ -371,6 +413,14 @@ export default function TicketsListPage() {
           count={visibleSelected.length}
           onCancel={() => setMoveOpen(false)}
           onConfirm={moveSelected}
+        />
+      )}
+      {isAdmin && (
+        <ConcludeTicketsDialog
+          open={concludeOpen}
+          count={visibleSelected.filter((t) => t.status !== 'CERRADO').length}
+          onCancel={() => setConcludeOpen(false)}
+          onConfirm={concludeSelected}
         />
       )}
 
