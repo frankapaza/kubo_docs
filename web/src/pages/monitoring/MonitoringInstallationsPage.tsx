@@ -17,6 +17,7 @@ import { clientSystemsApi, systemsApi } from '../../api/tickets.api';
 import type { Client, ClientSystem, System } from '../../api/types';
 import { askConfirm } from '../../ui/ConfirmDialog';
 import { toast } from '../../ui/Toast';
+import AppenderManualDialog from './AppenderManualDialog';
 import InstallationKeyDialog from './InstallationKeyDialog';
 import { fmtDateTime } from './monitoring-ui';
 
@@ -58,6 +59,7 @@ function InstallationsAdmin() {
   // La clave en claro se guarda solo aquí (estado de React), jamás en la caché de react-query.
   const [issued, setIssued] = useState<IssuedKey | null>(null);
   const [creating, setCreating] = useState(false);
+  const [showManual, setShowManual] = useState(false);
   const [downloading, setDownloading] = useState(false);
   // Filas con una emisión de clave en curso. Sin esto, un doble clic emite dos
   // claves y el diálogo puede quedarse con la primera, que el servidor ya
@@ -157,6 +159,7 @@ function InstallationsAdmin() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <h1 className="text-xl font-semibold text-slate-900">Instalaciones de monitoreo</h1>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" style={btn} onClick={() => setShowManual(true)}>Manual de implementación</button>
           <button type="button" style={btn} onClick={download} disabled={downloading || !version}>
             {downloading ? 'Descargando…' : `Descargar appender${version ? ` v${version}` : ''}`}
           </button>
@@ -252,20 +255,13 @@ function InstallationsAdmin() {
         )
       )}
 
-      <section>
-        <h2 style={{ fontSize: 15, fontWeight: 600, margin: '0 0 8px' }}>Manual de implementación</h2>
-        {manual.isLoading && <div style={{ fontSize: 13, color: 'var(--k-muted)' }}>Cargando…</div>}
-        {manual.error && <div role="alert" style={{ fontSize: 13, color: '#b3261e' }}>No se pudo cargar el manual.</div>}
-        {manual.data && (
-          // sandbox vacío: sin scripts ni mismo origen. El manual es HTML generado y se trata como no confiable.
-          <iframe
-            title="Manual de implementación del appender"
-            sandbox=""
-            srcDoc={manual.data.html}
-            style={{ width: '100%', height: 640, border: '1px solid #e6e9ea', borderRadius: 8, background: '#fff' }}
-          />
-        )}
-      </section>
+      <AppenderManualDialog
+        open={showManual}
+        manual={manual.data}
+        loading={manual.isLoading}
+        failed={!!manual.error}
+        onClose={() => setShowManual(false)}
+      />
 
       <NewInstallationDialog
         open={creating}
