@@ -121,9 +121,12 @@ export default function AvailabilityServerHistoryPage() {
           {showTable ? (
             <HistoryTable points={points} range={range} />
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: 14 }}>
-              <LineChart title="CPU" color={CPU} points={points} range={range} avg={(p) => p.cpuAvg} max={(p) => p.cpuMax} />
-              <LineChart title="RAM" color={RAM} points={points} range={range} avg={(p) => p.ramAvg} max={(p) => p.ramMax} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {/* CPU y RAM lado a lado; los errores debajo, a todo el ancho. */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: 14 }}>
+                <LineChart title="CPU" color={CPU} points={points} range={range} avg={(p) => p.cpuAvg} max={(p) => p.cpuMax} />
+                <LineChart title="RAM" color={RAM} points={points} range={range} avg={(p) => p.ramAvg} max={(p) => p.ramMax} />
+              </div>
               <BarChart title="Errores del Visor de eventos" color={ERR} points={points} range={range} />
             </div>
           )}
@@ -168,37 +171,43 @@ function Tile({ label: l, value, hint }: { label: string; value: string; hint: s
 
 // ---------------------------------------------------------------- gráficos
 
-const W = 560;
+/** Ancho lógico de un gráfico de media columna; el de errores, a todo el ancho, usa el doble. */
+const W_HALF = 720;
+const W_FULL = 1480;
 const H = 200;
 const PAD = { l: 40, r: 12, t: 10, b: 28 };
-const innerW = W - PAD.l - PAD.r;
 const innerH = H - PAD.t - PAD.b;
+const innerW = (w: number) => w - PAD.l - PAD.r;
 
-/** Índices de las etiquetas del eje X: unas 6, repartidas. */
-function tickIndexes(n: number): number[] {
+/** Índices de las etiquetas del eje X, repartidas según el ancho. */
+function tickIndexes(n: number, w: number): number[] {
   if (n <= 1) return [0];
-  const step = Math.max(1, Math.round((n - 1) / 6));
+  const want = w > 800 ? 12 : 6;
+  const step = Math.max(1, Math.round((n - 1) / want));
   const out: number[] = [];
   for (let i = 0; i < n; i += step) out.push(i);
   if (out[out.length - 1] !== n - 1 && n - 1 - out[out.length - 1] > step / 2) out.push(n - 1);
   return out;
 }
 
-const xAt = (i: number, n: number) => PAD.l + (n <= 1 ? innerW / 2 : (i / (n - 1)) * innerW);
+const xAt = (i: number, n: number, w: number) => PAD.l + (n <= 1 ? innerW(w) / 2 : (i / (n - 1)) * innerW(w));
+/** Centro de la ranura `i` cuando cada tramo es una barra. */
+const xBand = (i: number, n: number, w: number) => PAD.l + ((i + 0.5) / Math.max(n, 1)) * innerW(w);
 
 /** Tramos continuos de puntos con valor (los huecos sin datos cortan la línea). */
-function segments(values: Array<number | null>, n: number, y: (v: number) => number): string[] {
-  const out: string[] = [];
-  let cur: string[] = [];
+function segments(values: Array<number | null>, n: number, w: number, y: (v: number) => number): Array<Array<[number, number]>> {
+  const out: Array<Array<[number, number]>> = [];
+  let cur: Array<[number, number]> = [];
   values.forEach((v, i) => {
     if (v === null) {
-      if (cur.length) out.push(cur.join(' '));
+      if (cur.length) out.push(cur);
       cur = [];
-    } else cur.push(`${xAt(i, n).toFixed(1)},${y(v).toFixed(1)}`);
+    } else cur.push([xAt(i, n, w), y(v)]);
   });
-  if (cur.length) out.push(cur.join(' '));
+  if (cur.length) out.push(cur);
   return out;
 }
+const toPoints = (seg: Array<[number, number]>) => seg.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
 
 function ChartFrame({ title, legend, children }: { title: string; legend?: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -212,8 +221,8 @@ function ChartFrame({ title, legend, children }: { title: string; legend?: React
   );
 }
 
-function Tooltip({ x, lines }: { x: number; lines: Array<[string, string]> }) {
-  const left = Math.min(Math.max((x / W) * 100, 12), 88);
+function Tooltip({ x, w, lines }: { x: number; w: number; lines: Array<[string, string]> }) {
+  const left = Math.min(Math.max((x / w) * 100, 12), 88);
   return (
     <div style={{ position: 'absolute', top: 4, left: `${left}%`, transform: 'translateX(-50%)', background: '#fff', border: '1px solid #d8dcdd', borderRadius: 6, padding: '6px 8px', fontSize: 12, color: INK, boxShadow: '0 2px 8px rgba(0,0,0,.08)', pointerEvents: 'none', whiteSpace: 'nowrap', zIndex: 1 }}>
       {lines.map(([k, v], i) => (
@@ -227,30 +236,32 @@ function Tooltip({ x, lines }: { x: number; lines: Array<[string, string]> }) {
 }
 
 /** Índice del punto más cercano al ratón. */
-function useHover(n: number) {
+function useHover(n: number, w: number, band = false) {
   const [idx, setIdx] = useState<number | null>(null);
   const onMove = (e: React.MouseEvent<SVGRectElement>) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    const x = ((e.clientX - r.left) / r.width) * W;
-    const i = n <= 1 ? 0 : Math.round(((x - PAD.l) / innerW) * (n - 1));
+    const svg = e.currentTarget.ownerSVGElement!.getBoundingClientRect();
+    const x = ((e.clientX - svg.left) / svg.width) * w;
+    const f = (x - PAD.l) / innerW(w);
+    const i = n <= 1 ? 0 : band ? Math.floor(f * n) : Math.round(f * (n - 1));
     setIdx(Math.min(Math.max(i, 0), n - 1));
   };
   return { idx, onMove, onLeave: () => setIdx(null) };
 }
 
-function Axes({ points, range, yTicks, yFmt }: { points: HistoryPoint[]; range: HistoryRange; yTicks: number[]; yFmt: (v: number) => string; }) {
+function Axes({ points, range, w, yTicks, yFmt, band = false }: { points: HistoryPoint[]; range: HistoryRange; w: number; yTicks: number[]; yFmt: (v: number) => string; band?: boolean }) {
   const n = points.length;
+  const xOf = (i: number) => (band ? xBand(i, n, w) : xAt(i, n, w));
   const y = (v: number) => PAD.t + innerH - (v / yTicks[yTicks.length - 1]) * innerH;
   return (
     <g>
       {yTicks.map((t) => (
         <g key={t}>
-          <line x1={PAD.l} x2={W - PAD.r} y1={y(t)} y2={y(t)} stroke={GRID} strokeWidth={1} />
+          <line x1={PAD.l} x2={w - PAD.r} y1={y(t)} y2={y(t)} stroke={GRID} strokeWidth={1} />
           <text x={PAD.l - 6} y={y(t) + 4.5} textAnchor="end" fontSize={13} fill={MUTED}>{yFmt(t)}</text>
         </g>
       ))}
-      {tickIndexes(n).map((i) => (
-        <text key={i} x={xAt(i, n)} y={H - 6} textAnchor={i === 0 && n > 1 ? 'start' : i === n - 1 && n > 1 ? 'end' : 'middle'} fontSize={13} fill={MUTED}>{label(points[i], range)}</text>
+      {tickIndexes(n, w).map((i) => (
+        <text key={i} x={xOf(i)} y={H - 6} textAnchor={band ? 'middle' : i === 0 && n > 1 ? 'start' : i === n - 1 && n > 1 ? 'end' : 'middle'} fontSize={13} fill={MUTED}>{label(points[i], range)}</text>
       ))}
     </g>
   );
@@ -260,10 +271,11 @@ function LineChart({ title, color, points, range, avg, max }: {
   title: string; color: string; points: HistoryPoint[]; range: HistoryRange;
   avg: (p: HistoryPoint) => number | null; max: (p: HistoryPoint) => number | null;
 }) {
+  const w = W_HALF;
   const n = points.length;
   const yTicks = [0, 25, 50, 75, 100];
   const y = (v: number) => PAD.t + innerH - (Math.min(Math.max(v, 0), 100) / 100) * innerH;
-  const hover = useHover(n);
+  const hover = useHover(n, w);
   const avgVals = points.map(avg);
   const maxVals = points.map(max);
   const h = hover.idx;
@@ -276,25 +288,31 @@ function LineChart({ title, color, points, range, avg, max }: {
   return (
     <ChartFrame title={`${title} (%)`} legend={legend}>
       <div style={{ position: 'relative' }}>
-        <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={`${title}: media y máximo por tramo`} style={{ display: 'block' }}>
-          <Axes points={points} range={range} yTicks={yTicks} yFmt={(v) => `${v}`} />
-          {segments(maxVals, n, y).map((pts, i) => (
-            <polyline key={`m${i}`} points={pts} fill="none" stroke={color} strokeWidth={2} strokeDasharray="4 3" opacity={0.55} strokeLinejoin="round" />
-          ))}
-          {segments(avgVals, n, y).map((pts, i) => (
-            <polyline key={`a${i}`} points={pts} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-          ))}
+        <svg viewBox={`0 0 ${w} ${H}`} width="100%" role="img" aria-label={`${title}: media y máximo por tramo`} style={{ display: 'block' }}>
+          <Axes points={points} range={range} w={w} yTicks={yTicks} yFmt={(v) => `${v}`} />
+          {segments(maxVals, n, w, y).map((seg, i) =>
+            seg.length > 1
+              ? <polyline key={`m${i}`} points={toPoints(seg)} fill="none" stroke={color} strokeWidth={2} strokeDasharray="4 3" opacity={0.55} strokeLinejoin="round" />
+              : null,
+          )}
+          {segments(avgVals, n, w, y).map((seg, i) =>
+            seg.length > 1
+              ? <polyline key={`a${i}`} points={toPoints(seg)} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+              // Un tramo suelto (sin vecinos con datos) se marca con un punto para que se vea.
+              : <circle key={`a${i}`} cx={seg[0][0]} cy={seg[0][1]} r={3.5} fill={color} />,
+          )}
           {h !== null && (
             <g>
-              <line x1={xAt(h, n)} x2={xAt(h, n)} y1={PAD.t} y2={PAD.t + innerH} stroke={MUTED} strokeWidth={1} strokeDasharray="2 2" />
-              {avgVals[h] !== null && <circle cx={xAt(h, n)} cy={y(avgVals[h] as number)} r={4} fill={color} stroke="#fff" strokeWidth={2} />}
+              <line x1={xAt(h, n, w)} x2={xAt(h, n, w)} y1={PAD.t} y2={PAD.t + innerH} stroke={MUTED} strokeWidth={1} strokeDasharray="2 2" />
+              {avgVals[h] !== null && <circle cx={xAt(h, n, w)} cy={y(avgVals[h] as number)} r={4} fill={color} stroke="#fff" strokeWidth={2} />}
             </g>
           )}
-          <rect x={PAD.l} y={PAD.t} width={innerW} height={innerH} fill="transparent" onMouseMove={hover.onMove} onMouseLeave={hover.onLeave} />
+          <rect x={PAD.l} y={PAD.t} width={innerW(w)} height={innerH} fill="transparent" onMouseMove={hover.onMove} onMouseLeave={hover.onLeave} />
         </svg>
         {h !== null && (
           <Tooltip
-            x={xAt(h, n)}
+            x={xAt(h, n, w)}
+            w={w}
             lines={[
               [longLabel(points[h], range), ''],
               ['Media', pct(avgVals[h])],
@@ -309,23 +327,24 @@ function LineChart({ title, color, points, range, avg, max }: {
 }
 
 function BarChart({ title, color, points, range }: { title: string; color: string; points: HistoryPoint[]; range: HistoryRange }) {
+  const w = W_FULL;
   const n = points.length;
   const top = Math.max(4, ...points.map((p) => p.errors));
   const nice = top <= 4 ? 4 : Math.ceil(top / 4) * 4;
   const yTicks = [0, nice / 4, nice / 2, (3 * nice) / 4, nice];
   const y = (v: number) => PAD.t + innerH - (v / nice) * innerH;
-  const slot = innerW / Math.max(n, 1);
-  const bw = Math.max(1, Math.min(slot - 2, 24));
-  const hover = useHover(n);
+  const slot = innerW(w) / Math.max(n, 1);
+  const bw = Math.max(1, Math.min(slot * 0.7, 22));
+  const hover = useHover(n, w, true);
   const h = hover.idx;
   return (
     <ChartFrame title={title}>
       <div style={{ position: 'relative' }}>
-        <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={`${title} por tramo`} style={{ display: 'block' }}>
-          <Axes points={points} range={range} yTicks={yTicks} yFmt={(v) => (Number.isInteger(v) ? String(v) : '')} />
+        <svg viewBox={`0 0 ${w} ${H}`} width="100%" role="img" aria-label={`${title} por tramo`} style={{ display: 'block' }}>
+          <Axes points={points} range={range} w={w} band yTicks={yTicks} yFmt={(v) => (Number.isInteger(v) ? String(v) : '')} />
           {points.map((p, i) => {
             if (p.errors <= 0) return null;
-            const x = xAt(i, n) - bw / 2;
+            const x = xBand(i, n, w) - bw / 2;
             const yy = y(p.errors);
             const hh = PAD.t + innerH - yy;
             const r = Math.min(4, bw / 2, hh);
@@ -339,9 +358,9 @@ function BarChart({ title, color, points, range }: { title: string; color: strin
               />
             );
           })}
-          <rect x={PAD.l} y={PAD.t} width={innerW} height={innerH} fill="transparent" onMouseMove={hover.onMove} onMouseLeave={hover.onLeave} />
+          <rect x={PAD.l} y={PAD.t} width={innerW(w)} height={innerH} fill="transparent" onMouseMove={hover.onMove} onMouseLeave={hover.onLeave} />
         </svg>
-        {h !== null && <Tooltip x={xAt(h, n)} lines={[[longLabel(points[h], range), ''], ['Errores', String(points[h].errors)]]} />}
+        {h !== null && <Tooltip x={xBand(h, n, w)} w={w} lines={[[longLabel(points[h], range), ''], ['Errores', String(points[h].errors)]]} />}
       </div>
     </ChartFrame>
   );
