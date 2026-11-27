@@ -5,6 +5,7 @@ import { DataSource } from 'typeorm';
 
 import { LLMService } from '../ai/llm.service';
 import { ClientsService } from '../clients/clients.service';
+import { emailCallout } from '../email/email-layout';
 import { EmailService } from '../email/email.service';
 import { escapeHtml } from '../notifications/domain/template-renderer';
 import { ClientUsersRepository } from '../portal/client-users.repository';
@@ -67,8 +68,11 @@ export class RequirementDetailService {
         html: [
           `<p>Hola ${escapeHtml(user.fullName)}:</p>`,
           `<p>Para evaluar tu requerimiento <strong>${escapeHtml(code)} · ${escapeHtml(item.title)}</strong> necesitamos un poco más de detalle:</p>`,
-          `<blockquote style="border-left:3px solid #d0d5d6;margin:0;padding:6px 12px;color:#333">${escapeHtml(message.trim()).replace(/\n/g, '<br>')}</blockquote>`,
-          `<p>Puedes completarlo desde el portal: <a href="${escapeHtml(link)}">${escapeHtml(link)}</a></p>`,
+          `<blockquote style="border-left:4px solid #053777;background:#f7f9fc;margin:0 0 6px;padding:10px 14px;color:#33414d;border-radius:6px">${escapeHtml(message.trim()).replace(/\n/g, '<br>')}</blockquote>`,
+          emailCallout('Completa tu requerimiento', 'Agrega el detalle desde el portal; apenas lo tengamos seguimos con la evaluación.', {
+            href: link,
+            label: 'Completar en el portal',
+          }),
           '<p>Gracias,<br>Equipo Kubo</p>',
         ].join('\n'),
         text: `Para evaluar ${code} · ${item.title} necesitamos más detalle:\n\n${message.trim()}\n\nCompleta el requerimiento en ${link}`,

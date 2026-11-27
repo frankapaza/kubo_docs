@@ -129,12 +129,8 @@ export class DocumentsService {
     const { doc, client, emisor, personalMessage } = args;
     const brand = emisor?.razonSocial ?? 'Kubo DevDocs';
     const typeLabel = this.typeLabel(doc.type);
-    const logoHtml = emisor?.logoUrl
-      ? `<img src="${emisor.logoUrl}" alt="${this.escape(brand)}" style="max-height:42px;max-width:180px" />`
-      : `<span style="font-size:18px;font-weight:700;color:#ffffff">${this.escape(brand)}</span>`;
-
     const msgBlock = personalMessage?.trim()
-      ? `<div style="padding:16px 20px;background:#F8FAFC;border-left:3px solid #4F46E5;border-radius:6px;margin:20px 0;white-space:pre-wrap;font-size:14px;line-height:1.6;color:#334155">${this.escape(personalMessage)}</div>`
+      ? `<div style="padding:16px 20px;background:#eef3fb;border-left:4px solid #053777;border-radius:6px;margin:20px 0;white-space:pre-wrap;font-size:14px;line-height:1.6;color:#33414d">${this.escape(personalMessage)}</div>`
       : '';
 
     const contactLines: string[] = [];
@@ -142,80 +138,26 @@ export class DocumentsService {
     if (emisor?.phone) contactLines.push(emisor.phone);
     if (emisor?.website) contactLines.push(emisor.website);
 
-    return `<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>${this.escape(doc.title)}</title>
-</head>
-<body style="margin:0;padding:0;background:#F1F5F9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen,Ubuntu,sans-serif;color:#0F172A">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F1F5F9;padding:32px 16px">
-    <tr>
-      <td align="center">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(15,23,42,.08)">
-          <!-- Banda superior -->
-          <tr>
-            <td style="background:linear-gradient(135deg,#4F46E5 0%,#6366F1 100%);padding:24px 28px">
-              ${logoHtml}
-            </td>
-          </tr>
-          <!-- Contenido -->
-          <tr>
-            <td style="padding:28px">
-              <p style="margin:0 0 6px 0;font-size:12px;color:#64748B;text-transform:uppercase;letter-spacing:.06em;font-weight:600">${this.escape(typeLabel)}</p>
-              <h1 style="margin:0 0 16px 0;font-size:22px;line-height:1.3;color:#0F172A">${this.escape(doc.title)}</h1>
-              <p style="margin:0 0 8px 0;font-size:15px;line-height:1.6;color:#334155">
-                Estimados de <strong>${this.escape(client)}</strong>,
-              </p>
-              <p style="margin:0 0 12px 0;font-size:15px;line-height:1.6;color:#334155">
-                Adjuntamos el documento <strong>"${this.escape(doc.title)}"</strong> (${this.escape(typeLabel)}) en formato PDF.
-              </p>
-              ${msgBlock}
-              <p style="margin:0 0 4px 0;font-size:15px;line-height:1.6;color:#334155">
-                Cualquier consulta, pueden responder este mismo correo.
-              </p>
-              <p style="margin:16px 0 0 0;font-size:15px;line-height:1.6;color:#334155">
-                Saludos cordiales,<br />
-                <strong>${this.escape(brand)}</strong>
-              </p>
-              <!-- Caja de adjunto -->
-              <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top:24px;width:100%">
-                <tr>
-                  <td style="padding:14px 16px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px">
-                    <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
-                      <tr>
-                        <td style="width:38px;vertical-align:top">
-                          <div style="width:32px;height:32px;border-radius:6px;background:#EEF2FF;display:inline-block;text-align:center;line-height:32px;font-size:16px">📄</div>
-                        </td>
-                        <td style="vertical-align:top">
-                          <p style="margin:0;font-size:14px;font-weight:600;color:#0F172A">${this.escape(doc.title)}.pdf</p>
-                          <p style="margin:2px 0 0 0;font-size:12px;color:#64748B">Documento adjunto · PDF</p>
-                        </td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-          <!-- Footer -->
-          <tr>
-            <td style="padding:20px 28px;background:#F8FAFC;border-top:1px solid #E2E8F0">
-              <p style="margin:0;font-size:12px;color:#64748B;line-height:1.6">
-                <strong style="color:#0F172A">${this.escape(brand)}</strong>${emisor?.ruc ? ` · RUC ${this.escape(emisor.ruc)}` : ''}${emisor?.address ? `<br />${this.escape(emisor.address)}` : ''}${contactLines.length ? `<br />${contactLines.map((c) => this.escape(c)).join(' · ')}` : ''}
-              </p>
-            </td>
-          </tr>
-        </table>
-        <p style="margin:12px 0 0 0;font-size:11px;color:#94A3B8">
-          Este correo fue enviado automáticamente desde Kubo DevDocs.
-        </p>
+    // Solo el contenido: el marco Kubo (logo y pie) lo pone EmailService (spec 2026-11-28).
+    return `<p style="margin:0 0 4px;font-size:12px;color:#5b6b78;text-transform:uppercase;letter-spacing:.06em;font-weight:700">${this.escape(typeLabel)}</p>
+<h1 style="margin:0 0 16px;font-size:21px;line-height:1.3;color:#012660">${this.escape(doc.title)}</h1>
+<p style="margin:0 0 10px">Estimados de <strong>${this.escape(client)}</strong>,</p>
+<p style="margin:0 0 12px">Adjuntamos el documento <strong>"${this.escape(doc.title)}"</strong> (${this.escape(typeLabel)}) en formato PDF.</p>
+${msgBlock}
+<p style="margin:0 0 4px">Cualquier consulta, pueden responder este mismo correo.</p>
+<p style="margin:16px 0 0">Saludos cordiales,<br /><strong>${this.escape(brand)}</strong></p>
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin-top:22px">
+  <tr><td style="padding:14px 16px;background:#f7f9fc;border:1px solid #e3e8ef;border-radius:8px">
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%"><tr>
+      <td style="width:42px;vertical-align:top"><div style="width:32px;height:32px;border-radius:6px;background:#e6edf8;text-align:center;line-height:32px;font-size:16px">📄</div></td>
+      <td style="vertical-align:top">
+        <p style="margin:0;font-size:14px;font-weight:600;color:#22272a">${this.escape(doc.title)}.pdf</p>
+        <p style="margin:2px 0 0;font-size:12px;color:#7a8794">Documento adjunto · PDF</p>
       </td>
-    </tr>
-  </table>
-</body>
-</html>`;
+    </tr></table>
+  </td></tr>
+</table>
+<p style="margin:22px 0 0;font-size:12px;line-height:1.6;color:#7a8794"><strong style="color:#33414d">${this.escape(brand)}</strong>${emisor?.ruc ? ` · RUC ${this.escape(emisor.ruc)}` : ''}${emisor?.address ? `<br />${this.escape(emisor.address)}` : ''}${contactLines.length ? `<br />${contactLines.map((c) => this.escape(c)).join(' · ')}` : ''}</p>`;
   }
 
   private escape(s: string | null | undefined): string {

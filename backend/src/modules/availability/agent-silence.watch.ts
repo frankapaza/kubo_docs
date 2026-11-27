@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron } from '@nestjs/schedule';
+
+import { emailButton } from '../email/email-layout';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Not, Repository } from 'typeorm';
 import { formatPeruDateTime } from '../../common/peru-date-time';
@@ -115,7 +117,7 @@ export class AgentSilenceWatch {
       to,
       subject,
       text: `${line(server.name)}\nServidores: ${link}`,
-      html: `<p>${line(escapeHtml(server.name))}</p><p><a href="${escapeHtml(link)}">Ver servidores</a></p>`,
+      html: `<p>${line(escapeHtml(server.name))}</p>${emailButton(link, 'Ver servidores')}`,
     });
     // Condicional: solo escribe si la columna sigue como se leyó.
     const value = alert ? now : null;

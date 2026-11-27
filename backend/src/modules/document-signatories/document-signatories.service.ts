@@ -1,4 +1,5 @@
 import * as crypto from 'crypto';
+import { emailButton } from '../email/email-layout';
 import {
   BadRequestException,
   GoneException,
@@ -199,54 +200,13 @@ export class DocumentSignatoriesService {
     const esc = (s: string) =>
       s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-    return `<!DOCTYPE html>
-<html lang="es">
-<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
-<body style="margin:0;padding:0;background:#F1F5F9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0F172A">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F1F5F9;padding:32px 16px">
-    <tr><td align="center">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(15,23,42,.08)">
-        <tr>
-          <td style="background:linear-gradient(135deg,#4F46E5 0%,#6366F1 100%);padding:24px 28px">
-            <span style="font-size:18px;font-weight:700;color:#ffffff">${esc(brand)}</span>
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:28px">
-            <p style="margin:0 0 6px;font-size:12px;color:#64748B;text-transform:uppercase;letter-spacing:.06em;font-weight:600">Solicitud de firma electrónica</p>
-            <h1 style="margin:0 0 16px;font-size:20px;line-height:1.3;color:#0F172A">${esc(docTitle)}</h1>
-            <p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#334155">
-              Estimado/a <strong>${esc(signerName)}</strong>,
-            </p>
-            <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#334155">
-              Se te solicita revisar y confirmar tu conformidad con el documento indicado. El link estará disponible hasta el <strong>${esc(exp)}</strong>.
-            </p>
-            <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto 20px">
-              <tr>
-                <td style="border-radius:8px;background:#4F46E5">
-                  <a href="${signUrl}" target="_blank" style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px">
-                    Revisar y firmar documento →
-                  </a>
-                </td>
-              </tr>
-            </table>
-            <p style="margin:0;font-size:12px;color:#94A3B8;text-align:center">
-              Si no puedes hacer clic en el botón, copia este link en tu navegador:<br/>
-              <span style="color:#6366F1">${signUrl}</span>
-            </p>
-          </td>
-        </tr>
-        <tr>
-          <td style="padding:16px 28px;background:#F8FAFC;border-top:1px solid #E2E8F0">
-            <p style="margin:0;font-size:11px;color:#94A3B8">
-              Este correo fue enviado automáticamente desde <strong>${esc(brand)}</strong>. Si crees que lo recibiste por error, ignóralo.
-            </p>
-          </td>
-        </tr>
-      </table>
-    </td></tr>
-  </table>
-</body>
-</html>`;
+    // Solo el contenido: el marco Kubo (logo y pie) lo pone EmailService (spec 2026-11-28).
+    return `<p style="margin:0 0 4px;font-size:12px;color:#5b6b78;text-transform:uppercase;letter-spacing:.06em;font-weight:700">Solicitud de firma electrónica</p>
+<h1 style="margin:0 0 16px;font-size:21px;line-height:1.3;color:#012660">${esc(docTitle)}</h1>
+<p style="margin:0 0 12px">Estimado/a <strong>${esc(signerName)}</strong>,</p>
+<p style="margin:0 0 6px"><strong>${esc(brand)}</strong> te solicita revisar y confirmar tu conformidad con el documento indicado. El enlace estará disponible hasta el <strong>${esc(exp)}</strong>.</p>
+${emailButton(signUrl, 'Revisar y firmar documento')}
+<p style="margin:0;font-size:12px;line-height:1.5;color:#7a8794">Si el botón no funciona, copia este enlace en tu navegador:<br/><span style="color:#053777;word-break:break-all">${esc(signUrl)}</span></p>
+<p style="margin:16px 0 0;font-size:12px;color:#7a8794">Si crees que recibiste este correo por error, ignóralo.</p>`;
   }
 }
