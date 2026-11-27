@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useAuth } from '../../auth/AuthContext';
@@ -17,6 +17,7 @@ import { clientSystemsApi, systemsApi } from '../../api/tickets.api';
 import type { Client, ClientSystem, System } from '../../api/types';
 import { askConfirm } from '../../ui/ConfirmDialog';
 import { toast } from '../../ui/Toast';
+import { ClientTag } from '../work-items/client-colors';
 import AppenderManualDialog from './AppenderManualDialog';
 import InstallationKeyDialog from './InstallationKeyDialog';
 import { fmtDateTime } from './monitoring-ui';
@@ -60,6 +61,8 @@ function InstallationsAdmin() {
   const [issued, setIssued] = useState<IssuedKey | null>(null);
   const [creating, setCreating] = useState(false);
   const [showManual, setShowManual] = useState(false);
+  /** '' = todas; 'c:<id>' = un cliente; 'interna' = las internas de Kubo. */
+  const [clientFilter, setClientFilter] = useState('');
   const [downloading, setDownloading] = useState(false);
   // Filas con una emisión de clave en curso. Sin esto, un doble clic emite dos
   // claves y el diálogo puede quedarse con la primera, que el servidor ya
@@ -76,6 +79,28 @@ function InstallationsAdmin() {
   const installations = useQuery({ queryKey: ['monitoring', 'installations'], queryFn: monitoringApi.listInstallations });
   const disk = useQuery({ queryKey: ['monitoring', 'disk'], queryFn: monitoringApi.disk, refetchInterval: 5 * 60_000 });
   const manual = useQuery({ queryKey: ['monitoring', 'manual'], queryFn: monitoringApi.manual, staleTime: 10 * 60_000 });
+
+  const groupKey = (i: InstallationView) => (i.kind === 'CLIENTE' && i.clientId !== null ? `c:${i.clientId}` : 'interna');
+  const groupName = (i: InstallationView) => (i.kind === 'CLIENTE' ? i.clientName ?? 'Cliente' : 'Interno (Kubo)');
+  const clientOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const i of installations.data ?? []) m.set(groupKey(i), groupName(i));
+    return [...m.entries()].sort(([, a], [, b]) => a.localeCompare(b, 'es'));
+  }, [installations.data]);
+  // Agrupadas por cliente (las internas al final), y dentro por sistema.
+  const groups = useMemo(() => {
+    const m = new Map<string, { key: string; name: string; clientId: number | null; rows: InstallationView[] }>();
+    for (const i of installations.data ?? []) {
+      const key = groupKey(i);
+      if (clientFilter && key !== clientFilter) continue;
+      const g = m.get(key) ?? { key, name: groupName(i), clientId: key === 'interna' ? null : i.clientId, rows: [] };
+      g.rows.push(i);
+      m.set(key, g);
+    }
+    return [...m.values()]
+      .sort((a, b) => (a.clientId === null ? 1 : 0) - (b.clientId === null ? 1 : 0) || a.name.localeCompare(b.name, 'es'))
+      .map((g) => ({ ...g, rows: g.rows.sort((a, b) => (a.systemName ?? a.displayName).localeCompare(b.systemName ?? b.displayName, 'es')) }));
+  }, [installations.data, clientFilter]);
 
   const reload = () => queryClient.invalidateQueries({ queryKey: ['monitoring', 'installations'] });
 
@@ -180,6 +205,21 @@ function InstallationsAdmin() {
         <button type="button" style={btn} onClick={copyUrl}>Copiar</button>
       </div>
 
+      {clientOptions.length > 1 && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <select
+            value={clientFilter}
+            onChange={(e) => setClientFilter(e.target.value)}
+            aria-label="Filtrar por cliente"
+            style={{ ...inputStyle, width: 'auto', minWidth: 220 }}
+          >
+            <option value="">Todos los clientes</option>
+            {clientOptions.map(([k, n]) => <option key={k} value={k}>{n}</option>)}
+          </select>
+          {clientFilter && <button type="button" style={btn} onClick={() => setClientFilter('')}>Quitar filtro</button>}
+        </div>
+      )}
+
       {installations.isLoading && <div style={{ fontSize: 13, color: 'var(--k-muted)' }}>Cargando…</div>}
       {installations.error && <div role="alert" style={{ fontSize: 13, color: '#b3261e' }}>No se pudieron cargar las instalaciones.</div>}
 
@@ -197,15 +237,26 @@ function InstallationsAdmin() {
                 </tr>
               </thead>
               <tbody>
-                {installations.data.map((i) => {
+                {groups.map((g) => [
+                  <tr key={`h-${g.key}`} style={{ borderTop: '1px solid var(--k-border)', background: 'var(--k-surface-2)' }}>
+                    <td colSpan={6} style={{ padding: '8px 10px' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        {g.clientId !== null ? <ClientTag clientId={g.clientId} name={g.name} /> : <strong style={{ fontSize: 12 }}>{g.name}</strong>}
+                        <span style={{ fontSize: 12, color: 'var(--k-muted)' }}>
+                          {g.rows.length} {g.rows.length === 1 ? 'instalación' : 'instalaciones'}
+                        </span>
+                      </span>
+                    </td>
+                  </tr>,
+                  ...g.rows.map((i) => {
                   const ks = KEY_STYLES[i.keyStatus];
                   return (
                     <tr key={i.id} style={{ borderTop: '1px solid var(--k-surface-2)', verticalAlign: 'top' }}>
                       <td style={{ padding: '8px 10px' }}>
-                        <div style={{ fontWeight: 600 }}>{i.kind === 'CLIENTE' ? i.clientName : i.displayName}</div>
-                        <div style={{ fontSize: 12, color: 'var(--k-muted)' }}>
-                          {i.kind === 'CLIENTE' ? i.systemName : `Interna${i.systemName ? ` · ${i.systemName}` : ''}`}
-                        </div>
+                        <div style={{ fontWeight: 600 }}>{i.kind === 'CLIENTE' ? i.systemName ?? i.displayName : i.displayName}</div>
+                        {i.kind !== 'CLIENTE' && i.systemName && (
+                          <div style={{ fontSize: 12, color: 'var(--k-muted)' }}>{i.systemName}</div>
+                        )}
                       </td>
                       <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>{fmtDateTime(i.lastSeenAt)}</td>
                       <td style={{ padding: '8px 10px' }}>
@@ -248,7 +299,8 @@ function InstallationsAdmin() {
                       </td>
                     </tr>
                   );
-                })}
+                  }),
+                ])}
               </tbody>
             </table>
           </div>
