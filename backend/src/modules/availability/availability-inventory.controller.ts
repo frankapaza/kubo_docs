@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, ParseIntPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { OptionalIntPipe } from '../../common/pipes/optional-int.pipe';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -58,7 +59,7 @@ export class AvailabilityInventoryController {
   }
 
   @Get('services')
-  listServices(@Query('serverId', new ParseIntPipe({ optional: true })) serverId?: number) {
+  listServices(@Query('serverId', OptionalIntPipe) serverId?: number) {
     return this.inventory.listServices(serverId);
   }
 
