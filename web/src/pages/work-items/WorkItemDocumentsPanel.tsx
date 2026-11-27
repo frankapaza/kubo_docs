@@ -99,7 +99,17 @@ export default function WorkItemDocumentsPanel({ workItemId, onChanged }: { work
               {d.filename}
             </div>
             <div style={{ color: '#6d7577', fontSize: 11 }}>
-              {d.kindLabel} · {sizeLabel(d.sizeBytes)}
+              {d.source === 'CLIENTE' && (
+                <span
+                  style={{
+                    display: 'inline-block', marginRight: 6, padding: '0 6px', borderRadius: 4,
+                    background: '#e3ecfb', color: '#1d4e9e', fontWeight: 700,
+                  }}
+                >
+                  Del cliente
+                </span>
+              )}
+              {d.source === 'CLIENTE' ? 'Adjunto' : d.kindLabel} · {sizeLabel(d.sizeBytes)} · {new Date(d.createdAt).toLocaleDateString('es-PE')}
               {d.source === 'CLAUDE' && ' · vía Claude'}
               {d.status === 'BORRADOR' && <strong style={{ color: '#8a5a00' }}> · Borrador por revisar</strong>}
             </div>

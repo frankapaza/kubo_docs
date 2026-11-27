@@ -7,6 +7,8 @@ import {
 } from '../../api/portal.api';
 import type { PortalRequirement, WorkItemRequestType } from '../../api/types';
 import { Button } from '../../components/ui/Button';
+import { toast } from '../../ui/Toast';
+import RequirementFilePicker, { uploadRequirementFiles } from './RequirementFilePicker';
 import RequirementTemplateFields from '../requirements/RequirementTemplateFields';
 import {
   composeDescription,
@@ -43,6 +45,7 @@ export default function NewPortalRequirementDialog({ open, onCancel, onCreated }
   const [type, setType] = useState<WorkItemRequestType>('CAMBIO');
   const [answers, setAnswers] = useState<TemplateAnswers>({});
   const [criteria, setCriteria] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
   const description = composeDescription(type, answers);
   const missing = missingSections(type, answers);
 
@@ -85,6 +88,7 @@ export default function NewPortalRequirementDialog({ open, onCancel, onCreated }
     setType('CAMBIO');
     setAnswers({});
     setCriteria('');
+    setFiles([]);
     setErrors([]);
     setBusy(false);
   }, [open]);
@@ -131,7 +135,7 @@ export default function NewPortalRequirementDialog({ open, onCancel, onCreated }
     if (!canSubmit) {
       setErrors(
         tooLong
-          ? ['El texto es demasiado largo: resúmelo o adjunta un documento después.']
+          ? ['El texto es demasiado largo: resúmelo y adjunta el detalle como documento.']
           : [`Completa el título y: ${missing.join(', ')}.`],
       );
       return;
@@ -152,6 +156,14 @@ export default function NewPortalRequirementDialog({ open, onCancel, onCreated }
         requestType: type,
         acceptanceCriteria: parseCriteria(criteria),
       });
+      // Los archivos se cuelgan del requerimiento ya creado. Si alguno falla,
+      // el requerimiento igual quedó: se avisa cuál y se puede subir desde el detalle.
+      const failed = files.length ? await uploadRequirementFiles(created.id, files) : [];
+      if (failed.length) {
+        toast.warning(
+          `El requerimiento se envió, pero no se pudo subir: ${failed.map((f) => `${f.name} (${f.reason})`).join('; ')}. Puedes adjuntarlos desde su detalle.`,
+        );
+      }
       if (!alive.current) return;
       setBusy(false);
       onCreated(created);
@@ -230,6 +242,7 @@ export default function NewPortalRequirementDialog({ open, onCancel, onCreated }
             onCriteriaChange={setCriteria}
             disabled={busy}
           />
+          <RequirementFilePicker id="portal-requirement-files" files={files} onChange={setFiles} disabled={busy} />
           {tooLong && (
             <p className="text-xs text-red-600">
               El texto supera los {PORTAL_REQUIREMENT_DESCRIPTION_MAX_LENGTH} caracteres: resúmelo.

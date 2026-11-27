@@ -28,9 +28,13 @@ export type WorkItemDocStatus = 'BORRADOR' | 'VIGENTE';
 
 export const WORK_ITEM_DOC_STATUSES: WorkItemDocStatus[] = ['BORRADOR', 'VIGENTE'];
 
-export type WorkItemDocSource = 'WEB' | 'CLAUDE';
+/** `CLIENTE`: lo subió el cliente desde el portal (migración 034). */
+export type WorkItemDocSource = 'WEB' | 'CLAUDE' | 'CLIENTE';
 
-export const WORK_ITEM_DOC_SOURCES: WorkItemDocSource[] = ['WEB', 'CLAUDE'];
+export const WORK_ITEM_DOC_SOURCES: WorkItemDocSource[] = ['WEB', 'CLAUDE', 'CLIENTE'];
+
+/** Tope de archivos que el cliente puede adjuntar a un mismo requerimiento. */
+export const MAX_CLIENT_DOCS_PER_ITEM = 20;
 
 export const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 

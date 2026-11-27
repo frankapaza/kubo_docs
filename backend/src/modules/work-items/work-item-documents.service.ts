@@ -15,6 +15,8 @@ import { MarkdownPdf, PDF_COLORS } from '../../common/pdf/markdown-pdf.helper';
 import { IStorageService, STORAGE_SERVICE } from '../audio/interfaces/storage.interface';
 import { sanitizeFilename, toHeaderFilename } from '../ticket-messages/ticket-attachments.service';
 import {
+  DOCX_MIME,
+  docxText,
   DOC_EXTENSIONS,
   WORK_ITEM_DOC_KINDS,
   WORK_ITEM_DOC_KIND_LABELS,
@@ -39,6 +41,7 @@ export interface WorkItemDocView {
   mimeType: string;
   sizeBytes: number;
   uploadedByUserId: number | null;
+  uploadedByClientUserId: number | null;
   approvedByUserId: number | null;
   approvedAt: string | null;
   createdAt: string;
@@ -46,8 +49,10 @@ export interface WorkItemDocView {
 
 export interface WorkItemDocUpload {
   workItemId: number;
-  /** `null` cuando lo sube el sistema (el acta firmada por el cliente). */
+  /** `null` cuando lo sube el sistema (el acta firmada) o el cliente. */
   actorUserId: number | null;
+  /** Usuario del portal, cuando `source` es `CLIENTE`. */
+  actorClientUserId?: number | null;
   kind: WorkItemDocKind;
   buffer: Buffer;
   filename: string;
@@ -79,6 +84,16 @@ export class WorkItemDocumentsService {
   async list(workItemId: number): Promise<WorkItemDocView[]> {
     const rows = await this.repo.find({ where: { workItemId }, order: { createdAt: 'ASC', id: 'ASC' } });
     return rows.map(toView);
+  }
+
+  /** Solo los de un origen (p. ej. lo que subió el cliente, para el portal). */
+  async listBySource(workItemId: number, source: WorkItemDocSource): Promise<WorkItemDocView[]> {
+    const rows = await this.repo.find({ where: { workItemId, source }, order: { createdAt: 'ASC', id: 'ASC' } });
+    return rows.map(toView);
+  }
+
+  countBySource(workItemId: number, source: WorkItemDocSource): Promise<number> {
+    return this.repo.count({ where: { workItemId, source } });
   }
 
   async upload(input: WorkItemDocUpload): Promise<WorkItemDocView> {
@@ -115,6 +130,7 @@ export class WorkItemDocumentsService {
           mimeType,
           sizeBytes: input.buffer.length,
           uploadedByUserId: input.actorUserId,
+          uploadedByClientUserId: input.actorClientUserId ?? null,
           approvedByUserId: null,
           approvedAt: null,
         }),
@@ -132,11 +148,18 @@ export class WorkItemDocumentsService {
       workItemId: Number(item.id),
       type: 'COMMENT',
       actorUserId: input.actorUserId,
+      actorClientUserId: input.actorClientUserId ?? null,
       reason:
-        status === 'BORRADOR'
-          ? `Adjuntó «${filename}» (${label}, borrador para revisar).`
-          : `Adjuntó «${filename}» (${label}).`,
-      payload: { documentId: Number(row.id), kind: input.kind, via: source === 'CLAUDE' ? 'claude' : 'web' },
+        source === 'CLIENTE'
+          ? `El cliente adjuntó «${filename}».`
+          : status === 'BORRADOR'
+            ? `Adjuntó «${filename}» (${label}, borrador para revisar).`
+            : `Adjuntó «${filename}» (${label}).`,
+      payload: {
+        documentId: Number(row.id),
+        kind: input.kind,
+        via: source === 'CLAUDE' ? 'claude' : source === 'CLIENTE' ? 'portal' : 'web',
+      },
     });
     return toView(row);
   }
@@ -162,6 +185,14 @@ export class WorkItemDocumentsService {
     for await (const c of d.stream as AsyncIterable<Buffer | string>) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
     const row = await this.findOrFail(workItemId, docId);
     return { doc: toView(row), buffer: Buffer.concat(chunks) };
+  }
+
+  /** El texto de un Word; `null` para un PDF o una imagen, que aquí no se leen. */
+  async readText(workItemId: number, docId: number): Promise<string | null> {
+    const row = await this.findOrFail(workItemId, docId);
+    if (row.mimeType !== DOCX_MIME) return null;
+    const { buffer } = await this.readBuffer(workItemId, docId);
+    return docxText(buffer);
   }
 
   async approve(workItemId: number, docId: number, actorUserId: number): Promise<WorkItemDocView> {
@@ -260,6 +291,7 @@ function toView(r: WorkItemAttachment): WorkItemDocView {
     mimeType: r.mimeType,
     sizeBytes: Number(r.sizeBytes),
     uploadedByUserId: r.uploadedByUserId == null ? null : Number(r.uploadedByUserId),
+    uploadedByClientUserId: r.uploadedByClientUserId == null ? null : Number(r.uploadedByClientUserId),
     approvedByUserId: r.approvedByUserId == null ? null : Number(r.approvedByUserId),
     approvedAt: r.approvedAt ? new Date(r.approvedAt).toISOString() : null,
     createdAt: new Date(r.createdAt).toISOString(),

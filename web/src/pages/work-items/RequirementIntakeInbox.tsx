@@ -20,6 +20,8 @@ export interface RequirementIntakeInboxProps {
   onOpen?: (item: WorkItem) => void;
   /** Cambia cuando algo fuera de la bandeja (el panel) movió un solicitado: recarga. */
   refreshKey?: number;
+  /** Cuántos hay en la bandeja (para el número de la pestaña), o `null` mientras carga. */
+  onCount?: (n: number | null) => void;
 }
 
 const PRIORITIES: WorkItemPriority[] = ['ALTA', 'MEDIA', 'BAJA'];
@@ -425,10 +427,16 @@ function RejectDialog({ item, onCancel, onRejected }: RejectDialogProps) {
  * Se pinta **solo si hay al menos un solicitado**: una franja vacía
  * permanente enseña a ignorarla.
  */
-export default function RequirementIntakeInbox({ clients, onChanged, onOpen, refreshKey = 0 }: RequirementIntakeInboxProps) {
+export default function RequirementIntakeInbox({
+  clients, onChanged, onOpen, refreshKey = 0, onCount,
+}: RequirementIntakeInboxProps) {
   const [items, setItems] = useState<WorkItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    onCount?.(loading && items.length === 0 ? null : items.length);
+  }, [items.length, loading, onCount]);
 
   /**
    * Se pone en `true` cuando la primera carga termina, con éxito o con

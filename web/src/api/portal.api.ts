@@ -6,6 +6,7 @@ import type {
   PortalInvitationPreview,
   PortalMonthlyReport,
   PortalRequirement,
+  PortalRequirementAttachment,
   PortalSession,
   PortalTeamMember,
   PortalTicket,
@@ -207,6 +208,34 @@ export const portalApi = {
   /** Responde a «Pedir más detalle»: agrega el texto y lo devuelve a Solicitado. */
   provideRequirementDetail: (id: number, body: { detail: string; acceptanceCriteria?: string[] }) =>
     portalApiClient.post<PortalRequirement>(`/portal/requerimientos/${id}/detalle`, body).then((r) => r.data),
+
+  /** Capturas, Word o PDF que el cliente adjunta a su requerimiento. */
+  listRequirementAttachments: (id: number) =>
+    portalApiClient
+      .get<PortalRequirementAttachment[]>(`/portal/requerimientos/${id}/adjuntos`)
+      .then((r) => r.data),
+
+  uploadRequirementAttachment: (id: number, file: File) => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    return portalApiClient
+      .post<PortalRequirementAttachment>(`/portal/requerimientos/${id}/adjuntos`, form)
+      .then((r) => r.data);
+  },
+
+  downloadRequirementAttachment: async (id: number, att: PortalRequirementAttachment) => {
+    const res = await portalApiClient.get(`/portal/requerimientos/${id}/adjuntos/${att.id}/download`, {
+      responseType: 'blob',
+    });
+    const url = URL.createObjectURL(new Blob([res.data], { type: att.mimeType }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = att.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  },
 
   /**
    * Informe mensual (tarea 6 del backend). El backend rechaza el mes en

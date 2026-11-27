@@ -17,6 +17,8 @@ import { PortalTicketsService } from './portal-tickets.service';
 import { PortalTicketsController } from './portal-tickets.controller';
 import { PortalRequirementsService } from './portal-requirements.service';
 import { PortalRequirementsController } from './portal-requirements.controller';
+import { PortalRequirementAttachmentsService } from './portal-requirement-attachments.service';
+import { PortalRequirementAttachmentsController } from './portal-requirement-attachments.controller';
 import { PortalReportsService } from './portal-reports.service';
 import { PortalReportsController } from './portal-reports.controller';
 import { ClientUsersService } from './client-users.service';
@@ -71,6 +73,7 @@ import { UsersModule } from '../users/users.module';
     PortalTicketsController,
     PortalRequirementsController,
     PortalReportsController,
+    PortalRequirementAttachmentsController,
     ClientUsersController,
     PortalUsersController,
     PortalInvitationsController,
@@ -85,6 +88,7 @@ import { UsersModule } from '../users/users.module';
     PortalAuthService,
     PortalTicketsService,
     PortalRequirementsService,
+    PortalRequirementAttachmentsService,
     PortalReportsService,
     ClientUsersService,
     PortalUsersService,

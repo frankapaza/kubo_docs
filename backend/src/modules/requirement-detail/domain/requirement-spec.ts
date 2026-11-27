@@ -31,7 +31,13 @@ export interface SpecContext {
   tipo: WorkItemRequestType | null;
   descripcion: string | null;
   criterios: string[];
+  /** Archivos que adjuntó el cliente. `texto` en `null`: imagen o PDF, que aquí no se leen. */
+  adjuntos?: Array<{ nombre: string; texto: string | null }>;
 }
+
+/** Tope del texto de los adjuntos en el prompt, para no desbordar el contexto del modelo. */
+const MAX_ADJUNTO_CHARS = 8_000;
+const MAX_ADJUNTOS_CHARS = 16_000;
 
 export interface SpecPrompt {
   system: string;
@@ -82,10 +88,29 @@ export function buildSpecPrompt(ctx: SpecContext): SpecPrompt {
     '',
     limpio(ctx.descripcion) || '(sin descripción)',
     ctx.criterios.length ? `\nCriterios que indicó:\n${ctx.criterios.map((c) => `- ${limpio(c)}`).join('\n')}` : '',
+    adjuntosTexto(ctx.adjuntos ?? [], limpio),
     '</pedido_del_cliente>',
   ].join('\n');
 
   return { system, user };
+}
+
+function adjuntosTexto(
+  adjuntos: Array<{ nombre: string; texto: string | null }>,
+  limpio: (s: string | null) => string,
+): string {
+  if (!adjuntos.length) return '';
+  let restante = MAX_ADJUNTOS_CHARS;
+  const partes = adjuntos.map((a) => {
+    const nombre = limpio(a.nombre);
+    if (a.texto == null) return `\nArchivo «${nombre}»: imagen o PDF, no se puede leer aquí (pregunta si hace falta su contenido).`;
+    let t = limpio(a.texto).trim();
+    const tope = Math.min(MAX_ADJUNTO_CHARS, Math.max(0, restante));
+    if (t.length > tope) t = `${t.slice(0, tope)}\n[recortado]`;
+    restante -= t.length;
+    return `\nArchivo «${nombre}»:\n${t || '(vacío)'}`;
+  });
+  return `\nArchivos que adjuntó:${partes.join('\n')}`;
 }
 
 export interface SpecResult {

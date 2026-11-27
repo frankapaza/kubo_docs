@@ -90,11 +90,12 @@ export interface WorkItemDoc {
   kind: WorkItemDocKind;
   kindLabel: string;
   status: 'BORRADOR' | 'VIGENTE';
-  source: 'WEB' | 'CLAUDE';
+  source: 'WEB' | 'CLAUDE' | 'CLIENTE';
   filename: string;
   mimeType: string;
   sizeBytes: number;
   uploadedByUserId: number | null;
+  uploadedByClientUserId?: number | null;
   approvedByUserId: number | null;
   approvedAt: string | null;
   createdAt: string;

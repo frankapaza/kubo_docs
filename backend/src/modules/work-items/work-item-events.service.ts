@@ -8,6 +8,8 @@ export interface RecordWorkItemEventInput {
   workItemId: number;
   type: WorkItemEventType;
   actorUserId: number | null;
+  /** Cuando actúa un usuario del portal (y `actorUserId` va en `null`). */
+  actorClientUserId?: number | null;
   fromStatus?: WorkItemStatus | null;
   toStatus?: WorkItemStatus | null;
   reason?: string | null;
@@ -24,6 +26,7 @@ export class WorkItemEventsService {
       workItemId: input.workItemId,
       type: input.type,
       actorUserId: input.actorUserId,
+      ...(input.actorClientUserId ? { actorClientUserId: input.actorClientUserId } : {}),
       fromStatus: input.fromStatus ?? null,
       toStatus: input.toStatus ?? null,
       reason: input.reason?.trim() || null,

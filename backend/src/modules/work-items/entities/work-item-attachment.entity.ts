@@ -45,6 +45,10 @@ export class WorkItemAttachment {
   @Column({ name: 'uploaded_by_user_id', type: 'bigint', unsigned: true, nullable: true })
   uploadedByUserId!: number | null;
 
+  /** Usuario del portal que lo subió (`source = 'CLIENTE'`, migración 034). */
+  @Column({ name: 'uploaded_by_client_user_id', type: 'bigint', unsigned: true, nullable: true })
+  uploadedByClientUserId!: number | null;
+
   @Column({ name: 'approved_by_user_id', type: 'bigint', unsigned: true, nullable: true })
   approvedByUserId!: number | null;
 

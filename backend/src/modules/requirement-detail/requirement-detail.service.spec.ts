@@ -6,7 +6,7 @@ const RQ = {
   createdByClientUserId: 21,
 };
 
-function build(over: { rq?: object; user?: object | null; emailFails?: boolean; llm?: string } = {}) {
+function build(over: { rq?: object; user?: object | null; emailFails?: boolean; llm?: string; clientDocs?: object[] } = {}) {
   const rq = { ...RQ, ...(over.rq ?? {}) };
   const intake = { requestDetail: jest.fn().mockResolvedValue({ ...rq, status: 'FALTA_INFO' }) };
   const items = { findByIdOrFail: jest.fn().mockResolvedValue(rq) };
@@ -25,6 +25,8 @@ function build(over: { rq?: object; user?: object | null; emailFails?: boolean; 
   const docs = {
     renderManualPdf: jest.fn().mockResolvedValue(Buffer.from('%PDF')),
     upload: jest.fn().mockImplementation(async (i: { kind: string }) => ({ id: i.kind === 'OTRO' ? 61 : 60, kind: i.kind })),
+    listBySource: jest.fn().mockResolvedValue(over.clientDocs ?? []),
+    readText: jest.fn().mockImplementation(async (_w: number, id: number) => (id === 70 ? 'Agrupar por gestor.' : null)),
   };
   const service = new RequirementDetailService(
     intake as never, items as never, clientUsers as never, email as never, config as never,
@@ -95,6 +97,20 @@ describe('RequirementDetailService.draftSpec', () => {
     expect(docs.upload).toHaveBeenCalledTimes(2);
     expect(docs.upload).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'OTRO', filename: 'RQ-0003 - Brief de prototipo.pdf' }));
     expect(out.brief).toContain('[1. Idea]');
+  });
+
+  it('le pasa a la IA el texto de los Word que adjuntó el cliente', async () => {
+    const { service, llm, docs } = build({
+      clientDocs: [
+        { id: 70, filename: 'detalle.docx' },
+        { id: 71, filename: 'pantalla.png' },
+      ],
+    });
+    await service.draftSpec(3, 5);
+    expect(docs.listBySource).toHaveBeenCalledWith(3, 'CLIENTE');
+    const user = llm.chat.mock.calls[0][1][0].content as string;
+    expect(user).toContain('Agrupar por gestor.');
+    expect(user).toContain('«pantalla.png»');
   });
 
   it('una respuesta vacía de la IA no deja documento', async () => {

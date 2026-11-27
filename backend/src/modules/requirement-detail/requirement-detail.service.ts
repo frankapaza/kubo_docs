@@ -101,7 +101,16 @@ export class RequirementDetailService {
         : Promise.resolve([]),
     ]);
     const code = item.code ?? `RQ-${item.id}`;
+    const clientDocs = await this.docs.listBySource(Number(item.id), 'CLIENTE');
+    const adjuntos = await Promise.all(
+      clientDocs.map(async (d) => ({
+        nombre: d.filename,
+        // Un archivo que no se pueda leer no impide redactar: se nombra y la IA pregunta.
+        texto: await this.docs.readText(Number(item.id), d.id).catch(() => null),
+      })),
+    );
     const prompt = buildSpecPrompt({
+      adjuntos,
       codigo: code,
       titulo: item.title,
       cliente: client.razonSocial,

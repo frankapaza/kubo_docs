@@ -766,6 +766,15 @@ export type PortalRequirementStatusLabel =
   | 'Solicitado' | 'Aceptado, en cola' | 'En desarrollo' | 'En pruebas'
   | 'Entregado' | 'Bloqueado' | 'Cancelado' | 'Rechazado' | 'Falta información';
 
+/** Un archivo que el cliente adjuntó a su requerimiento. */
+export interface PortalRequirementAttachment {
+  id: number;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  createdAt: string;
+}
+
 export interface PortalRequirement {
   id: number;
   code: string | null;

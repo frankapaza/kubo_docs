@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { portalApi } from '../../api/portal.api';
-import type { PortalRequirement } from '../../api/types';
+import type { PortalRequirement, PortalRequirementAttachment } from '../../api/types';
 import { Card, CardBody } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { ArrowLeftIcon } from '../../components/ui/Icon';
 import { Button } from '../../components/ui/Button';
 import { parseCriteria } from '../requirements/requirement-template';
+import { toast } from '../../ui/Toast';
+import RequirementFilePicker, { formatSize, uploadRequirementFiles } from './RequirementFilePicker';
 import { fmtDate, fmtDateTime } from './PortalTicketsListPage';
 import { REQUIREMENT_STATUS_TONES, fmtCommittedDate } from './PortalRequirementsListPage';
 
@@ -25,6 +27,8 @@ export default function PortalRequirementDetailPage() {
   const [requirement, setRequirement] = useState<PortalRequirement | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** Sube al terminar «Enviar detalle», para que la lista de archivos se recargue. */
+  const [filesKey, setFilesKey] = useState(0);
 
   /**
    * Las dos guardas de siempre (ver `PortalTicketDetailPage`): `alive` corta
@@ -137,7 +141,13 @@ export default function PortalRequirementDetailPage() {
           )}
 
           {requirement.status === 'Falta información' && (
-            <ProvideDetailCard requirement={requirement} onDone={(r) => setRequirement(r)} />
+            <ProvideDetailCard
+              requirement={requirement}
+              onDone={(r) => {
+                setRequirement(r);
+                setFilesKey((k) => k + 1);
+              }}
+            />
           )}
 
           <Card>
@@ -150,6 +160,8 @@ export default function PortalRequirementDetailPage() {
               )}
             </CardBody>
           </Card>
+
+          <AttachmentsCard requirement={requirement} refreshKey={filesKey} />
         </>
       )}
     </div>
@@ -170,6 +182,7 @@ function ProvideDetailCard({
 }) {
   const [detail, setDetail] = useState('');
   const [criteria, setCriteria] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
@@ -185,6 +198,12 @@ function ProvideDetailCard({
         detail: detail.trim(),
         acceptanceCriteria: parseCriteria(criteria),
       });
+      const failed = files.length ? await uploadRequirementFiles(requirement.id, files) : [];
+      if (failed.length) {
+        toast.warning(
+          `El detalle se envió, pero no se pudo subir: ${failed.map((x) => `${x.name} (${x.reason})`).join('; ')}.`,
+        );
+      }
       setSent(true);
       onDone(updated);
     } catch (e: any) {
@@ -223,7 +242,7 @@ function ProvideDetailCard({
           value={detail}
           disabled={busy}
           onChange={(e) => setDetail(e.target.value)}
-          placeholder="Responde a la pregunta con el mayor detalle posible. Si tienes capturas o un documento, menciónalo y te diremos cómo enviarlo."
+          placeholder="Responde a la pregunta con el mayor detalle posible. Las capturas o documentos adjúntalos abajo."
         />
       </div>
       <div>
@@ -237,11 +256,112 @@ function ProvideDetailCard({
           onChange={(e) => setCriteria(e.target.value)}
         />
       </div>
+      <RequirementFilePicker id="rq-detail-files" files={files} onChange={setFiles} disabled={busy} />
       <div className="flex justify-end">
         <Button type="button" variant="primary" onClick={submit} disabled={busy || detail.trim().length < 3} loading={busy}>
           {busy ? 'Enviando…' : 'Enviar detalle'}
         </Button>
       </div>
     </div>
+  );
+}
+
+/** Estados en los que ya no se trabaja el requerimiento: no se adjunta más. */
+const CLOSED_LABELS = ['Entregado', 'Cancelado', 'Rechazado'];
+
+/**
+ * Los archivos que la empresa adjuntó (capturas, Word, PDF), con su descarga.
+ * Solo los suyos: los documentos internos del equipo no se muestran aquí.
+ */
+function AttachmentsCard({ requirement, refreshKey }: { requirement: PortalRequirement; refreshKey: number }) {
+  const [items, setItems] = useState<PortalRequirementAttachment[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [adding, setAdding] = useState<File[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [reload, setReload] = useState(0);
+  const open = !CLOSED_LABELS.includes(requirement.status);
+
+  useEffect(() => {
+    let cancelled = false;
+    portalApi
+      .listRequirementAttachments(requirement.id)
+      .then((list) => {
+        if (!cancelled) {
+          setItems(list);
+          setLoadError(null);
+        }
+      })
+      .catch((e: any) => {
+        if (!cancelled) setLoadError(e?.response?.data?.message ?? 'No se pudieron cargar los archivos.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [requirement.id, refreshKey, reload]);
+
+  const upload = async () => {
+    if (!adding.length || busy) return;
+    setBusy(true);
+    const failed = await uploadRequirementFiles(requirement.id, adding);
+    setBusy(false);
+    if (failed.length) {
+      toast.error(`No se pudo subir: ${failed.map((x) => `${x.name} (${x.reason})`).join('; ')}.`);
+    } else {
+      toast.success(adding.length === 1 ? 'Archivo adjuntado.' : 'Archivos adjuntados.');
+    }
+    setAdding([]);
+    setReload((k) => k + 1);
+  };
+
+  const download = async (att: PortalRequirementAttachment) => {
+    try {
+      await portalApi.downloadRequirementAttachment(requirement.id, att);
+    } catch {
+      toast.error('No se pudo descargar el archivo.');
+    }
+  };
+
+  return (
+    <Card>
+      <CardBody>
+        <h2 className="text-sm font-semibold text-slate-900">Archivos adjuntos</h2>
+        <p className="mt-1 text-xs text-slate-500">Capturas de pantalla, Word o PDF que acompañan este pedido.</p>
+        {loadError && <p className="mt-3 text-sm text-red-600">{loadError}</p>}
+        {items && items.length === 0 && <p className="mt-3 text-sm text-slate-500">Todavía no hay archivos.</p>}
+        {items && items.length > 0 && (
+          <ul className="mt-3 divide-y divide-slate-100 rounded-lg border border-slate-200">
+            {items.map((a) => (
+              <li key={a.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                <span className="min-w-0 truncate text-slate-700">
+                  {a.filename}
+                  <span className="ml-2 text-xs text-slate-400">
+                    {formatSize(a.sizeBytes)} · {fmtDateTime(a.createdAt)}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => download(a)}
+                  className="shrink-0 text-xs font-semibold text-kubo-primary hover:underline"
+                >
+                  Descargar
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {open && (
+          <div className="mt-4 space-y-2">
+            <RequirementFilePicker id="rq-more-files" files={adding} onChange={setAdding} disabled={busy} />
+            {adding.length > 0 && (
+              <div className="flex justify-end">
+                <Button type="button" variant="primary" onClick={upload} disabled={busy} loading={busy}>
+                  {busy ? 'Subiendo…' : adding.length === 1 ? 'Adjuntar archivo' : `Adjuntar ${adding.length} archivos`}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+      </CardBody>
+    </Card>
   );
 }
