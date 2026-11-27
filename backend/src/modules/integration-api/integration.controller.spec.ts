@@ -65,6 +65,21 @@ describe('IntegrationController (HTTP, guarda real)', () => {
     expect((await app.raw('/integracion/resumen?desde=2026-01&desde=2026-02', { method: 'GET', headers: auth })).status).toBe(400);
   });
 
+  it('formato=csv: texto CSV con BOM, cabecera y cursor en X-Siguiente-Cursor; formato=xml -> 400', async () => {
+    query.tickets.mockResolvedValueOnce({ datos: [{ id: 1, codigo: 'KB-1', slaEnRiesgo: false } as any], siguienteCursor: 'abc' as any });
+    const res = await app.raw('/integracion/tickets?formato=csv&limite=5000', { method: 'GET', headers: auth });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/csv');
+    expect(res.headers.get('x-siguiente-cursor')).toBe('abc');
+    // fetch quita el BOM al decodificar: se miran los bytes crudos.
+    const bytes = Buffer.from(await res.arrayBuffer());
+    expect([...bytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    expect(bytes.subarray(3).toString('utf8').startsWith('"id";"codigo";"asunto"')).toBe(true);
+    expect(query.tickets).toHaveBeenCalledWith(10, { limite: 5000 });
+    expect((await app.raw('/integracion/tickets?formato=xml', { method: 'GET', headers: auth })).status).toBe(400);
+    expect((await app.raw('/integracion/tickets?limite=5000', { method: 'GET', headers: auth })).status).toBe(400);
+  });
+
   it('POST, PUT o DELETE sobre la API -> 405', async () => {
     for (const method of ['POST', 'PUT', 'DELETE']) {
       const res = await app.raw('/integracion/tickets', { method, headers: auth });
