@@ -36,6 +36,20 @@ export class DevStatusDto {
   @IsString()
   @MaxLength(30)
   estado!: string;
+
+  /** Obligatorio al pasar a ESPERA_CLIENTE o DERIVADO. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  motivo?: string;
+}
+
+export class DevAssignDto {
+  /** Correo o nombre de una persona activa del equipo. */
+  @IsString()
+  @MinLength(1)
+  @MaxLength(180)
+  persona!: string;
 }
 
 export class DevLinkDto {

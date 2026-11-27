@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
 
 import { DevApiService } from './dev-api.service';
 import { DevKeyGuard, DevRequest } from './dev-key.guard';
-import { DevDeliverDto, DevLinkDto, DevNoteDto, DevResolveDto, DevStatusDto } from './dto/dev-admin.dto';
+import { DevAssignDto, DevDeliverDto, DevLinkDto, DevNoteDto, DevResolveDto, DevStatusDto } from './dto/dev-admin.dto';
 
 /**
  * `/api/v1/dev/*`: lo que llama el MCP `kubo-devdocs`. Autentica la clave
@@ -21,6 +21,12 @@ export class DevApiController {
   @Get('pendientes')
   pendientes(@Req() req: DevRequest) {
     return this.api.pendientes(req.dev!);
+  }
+
+  /** A quién se asignaría «q» (correo o nombre): el MCP lo muestra en la confirmación. */
+  @Get('personas')
+  personas(@Query('q') q?: string) {
+    return this.api.persona(String(q ?? '').slice(0, 180));
   }
 
   @Get('items/:code')
@@ -60,7 +66,17 @@ export class DevApiController {
 
   @Post('items/:code/estado')
   estado(@Req() req: DevRequest, @Param('code') code: string, @Body() dto: DevStatusDto) {
-    return this.api.estado(req.dev!, code, dto.estado);
+    return this.api.estado(req.dev!, code, dto.estado, dto.motivo);
+  }
+
+  @Post('items/:code/asignar')
+  asignar(@Req() req: DevRequest, @Param('code') code: string, @Body() dto: DevAssignDto) {
+    return this.api.asignar(req.dev!, code, dto.persona);
+  }
+
+  @Post('items/:code/responder')
+  responder(@Req() req: DevRequest, @Param('code') code: string, @Body() dto: DevNoteDto) {
+    return this.api.responder(req.dev!, code, dto.texto);
   }
 
   @Post('items/:code/vinculos')

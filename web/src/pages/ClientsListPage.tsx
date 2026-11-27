@@ -35,6 +35,10 @@ export default function ClientsListPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<CreateClientBody>(EMPTY_FORM);
 
+  // Clientes que ya operan sin sistemas: sus tickets no se pueden clasificar ni llegan al conector MCP.
+  const { data: withoutSystems = [] } = useQuery({ queryKey: ['clients', 'sin-sistemas'], queryFn: clientsApi.withoutSystems, retry: false });
+  const withoutSystemsIds = new Set(withoutSystems.map((c) => c.id));
+
   const { data = [], isLoading } = useQuery({
     queryKey: ['clients', statusFilter, q],
     queryFn: () =>
@@ -81,6 +85,11 @@ export default function ClientsListPage() {
             Empresas con las que trabajas. Un cliente puede tener varios proyectos y documentos
             comerciales.
           </p>
+          {withoutSystems.length > 0 && (
+            <p role="status" className="mt-2 inline-block rounded-md border px-3 py-1.5 text-xs" style={{ borderColor: '#f0d9a8', background: '#fff4e0', color: '#7a4a00' }}>
+              <strong>{withoutSystems.length} cliente{withoutSystems.length === 1 ? '' : 's'} sin sistemas</strong>: sus tickets no pueden clasificarse ni llegar al conector de Claude. Asígnaselos en su ficha → «Sistemas».
+            </p>
+          )}
         </div>
         <Button icon={<PlusIcon size={16} />} onClick={() => setShowForm((v) => !v)}>
           Nuevo cliente
@@ -263,6 +272,11 @@ export default function ClientsListPage() {
                 </h3>
                 <Badge tone={STATUS_TONE[c.status]}>{CLIENT_STATUS_LABELS[c.status]}</Badge>
               </div>
+              {withoutSystemsIds.has(c.id) && (
+                <span className="mb-2 inline-block rounded px-2 py-0.5 text-[11px] font-semibold" style={{ background: '#fff4e0', color: '#a35c00' }}>
+                  Sin sistemas
+                </span>
+              )}
               <div className="space-y-1 text-xs text-slate-500">
                 {c.ruc && (
                   <p>

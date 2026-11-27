@@ -38,6 +38,13 @@ export interface TicketListParams {
   excludeClosed?: boolean;
   /** `true` = solo archivados; si no, los archivados nunca vienen. */
   archived?: boolean;
+  /** Solo los pendientes de clasificar (sin sistema, abiertos, de clientes con sistemas). */
+  sinSistema?: boolean;
+}
+
+export interface WithoutSystemSummary {
+  total: number;
+  porCliente: Array<{ clientId: number; cliente: string; total: number }>;
 }
 
 export const ticketsApi = {
@@ -45,6 +52,9 @@ export const ticketsApi = {
     api.get<Ticket[]>('/tickets', { params }).then((r) => r.data),
 
   findOne: (id: number) => api.get<TicketDetail>(`/tickets/${id}`).then((r) => r.data),
+
+  /** Aviso del panel: tickets abiertos sin sistema de clientes que sí tienen sistemas. */
+  withoutSystemSummary: () => api.get<WithoutSystemSummary>('/tickets/sin-sistema/resumen').then((r) => r.data),
 
   /**
    * Devuelve `CreatedTicket` y no `Ticket`: el alta trae además el

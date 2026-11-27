@@ -32,6 +32,7 @@ import { ArchiveTicketDto } from './dto/archive-ticket.dto';
 import { ChangeTicketClientDto } from './dto/change-client.dto';
 import { ConcludeTicketDto } from './dto/conclude-ticket.dto';
 import { TicketConclusionService } from './ticket-conclusion.service';
+import { TicketSystemGuard } from './ticket-system-guard.service';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { TicketsRealtimeGateway } from './tickets-realtime.gateway';
@@ -51,6 +52,7 @@ export class TicketsController {
     private readonly ai: TicketAIService,
     private readonly realtime: TicketsRealtimeGateway,
     private readonly conclusion: TicketConclusionService,
+    private readonly systemGuard: TicketSystemGuard,
   ) {}
 
   /**
@@ -101,6 +103,7 @@ export class TicketsController {
     @Query('q') q?: string,
     @Query('excludeClosed') excludeClosed?: string,
     @Query('archived') archived?: string,
+    @Query('sinSistema') sinSistema?: string,
   ) {
     return this.service.list({
       status,
@@ -117,7 +120,15 @@ export class TicketsController {
       // los archivados por omisión. El repositorio solo filtra si se lo piden
       // (el portal no lo pide), así que esta es la puerta que lo decide.
       archived: archived === 'true',
+      sinSistema: sinSistema === '1' || sinSistema === 'true',
     });
+  }
+
+  /** Aviso del panel: tickets abiertos sin sistema de clientes que sí tienen sistemas. */
+  @Get('sin-sistema/resumen')
+  async withoutSystemSummary(): Promise<{ total: number; porCliente: Array<{ clientId: number; cliente: string; total: number }> }> {
+    const porCliente = await this.service.summaryWithoutSystem();
+    return { total: porCliente.reduce((a, c) => a + c.total, 0), porCliente };
   }
 
   @Get(':id')
@@ -164,11 +175,15 @@ export class TicketsController {
   }
 
   @Post(':id/transition')
-  transition(
+  async transition(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: TransitionTicketDto,
   ) {
+    // Volver a Nuevo o Triaje es ordenar, no trabajar: no exige sistema.
+    if (dto.toStatus !== 'NUEVO' && dto.toStatus !== 'TRIAJE') {
+      await this.systemGuard.assertCanWork(id, 'cambiar su estado');
+    }
     return this.changed(this.transitions.transition({
       ticketId: id,
       actorUserId: user.id,
@@ -188,11 +203,12 @@ export class TicketsController {
   @Post(':id/conclude')
   @UseGuards(RolesGuard)
   @Roles('ADMIN')
-  conclude(
+  async conclude(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: ConcludeTicketDto,
   ) {
+    await this.systemGuard.assertCanWork(id, 'concluirlo');
     return this.changed(this.conclusion.conclude({
       ticketId: id,
       actorUserId: user.id,
@@ -203,11 +219,12 @@ export class TicketsController {
   }
 
   @Post(':id/assign')
-  assign(
+  async assign(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: AssignTicketDto,
   ) {
+    await this.systemGuard.assertCanWork(id, 'asignarlo');
     return this.changed(this.assignment.assign({
       ticketId: id,
       actorUserId: user.id,
@@ -217,16 +234,18 @@ export class TicketsController {
   }
 
   @Post(':id/take')
-  take(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number) {
+  async take(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number) {
+    await this.systemGuard.assertCanWork(id, 'tomarlo');
     return this.changed(this.assignment.take({ ticketId: id, actorUserId: user.id }));
   }
 
   @Post(':id/escalate')
-  escalate(
+  async escalate(
     @CurrentUser() user: AuthUser,
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: EscalateTicketDto,
   ) {
+    await this.systemGuard.assertCanWork(id, 'escalarlo');
     return this.changed(this.assignment.escalate({
       ticketId: id,
       actorUserId: user.id,

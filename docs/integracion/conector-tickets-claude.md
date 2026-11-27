@@ -130,11 +130,27 @@ Copiar el bloque de la sección 7 al `CLAUDE.md` en la raíz del repo y hacer co
 | `tomar_requerimiento(codigo)` | Se asigna el RQ y lo pasa a **En proceso**; avisa si falta la Especificación | aceptado (Pendiente), libre o tuyo |
 | `entregar_requerimiento(...)` | **Pruebas** con qué se hizo, cómo probarlo y el **manual de usuario** (PDF en borrador) | tuyo, En proceso |
 | `nota_interna(codigo, texto)` | Nota que **el cliente no ve** | cualquier ítem del cliente–sistema |
-| `cambiar_estado(codigo, estado)` | Ticket → En atención · RQ → En proceso | **solo los asignados a ti** |
+| `cambiar_estado(codigo, estado, motivo?)` | Ticket → En atención, **Espera del cliente** o **Derivado** (estos dos con motivo y **confirmación**) · RQ → En proceso | **solo los asignados a ti** |
+| `asignar_ticket(codigo, persona)` | Asigna el ticket a otra persona activa del equipo (correo o nombre) — **con confirmación** | tickets abiertos del cliente–sistema |
+| `responder_cliente(codigo, texto)` | Envía la respuesta **directamente al cliente** a tu nombre (correo o portal) — **con confirmación** | **solo los asignados a ti** |
 | `vincular_commit(...)` | Registra un commit/rama/PR en el ticket | útil si no hay webhook |
 
-**Claude NO puede:** enviar nada al cliente sin que una persona lo revise,
-cerrar, aceptar o rechazar requerimientos, reasignar, cambiar prioridad o
+**Confirmación:** `responder_cliente`, `asignar_ticket` y pasar a Espera del
+cliente o Derivado muestran un **cuadro en Claude Code** con el resumen exacto
+(el texto completo de la respuesta). Solo se ejecutan si la persona marca
+«Confirmo esta acción» y acepta; rechazar o cancelar no hace nada, y un cliente
+MCP que no sepa mostrar el cuadro tampoco. Al asignar, el cuadro muestra el
+nombre y el correo reales de la persona. Hay 10 minutos para decidir.
+
+**Apagado por defecto:** estas tres acciones responden «hazlo en DevDocs» hasta
+que el servidor tenga `DEV_SENSITIVE_ACTIONS=true`. El cuadro lo muestra Claude
+Code: quien tenga la clave `kdev_` puede llamar a la API sin pasar por él, así
+que la clave se guarda como una contraseña. Cada respuesta enviada así queda
+marcada en el historial interno del ticket («vía Claude», con el repositorio);
+el cliente no ve esa marca.
+
+**Claude NO puede:** enviar nada al cliente sin tu confirmación,
+cerrar, aceptar o rechazar requerimientos, cambiar prioridad o
 vencimiento, crear tickets ni ver ítems de otros clientes. Eso lo hace una
 persona en DevDocs. Los tickets los crea el **administrador** (o llegan por
 portal/correo).

@@ -14,6 +14,7 @@ import { TicketEventsRepository } from './ticket-events.repository';
 import { SlaPoliciesRepository } from './sla-policies.repository';
 import { SupportAgentsRepository } from './support-agents.repository';
 import { ClientSystemsRepository } from './client-systems.repository';
+import { TicketSystemGuard } from './ticket-system-guard.service';
 import { SystemsRepository } from './systems.repository';
 import { TicketEventsService } from './ticket-events.service';
 import { SlaService } from './sla.service';
@@ -53,6 +54,7 @@ import { DocumentsModule } from '../documents/documents.module';
     DocumentsModule,
   ],
   providers: [
+    TicketSystemGuard,
     TicketsRepository,
     TicketEventsRepository,
     SlaPoliciesRepository,
@@ -74,6 +76,7 @@ import { DocumentsModule } from '../documents/documents.module';
   ],
   controllers: [TicketsController, ClientSystemsController, SystemsController, SupportAgentsController],
   exports: [
+    TicketSystemGuard,
     TicketsRepository,
     TicketEventsRepository,
     SlaPoliciesRepository,

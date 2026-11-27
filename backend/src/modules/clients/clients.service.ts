@@ -8,6 +8,10 @@ import { Client, ClientStatus } from './entities/client.entity';
 export class ClientsService {
   constructor(private readonly repo: ClientsRepository) {}
 
+  listWithoutActiveSystems() {
+    return this.repo.listWithoutActiveSystems();
+  }
+
   async findByIdOrFail(id: number): Promise<Client> {
     const c = await this.repo.findById(id);
     if (!c) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Cliente no encontrado' });

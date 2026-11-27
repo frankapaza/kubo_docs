@@ -15,6 +15,7 @@ import ResolveDialog from './tickets/ResolveDialog';
 import AssignDialog from './tickets/AssignDialog';
 import OverridePriorityDialog from './tickets/OverridePriorityDialog';
 import ChangeClientDialog from './tickets/ChangeClientDialog';
+import MissingSystemNotice from './tickets/MissingSystemNotice';
 import { useAuth } from '../auth/AuthContext';
 import { canManageUsers } from '../auth/permissions';
 import TicketThread from './tickets/thread/TicketThread';
@@ -490,6 +491,13 @@ export default function TicketDetailPage() {
                     : Number(ticket.systemId),
                 )}
               />
+              {(ticket.systemId === null || ticket.systemId === undefined) && !fromMonitoring && ticket.status !== 'RESUELTO' && ticket.status !== 'CERRADO' && (
+                <MissingSystemNotice
+                  systems={systems}
+                  busy={busy}
+                  onAssign={(systemId) => act(() => ticketsApi.update(id, { systemId }))}
+                />
+              )}
               <Field label="Origen" value={ORIGIN_LABELS[ticket.origin]} />
               {linkedError && (
                 <div>

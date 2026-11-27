@@ -20,6 +20,12 @@ export const clientsApi = {
 
   findOne: (id: number) => api.get<Client>(`/clients/${id}`).then((r) => r.data),
 
+  /** Clientes que operan (tickets o usuarios del portal) sin ningún sistema activo. */
+  withoutSystems: () =>
+    api
+      .get<Array<{ id: number; razonSocial: string; tickets: number; usuariosPortal: number }>>('/clients/sin-sistemas')
+      .then((r) => r.data),
+
   create: (body: CreateClientBody) =>
     api.post<Client>('/clients', body).then((r) => r.data),
 

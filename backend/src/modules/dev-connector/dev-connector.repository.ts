@@ -70,6 +70,14 @@ export class DevConnectorRepository {
     @InjectRepository(DevLink) private readonly links: Repository<DevLink>,
   ) {}
 
+  /** Personal activo, para asignar tickets desde el conector. */
+  async listActiveStaff(): Promise<Array<{ id: number; email: string; fullName: string }>> {
+    const rows: Array<{ id: string | number; email: string; fullName: string }> = await this.keys.query(
+      'SELECT id, email, full_name AS fullName FROM users WHERE is_active = 1 ORDER BY full_name',
+    );
+    return rows.map((r) => ({ id: Number(r.id), email: r.email, fullName: r.fullName }));
+  }
+
   /**
    * La clave solo vale si ella, su repo, la asignación y el producto siguen
    * activos y el usuario también: cualquier eslabón dado de baja la apaga sin
