@@ -123,9 +123,15 @@ api.interceptors.response.use(
       const newToken = await refreshAccessToken();
       original.headers.Authorization = `Bearer ${newToken}`;
       return api(original);
-    } catch {
-      doLogout();
-      return Promise.reject(err);
+    } catch (refreshErr) {
+      // Solo un refresh rechazado (4xx) cierra la sesión. Un error de red o un
+      // 5xx --el backend reiniciando durante un despliegue-- no: se devuelve
+      // ese error (no el 401) y los tokens se quedan para el siguiente intento.
+      if (isSessionExpiredError(refreshErr)) {
+        doLogout();
+        return Promise.reject(err);
+      }
+      return Promise.reject(refreshErr);
     }
   },
 );

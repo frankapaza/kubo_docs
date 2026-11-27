@@ -2,7 +2,7 @@ import {
   createContext, useContext, useEffect, useState, ReactNode,
 } from 'react';
 import { authApi } from '../api/auth.api';
-import { TOKEN_STORAGE_KEY } from '../api/client';
+import { isSessionExpiredError, TOKEN_STORAGE_KEY } from '../api/client';
 import type { User } from '../api/types';
 import { disconnectRealtime } from '../lib/realtime';
 
@@ -26,10 +26,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
-    authApi.me()
-      .then(setUser)
-      .catch(() => localStorage.removeItem(TOKEN_STORAGE_KEY))
-      .finally(() => setLoading(false));
+    // Al abrir la web el backend puede estar reiniciando (despliegue) o sin
+    // red: eso no es una sesión caducada. Se reintenta cada 5 s sin borrar los
+    // tokens; solo un rechazo real (4xx tras intentar renovar) deja sin sesión.
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const loadMe = () => {
+      authApi.me()
+        .then((u) => {
+          if (cancelled) return;
+          setUser(u);
+          setLoading(false);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          if (isSessionExpiredError(err)) {
+            localStorage.removeItem(TOKEN_STORAGE_KEY);
+            setLoading(false);
+          } else {
+            timer = setTimeout(loadMe, 5000);
+          }
+        });
+    };
+    loadMe();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, []);
 
   const login = async (email: string, password: string) => {
