@@ -7,7 +7,7 @@ import { toast } from '../../ui/Toast';
 import RequestDetailDialog from './RequestDetailDialog';
 
 const button: React.CSSProperties = {
-  fontSize: 12, padding: '6px 12px', borderRadius: 6, border: '1px solid #dfe3e4', background: '#fff', cursor: 'pointer',
+  fontSize: 12, padding: '6px 12px', borderRadius: 6, border: '1px solid var(--k-border)', background: '#fff', cursor: 'pointer',
 };
 
 /**
@@ -44,7 +44,7 @@ export default function WorkItemSpecAssistant({ item, onChanged }: { item: WorkI
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12 }}>
-      <div style={{ color: '#6d7577', lineHeight: 1.5 }}>
+      <div style={{ color: 'var(--k-muted)', lineHeight: 1.5 }}>
         La IA ordena lo que pidió el cliente en una Especificación (objetivo, alcance, reglas, criterios) y lista las
         dudas como preguntas abiertas.
         {item.requestType === 'PROYECTO' && ' Como es un proyecto nuevo, también arma el brief para el prototipo.'}
@@ -54,17 +54,17 @@ export default function WorkItemSpecAssistant({ item, onChanged }: { item: WorkI
           type="button"
           disabled={draft.isPending}
           onClick={() => draft.mutate()}
-          style={{ ...button, background: '#15191a', color: '#fff', border: 'none', fontWeight: 600, opacity: draft.isPending ? 0.6 : 1 }}
+          style={{ ...button, background: 'var(--k-primary)', color: '#fff', border: 'none', fontWeight: 600, opacity: draft.isPending ? 0.6 : 1 }}
         >
           {draft.isPending ? 'Redactando… (puede tardar un minuto)' : out ? 'Volver a redactar' : 'Redactar especificación con IA'}
         </button>
       </div>
 
       {out && (
-        <div style={{ padding: '10px 12px', border: '1px solid #eceeef', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ padding: '10px 12px', border: '1px solid var(--k-border-soft)', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <strong>Preguntas abiertas</strong>
           {preguntas.length === 0 ? (
-            <span style={{ color: '#6d7577' }}>La IA no encontró dudas.</span>
+            <span style={{ color: 'var(--k-muted)' }}>La IA no encontró dudas.</span>
           ) : (
             <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6 }}>
               {preguntas.map((p, i) => <li key={i}>{p}</li>)}
@@ -81,15 +81,15 @@ export default function WorkItemSpecAssistant({ item, onChanged }: { item: WorkI
       )}
 
       {out?.brief && (
-        <div style={{ padding: '10px 12px', border: '1px solid #eceeef', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ padding: '10px 12px', border: '1px solid var(--k-border-soft)', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
             <strong>Brief de prototipo</strong>
             <button type="button" style={button} onClick={copyBrief}>Copiar</button>
           </div>
-          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit', lineHeight: 1.5, maxHeight: 260, overflowY: 'auto', color: '#3a4041' }}>
+          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit', lineHeight: 1.5, maxHeight: 260, overflowY: 'auto', color: 'var(--k-ink-2)' }}>
             {out.brief}
           </pre>
-          <span style={{ color: '#6d7577' }}>También quedó como PDF en Documentos.</span>
+          <span style={{ color: 'var(--k-muted)' }}>También quedó como PDF en Documentos.</span>
         </div>
       )}
 

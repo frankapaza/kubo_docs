@@ -66,20 +66,20 @@ export default function InstallationKeyDialog({ issued, onClose }: Props) {
           value={issued.secret}
           aria-label="Clave de la instalación"
           onFocus={(e) => e.currentTarget.select()}
-          style={{ fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 13, padding: '9px 10px', border: '1px solid #dfe3e4', borderRadius: 6, width: '100%', boxSizing: 'border-box' }}
+          style={{ fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 13, padding: '9px 10px', border: '1px solid var(--k-border)', borderRadius: 6, width: '100%', boxSizing: 'border-box' }}
         />
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button
             type="button"
             onClick={copy}
-            style={{ fontSize: 13, padding: '9px 14px', borderRadius: 7, background: '#fff', border: '1px solid #d8dcdd', cursor: 'pointer' }}
+            style={{ fontSize: 13, padding: '9px 14px', borderRadius: 7, background: '#fff', border: '1px solid var(--k-border-strong)', cursor: 'pointer' }}
           >
             {copied ? 'Copiada' : 'Copiar clave'}
           </button>
           <button
             type="button"
             onClick={onClose}
-            style={{ fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: '#15191a', color: '#fff', border: 'none', cursor: 'pointer' }}
+            style={{ fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: 'var(--k-primary)', color: '#fff', border: 'none', cursor: 'pointer' }}
           >
             Ya la copié, cerrar
           </button>

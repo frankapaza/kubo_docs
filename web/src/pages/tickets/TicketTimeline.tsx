@@ -25,7 +25,7 @@ const EVENT_LABELS: Record<TicketEventType, string> = {
 
 export default function TicketTimeline({ events }: { events: TicketEvent[] }) {
   if (events.length === 0) {
-    return <span style={{ fontSize: 12, color: '#6d7577' }}>Sin eventos todavía.</span>;
+    return <span style={{ fontSize: 12, color: 'var(--k-muted)' }}>Sin eventos todavía.</span>;
   }
 
   return (
@@ -39,25 +39,25 @@ export default function TicketTimeline({ events }: { events: TicketEvent[] }) {
           <div style={{ paddingBottom: 16, display: 'flex', flexDirection: 'column', gap: 3 }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 9 }}>
               <span style={{ fontSize: 13, fontWeight: 600 }}>{EVENT_LABELS[e.type]}</span>
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: '#6d7577' }}>
+              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: 'var(--k-muted)' }}>
                 {new Date(e.createdAt).toLocaleString('es-PE')}
               </span>
             </div>
             {e.fromStatus && e.toStatus && (
-              <span style={{ fontSize: 12, color: '#4a5052' }}>
+              <span style={{ fontSize: 12, color: 'var(--k-ink-2)' }}>
                 {e.fromStatus} → {e.toStatus}
               </span>
             )}
             {e.reason && (
-              <span style={{ fontSize: 12, color: '#4a5052', lineHeight: 1.55 }}>{e.reason}</span>
+              <span style={{ fontSize: 12, color: 'var(--k-ink-2)', lineHeight: 1.55 }}>{e.reason}</span>
             )}
             {e.type === 'TRIAGED' && typeof e.payload?.confidence === 'number' && (
-              <span style={{ fontSize: 12, color: '#4a5052' }}>
+              <span style={{ fontSize: 12, color: 'var(--k-ink-2)' }}>
                 Confianza de la IA: {Math.round(e.payload.confidence)}%
               </span>
             )}
             {e.actorUserId === null && (
-              <span style={{ fontSize: 11, color: '#6d7577' }}>Registrado por el sistema</span>
+              <span style={{ fontSize: 11, color: 'var(--k-muted)' }}>Registrado por el sistema</span>
             )}
           </div>
         </div>

@@ -95,7 +95,7 @@ function MoveMenu({
         onClick={() => setOpen((v) => !v)}
         style={{
           fontSize: 11, fontWeight: 500, padding: '5px 9px', borderRadius: 6,
-          border: '1px solid #dfe3e4', background: '#fff', color: '#3a4041', cursor: 'pointer',
+          border: '1px solid var(--k-border)', background: '#fff', color: 'var(--k-ink-2)', cursor: 'pointer',
         }}
       >
         Mover a…
@@ -106,7 +106,7 @@ function MoveMenu({
           aria-label={`Destinos para ${label}`}
           style={{
             position: 'absolute', zIndex: 20, top: '100%', right: 0, marginTop: 4,
-            background: '#fff', border: '1px solid #dfe3e4', borderRadius: 8,
+            background: '#fff', border: '1px solid var(--k-border)', borderRadius: 8,
             boxShadow: '0 6px 18px rgba(0,0,0,0.16)', minWidth: 160,
             display: 'flex', flexDirection: 'column', padding: 4,
           }}
@@ -126,7 +126,7 @@ function MoveMenu({
               }}
               style={{
                 fontSize: 12, textAlign: 'left', padding: '7px 10px', borderRadius: 5,
-                border: 'none', background: 'none', cursor: 'pointer', color: '#15191a',
+                border: 'none', background: 'none', cursor: 'pointer', color: 'var(--k-ink)',
               }}
             >
               {STATUS_LABELS[status]}
@@ -166,7 +166,7 @@ export default function WorkItemCard({
       onDragEnd={onDragEnd}
       style={{
         background: '#fff',
-        border: '1px solid var(--k-border, #e2e5e6)',
+        border: '1px solid var(--k-border)',
         borderTop: `4px solid ${color.solid}`,
         borderRadius: 10,
         boxShadow: '0 1px 2px rgba(16, 24, 32, 0.05)',
@@ -198,10 +198,10 @@ export default function WorkItemCard({
           color: 'inherit',
         }}
       >
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: '#6d7577' }}>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: 'var(--k-muted)' }}>
           {label}
         </span>
-        <span style={{ fontSize: 13, fontWeight: 500, color: '#15191a', lineHeight: 1.3 }}>
+        <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--k-ink)', lineHeight: 1.3 }}>
           {item.title}
         </span>
       </button>
@@ -240,7 +240,7 @@ export default function WorkItemCard({
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <span style={{ fontSize: 11, color: '#6d7577' }}>{assigneeName}</span>
+        <span style={{ fontSize: 11, color: 'var(--k-muted)' }}>{assigneeName}</span>
         <MoveMenu item={item} onMove={onMove} />
       </div>
     </article>

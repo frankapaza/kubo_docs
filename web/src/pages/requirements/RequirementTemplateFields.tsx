@@ -2,7 +2,7 @@ import type { WorkItemRequestType } from '../../api/types';
 import { REQUEST_TEMPLATES, TemplateAnswers } from './requirement-template';
 
 const fieldStyle: React.CSSProperties = {
-  fontSize: 13, padding: '8px 10px', border: '1px solid #dfe3e4', borderRadius: 6, width: '100%',
+  fontSize: 13, padding: '8px 10px', border: '1px solid var(--k-border)', borderRadius: 6, width: '100%',
   boxSizing: 'border-box', fontFamily: 'inherit', resize: 'vertical',
 };
 
@@ -39,11 +39,11 @@ export default function RequirementTemplateFields({
               onClick={() => onTypeChange(t.type)}
               style={{
                 flex: '1 1 200px', textAlign: 'left', padding: '9px 12px', borderRadius: 8, cursor: 'pointer',
-                border: `1px solid ${active ? '#15191a' : '#dfe3e4'}`, background: active ? '#f4f7f7' : '#fff',
+                border: `1px solid ${active ? 'var(--k-ink)' : 'var(--k-border)'}`, background: active ? 'var(--k-surface-2)' : '#fff',
               }}
             >
               <div style={{ fontSize: 13, fontWeight: 600 }}>{t.label}</div>
-              <div style={{ fontSize: 11, color: '#6d7577', marginTop: 2 }}>{t.description}</div>
+              <div style={{ fontSize: 11, color: 'var(--k-muted)', marginTop: 2 }}>{t.description}</div>
             </button>
           );
         })}
@@ -53,9 +53,9 @@ export default function RequirementTemplateFields({
         <label key={`${type}-${s.key}`} htmlFor={`rq-${type}-${s.key}`}>
           <span style={{ fontSize: 12, fontWeight: 600, display: 'block' }}>
             {s.title}
-            {s.required ? ' *' : <span style={{ fontWeight: 400, color: '#6d7577' }}> (opcional)</span>}
+            {s.required ? ' *' : <span style={{ fontWeight: 400, color: 'var(--k-muted)' }}> (opcional)</span>}
           </span>
-          <span style={{ fontSize: 11, color: '#6d7577', display: 'block', margin: '2px 0 5px' }}>{s.hint}</span>
+          <span style={{ fontSize: 11, color: 'var(--k-muted)', display: 'block', margin: '2px 0 5px' }}>{s.hint}</span>
           <textarea
             id={`rq-${type}-${s.key}`}
             rows={s.rows ?? 3}
@@ -70,9 +70,9 @@ export default function RequirementTemplateFields({
 
       <label htmlFor={`rq-${type}-criterios`}>
         <span style={{ fontSize: 12, fontWeight: 600, display: 'block' }}>
-          Cómo sabremos que está bien <span style={{ fontWeight: 400, color: '#6d7577' }}>(opcional)</span>
+          Cómo sabremos que está bien <span style={{ fontWeight: 400, color: 'var(--k-muted)' }}>(opcional)</span>
         </span>
-        <span style={{ fontSize: 11, color: '#6d7577', display: 'block', margin: '2px 0 5px' }}>
+        <span style={{ fontSize: 11, color: 'var(--k-muted)', display: 'block', margin: '2px 0 5px' }}>
           Criterios de aceptación: uno por línea.
         </span>
         <textarea

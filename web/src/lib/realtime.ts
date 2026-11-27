@@ -43,6 +43,17 @@ export interface LogsLinesEvent {
   omitidas: number;
 }
 
+/** Resumen de logs cada 30 min (backend: LogDigestService). */
+export interface LogDigestEvent {
+  desde: string;
+  hasta: string;
+  total: number;
+  porNivel: Record<'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | 'FATAL', number>;
+  fuentes: Array<{ nombre: string; total: number; errores: number; avisos: number }>;
+  totalFuentes: number;
+  callados: string[];
+}
+
 export interface DiskAlertEvent {
   usedPct: number;
   threshold: number;
@@ -55,6 +66,7 @@ interface RealtimeEvents {
   'errors:changed': Record<string, never>;
   'logs:lines': LogsLinesEvent;
   'monitoreo:disco': DiskAlertEvent;
+  'logs:resumen': LogDigestEvent;
 }
 
 let socket: Socket | null = null;

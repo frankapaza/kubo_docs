@@ -9,7 +9,7 @@ const KIND_LABEL: Record<DevLinkKind, string> = { BRANCH: 'Rama', COMMIT: 'Commi
 const STATE_STYLE: Record<string, { bg: string; fg: string }> = {
   open: { bg: '#e7f5ec', fg: '#1d6b3a' },
   merged: { bg: '#efe8fb', fg: '#5b3aa0' },
-  closed: { bg: '#f3f4f4', fg: '#6d7577' },
+  closed: { bg: '#f3f4f4', fg: 'var(--k-muted)' },
 };
 
 /**
@@ -31,9 +31,9 @@ export default function CodeLinksPanel({ target }: { target: { ticketId: number 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      {links.isLoading && <span style={{ fontSize: 12, color: '#6d7577' }}>Cargando…</span>}
+      {links.isLoading && <span style={{ fontSize: 12, color: 'var(--k-muted)' }}>Cargando…</span>}
       {!links.isLoading && rows.length === 0 && (
-        <span style={{ fontSize: 12, color: '#6d7577' }}>
+        <span style={{ fontSize: 12, color: 'var(--k-muted)' }}>
           Sin código asociado. Nombra el código en la rama o el commit (p. ej. <code>fix/KB-0210-…</code>).
         </span>
       )}
@@ -42,7 +42,7 @@ export default function CodeLinksPanel({ target }: { target: { ticketId: number 
         const shown = l.kind === 'COMMIT' ? l.ref.slice(0, 7) : l.kind === 'PR' ? `#${l.ref}` : l.ref;
         return (
           <div key={l.id} style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 12 }}>
-            <span style={{ minWidth: 52, color: '#6d7577', fontWeight: 600 }}>{KIND_LABEL[l.kind]}</span>
+            <span style={{ minWidth: 52, color: 'var(--k-muted)', fontWeight: 600 }}>{KIND_LABEL[l.kind]}</span>
             <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {l.url ? (
                 <a href={l.url} target="_blank" rel="noreferrer" style={{ fontFamily: 'ui-monospace, Consolas, monospace' }}>
@@ -51,12 +51,12 @@ export default function CodeLinksPanel({ target }: { target: { ticketId: number 
               ) : (
                 <code>{shown}</code>
               )}
-              {l.title && <span style={{ color: '#4b5355' }}> · {l.title}</span>}
+              {l.title && <span style={{ color: 'var(--k-ink-2)' }}> · {l.title}</span>}
             </span>
             {st && (
               <span style={{ fontSize: 11, padding: '1px 7px', borderRadius: 10, background: st.bg, color: st.fg }}>{l.state}</span>
             )}
-            <span style={{ fontSize: 11, color: '#9aa0a1', whiteSpace: 'nowrap' }}>
+            <span style={{ fontSize: 11, color: 'var(--k-faint)', whiteSpace: 'nowrap' }}>
               {new Date(l.occurredAt).toLocaleDateString('es-PE')}
               {l.authorLogin ? ` · ${l.authorLogin}` : ''}
             </span>

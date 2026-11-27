@@ -23,7 +23,7 @@ function sizeLabel(bytes: number): string {
 }
 
 const smallButton: React.CSSProperties = {
-  fontSize: 11, padding: '3px 8px', borderRadius: 5, border: '1px solid #dfe3e4', background: '#fff', cursor: 'pointer',
+  fontSize: 11, padding: '3px 8px', borderRadius: 5, border: '1px solid var(--k-border)', background: '#fff', cursor: 'pointer',
 };
 
 /**
@@ -82,7 +82,7 @@ export default function WorkItemDocumentsPanel({ workItemId, onChanged }: { work
         </div>
       )}
 
-      {docs.isLoading && <div style={{ fontSize: 12, color: '#6d7577' }}>Cargando…</div>}
+      {docs.isLoading && <div style={{ fontSize: 12, color: 'var(--k-muted)' }}>Cargando…</div>}
       {docs.isError && <div style={{ fontSize: 12, color: 'oklch(0.5 0.16 25)' }}>No se pudieron cargar los documentos.</div>}
 
       {list.map((d) => (
@@ -90,7 +90,7 @@ export default function WorkItemDocumentsPanel({ workItemId, onChanged }: { work
           key={d.id}
           style={{
             display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 6, fontSize: 12,
-            border: `1px solid ${d.status === 'BORRADOR' ? '#f3dca8' : '#eceeef'}`,
+            border: `1px solid ${d.status === 'BORRADOR' ? '#f3dca8' : 'var(--k-border-soft)'}`,
             background: d.status === 'BORRADOR' ? '#fffbf2' : '#fff',
           }}
         >
@@ -98,7 +98,7 @@ export default function WorkItemDocumentsPanel({ workItemId, onChanged }: { work
             <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={d.filename}>
               {d.filename}
             </div>
-            <div style={{ color: '#6d7577', fontSize: 11 }}>
+            <div style={{ color: 'var(--k-muted)', fontSize: 11 }}>
               {d.source === 'CLIENTE' && (
                 <span
                   style={{
@@ -118,7 +118,7 @@ export default function WorkItemDocumentsPanel({ workItemId, onChanged }: { work
             Descargar
           </button>
           {d.status === 'BORRADOR' && (
-            <button type="button" disabled={busy} style={{ ...smallButton, background: '#15191a', color: '#fff', border: 'none' }} onClick={() => approve.mutate(d)}>
+            <button type="button" disabled={busy} style={{ ...smallButton, background: 'var(--k-primary)', color: '#fff', border: 'none' }} onClick={() => approve.mutate(d)}>
               Aprobar
             </button>
           )}
@@ -138,7 +138,7 @@ export default function WorkItemDocumentsPanel({ workItemId, onChanged }: { work
           value={kind}
           onChange={(e) => setKind(e.target.value as WorkItemDocKind)}
           aria-label="Tipo de documento"
-          style={{ fontSize: 12, padding: '5px 8px', border: '1px solid #dfe3e4', borderRadius: 6 }}
+          style={{ fontSize: 12, padding: '5px 8px', border: '1px solid var(--k-border)', borderRadius: 6 }}
         >
           {KINDS.map((k) => (
             <option key={k} value={k}>{WORK_ITEM_DOC_KIND_LABELS[k]}</option>
@@ -147,7 +147,7 @@ export default function WorkItemDocumentsPanel({ workItemId, onChanged }: { work
         <button type="button" disabled={busy} style={{ ...smallButton, fontSize: 12, padding: '5px 10px' }} onClick={() => fileRef.current?.click()}>
           {upload.isPending ? 'Subiendo…' : 'Adjuntar documento'}
         </button>
-        <span style={{ fontSize: 11, color: '#6d7577' }}>PDF, Word (.docx) o imagen · hasta 15 MB</span>
+        <span style={{ fontSize: 11, color: 'var(--k-muted)' }}>PDF, Word (.docx) o imagen · hasta 15 MB</span>
         <input
           ref={fileRef}
           type="file"

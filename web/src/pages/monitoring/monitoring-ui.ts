@@ -13,7 +13,7 @@ export const ERROR_STATUS_STYLES: Record<ErrorGroupStatus, { bg: string; fg: str
 };
 
 export const LEVEL_STYLES: Record<LogLevel, { bg: string; fg: string }> = {
-  DEBUG: { bg: '#eef0f1', fg: '#6d7577' },
+  DEBUG: { bg: 'var(--k-surface-2)', fg: 'var(--k-muted)' },
   INFO: { bg: '#e8f0fe', fg: '#1a56c4' },
   WARN: { bg: '#fff4e0', fg: '#a35c00' },
   ERROR: { bg: '#fdecea', fg: '#b3261e' },

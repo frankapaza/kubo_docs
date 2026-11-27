@@ -23,7 +23,7 @@ interface Props {
 }
 
 const inputStyle: React.CSSProperties = {
-  fontSize: 13, padding: '8px 10px', border: '1px solid #dfe3e4', borderRadius: 6,
+  fontSize: 13, padding: '8px 10px', border: '1px solid var(--k-border)', borderRadius: 6,
   fontFamily: 'inherit', width: '100%', boxSizing: 'border-box',
 };
 const labelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 600, marginBottom: 5, display: 'block' };
@@ -158,7 +158,7 @@ export default function CreateTicketFromErrorDialog({ open, group, onCancel, onC
         <h2 id="create-ticket-error-title" style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Crear ticket desde el error</h2>
 
         {!askSystem && !askClient && !linkFailed && (
-          <span style={{ fontSize: 13, color: '#3a4041', lineHeight: 1.5 }}>
+          <span style={{ fontSize: 13, color: 'var(--k-ink-2)', lineHeight: 1.5 }}>
             Se creará un ticket para <b>{group.clientName}</b> · <b>{group.systemName}</b> con el detalle de este error.
           </span>
         )}
@@ -202,7 +202,7 @@ export default function CreateTicketFromErrorDialog({ open, group, onCancel, onC
               <label htmlFor="err-ticket-system">
                 <span style={labelStyle}>Sistema afectado *</span>
                 {systemsLoaded && systems.length === 0 ? (
-                  <span style={{ fontSize: 12, color: '#6d7577', lineHeight: 1.4 }}>
+                  <span style={{ fontSize: 12, color: 'var(--k-muted)', lineHeight: 1.4 }}>
                     Este cliente no tiene sistemas asignados. El ticket se creará sin clasificar.
                   </span>
                 ) : (
@@ -228,7 +228,7 @@ export default function CreateTicketFromErrorDialog({ open, group, onCancel, onC
             <button
               type="button"
               onClick={dismiss}
-              style={{ fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: '#15191a', color: '#fff', border: 'none', cursor: 'pointer' }}
+              style={{ fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: 'var(--k-primary)', color: '#fff', border: 'none', cursor: 'pointer' }}
             >
               Entendido
             </button>
@@ -238,7 +238,7 @@ export default function CreateTicketFromErrorDialog({ open, group, onCancel, onC
                 type="button"
                 onClick={dismiss}
                 disabled={busy}
-                style={{ fontSize: 13, padding: '9px 14px', borderRadius: 7, background: '#fff', border: '1px solid #d8dcdd', cursor: 'pointer' }}
+                style={{ fontSize: 13, padding: '9px 14px', borderRadius: 7, background: '#fff', border: '1px solid var(--k-border-strong)', cursor: 'pointer' }}
               >
                 Cancelar
               </button>
@@ -246,7 +246,7 @@ export default function CreateTicketFromErrorDialog({ open, group, onCancel, onC
                 type="button"
                 onClick={submit}
                 disabled={!canSubmit}
-                style={{ fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: canSubmit ? '#15191a' : '#c9cdce', color: '#fff', border: 'none', cursor: canSubmit ? 'pointer' : 'not-allowed' }}
+                style={{ fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: canSubmit ? 'var(--k-ink)' : 'var(--k-disabled)', color: '#fff', border: 'none', cursor: canSubmit ? 'pointer' : 'not-allowed' }}
               >
                 {busy ? 'Creando…' : 'Crear ticket'}
               </button>

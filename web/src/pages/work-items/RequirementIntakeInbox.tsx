@@ -5,6 +5,10 @@ import { clientUsersApi } from '../../api/client-users.api';
 import type { Client, WorkItem, WorkItemPriority } from '../../api/types';
 import ClientSystemSelect from '../dev-connector/ClientSystemSelect';
 import RequestDetailDialog from './RequestDetailDialog';
+import { ClientTag } from './client-colors';
+import ChangeClientDialog from '../tickets/ChangeClientDialog';
+import { useAuth } from '../../auth/AuthContext';
+import { toast } from '../../ui/Toast';
 
 export interface RequirementIntakeInboxProps {
   /** Empresas activas, ya cargadas por WorkItemsBoardPage: evita pedirlas dos veces. */
@@ -57,7 +61,7 @@ function fmtAlta(v: string): string {
 }
 
 const inputStyle: React.CSSProperties = {
-  fontSize: 13, padding: '8px 10px', border: '1px solid #dfe3e4', borderRadius: 6,
+  fontSize: 13, padding: '8px 10px', border: '1px solid var(--k-border)', borderRadius: 6,
   fontFamily: 'inherit', width: '100%', boxSizing: 'border-box',
 };
 
@@ -75,13 +79,13 @@ const dialogPanelStyle: React.CSSProperties = {
 
 const cancelButtonStyle: React.CSSProperties = {
   fontSize: 13, padding: '9px 14px', borderRadius: 7, background: '#fff',
-  border: '1px solid #d8dcdd', cursor: 'pointer',
+  border: '1px solid var(--k-border-strong)', cursor: 'pointer',
 };
 
 function confirmButtonStyle(ready: boolean): React.CSSProperties {
   return {
     fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7,
-    background: ready ? '#15191a' : '#c9cdce', color: '#fff', border: 'none',
+    background: ready ? 'var(--k-ink)' : 'var(--k-disabled)', color: '#fff', border: 'none',
     cursor: ready ? 'pointer' : 'not-allowed',
   };
 }
@@ -215,7 +219,7 @@ function AcceptDialog({ item, onCancel, onAccepted }: AcceptDialogProps) {
         <h2 id="accept-wi-dialog-title" style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
           Aceptar {label}
         </h2>
-        <span style={{ fontSize: 12, color: '#6d7577', lineHeight: 1.4 }}>{item.title}</span>
+        <span style={{ fontSize: 12, color: 'var(--k-muted)', lineHeight: 1.4 }}>{item.title}</span>
 
         {error && (
           <div role="alert" style={errorBannerStyle()}>
@@ -253,7 +257,7 @@ function AcceptDialog({ item, onCancel, onAccepted }: AcceptDialogProps) {
             style={inputStyle}
           />
         </label>
-        <span style={{ fontSize: 11, color: '#6d7577', marginTop: -8, lineHeight: 1.5 }}>
+        <span style={{ fontSize: 11, color: 'var(--k-muted)', marginTop: -8, lineHeight: 1.5 }}>
           La fecha se le mostrará al cliente en su portal.
         </span>
 
@@ -371,7 +375,7 @@ function RejectDialog({ item, onCancel, onRejected }: RejectDialogProps) {
         <h2 id="reject-wi-dialog-title" style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
           Rechazar {label}
         </h2>
-        <span style={{ fontSize: 12, color: '#6d7577', lineHeight: 1.4 }}>{item.title}</span>
+        <span style={{ fontSize: 12, color: 'var(--k-muted)', lineHeight: 1.4 }}>{item.title}</span>
 
         {error && (
           <div role="alert" style={errorBannerStyle()}>
@@ -391,7 +395,7 @@ function RejectDialog({ item, onCancel, onRejected }: RejectDialogProps) {
             style={{ ...inputStyle, resize: 'vertical' }}
           />
         </label>
-        <span style={{ fontSize: 11, color: '#6d7577', marginTop: -8, lineHeight: 1.5 }}>
+        <span style={{ fontSize: 11, color: 'var(--k-muted)', marginTop: -8, lineHeight: 1.5 }}>
           El cliente verá este motivo en su portal.
         </span>
 
@@ -468,6 +472,14 @@ export default function RequirementIntakeInbox({
   const [rejectTarget, setRejectTarget] = useState<WorkItem | null>(null);
   const [detailTarget, setDetailTarget] = useState<WorkItem | null>(null);
 
+  // Cambiar de cliente (solo ADMIN, como en tickets): uno desde su fila o
+  // varios marcados a la vez.
+  const { user } = useAuth();
+  const canChangeClient = user?.role === 'ADMIN';
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [moveIds, setMoveIds] = useState<number[] | null>(null);
+  const [moving, setMoving] = useState(false);
+
   const clientsById = useMemo(() => new Map(clients.map((c) => [c.id, c.razonSocial])), [clients]);
 
   const load = () => {
@@ -531,6 +543,45 @@ export default function RequirementIntakeInbox({
 
   const clientLabel = (item: WorkItem): string => clientsById.get(item.clientId) ?? `Cliente #${item.clientId}`;
 
+  const toggle = (id: number) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const allSelected = items.length > 0 && items.every((i) => selected.has(i.id));
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(items.map((i) => i.id)));
+
+  const moveTargets = moveIds ? items.filter((i) => moveIds.includes(i.id)) : [];
+  const moveFromClient = moveTargets.length > 0 && moveTargets.every((i) => i.clientId === moveTargets[0].clientId)
+    ? moveTargets[0].clientId
+    : null;
+
+  /** Uno por uno, con las mismas validaciones que en el detalle; los que fallan quedan marcados. */
+  const changeClient = async (v: { clientId: number; systemId: number | null; clientUserId: number | null }) => {
+    if (!moveIds || moving) return;
+    setMoving(true);
+    const failed: number[] = [];
+    let lastError = '';
+    for (const id of moveIds) {
+      try {
+        await workItemsApi.changeClient(id, { clientId: v.clientId, clientSystemId: v.systemId, clientUserId: v.clientUserId });
+      } catch (e: any) {
+        failed.push(id);
+        lastError = e?.response?.data?.message ?? 'No se pudo cambiar el cliente.';
+      }
+    }
+    setMoving(false);
+    setMoveIds(null);
+    const ok = moveIds.length - failed.length;
+    setSelected(new Set(failed));
+    if (ok > 0) toast.success(ok === 1 ? 'Requerimiento movido al cliente nuevo.' : `${ok} requerimientos movidos al cliente nuevo.`);
+    if (failed.length > 0) toast.error(`${failed.length} no se movieron: ${lastError}`);
+    load();
+    onChanged();
+  };
+
   const handleAccepted = (updated: WorkItem) => {
     setAcceptTarget(null);
     setItems((prev) => prev.filter((i) => i.id !== updated.id));
@@ -571,11 +622,33 @@ export default function RequirementIntakeInbox({
   return (
     <section
       aria-label="Requerimientos solicitados, pendientes de aceptación"
-      style={{ background: '#fff', border: '1px solid #e2e5e6', borderRadius: 10, padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}
+      style={{ background: '#fff', border: '1px solid var(--k-border)', borderRadius: 10, padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Solicitados</h2>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: '#6d7577' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Solicitados</h2>
+          {canChangeClient && selected.size > 0 && (
+            <>
+              <span style={{ fontSize: 12, color: 'var(--k-muted)' }}>{selected.size} marcados</span>
+              <button
+                type="button"
+                disabled={moving}
+                onClick={() => setMoveIds([...selected])}
+                style={{ fontSize: 12, fontWeight: 600, padding: '5px 10px', borderRadius: 6, background: 'var(--k-ink)', color: '#fff', border: 'none', cursor: 'pointer' }}
+              >
+                {moving ? 'Moviendo…' : 'Cambiar cliente'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelected(new Set())}
+                style={{ fontSize: 12, padding: '5px 10px', borderRadius: 6, background: '#fff', border: '1px solid var(--k-border-strong)', cursor: 'pointer' }}
+              >
+                Quitar selección
+              </button>
+            </>
+          )}
+        </div>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: 'var(--k-muted)' }}>
           {items.length}
         </span>
       </div>
@@ -586,19 +659,24 @@ export default function RequirementIntakeInbox({
           <button
             type="button"
             onClick={load}
-            style={{ fontSize: 12, padding: '5px 10px', borderRadius: 6, border: '1px solid #d8dcdd', background: '#fff', cursor: 'pointer' }}
+            style={{ fontSize: 12, padding: '5px 10px', borderRadius: 6, border: '1px solid var(--k-border-strong)', background: '#fff', cursor: 'pointer' }}
           >
             Reintentar
           </button>
         </div>
       )}
 
-      {loading && <div style={{ fontSize: 13, color: '#6d7577' }}>Cargando…</div>}
+      {loading && <div style={{ fontSize: 13, color: 'var(--k-muted)' }}>Cargando…</div>}
 
       {!loading && items.length > 0 && (
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
-            <tr style={{ textAlign: 'left', color: '#6d7577', fontSize: 11, fontWeight: 600 }}>
+            <tr style={{ textAlign: 'left', color: 'var(--k-muted)', fontSize: 11, fontWeight: 600 }}>
+              {canChangeClient && (
+                <th style={{ padding: '6px 8px', width: 28 }}>
+                  <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Marcar todos" />
+                </th>
+              )}
               <th style={{ padding: '6px 8px' }}>Código</th>
               <th style={{ padding: '6px 8px' }}>Título</th>
               <th style={{ padding: '6px 8px' }}>Empresa</th>
@@ -609,7 +687,17 @@ export default function RequirementIntakeInbox({
           </thead>
           <tbody>
             {items.map((item) => (
-              <tr key={item.id} style={{ borderTop: '1px solid #eceeef' }}>
+              <tr key={item.id} style={{ borderTop: '1px solid var(--k-border-soft)', background: selected.has(item.id) ? 'var(--k-surface-2)' : undefined }}>
+                {canChangeClient && (
+                  <td style={{ padding: '8px' }}>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(item.id)}
+                      onChange={() => toggle(item.id)}
+                      aria-label={`Marcar ${item.code ?? `requerimiento #${item.id}`}`}
+                    />
+                  </td>
+                )}
                 <td style={{ padding: '8px', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12 }}>
                   {item.code ?? `#${item.id}`}
                 </td>
@@ -619,7 +707,7 @@ export default function RequirementIntakeInbox({
                       type="button"
                       onClick={() => onOpen(item)}
                       title="Ver el detalle, los documentos y redactar la especificación"
-                      style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', fontWeight: 500, color: '#15191a', cursor: 'pointer', textAlign: 'left', textDecoration: 'underline', textDecorationColor: '#c9cdce', textUnderlineOffset: 3 }}
+                      style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', fontWeight: 500, color: 'var(--k-ink)', cursor: 'pointer', textAlign: 'left', textDecoration: 'underline', textDecorationColor: 'var(--k-disabled)', textUnderlineOffset: 3 }}
                     >
                       {item.title}
                     </button>
@@ -632,9 +720,23 @@ export default function RequirementIntakeInbox({
                     </span>
                   )}
                 </td>
-                <td style={{ padding: '8px' }}>{clientLabel(item)}</td>
+                <td style={{ padding: '8px' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <ClientTag clientId={item.clientId} name={clientLabel(item)} />
+                    {canChangeClient && (
+                      <button
+                        type="button"
+                        onClick={() => setMoveIds([item.id])}
+                        title="Pasar este requerimiento a otro cliente"
+                        style={{ fontSize: 11, padding: 0, background: 'none', border: 'none', color: 'var(--k-primary)', cursor: 'pointer', textDecoration: 'underline', textUnderlineOffset: 2 }}
+                      >
+                        Cambiar
+                      </button>
+                    )}
+                  </span>
+                </td>
                 <td style={{ padding: '8px' }}>{requesterLabel(item)}</td>
-                <td style={{ padding: '8px', color: '#6d7577' }}>{fmtAlta(item.createdAt)}</td>
+                <td style={{ padding: '8px', color: 'var(--k-muted)' }}>{fmtAlta(item.createdAt)}</td>
                 <td style={{ padding: '8px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                   <button
                     type="button"
@@ -642,7 +744,7 @@ export default function RequirementIntakeInbox({
                     aria-label={`Aceptar ${item.code ?? `requerimiento #${item.id}`}`}
                     style={{
                       fontSize: 12, fontWeight: 600, padding: '6px 11px', borderRadius: 6,
-                      background: '#15191a', color: '#fff', border: 'none', cursor: 'pointer', marginRight: 6,
+                      background: 'var(--k-primary)', color: '#fff', border: 'none', cursor: 'pointer', marginRight: 6,
                     }}
                   >
                     Aceptar
@@ -653,7 +755,7 @@ export default function RequirementIntakeInbox({
                     aria-label={`Pedir más detalle de ${item.code ?? `requerimiento #${item.id}`}`}
                     style={{
                       fontSize: 12, fontWeight: 500, padding: '6px 11px', borderRadius: 6, marginRight: 6,
-                      background: '#fff', color: '#3a4041', border: '1px solid #d8dcdd', cursor: 'pointer',
+                      background: '#fff', color: 'var(--k-ink-2)', border: '1px solid var(--k-border-strong)', cursor: 'pointer',
                     }}
                   >
                     {item.status === 'FALTA_INFO' ? 'Preguntar otra vez' : 'Pedir detalle'}
@@ -664,7 +766,7 @@ export default function RequirementIntakeInbox({
                     aria-label={`Rechazar ${item.code ?? `requerimiento #${item.id}`}`}
                     style={{
                       fontSize: 12, fontWeight: 500, padding: '6px 11px', borderRadius: 6,
-                      background: '#fff', color: '#3a4041', border: '1px solid #d8dcdd', cursor: 'pointer',
+                      background: '#fff', color: 'var(--k-ink-2)', border: '1px solid var(--k-border-strong)', cursor: 'pointer',
                     }}
                   >
                     Rechazar
@@ -678,6 +780,14 @@ export default function RequirementIntakeInbox({
 
       <AcceptDialog item={acceptTarget} onCancel={() => setAcceptTarget(null)} onAccepted={handleAccepted} />
       <RejectDialog item={rejectTarget} onCancel={() => setRejectTarget(null)} onRejected={handleRejected} />
+      <ChangeClientDialog
+        open={moveIds !== null}
+        kind="requerimiento"
+        count={moveIds?.length ?? 1}
+        currentClientId={moveFromClient}
+        onCancel={() => { if (!moving) setMoveIds(null); }}
+        onConfirm={changeClient}
+      />
       <RequestDetailDialog item={detailTarget} onCancel={() => setDetailTarget(null)} onDone={handleDetailRequested} />
     </section>
   );

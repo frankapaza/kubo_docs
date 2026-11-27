@@ -11,6 +11,7 @@ import { LokiClient } from '../loki/loki.client';
 import { IngestController } from './ingest.controller';
 import { IngestRateLimiter, INGEST_MAX_BATCHES_PER_WINDOW } from './ingest-rate-limiter';
 import { IngestService } from './ingest.service';
+import { LogDigestService } from '../log-digest.service';
 import { InstallationKeyGuard } from './installation-key.guard';
 import { RecentBatches } from './recent-batches';
 
@@ -69,6 +70,7 @@ describe('POST /ingest/logs (integración HTTP)', () => {
         { provide: ErrorGroupsService, useValue: { recordOccurrences: jest.fn().mockResolvedValue(undefined) } },
         { provide: ClientsRepository, useValue: { findByRuc: jest.fn().mockResolvedValue(null) } },
         { provide: TicketsRealtimeGateway, useValue: { publishLogLines: jest.fn() } },
+        { provide: LogDigestService, useValue: { record: jest.fn() } },
       ],
     }).compile();
     limiter = moduleRef.get(IngestRateLimiter);

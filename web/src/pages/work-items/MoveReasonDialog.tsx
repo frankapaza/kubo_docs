@@ -65,7 +65,7 @@ export default function MoveReasonDialog({ open, toStatus, onCancel, onConfirm }
         <h2 id="move-reason-dialog-title" style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
           Mover a {statusLabel}
         </h2>
-        <span style={{ fontSize: 12, color: '#6d7577', lineHeight: 1.5 }}>
+        <span style={{ fontSize: 12, color: 'var(--k-muted)', lineHeight: 1.5 }}>
           Este destino exige un motivo: sin él, el movimiento no se puede registrar.
         </span>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }} htmlFor="move-reason-textarea">
@@ -77,7 +77,7 @@ export default function MoveReasonDialog({ open, toStatus, onCancel, onConfirm }
             autoFocus
             onChange={(e) => setReason(e.target.value)}
             style={{
-              fontSize: 13, padding: 9, border: '1px solid #dfe3e4', borderRadius: 6,
+              fontSize: 13, padding: 9, border: '1px solid var(--k-border)', borderRadius: 6,
               resize: 'vertical', fontFamily: 'inherit',
             }}
           />
@@ -88,7 +88,7 @@ export default function MoveReasonDialog({ open, toStatus, onCancel, onConfirm }
             onClick={onCancel}
             style={{
               fontSize: 13, padding: '9px 14px', borderRadius: 7, background: '#fff',
-              border: '1px solid #d8dcdd', cursor: 'pointer',
+              border: '1px solid var(--k-border-strong)', cursor: 'pointer',
             }}
           >
             Cancelar
@@ -99,7 +99,7 @@ export default function MoveReasonDialog({ open, toStatus, onCancel, onConfirm }
             onClick={() => onConfirm(reason.trim())}
             style={{
               fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7,
-              background: ready ? '#15191a' : '#c9cdce', color: '#fff', border: 'none',
+              background: ready ? 'var(--k-ink)' : 'var(--k-disabled)', color: '#fff', border: 'none',
               cursor: ready ? 'pointer' : 'not-allowed',
             }}
           >

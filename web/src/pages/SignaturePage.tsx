@@ -84,7 +84,7 @@ export default function SignaturePage() {
         {/* Header */}
         <div className="bg-white rounded-xl shadow-sm p-6 border border-slate-200">
           <div className="flex items-start gap-4">
-            <div className="w-10 h-10 rounded-lg bg-indigo-600 flex items-center justify-center flex-shrink-0">
+            <div className="w-10 h-10 rounded-lg bg-cyan-600 flex items-center justify-center flex-shrink-0">
               <span className="text-white text-lg font-bold">K</span>
             </div>
             <div>
@@ -120,7 +120,7 @@ export default function SignaturePage() {
           <button
             onClick={() => confirm.mutate()}
             disabled={confirm.isPending}
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold text-sm transition"
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg bg-cyan-600 hover:bg-cyan-700 disabled:opacity-60 text-white font-semibold text-sm transition"
           >
             {confirm.isPending ? 'Registrando…' : '✍️ Confirmar y firmar documento'}
           </button>

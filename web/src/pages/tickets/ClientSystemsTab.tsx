@@ -150,7 +150,7 @@ export default function ClientSystemsTab({ clientId }: { clientId: number }) {
     padding: '5px 10px',
     borderRadius: 5,
     background: '#fff',
-    border: '1px solid #d8dcdd',
+    border: '1px solid var(--k-border-strong)',
     cursor: busy ? 'not-allowed' : 'pointer',
   };
 
@@ -163,7 +163,7 @@ export default function ClientSystemsTab({ clientId }: { clientId: number }) {
             onChange={(e) => setSelected(e.target.value ? Number(e.target.value) : '')}
             aria-label="Sistema del catálogo a asignar"
             disabled={busy || assignable.length === 0}
-            style={{ flex: 1, fontSize: 13, padding: '8px 10px', border: '1px solid #dfe3e4', borderRadius: 6, background: '#fff' }}
+            style={{ flex: 1, fontSize: 13, padding: '8px 10px', border: '1px solid var(--k-border)', borderRadius: 6, background: '#fff' }}
           >
             <option value="">
               {assignable.length === 0
@@ -185,7 +185,7 @@ export default function ClientSystemsTab({ clientId }: { clientId: number }) {
               fontWeight: 600,
               padding: '8px 14px',
               borderRadius: 6,
-              background: busy || selected === '' ? '#c9cdce' : '#15191a',
+              background: busy || selected === '' ? 'var(--k-disabled)' : 'var(--k-primary)',
               color: '#fff',
               border: 'none',
               cursor: busy || selected === '' ? 'not-allowed' : 'pointer',
@@ -202,7 +202,7 @@ export default function ClientSystemsTab({ clientId }: { clientId: number }) {
         </span>
       )}
 
-      {loading && <span style={{ fontSize: 12, color: '#6d7577' }}>Cargando…</span>}
+      {loading && <span style={{ fontSize: 12, color: 'var(--k-muted)' }}>Cargando…</span>}
       {loadError && (
         <span role="alert" style={{ fontSize: 12, color: 'oklch(0.5 0.16 25)' }}>
           {loadError}
@@ -210,7 +210,7 @@ export default function ClientSystemsTab({ clientId }: { clientId: number }) {
       )}
 
       {!loading && !loadError && systems.length === 0 && (
-        <span style={{ fontSize: 12, color: '#6d7577' }}>
+        <span style={{ fontSize: 12, color: 'var(--k-muted)' }}>
           Este cliente no tiene sistemas asignados. Sus tickets se podrán crear igualmente, pero
           quedarán sin clasificar: no se podrán agrupar por sistema ni en la bandeja ni en su
           informe mensual.
@@ -220,11 +220,11 @@ export default function ClientSystemsTab({ clientId }: { clientId: number }) {
       {!loading &&
         !loadError &&
         systems.map((s) => (
-          <div key={s.id} style={{ borderBottom: '1px solid #f1f3f3' }}>
+          <div key={s.id} style={{ borderBottom: '1px solid var(--k-border-soft)' }}>
           <div
             style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 0' }}
           >
-            <span style={{ flex: 1, fontSize: 13, color: s.isActive ? '#15191a' : '#9aa0a1' }}>
+            <span style={{ flex: 1, fontSize: 13, color: s.isActive ? 'var(--k-ink)' : 'var(--k-faint)' }}>
               {s.name}
               {!s.isActive && ' (inactivo)'}
             </span>

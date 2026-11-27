@@ -10,12 +10,14 @@ interface Props {
   currentClientId: number | null;
   /** Cuántos tickets se mueven a la vez (selección en la bandeja). Por defecto, 1. */
   count?: number;
+  /** Qué se mueve. Por defecto, tickets. */
+  kind?: 'ticket' | 'requerimiento';
   onCancel: () => void;
   onConfirm: (v: { clientId: number; systemId: number | null; clientUserId: number | null }) => void;
 }
 
 const selectStyle: React.CSSProperties = {
-  fontSize: 13, padding: '8px 10px', border: '1px solid #dfe3e4', borderRadius: 6, width: '100%', boxSizing: 'border-box',
+  fontSize: 13, padding: '8px 10px', border: '1px solid var(--k-border)', borderRadius: 6, width: '100%', boxSizing: 'border-box',
 };
 const labelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 5 };
 
@@ -24,7 +26,16 @@ const labelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 600, display
  * cliente nuevo tiene alguno activo; el usuario es a quien le llegarán los
  * avisos del ticket por correo (puede quedar en «ninguno»).
  */
-export default function ChangeClientDialog({ open, currentClientId, count = 1, onCancel, onConfirm }: Props) {
+const NOUNS = {
+  ticket: { one: 'ticket', many: 'tickets', the: 'El ticket', each: 'Cada ticket' },
+  requerimiento: { one: 'requerimiento', many: 'requerimientos', the: 'El requerimiento', each: 'Cada requerimiento' },
+};
+
+export default function ChangeClientDialog({ open, currentClientId, count = 1, kind = 'ticket', onCancel, onConfirm }: Props) {
+  const noun = NOUNS[kind];
+  // En tickets el sistema es obligatorio si el cliente tiene alguno; un
+  // requerimiento puede quedarse sin sistema hasta que se acepte.
+  const systemOptional = kind === 'requerimiento';
   const [clientId, setClientId] = useState<number | ''>('');
   const [systemId, setSystemId] = useState<number | ''>('');
   const [clientUserId, setClientUserId] = useState<number | ''>('');
@@ -62,7 +73,7 @@ export default function ChangeClientDialog({ open, currentClientId, count = 1, o
   const activeSystems = (systems.data ?? []).filter((s) => Number(s.isActive) === 1);
   const activeUsers = (users.data ?? []).filter((u) => u.isActive);
   const needsSystem = activeSystems.length > 0;
-  const ready = clientId !== '' && Number(clientId) !== Number(currentClientId) && (!needsSystem || systemId !== '');
+  const ready = clientId !== '' && Number(clientId) !== Number(currentClientId) && (!needsSystem || systemOptional || systemId !== '');
 
   const pickClient = (v: string) => {
     setClientId(v ? Number(v) : '');
@@ -83,7 +94,7 @@ export default function ChangeClientDialog({ open, currentClientId, count = 1, o
         style={{ background: '#fff', borderRadius: 10, padding: 22, width: 480, maxWidth: '92vw', display: 'flex', flexDirection: 'column', gap: 14 }}
       >
         <h2 id="client-dialog-title" style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
-          {count > 1 ? `Cambiar cliente de ${count} tickets` : 'Cambiar cliente'}
+          {count > 1 ? `Cambiar cliente de ${count} ${noun.many}` : 'Cambiar cliente'}
         </h2>
 
         <label htmlFor="change-client">
@@ -109,7 +120,7 @@ export default function ChangeClientDialog({ open, currentClientId, count = 1, o
                 onChange={(e) => setSystemId(e.target.value ? Number(e.target.value) : '')}
                 style={selectStyle}
               >
-                <option value="">{needsSystem ? 'Elige el sistema…' : '—'}</option>
+                <option value="">{!needsSystem ? '—' : systemOptional ? 'Sin sistema (se elige al aceptar)' : 'Elige el sistema…'}</option>
                 {activeSystems.map((s) => (
                   <option key={s.id} value={s.id}>{s.name}</option>
                 ))}
@@ -117,7 +128,7 @@ export default function ChangeClientDialog({ open, currentClientId, count = 1, o
             </label>
 
             <label htmlFor="change-client-user">
-              <span style={labelStyle}>Usuario del cliente que recibe los avisos</span>
+              <span style={labelStyle}>{kind === 'requerimiento' ? 'Usuario del cliente que lo pidió (recibe los avisos)' : 'Usuario del cliente que recibe los avisos'}</span>
               <select
                 id="change-client-user"
                 value={clientUserId}
@@ -133,14 +144,14 @@ export default function ChangeClientDialog({ open, currentClientId, count = 1, o
           </>
         )}
 
-        <p style={{ margin: 0, fontSize: 12, color: '#6d7577', lineHeight: 1.5 }}>
-          {count > 1 ? 'Cada ticket' : 'El ticket'} conserva su código, estado, conversación y SLA. Deja de verse en el portal del cliente anterior y
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--k-muted)', lineHeight: 1.5 }}>
+          {count > 1 ? noun.each : noun.the} conserva su código, estado y {kind === 'requerimiento' ? 'documentos' : 'conversación y SLA'}. Deja de verse en el portal del cliente anterior y
           pasa a verse en el del nuevo. Si tenía un proyecto del cliente anterior, se suelta.
         </p>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button type="button" onClick={onCancel}
-            style={{ fontSize: 13, padding: '8px 14px', borderRadius: 6, border: '1px solid #d8dcdd', background: '#fff', cursor: 'pointer' }}>
+            style={{ fontSize: 13, padding: '8px 14px', borderRadius: 6, border: '1px solid var(--k-border-strong)', background: '#fff', cursor: 'pointer' }}>
             Cancelar
           </button>
           <button
@@ -156,10 +167,10 @@ export default function ChangeClientDialog({ open, currentClientId, count = 1, o
             }
             style={{
               fontSize: 13, fontWeight: 600, padding: '8px 14px', borderRadius: 6, border: 'none',
-              background: ready ? '#15191a' : '#c9cdce', color: '#fff', cursor: ready ? 'pointer' : 'not-allowed',
+              background: ready ? 'var(--k-ink)' : 'var(--k-disabled)', color: '#fff', cursor: ready ? 'pointer' : 'not-allowed',
             }}
           >
-            {count > 1 ? `Mover ${count} tickets` : 'Mover ticket'}
+            {count > 1 ? `Mover ${count} ${noun.many}` : `Mover ${noun.one}`}
           </button>
         </div>
       </div>

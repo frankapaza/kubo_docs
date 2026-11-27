@@ -19,7 +19,7 @@ const PRIORITIES: WorkItemPriority[] = ['ALTA', 'MEDIA', 'BAJA'];
 const inputStyle: React.CSSProperties = {
   fontSize: 13,
   padding: '8px 10px',
-  border: '1px solid #dfe3e4',
+  border: '1px solid var(--k-border)',
   borderRadius: 6,
   fontFamily: 'inherit',
   width: '100%',
@@ -228,7 +228,7 @@ export default function NewWorkItemDialog({ open, onCancel, onCreated }: NewWork
           onCriteriaChange={setCriteria}
           disabled={busy}
         />
-        <span style={{ fontSize: 11, color: '#6d7577', marginTop: -8 }}>
+        <span style={{ fontSize: 11, color: 'var(--k-muted)', marginTop: -8 }}>
           Aquí ninguna sección es obligatoria; en el portal el cliente sí debe completar las marcadas con *.
         </span>
 
@@ -273,17 +273,17 @@ export default function NewWorkItemDialog({ open, onCancel, onCreated }: NewWork
             style={inputStyle}
           />
         </label>
-        <span style={{ fontSize: 11, color: '#6d7577', marginTop: -10, lineHeight: 1.5 }}>
+        <span style={{ fontSize: 11, color: 'var(--k-muted)', marginTop: -10, lineHeight: 1.5 }}>
           Es un objetivo que se propone el equipo, no un compromiso de SLA con el cliente: a diferencia de
           un ticket, este requerimiento no trae un reloj contractual corriendo.
         </span>
 
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', borderTop: '1px solid #eceeef', paddingTop: 14 }}>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', borderTop: '1px solid var(--k-border-soft)', paddingTop: 14 }}>
           <button
             type="button"
             onClick={onCancel}
             disabled={busy}
-            style={{ fontSize: 13, padding: '9px 14px', borderRadius: 7, background: '#fff', border: '1px solid #d8dcdd', cursor: 'pointer' }}
+            style={{ fontSize: 13, padding: '9px 14px', borderRadius: 7, background: '#fff', border: '1px solid var(--k-border-strong)', cursor: 'pointer' }}
           >
             Cancelar
           </button>
@@ -293,7 +293,7 @@ export default function NewWorkItemDialog({ open, onCancel, onCreated }: NewWork
             onClick={submit}
             style={{
               fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7,
-              background: busy || !ready ? '#c9cdce' : '#15191a', color: '#fff', border: 'none',
+              background: busy || !ready ? 'var(--k-disabled)' : 'var(--k-primary)', color: '#fff', border: 'none',
               cursor: busy || !ready ? 'not-allowed' : 'pointer',
             }}
           >

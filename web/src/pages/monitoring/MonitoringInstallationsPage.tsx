@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useAuth } from '../../auth/AuthContext';
@@ -17,6 +17,8 @@ import { clientSystemsApi, systemsApi } from '../../api/tickets.api';
 import type { Client, ClientSystem, System } from '../../api/types';
 import { askConfirm } from '../../ui/ConfirmDialog';
 import { toast } from '../../ui/Toast';
+import { ClientTag } from '../work-items/client-colors';
+import AppenderManualDialog from './AppenderManualDialog';
 import InstallationKeyDialog from './InstallationKeyDialog';
 import { fmtDateTime } from './monitoring-ui';
 
@@ -24,17 +26,17 @@ type ApiError = { response?: { data?: { message?: string } } };
 const apiMessage = (e: unknown, fallback: string) => (e as ApiError).response?.data?.message ?? fallback;
 
 const inputStyle: React.CSSProperties = {
-  fontSize: 13, padding: '8px 10px', border: '1px solid #dfe3e4', borderRadius: 6,
+  fontSize: 13, padding: '8px 10px', border: '1px solid var(--k-border)', borderRadius: 6,
   fontFamily: 'inherit', width: '100%', boxSizing: 'border-box',
 };
 const labelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 600, marginBottom: 5, display: 'block' };
-const btn: React.CSSProperties = { fontSize: 12, padding: '6px 10px', borderRadius: 6, background: '#fff', border: '1px solid #d8dcdd', cursor: 'pointer' };
-const btnPrimary: React.CSSProperties = { fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: '#15191a', color: '#fff', border: 'none', cursor: 'pointer' };
+const btn: React.CSSProperties = { fontSize: 12, padding: '6px 10px', borderRadius: 6, background: '#fff', border: '1px solid var(--k-border-strong)', cursor: 'pointer' };
+const btnPrimary: React.CSSProperties = { fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: 'var(--k-primary)', color: '#fff', border: 'none', cursor: 'pointer' };
 
 const KEY_STYLES: Record<KeyStatus, { bg: string; fg: string; label: string }> = {
   ACTIVA: { bg: '#e6f4ea', fg: '#1e7a3c', label: 'Activa' },
   REVOCADA: { bg: '#fdecea', fg: '#b3261e', label: 'Revocada' },
-  SIN_CLAVE: { bg: '#eef0f1', fg: '#6d7577', label: 'Sin clave' },
+  SIN_CLAVE: { bg: 'var(--k-surface-2)', fg: 'var(--k-muted)', label: 'Sin clave' },
 };
 
 /** La URL que se pega en log4net.config: sale del origen actual para valer en cualquier entorno. */
@@ -58,6 +60,9 @@ function InstallationsAdmin() {
   // La clave en claro se guarda solo aquí (estado de React), jamás en la caché de react-query.
   const [issued, setIssued] = useState<IssuedKey | null>(null);
   const [creating, setCreating] = useState(false);
+  const [showManual, setShowManual] = useState(false);
+  /** '' = todas; 'c:<id>' = un cliente; 'interna' = las internas de Kubo. */
+  const [clientFilter, setClientFilter] = useState('');
   const [downloading, setDownloading] = useState(false);
   // Filas con una emisión de clave en curso. Sin esto, un doble clic emite dos
   // claves y el diálogo puede quedarse con la primera, que el servidor ya
@@ -74,6 +79,28 @@ function InstallationsAdmin() {
   const installations = useQuery({ queryKey: ['monitoring', 'installations'], queryFn: monitoringApi.listInstallations });
   const disk = useQuery({ queryKey: ['monitoring', 'disk'], queryFn: monitoringApi.disk, refetchInterval: 5 * 60_000 });
   const manual = useQuery({ queryKey: ['monitoring', 'manual'], queryFn: monitoringApi.manual, staleTime: 10 * 60_000 });
+
+  const groupKey = (i: InstallationView) => (i.kind === 'CLIENTE' && i.clientId !== null ? `c:${i.clientId}` : 'interna');
+  const groupName = (i: InstallationView) => (i.kind === 'CLIENTE' ? i.clientName ?? 'Cliente' : 'Interno (Kubo)');
+  const clientOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const i of installations.data ?? []) m.set(groupKey(i), groupName(i));
+    return [...m.entries()].sort(([, a], [, b]) => a.localeCompare(b, 'es'));
+  }, [installations.data]);
+  // Agrupadas por cliente (las internas al final), y dentro por sistema.
+  const groups = useMemo(() => {
+    const m = new Map<string, { key: string; name: string; clientId: number | null; rows: InstallationView[] }>();
+    for (const i of installations.data ?? []) {
+      const key = groupKey(i);
+      if (clientFilter && key !== clientFilter) continue;
+      const g = m.get(key) ?? { key, name: groupName(i), clientId: key === 'interna' ? null : i.clientId, rows: [] };
+      g.rows.push(i);
+      m.set(key, g);
+    }
+    return [...m.values()]
+      .sort((a, b) => (a.clientId === null ? 1 : 0) - (b.clientId === null ? 1 : 0) || a.name.localeCompare(b.name, 'es'))
+      .map((g) => ({ ...g, rows: g.rows.sort((a, b) => (a.systemName ?? a.displayName).localeCompare(b.systemName ?? b.displayName, 'es')) }));
+  }, [installations.data, clientFilter]);
 
   const reload = () => queryClient.invalidateQueries({ queryKey: ['monitoring', 'installations'] });
 
@@ -157,6 +184,7 @@ function InstallationsAdmin() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <h1 className="text-xl font-semibold text-slate-900">Instalaciones de monitoreo</h1>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" style={btn} onClick={() => setShowManual(true)}>Manual de implementación</button>
           <button type="button" style={btn} onClick={download} disabled={downloading || !version}>
             {downloading ? 'Descargando…' : `Descargar appender${version ? ` v${version}` : ''}`}
           </button>
@@ -177,39 +205,65 @@ function InstallationsAdmin() {
         <button type="button" style={btn} onClick={copyUrl}>Copiar</button>
       </div>
 
-      {installations.isLoading && <div style={{ fontSize: 13, color: '#6d7577' }}>Cargando…</div>}
+      {clientOptions.length > 1 && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <select
+            value={clientFilter}
+            onChange={(e) => setClientFilter(e.target.value)}
+            aria-label="Filtrar por cliente"
+            style={{ ...inputStyle, width: 'auto', minWidth: 220 }}
+          >
+            <option value="">Todos los clientes</option>
+            {clientOptions.map(([k, n]) => <option key={k} value={k}>{n}</option>)}
+          </select>
+          {clientFilter && <button type="button" style={btn} onClick={() => setClientFilter('')}>Quitar filtro</button>}
+        </div>
+      )}
+
+      {installations.isLoading && <div style={{ fontSize: 13, color: 'var(--k-muted)' }}>Cargando…</div>}
       {installations.error && <div role="alert" style={{ fontSize: 13, color: '#b3261e' }}>No se pudieron cargar las instalaciones.</div>}
 
       {installations.data && (
         installations.data.length === 0 ? (
-          <div style={{ fontSize: 13, color: '#6d7577' }}>Aún no hay instalaciones. Crea la primera con «Nueva instalación».</div>
+          <div style={{ fontSize: 13, color: 'var(--k-muted)' }}>Aún no hay instalaciones. Crea la primera con «Nueva instalación».</div>
         ) : (
           <div style={{ overflowX: 'auto', border: '1px solid #e6e9ea', borderRadius: 8 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
-                <tr style={{ textAlign: 'left', background: '#f7f8f8', color: '#6d7577', fontSize: 12 }}>
+                <tr style={{ textAlign: 'left', background: '#f7f8f8', color: 'var(--k-muted)', fontSize: 12 }}>
                   {['Instalación', 'Último envío', 'Aplicativos y servidores', 'Clave', 'Nivel mínimo', ''].map((h, n) => (
                     <th key={n} style={{ padding: '8px 10px', fontWeight: 600 }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {installations.data.map((i) => {
+                {groups.map((g) => [
+                  <tr key={`h-${g.key}`} style={{ borderTop: '1px solid var(--k-border)', background: 'var(--k-surface-2)' }}>
+                    <td colSpan={6} style={{ padding: '8px 10px' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        {g.clientId !== null ? <ClientTag clientId={g.clientId} name={g.name} /> : <strong style={{ fontSize: 12 }}>{g.name}</strong>}
+                        <span style={{ fontSize: 12, color: 'var(--k-muted)' }}>
+                          {g.rows.length} {g.rows.length === 1 ? 'instalación' : 'instalaciones'}
+                        </span>
+                      </span>
+                    </td>
+                  </tr>,
+                  ...g.rows.map((i) => {
                   const ks = KEY_STYLES[i.keyStatus];
                   return (
-                    <tr key={i.id} style={{ borderTop: '1px solid #eef0f1', verticalAlign: 'top' }}>
+                    <tr key={i.id} style={{ borderTop: '1px solid var(--k-surface-2)', verticalAlign: 'top' }}>
                       <td style={{ padding: '8px 10px' }}>
-                        <div style={{ fontWeight: 600 }}>{i.kind === 'CLIENTE' ? i.clientName : i.displayName}</div>
-                        <div style={{ fontSize: 12, color: '#6d7577' }}>
-                          {i.kind === 'CLIENTE' ? i.systemName : `Interna${i.systemName ? ` · ${i.systemName}` : ''}`}
-                        </div>
+                        <div style={{ fontWeight: 600 }}>{i.kind === 'CLIENTE' ? i.systemName ?? i.displayName : i.displayName}</div>
+                        {i.kind !== 'CLIENTE' && i.systemName && (
+                          <div style={{ fontSize: 12, color: 'var(--k-muted)' }}>{i.systemName}</div>
+                        )}
                       </td>
                       <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>{fmtDateTime(i.lastSeenAt)}</td>
                       <td style={{ padding: '8px 10px' }}>
                         {i.sources.length === 0 ? '—' : i.sources.map((s) => (
                           <div key={`${s.aplicativo}|${s.servidor}`} style={{ fontSize: 12 }}>
                             {s.aplicativo} · {s.servidor}
-                            {s.appenderVersion && <span style={{ color: '#6d7577' }}> (v{s.appenderVersion})</span>}
+                            {s.appenderVersion && <span style={{ color: 'var(--k-muted)' }}> (v{s.appenderVersion})</span>}
                           </div>
                         ))}
                       </td>
@@ -245,27 +299,21 @@ function InstallationsAdmin() {
                       </td>
                     </tr>
                   );
-                })}
+                  }),
+                ])}
               </tbody>
             </table>
           </div>
         )
       )}
 
-      <section>
-        <h2 style={{ fontSize: 15, fontWeight: 600, margin: '0 0 8px' }}>Manual de implementación</h2>
-        {manual.isLoading && <div style={{ fontSize: 13, color: '#6d7577' }}>Cargando…</div>}
-        {manual.error && <div role="alert" style={{ fontSize: 13, color: '#b3261e' }}>No se pudo cargar el manual.</div>}
-        {manual.data && (
-          // sandbox vacío: sin scripts ni mismo origen. El manual es HTML generado y se trata como no confiable.
-          <iframe
-            title="Manual de implementación del appender"
-            sandbox=""
-            srcDoc={manual.data.html}
-            style={{ width: '100%', height: 640, border: '1px solid #e6e9ea', borderRadius: 8, background: '#fff' }}
-          />
-        )}
-      </section>
+      <AppenderManualDialog
+        open={showManual}
+        manual={manual.data}
+        loading={manual.isLoading}
+        failed={!!manual.error}
+        onClose={() => setShowManual(false)}
+      />
 
       <NewInstallationDialog
         open={creating}
@@ -371,7 +419,7 @@ function NewInstallationDialog({ open, onCancel, onCreated }: {
             </label>
             {clientId !== '' && (
               assignments !== null && assignments.length === 0 ? (
-                <span style={{ fontSize: 12, color: '#6d7577', lineHeight: 1.4 }}>
+                <span style={{ fontSize: 12, color: 'var(--k-muted)', lineHeight: 1.4 }}>
                   Este cliente no tiene sistemas del catálogo asignados y activos. Asígnalos primero en la ficha del cliente.
                 </span>
               ) : (
@@ -411,7 +459,7 @@ function NewInstallationDialog({ open, onCancel, onCreated }: {
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button type="button" style={{ ...btn, padding: '9px 14px', fontSize: 13 }} onClick={onCancel} disabled={busy}>Cancelar</button>
-          <button type="button" style={{ ...btnPrimary, background: canSubmit ? '#15191a' : '#c9cdce', cursor: canSubmit ? 'pointer' : 'not-allowed' }} onClick={submit} disabled={!canSubmit}>
+          <button type="button" style={{ ...btnPrimary, background: canSubmit ? 'var(--k-ink)' : 'var(--k-disabled)', cursor: canSubmit ? 'pointer' : 'not-allowed' }} onClick={submit} disabled={!canSubmit}>
             {busy ? 'Creando…' : 'Crear y ver clave'}
           </button>
         </div>

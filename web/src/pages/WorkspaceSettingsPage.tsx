@@ -633,10 +633,10 @@ export default function WorkspaceSettingsPage() {
           </CardBody>
         </Card>
 
-        <Card className="mt-4 border-2 border-indigo-100 bg-indigo-50/30">
+        <Card className="mt-4 border-2 border-cyan-100 bg-cyan-50/30">
           <CardBody>
             <div className="flex items-start gap-3">
-              <CheckIcon size={18} className="text-indigo-600 mt-0.5 flex-shrink-0" />
+              <CheckIcon size={18} className="text-cyan-600 mt-0.5 flex-shrink-0" />
               <div className="text-sm text-slate-700">
                 <p className="font-semibold mb-1.5">Variables disponibles en las plantillas</p>
                 <p className="text-xs text-slate-600 mb-2">

@@ -589,7 +589,7 @@ function BacklogModal({
       <div className="relative h-full w-full max-w-2xl bg-white shadow-2xl flex flex-col">
         {/* Header */}
         <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-200 flex-shrink-0">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-cyan-600 flex items-center justify-center">
             <ZapIcon size={15} className="text-white" />
           </div>
           <div className="flex-1 min-w-0">
@@ -720,22 +720,22 @@ function BacklogModal({
 function EpicCard({ epic }: { epic: BacklogEpic }) {
   const [open, setOpen] = useState(true);
   return (
-    <div className="border border-indigo-200 rounded-xl overflow-hidden">
+    <div className="border border-cyan-200 rounded-xl overflow-hidden">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-3 px-4 py-3 bg-indigo-50 hover:bg-indigo-100 transition text-left"
+        className="w-full flex items-center gap-3 px-4 py-3 bg-cyan-50 hover:bg-cyan-100 transition text-left"
       >
-        <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider w-10 flex-shrink-0">
+        <span className="text-xs font-bold text-cyan-400 uppercase tracking-wider w-10 flex-shrink-0">
           ÉPICA
         </span>
-        <span className="font-semibold text-indigo-900 flex-1 truncate">{epic.title}</span>
-        <span className="text-xs text-indigo-500 flex-shrink-0">
+        <span className="font-semibold text-cyan-900 flex-1 truncate">{epic.title}</span>
+        <span className="text-xs text-cyan-500 flex-shrink-0">
           {epic.stories.length} historia{epic.stories.length !== 1 ? 's' : ''}
         </span>
         <span className={`text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
       </button>
       {epic.description && (
-        <p className="px-4 pt-2 pb-1 text-xs text-slate-500 bg-indigo-50/60 border-b border-indigo-100">
+        <p className="px-4 pt-2 pb-1 text-xs text-slate-500 bg-cyan-50/60 border-b border-cyan-100">
           {epic.description}
         </p>
       )}

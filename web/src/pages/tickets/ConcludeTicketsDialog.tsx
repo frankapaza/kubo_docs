@@ -14,7 +14,7 @@ interface Props {
 }
 
 const fieldStyle: React.CSSProperties = {
-  fontSize: 13, padding: '8px 10px', border: '1px solid #dfe3e4', borderRadius: 6, width: '100%',
+  fontSize: 13, padding: '8px 10px', border: '1px solid var(--k-border)', borderRadius: 6, width: '100%',
   boxSizing: 'border-box', fontFamily: 'inherit', resize: 'vertical',
 };
 const labelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 5 };
@@ -89,7 +89,7 @@ export default function ConcludeTicketsDialog({ open, count, onCancel, onConfirm
           <textarea id="conclude-accion" rows={2} value={correctiveAction} onChange={(e) => setCorrectiveAction(e.target.value)} style={fieldStyle} />
         </label>
 
-        <p style={{ margin: 0, fontSize: 12, color: '#6d7577', lineHeight: 1.5 }}>
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--k-muted)', lineHeight: 1.5 }}>
           Cada ticket pasa por Asignado (a ti, si no tenía responsable), En atención, Resuelto y Cerrado, y todo queda en su
           historial. Si un ticket lo abrió un usuario del cliente, a ese usuario le llegan por correo los avisos de
           Resuelto y Cerrado, igual que al hacerlo a mano. Cerrado es definitivo.
@@ -97,7 +97,7 @@ export default function ConcludeTicketsDialog({ open, count, onCancel, onConfirm
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button type="button" onClick={onCancel}
-            style={{ fontSize: 13, padding: '8px 14px', borderRadius: 6, border: '1px solid #d8dcdd', background: '#fff', cursor: 'pointer' }}>
+            style={{ fontSize: 13, padding: '8px 14px', borderRadius: 6, border: '1px solid var(--k-border-strong)', background: '#fff', cursor: 'pointer' }}>
             Cancelar
           </button>
           <button
@@ -113,7 +113,7 @@ export default function ConcludeTicketsDialog({ open, count, onCancel, onConfirm
             }
             style={{
               fontSize: 13, fontWeight: 600, padding: '8px 14px', borderRadius: 6, border: 'none',
-              background: ready ? '#15191a' : '#c9cdce', color: '#fff', cursor: ready ? 'pointer' : 'not-allowed',
+              background: ready ? 'var(--k-ink)' : 'var(--k-disabled)', color: '#fff', cursor: ready ? 'pointer' : 'not-allowed',
             }}
           >
             Concluir {plural}

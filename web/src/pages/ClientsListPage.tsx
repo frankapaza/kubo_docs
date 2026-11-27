@@ -255,7 +255,7 @@ export default function ClientsListPage() {
             <Link
               key={c.id}
               to={`/clients/${c.id}`}
-              className="group bg-white border border-slate-200 rounded-xl shadow-card p-5 hover:shadow-pop hover:border-indigo-200 transition block"
+              className="group bg-white border border-slate-200 rounded-xl shadow-card p-5 hover:shadow-pop hover:border-cyan-200 transition block"
             >
               <div className="flex items-start justify-between gap-2 mb-2">
                 <h3 className="font-semibold text-slate-900 line-clamp-2 group-hover:text-kubo-primary-dark transition flex-1">

@@ -180,7 +180,7 @@ export default function SupportAgentsSection() {
           {error}
         </span>
       )}
-      {loading && <span style={{ fontSize: 12, color: '#6d7577' }}>Cargando…</span>}
+      {loading && <span style={{ fontSize: 12, color: 'var(--k-muted)' }}>Cargando…</span>}
       {loadError && (
         <span role="alert" style={{ fontSize: 12, color: 'oklch(0.5 0.16 25)' }}>
           {loadError}
@@ -188,7 +188,7 @@ export default function SupportAgentsSection() {
       )}
 
       {!loading && !loadError && agents.length === 0 && (
-        <span style={{ fontSize: 12, color: '#6d7577' }}>
+        <span style={{ fontSize: 12, color: 'var(--k-muted)' }}>
           Todavía no hay técnicos registrados en la mesa de servicio.
         </span>
       )}
@@ -201,12 +201,12 @@ export default function SupportAgentsSection() {
               gridTemplateColumns: gridCols,
               gap: 12,
               padding: '8px 0',
-              borderBottom: '1px solid #eceeef',
+              borderBottom: '1px solid var(--k-border-soft)',
               fontFamily: "'IBM Plex Mono', monospace",
               fontSize: 10,
               letterSpacing: '0.06em',
               textTransform: 'uppercase',
-              color: '#6d7577',
+              color: 'var(--k-muted)',
             }}
           >
             <span>Técnico</span>
@@ -225,14 +225,14 @@ export default function SupportAgentsSection() {
                 gap: 12,
                 alignItems: 'center',
                 padding: '10px 0',
-                borderBottom: '1px solid #f1f3f3',
+                borderBottom: '1px solid var(--k-border-soft)',
               }}
             >
               <div>
-                <div style={{ fontSize: 13, fontWeight: 500, color: a.isActive ? '#15191a' : '#9aa0a1' }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: a.isActive ? 'var(--k-ink)' : 'var(--k-faint)' }}>
                   {a.fullName}
                 </div>
-                <div style={{ fontSize: 11, color: '#6d7577' }}>{a.email}</div>
+                <div style={{ fontSize: 11, color: 'var(--k-muted)' }}>{a.email}</div>
               </div>
 
               {isAdmin ? (
@@ -241,7 +241,7 @@ export default function SupportAgentsSection() {
                   disabled={busy}
                   onChange={(e) => updateLevel(a, e.target.value as AgentLevel)}
                   aria-label={`Nivel de ${a.fullName}`}
-                  style={{ fontSize: 12, padding: '5px 6px', border: '1px solid #dfe3e4', borderRadius: 5 }}
+                  style={{ fontSize: 12, padding: '5px 6px', border: '1px solid var(--k-border)', borderRadius: 5 }}
                 >
                   {AGENT_LEVELS.map((l) => (
                     <option key={l} value={l}>
@@ -267,8 +267,8 @@ export default function SupportAgentsSection() {
                           fontSize: 11,
                           padding: '2px 6px',
                           borderRadius: 4,
-                          border: '1px solid #e2e5e6',
-                          background: checked ? '#eceeef' : '#fff',
+                          border: '1px solid var(--k-border)',
+                          background: checked ? 'var(--k-border-soft)' : '#fff',
                         }}
                       >
                         <input
@@ -284,7 +284,7 @@ export default function SupportAgentsSection() {
                   })}
                 </div>
               ) : (
-                <span style={{ fontSize: 12, color: '#4a5052' }}>
+                <span style={{ fontSize: 12, color: 'var(--k-ink-2)' }}>
                   {(a.specialties ?? []).length > 0
                     ? a.specialties!.map((c) => SERVICE_CATEGORY_LABELS[c]).join(', ')
                     : '—'}
@@ -306,14 +306,14 @@ export default function SupportAgentsSection() {
                     padding: '5px 8px',
                     borderRadius: 5,
                     background: '#fff',
-                    border: '1px solid #d8dcdd',
+                    border: '1px solid var(--k-border-strong)',
                     cursor: busy ? 'not-allowed' : 'pointer',
                   }}
                 >
                   {a.isActive ? 'Desactivar' : 'Activar'}
                 </button>
               ) : (
-                <span style={{ fontSize: 12, color: a.isActive ? '#15191a' : '#9aa0a1' }}>
+                <span style={{ fontSize: 12, color: a.isActive ? 'var(--k-ink)' : 'var(--k-faint)' }}>
                   {a.isActive ? 'Activo' : 'Inactivo'}
                 </span>
               )}
@@ -323,7 +323,7 @@ export default function SupportAgentsSection() {
       )}
 
       {isAdmin ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 8, borderTop: '1px solid #eceeef' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 8, borderTop: '1px solid var(--k-border-soft)' }}>
           <span style={{ fontSize: 12, fontWeight: 600 }}>Registrar técnico</span>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <select
@@ -331,7 +331,7 @@ export default function SupportAgentsSection() {
               disabled={busy}
               onChange={(e) => setNewUserId(e.target.value ? Number(e.target.value) : '')}
               aria-label="Usuario a registrar como técnico"
-              style={{ fontSize: 13, padding: '8px 10px', border: '1px solid #dfe3e4', borderRadius: 6, minWidth: 240 }}
+              style={{ fontSize: 13, padding: '8px 10px', border: '1px solid var(--k-border)', borderRadius: 6, minWidth: 240 }}
             >
               <option value="">Selecciona un usuario…</option>
               {candidates.map((u) => (
@@ -345,7 +345,7 @@ export default function SupportAgentsSection() {
               disabled={busy}
               onChange={(e) => setNewLevel(e.target.value as AgentLevel)}
               aria-label="Nivel del nuevo técnico"
-              style={{ fontSize: 13, padding: '8px 10px', border: '1px solid #dfe3e4', borderRadius: 6 }}
+              style={{ fontSize: 13, padding: '8px 10px', border: '1px solid var(--k-border)', borderRadius: 6 }}
             >
               {AGENT_LEVELS.map((l) => (
                 <option key={l} value={l}>
@@ -362,7 +362,7 @@ export default function SupportAgentsSection() {
                 fontWeight: 600,
                 padding: '8px 14px',
                 borderRadius: 6,
-                background: busy || !newUserId ? '#c9cdce' : '#15191a',
+                background: busy || !newUserId ? 'var(--k-disabled)' : 'var(--k-primary)',
                 color: '#fff',
                 border: 'none',
                 cursor: busy || !newUserId ? 'not-allowed' : 'pointer',
@@ -384,8 +384,8 @@ export default function SupportAgentsSection() {
                     fontSize: 11,
                     padding: '2px 6px',
                     borderRadius: 4,
-                    border: '1px solid #e2e5e6',
-                    background: checked ? '#eceeef' : '#fff',
+                    border: '1px solid var(--k-border)',
+                    background: checked ? 'var(--k-border-soft)' : '#fff',
                   }}
                 >
                   <input
@@ -403,13 +403,13 @@ export default function SupportAgentsSection() {
             })}
           </div>
           {candidates.length === 0 && users.length > 0 && (
-            <span style={{ fontSize: 11, color: '#6d7577' }}>
+            <span style={{ fontSize: 11, color: 'var(--k-muted)' }}>
               Todos los usuarios ya están registrados como técnicos.
             </span>
           )}
         </div>
       ) : (
-        <span style={{ fontSize: 11, color: '#6d7577' }}>
+        <span style={{ fontSize: 11, color: 'var(--k-muted)' }}>
           Solo un administrador puede registrar técnicos o cambiar su nivel, especialidades y estado.
         </span>
       )}

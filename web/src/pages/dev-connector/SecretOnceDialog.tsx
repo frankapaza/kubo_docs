@@ -69,7 +69,7 @@ export default function SecretOnceDialog({ open, title, warning, fields, childre
           {warning}
         </div>
         {fields.map((f, i) => (
-          <label key={f.label} style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: '#4b5355' }}>
+          <label key={f.label} style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--k-ink-2)' }}>
             {f.label}
             <div style={{ display: 'flex', gap: 8 }}>
               <input
@@ -77,12 +77,12 @@ export default function SecretOnceDialog({ open, title, warning, fields, childre
                 value={f.value}
                 aria-label={f.label}
                 onFocus={(e) => e.currentTarget.select()}
-                style={{ flex: 1, fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 12, padding: '8px 10px', border: '1px solid #dfe3e4', borderRadius: 6, minWidth: 0 }}
+                style={{ flex: 1, fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 12, padding: '8px 10px', border: '1px solid var(--k-border)', borderRadius: 6, minWidth: 0 }}
               />
               <button
                 type="button"
                 onClick={() => copy(i, f.value)}
-                style={{ fontSize: 12, padding: '8px 12px', borderRadius: 6, background: '#fff', border: '1px solid #d8dcdd', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                style={{ fontSize: 12, padding: '8px 12px', borderRadius: 6, background: '#fff', border: '1px solid var(--k-border-strong)', cursor: 'pointer', whiteSpace: 'nowrap' }}
               >
                 {copied[i] ? 'Copiado' : 'Copiar'}
               </button>
@@ -94,7 +94,7 @@ export default function SecretOnceDialog({ open, title, warning, fields, childre
           <button
             type="button"
             onClick={onClose}
-            style={{ fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: '#15191a', color: '#fff', border: 'none', cursor: 'pointer' }}
+            style={{ fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: 'var(--k-primary)', color: '#fff', border: 'none', cursor: 'pointer' }}
           >
             Ya lo copié, cerrar
           </button>

@@ -5,15 +5,20 @@ export default {
     extend: {
       colors: {
         kubo: {
-          primary: '#4F46E5',
-          'primary-dark': '#4338CA',
-          'primary-light': '#EEF2FF',
-          accent: '#10B981',
-          'accent-light': '#D1FAE5',
-          surface: '#F8FAFC',
-          'surface-2': '#F1F5F9',
-          ink: '#0F172A',
-          muted: '#64748B',
+          // Paleta «Océano»: los mismos valores que las variables --k-* de index.css.
+          primary: '#0E7490',
+          'primary-dark': '#0B5A70',
+          'primary-light': '#E0F2F5',
+          accent: '#14B8A6',
+          'accent-light': '#CCF1EC',
+          surface: '#F3F7F9',
+          'surface-2': '#EAF0F3',
+          ink: '#10232F',
+          muted: '#566672',
+          nav: '#0F2A3D',
+          'nav-active': '#1C4560',
+          'nav-text': '#D6E4EC',
+          'nav-muted': '#8AA3B3',
         },
       },
       fontFamily: {

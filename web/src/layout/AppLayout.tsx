@@ -8,11 +8,12 @@ import { monitoringApi } from '../api/monitoring.api';
 import { useRealtime } from '../lib/realtime';
 import { workspaceApi } from '../api/workspace.api';
 import { roleLabels } from '../components/ui/Badge';
-import { ArchiveIcon, BellIcon, ClockIcon, RefreshIcon, BookOpenIcon, BotIcon, FileTextIcon, FolderIcon, InboxIcon, KuboLogo, LogOutIcon, SettingsIcon, SparklesIcon, UsersIcon, ZapIcon } from '../components/ui/Icon';
+import { ArchiveIcon, BellIcon, ClockIcon, RefreshIcon, BookOpenIcon, FileTextIcon, FolderIcon, InboxIcon, KuboLogo, LogOutIcon, SettingsIcon, SparklesIcon, UsersIcon, ZapIcon } from '../components/ui/Icon';
 // Nota: "InboxIcon" también se usa en la sección Tickets (nav principal); es intencional.
 import { toast } from '../ui/Toast';
 import { useNewTicketNotifier } from '../pages/tickets/useNewTicketNotifier';
 import { useNewErrorNotifier } from '../pages/monitoring/useNewErrorNotifier';
+import NotificationPermissionBanner from './NotificationPermissionBanner';
 // Nota: "UsersIcon" también se usa en la sección Clientes; es intencional.
 
 export default function AppLayout() {
@@ -70,8 +71,8 @@ export default function AppLayout() {
 
   const navItem =
     'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition';
-  const navActive = 'bg-kubo-primary-light text-kubo-primary-dark';
-  const navIdle = 'text-slate-600 hover:bg-slate-100';
+  const navActive = 'bg-kubo-nav-active text-white';
+  const navIdle = 'text-kubo-nav-text hover:bg-white/5 hover:text-white';
 
   const initials = (user?.fullName ?? 'U')
     .split(' ')
@@ -87,19 +88,19 @@ export default function AppLayout() {
 
   return (
     <div className="min-h-screen flex bg-kubo-surface">
-      <aside className="w-64 border-r border-slate-200 bg-white flex flex-col">
-        <div className="px-5 py-5 border-b border-slate-100">
+      <aside className="w-64 bg-kubo-nav flex flex-col">
+        <div className="px-5 py-5 border-b border-white/10">
           <Link to="/" className="flex items-center gap-3">
             <KuboLogo size={32} />
             <div>
-              <p className="font-semibold text-slate-900 leading-none">Kubo DevDocs</p>
-              <p className="text-xs text-slate-500 mt-1">CRM de reuniones</p>
+              <p className="font-semibold text-white leading-none">Kubo DevDocs</p>
+              <p className="text-xs text-kubo-nav-muted mt-1">CRM de reuniones</p>
             </div>
           </Link>
         </div>
 
         <nav className="flex-1 px-3 py-4 flex flex-col gap-0.5">
-          <p className="px-3 py-1 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+          <p className="px-3 py-1 text-[11px] font-semibold text-kubo-nav-muted uppercase tracking-wider">
             Principal
           </p>
           <NavLink
@@ -131,7 +132,7 @@ export default function AppLayout() {
             Requerimientos
           </NavLink>
 
-          <p className="px-3 py-1 mt-4 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+          <p className="px-3 py-1 mt-4 text-[11px] font-semibold text-kubo-nav-muted uppercase tracking-wider">
             Monitoreo
           </p>
           {([
@@ -189,20 +190,9 @@ export default function AppLayout() {
             </NavLink>
           )}
 
-          <p className="px-3 py-1 mt-4 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-            Agentes IA
-          </p>
-          <NavLink
-            to="/agents"
-            className={({ isActive }) => `${navItem} ${isActive ? navActive : navIdle}`}
-          >
-            <BotIcon size={18} />
-            Agentes
-          </NavLink>
-
           {canManageUsers(user) && (
             <>
-              <p className="px-3 py-1 mt-4 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+              <p className="px-3 py-1 mt-4 text-[11px] font-semibold text-kubo-nav-muted uppercase tracking-wider">
                 Administración
               </p>
               <NavLink
@@ -229,7 +219,7 @@ export default function AppLayout() {
             la página, así que "al pie" queda fuera de pantalla en cualquier
             vista larga.
           */}
-          <p className="px-3 py-1 mt-4 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+          <p className="px-3 py-1 mt-4 text-[11px] font-semibold text-kubo-nav-muted uppercase tracking-wider">
             Ayuda
           </p>
           <NavLink
@@ -241,16 +231,16 @@ export default function AppLayout() {
           </NavLink>
         </nav>
 
-        <div className="p-3 border-t border-slate-100">
+        <div className="p-3 border-t border-white/10">
           <div className="flex items-center gap-3 px-2 py-2 rounded-lg relative" ref={settingsRef}>
             <div className="w-9 h-9 rounded-full bg-kubo-primary text-white flex items-center justify-center text-xs font-semibold flex-shrink-0">
               {initials}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-slate-900 truncate">
+              <p className="text-sm font-medium text-white truncate">
                 {user?.fullName ?? 'Usuario'}
               </p>
-              <p className="text-xs text-slate-500 truncate">
+              <p className="text-xs text-kubo-nav-muted truncate">
                 {user?.role ? roleLabels[user.role] : user?.email}
               </p>
             </div>
@@ -259,8 +249,8 @@ export default function AppLayout() {
                 onClick={() => setSettingsOpen((v) => !v)}
                 className={`p-2 rounded-lg transition ${
                   settingsOpen
-                    ? 'bg-kubo-primary-light text-kubo-primary-dark'
-                    : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
+                    ? 'bg-kubo-nav-active text-white'
+                    : 'text-kubo-nav-muted hover:text-white hover:bg-white/10'
                 }`}
                 title="Configuración"
               >
@@ -269,7 +259,7 @@ export default function AppLayout() {
             )}
             <button
               onClick={logout}
-              className="p-2 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+              className="p-2 rounded-lg text-kubo-nav-muted hover:text-white hover:bg-white/10 transition"
               title="Salir"
             >
               <LogOutIcon size={16} />
@@ -354,6 +344,7 @@ export default function AppLayout() {
          * el ojo pierde el salto de renglon.
          */}
         <div className="px-8 py-8">
+          <NotificationPermissionBanner />
           <Outlet />
         </div>
       </main>

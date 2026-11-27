@@ -12,7 +12,7 @@ const smallButton = {
   padding: '5px 10px',
   borderRadius: 6,
   background: '#fff',
-  border: '1px solid #d8dcdd',
+  border: '1px solid var(--k-border-strong)',
   cursor: 'pointer',
 } as const;
 
@@ -69,19 +69,19 @@ export default function ClientSystemReposSection({ clientSystemId, systemName }:
 
   return (
     <div style={{ marginLeft: 16, padding: '6px 0 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <span style={{ fontSize: 11, fontWeight: 600, color: '#6d7577', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--k-muted)', textTransform: 'uppercase', letterSpacing: 0.4 }}>
         Repositorios de {systemName}
       </span>
 
-      {repos.isLoading && <span style={{ fontSize: 12, color: '#6d7577' }}>Cargando…</span>}
+      {repos.isLoading && <span style={{ fontSize: 12, color: 'var(--k-muted)' }}>Cargando…</span>}
       {repos.data?.length === 0 && (
-        <span style={{ fontSize: 12, color: '#6d7577' }}>
+        <span style={{ fontSize: 12, color: 'var(--k-muted)' }}>
           Sin repositorios: Claude no puede trabajar los tickets de este sistema.
         </span>
       )}
       {repos.data?.map((r) => (
         <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}>
-          <a href={r.githubUrl} target="_blank" rel="noreferrer" style={{ flex: 1, color: r.isActive ? '#15191a' : '#9aa0a1' }}>
+          <a href={r.githubUrl} target="_blank" rel="noreferrer" style={{ flex: 1, color: r.isActive ? 'var(--k-ink)' : 'var(--k-faint)' }}>
             {r.githubFullName}
             {!r.isActive && ' (inactivo)'}
           </a>
@@ -129,7 +129,7 @@ export default function ClientSystemReposSection({ clientSystemId, systemName }:
             onChange={(e) => setName(e.target.value)}
             placeholder="owner/repo o https://github.com/owner/repo.git"
             aria-label={`Repositorio de ${systemName}`}
-            style={{ flex: 1, fontSize: 12, padding: '6px 9px', border: '1px solid #dfe3e4', borderRadius: 6 }}
+            style={{ flex: 1, fontSize: 12, padding: '6px 9px', border: '1px solid var(--k-border)', borderRadius: 6 }}
           />
           <button type="submit" style={smallButton} disabled={register.isPending || !name.trim()}>
             Registrar repo
@@ -147,7 +147,7 @@ export default function ClientSystemReposSection({ clientSystemId, systemName }:
         ] : []}
         onClose={() => setIssued(null)}
       >
-        <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.6, color: '#4b5355' }}>
+        <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.6, color: 'var(--k-ink-2)' }}>
           <li>
             En <a href={`${issued?.repo.githubUrl}/settings/hooks/new`} target="_blank" rel="noreferrer">GitHub → Settings → Webhooks → Add webhook</a>{' '}
             (requiere ser admin del repo).

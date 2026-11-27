@@ -253,7 +253,7 @@ function ProjectsTab({
               <Link
                 key={p.id}
                 to={`/projects/${p.id}/meetings`}
-                className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-indigo-200 hover:bg-slate-50 transition"
+                className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-cyan-200 hover:bg-slate-50 transition"
               >
                 <FolderIcon size={18} className="text-slate-400 flex-shrink-0" />
                 <div className="flex-1 min-w-0">
@@ -571,7 +571,7 @@ function DocumentsTab({
               <button
                 key={d.id}
                 onClick={() => onOpen(d.id)}
-                className="w-full text-left flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-indigo-200 hover:bg-slate-50 transition"
+                className="w-full text-left flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:border-cyan-200 hover:bg-slate-50 transition"
               >
                 <FileTextIcon size={18} className="text-slate-400 flex-shrink-0" />
                 <div className="flex-1 min-w-0">

@@ -84,7 +84,7 @@ export default function AssignDialog({ open, ticketId, serviceCategory, onCancel
           Asignar técnico
         </h2>
 
-        {loading && <span style={{ fontSize: 12, color: '#6d7577' }}>Buscando sugerencia…</span>}
+        {loading && <span style={{ fontSize: 12, color: 'var(--k-muted)' }}>Buscando sugerencia…</span>}
         {loadError && (
           <span role="alert" style={{ fontSize: 12, color: 'oklch(0.5 0.16 25)' }}>
             {loadError}
@@ -94,14 +94,14 @@ export default function AssignDialog({ open, ticketId, serviceCategory, onCancel
         {!loading && !loadError && (
           <>
             {suggestedAgent ? (
-              <div style={{ fontSize: 12, color: '#4a5052', lineHeight: 1.5, background: '#fafbfb', border: '1px solid #eceeef', borderRadius: 6, padding: '8px 10px' }}>
+              <div style={{ fontSize: 12, color: 'var(--k-ink-2)', lineHeight: 1.5, background: 'var(--k-surface-2)', border: '1px solid var(--k-border-soft)', borderRadius: 6, padding: '8px 10px' }}>
                 Sugerencia: <strong>{suggestedAgent.fullName}</strong> — especialista en{' '}
                 {serviceCategory ? SERVICE_CATEGORY_LABELS[serviceCategory] : 'la categoría del ticket'}, con{' '}
                 {suggestedAgent.openTickets} ticket{suggestedAgent.openTickets === 1 ? '' : 's'} abierto
                 {suggestedAgent.openTickets === 1 ? '' : 's'} ahora mismo. Confirma o elige otro técnico.
               </div>
             ) : (
-              <div style={{ fontSize: 12, color: '#6d7577', lineHeight: 1.5, background: '#fafbfb', border: '1px solid #eceeef', borderRadius: 6, padding: '8px 10px' }}>
+              <div style={{ fontSize: 12, color: 'var(--k-muted)', lineHeight: 1.5, background: 'var(--k-surface-2)', border: '1px solid var(--k-border-soft)', borderRadius: 6, padding: '8px 10px' }}>
                 No hay una sugerencia automática {serviceCategory ? '' : '(el ticket no tiene categoría de servicio)'}
                 . Elige el técnico manualmente.
               </div>
@@ -113,7 +113,7 @@ export default function AssignDialog({ open, ticketId, serviceCategory, onCancel
                 id="assign-technician"
                 value={assigneeUserId}
                 onChange={(e) => setAssigneeUserId(e.target.value ? Number(e.target.value) : '')}
-                style={{ fontSize: 13, padding: '8px 10px', border: '1px solid #dfe3e4', borderRadius: 6, width: '100%', boxSizing: 'border-box' }}
+                style={{ fontSize: 13, padding: '8px 10px', border: '1px solid var(--k-border)', borderRadius: 6, width: '100%', boxSizing: 'border-box' }}
               >
                 <option value="">Selecciona un técnico…</option>
                 {agents.map((a) => (
@@ -134,20 +134,20 @@ export default function AssignDialog({ open, ticketId, serviceCategory, onCancel
                 maxLength={2000}
                 onChange={(e) => setReason(e.target.value)}
                 placeholder="Ej: coincide con la especialidad y tiene menos carga"
-                style={{ fontSize: 13, padding: '8px 10px', border: '1px solid #dfe3e4', borderRadius: 6, width: '100%', boxSizing: 'border-box' }}
+                style={{ fontSize: 13, padding: '8px 10px', border: '1px solid var(--k-border)', borderRadius: 6, width: '100%', boxSizing: 'border-box' }}
               />
             </label>
           </>
         )}
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button onClick={onCancel} style={{ fontSize: 13, padding: '9px 14px', borderRadius: 7, background: '#fff', border: '1px solid #d8dcdd', cursor: 'pointer' }}>
+          <button onClick={onCancel} style={{ fontSize: 13, padding: '9px 14px', borderRadius: 7, background: '#fff', border: '1px solid var(--k-border-strong)', cursor: 'pointer' }}>
             Cancelar
           </button>
           <button
             disabled={!ready}
             onClick={() => onConfirm({ assigneeUserId: Number(assigneeUserId), reason: reason.trim() || undefined })}
-            style={{ fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: ready ? '#15191a' : '#c9cdce', color: '#fff', border: 'none', cursor: ready ? 'pointer' : 'not-allowed' }}
+            style={{ fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: ready ? 'var(--k-ink)' : 'var(--k-disabled)', color: '#fff', border: 'none', cursor: ready ? 'pointer' : 'not-allowed' }}
           >
             Asignar
           </button>

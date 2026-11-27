@@ -32,12 +32,12 @@ export const STATUS_LABELS: Record<WorkItemStatus, string> = {
 export const PRIORITY_STYLES: Record<WorkItemPriority, Swatch> = {
   ALTA:  { bg: 'oklch(0.94 0.04 25)',  fg: 'oklch(0.5 0.16 25)' },
   MEDIA: { bg: 'oklch(0.94 0.05 78)',  fg: 'oklch(0.5 0.11 70)' },
-  BAJA:  { bg: '#eceeef',              fg: '#4a5052' },
+  BAJA:  { bg: 'var(--k-border-soft)',              fg: 'var(--k-ink-2)' },
 };
 
 export const OUT_OF_FLOW_STYLES: Record<'BLOQUEADO' | 'CANCELADO', Swatch> = {
   BLOQUEADO: { bg: 'oklch(0.95 0.04 290)', fg: 'oklch(0.45 0.13 290)' },
-  CANCELADO: { bg: '#eceeef',              fg: '#6d7577' },
+  CANCELADO: { bg: 'var(--k-border-soft)',              fg: 'var(--k-muted)' },
 };
 
 /**
@@ -49,8 +49,8 @@ export const WORK_ITEM_EVENT_DOTS: Partial<Record<WorkItemEventType, string>> = 
   CREATED: 'oklch(0.52 0.1 205)',
   BLOCKED: 'oklch(0.45 0.13 290)',
   UNBLOCKED: 'oklch(0.6 0.12 150)',
-  CLOSED: '#4a5052',
-  CANCELLED: '#6d7577',
+  CLOSED: 'var(--k-ink-2)',
+  CANCELLED: 'var(--k-muted)',
   REOPENED: 'oklch(0.5 0.11 70)',
   PRIORITY_CHANGED: 'oklch(0.68 0.14 78)',
 };
@@ -63,8 +63,8 @@ export function dueDateStyle(
   dueDate: string | null,
   status: WorkItemStatus,
 ): { color: string; overdue: boolean } {
-  if (!dueDate) return { color: '#6d7577', overdue: false };
-  if (status === 'CERRADO' || status === 'CANCELADO') return { color: '#6d7577', overdue: false };
+  if (!dueDate) return { color: 'var(--k-muted)', overdue: false };
+  if (status === 'CERRADO' || status === 'CANCELADO') return { color: 'var(--k-muted)', overdue: false };
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -73,5 +73,5 @@ export function dueDateStyle(
 
   if (days < 0) return { color: 'oklch(0.5 0.16 25)', overdue: true };
   if (days <= 3) return { color: 'oklch(0.5 0.11 70)', overdue: false };
-  return { color: '#6d7577', overdue: false };
+  return { color: 'var(--k-muted)', overdue: false };
 }

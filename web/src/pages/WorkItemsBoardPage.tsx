@@ -31,9 +31,9 @@ const COLUMN_DOTS: Partial<Record<WorkItemStatus, string>> = {
 function chipStyle(active: boolean): React.CSSProperties {
   return {
     cursor: 'pointer', font: 'inherit', fontSize: 12, fontWeight: active ? 600 : 500, padding: '6px 12px', borderRadius: 999,
-    border: `1px solid ${active ? 'var(--k-ink, #15191a)' : 'var(--k-border, #dfe3e4)'}`,
-    background: active ? 'var(--k-ink, #15191a)' : '#fff',
-    color: active ? '#fff' : 'var(--k-ink, #3a4041)',
+    border: `1px solid ${active ? 'var(--k-ink)' : 'var(--k-border)'}`,
+    background: active ? 'var(--k-ink)' : '#fff',
+    color: active ? '#fff' : 'var(--k-ink, var(--k-ink-2))',
   };
 }
 
@@ -451,14 +451,14 @@ export default function WorkItemsBoardPage() {
           aria-label="Crear nuevo requerimiento"
           style={{
             fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7,
-            background: '#15191a', color: '#fff', border: 'none', cursor: 'pointer',
+            background: 'var(--k-primary)', color: '#fff', border: 'none', cursor: 'pointer',
           }}
         >
           + Nuevo requerimiento
         </button>
       </div>
 
-      <div role="tablist" aria-label="Vistas de requerimientos" style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--k-border, #e2e5e6)' }}>
+      <div role="tablist" aria-label="Vistas de requerimientos" style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--k-border)' }}>
         {([
           { key: 'bandeja', label: 'Bandeja', count: inboxCount },
           { key: 'tablero', label: 'Tablero', count: boardCount },
@@ -472,8 +472,8 @@ export default function WorkItemsBoardPage() {
             style={{
               font: 'inherit', fontSize: 13, fontWeight: tab === t.key ? 700 : 500, padding: '10px 14px',
               background: 'none', border: 'none', cursor: 'pointer', marginBottom: -1,
-              borderBottom: `2px solid ${tab === t.key ? 'var(--k-primary, #15191a)' : 'transparent'}`,
-              color: tab === t.key ? 'var(--k-ink, #15191a)' : 'var(--k-muted, #6d7577)',
+              borderBottom: `2px solid ${tab === t.key ? 'var(--k-primary, var(--k-ink))' : 'transparent'}`,
+              color: tab === t.key ? 'var(--k-ink)' : 'var(--k-muted)',
               display: 'inline-flex', alignItems: 'center', gap: 7,
             }}
           >
@@ -482,8 +482,8 @@ export default function WorkItemsBoardPage() {
               <span
                 style={{
                   fontSize: 11, fontWeight: 700, padding: '1px 7px', borderRadius: 999,
-                  background: t.key === 'bandeja' && t.count > 0 ? 'var(--k-accent-soft, #e3ecfb)' : 'var(--k-column, #eef0f1)',
-                  color: t.key === 'bandeja' && t.count > 0 ? 'var(--k-accent-ink, #1d4e9e)' : 'var(--k-muted, #6d7577)',
+                  background: t.key === 'bandeja' && t.count > 0 ? 'var(--k-accent-soft, #e3ecfb)' : 'var(--k-column, var(--k-surface-2))',
+                  color: t.key === 'bandeja' && t.count > 0 ? 'var(--k-accent-ink, #1d4e9e)' : 'var(--k-muted)',
                 }}
               >
                 {t.count}
@@ -508,8 +508,8 @@ export default function WorkItemsBoardPage() {
         {inboxCount === 0 && (
           <div
             style={{
-              padding: '28px 18px', textAlign: 'center', fontSize: 13, color: 'var(--k-muted, #6d7577)',
-              background: '#fff', border: '1px dashed var(--k-border, #dfe3e4)', borderRadius: 12,
+              padding: '28px 18px', textAlign: 'center', fontSize: 13, color: 'var(--k-muted)',
+              background: '#fff', border: '1px dashed var(--k-border)', borderRadius: 12,
             }}
           >
             No hay requerimientos por evaluar. Los nuevos pedidos del portal aparecerán aquí.
@@ -521,17 +521,17 @@ export default function WorkItemsBoardPage() {
       <>
       <section
         style={{
-          background: '#fff', border: '1px solid #e2e5e6', borderRadius: 10,
+          background: '#fff', border: '1px solid var(--k-border)', borderRadius: 10,
           padding: '13px 18px', display: 'flex', gap: 14, alignItems: 'flex-end', flexWrap: 'wrap',
         }}
       >
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: '#6d7577' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--k-muted)' }}>
           Prioridad
           <select
             value={priorityParam}
             onChange={(e) => setParam('priority', e.target.value)}
             aria-label="Filtrar por prioridad"
-            style={{ fontSize: 12, padding: '6px 8px', border: '1px solid #dfe3e4', borderRadius: 6 }}
+            style={{ fontSize: 12, padding: '6px 8px', border: '1px solid var(--k-border)', borderRadius: 6 }}
           >
             <option value="">Todas</option>
             {PRIORITIES.map((p) => (
@@ -540,13 +540,13 @@ export default function WorkItemsBoardPage() {
           </select>
         </label>
 
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: '#6d7577' }}>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: 'var(--k-muted)' }}>
           Asignado
           <select
             value={assigneeIdParam}
             onChange={(e) => setParam('assigneeId', e.target.value)}
             aria-label="Filtrar por asignado"
-            style={{ fontSize: 12, padding: '6px 8px', border: '1px solid #dfe3e4', borderRadius: 6 }}
+            style={{ fontSize: 12, padding: '6px 8px', border: '1px solid var(--k-border)', borderRadius: 6 }}
           >
             <option value="">Todos</option>
             {agents.map((a) => (
@@ -564,9 +564,9 @@ export default function WorkItemsBoardPage() {
               aria-pressed={dueFilterParam === d.value}
               style={{
                 cursor: 'pointer', fontSize: 12, fontWeight: 500, padding: '6px 12px', borderRadius: 16,
-                border: `1px solid ${dueFilterParam === d.value ? '#15191a' : '#dfe3e4'}`,
-                background: dueFilterParam === d.value ? '#15191a' : '#fff',
-                color: dueFilterParam === d.value ? '#fff' : '#3a4041',
+                border: `1px solid ${dueFilterParam === d.value ? 'var(--k-ink)' : 'var(--k-border)'}`,
+                background: dueFilterParam === d.value ? 'var(--k-ink)' : '#fff',
+                color: dueFilterParam === d.value ? '#fff' : 'var(--k-ink-2)',
               }}
             >
               {d.label}
@@ -580,7 +580,7 @@ export default function WorkItemsBoardPage() {
           placeholder="Buscar por código o título"
           aria-label="Buscar requerimientos por código o título"
           style={{
-            marginLeft: 'auto', fontSize: 12, padding: '7px 10px', border: '1px solid #dfe3e4',
+            marginLeft: 'auto', fontSize: 12, padding: '7px 10px', border: '1px solid var(--k-border)',
             borderRadius: 6, minWidth: 220,
           }}
         />
@@ -588,7 +588,7 @@ export default function WorkItemsBoardPage() {
 
       {/* Filtro por cliente: un chip de su color por cada cliente con algo en el tablero. */}
       <div role="group" aria-label="Filtrar por cliente" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--k-muted, #6d7577)', marginRight: 2 }}>Cliente</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--k-muted)', marginRight: 2 }}>Cliente</span>
         <button
           type="button"
           aria-pressed={!clientIdParam}
@@ -617,7 +617,7 @@ export default function WorkItemsBoardPage() {
       </div>
 
       {error && <div style={{ fontSize: 13, color: 'oklch(0.5 0.16 25)' }}>{error}</div>}
-      {loading && <div style={{ fontSize: 13, color: '#6d7577' }}>Cargando…</div>}
+      {loading && <div style={{ fontSize: 13, color: 'var(--k-muted)' }}>Cargando…</div>}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 14 }}>
         {BOARD_COLUMNS.map((status) => (
@@ -643,7 +643,7 @@ export default function WorkItemsBoardPage() {
         ))}
       </div>
 
-      <section style={{ background: '#fff', border: '1px solid #e2e5e6', borderRadius: 10, overflow: 'hidden' }}>
+      <section style={{ background: '#fff', border: '1px solid var(--k-border)', borderRadius: 10, overflow: 'hidden' }}>
         <button
           type="button"
           onClick={() => setOutOfFlowOpen((v) => !v)}
@@ -652,11 +652,11 @@ export default function WorkItemsBoardPage() {
           style={{
             width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
             padding: '12px 16px', background: 'none', border: 'none', cursor: 'pointer',
-            fontSize: 13, fontWeight: 600, color: '#15191a',
+            fontSize: 13, fontWeight: 600, color: 'var(--k-ink)',
           }}
         >
           <span>Fuera de flujo — bloqueados, cancelados y rechazados</span>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: '#6d7577' }}>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: 'var(--k-muted)' }}>
             {outOfFlowItems.length} {outOfFlowOpen ? '▲' : '▼'}
           </span>
         </button>
