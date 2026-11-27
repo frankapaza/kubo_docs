@@ -69,8 +69,8 @@ export class CreateServiceDto {
   @IsString() @MinLength(1) @MaxLength(150)
   name!: string;
 
-  @IsEnum(['TCP', 'HTTPS', 'ICMP'])
-  protocol!: 'TCP' | 'HTTPS' | 'ICMP';
+  @IsEnum(['TCP', 'HTTPS', 'HTTP', 'ICMP'])
+  protocol!: 'TCP' | 'HTTPS' | 'HTTP' | 'ICMP';
 
   @IsString() @MinLength(1) @MaxLength(255)
   target!: string;
@@ -92,8 +92,8 @@ export class UpdateServiceDto {
   @IsOptional() @IsString() @MinLength(1) @MaxLength(150)
   name?: string;
 
-  @IsOptional() @IsEnum(['TCP', 'HTTPS', 'ICMP'])
-  protocol?: 'TCP' | 'HTTPS' | 'ICMP';
+  @IsOptional() @IsEnum(['TCP', 'HTTPS', 'HTTP', 'ICMP'])
+  protocol?: 'TCP' | 'HTTPS' | 'HTTP' | 'ICMP';
 
   @IsOptional() @IsString() @MinLength(1) @MaxLength(255)
   target?: string;

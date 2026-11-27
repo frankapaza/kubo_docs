@@ -96,6 +96,8 @@ services:
       - ./backend/sql/migrations/037_disponibilidad_informe.sql:/docker-entrypoint-initdb.d/037_disponibilidad_informe.sql:ro
       # La 038 anade media, maximo y errores al resumen diario del agente (historial).
       - ./backend/sql/migrations/038_disponibilidad_historial_agente.sql:/docker-entrypoint-initdb.d/038_disponibilidad_historial_agente.sql:ro
+      # La 039 anade HTTP (sin cifrar) a los protocolos de monitor_services.
+      - ./backend/sql/migrations/039_disponibilidad_protocolo_http.sql:/docker-entrypoint-initdb.d/039_disponibilidad_protocolo_http.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s

@@ -23,7 +23,12 @@ export default function AvailabilityServersPage() {
   const servers = useQuery({ queryKey: ['availability', 'servers'], queryFn: availabilityApi.listServers, refetchInterval: 60_000 });
   const clientName = useMemo(() => new Map((clients.data ?? []).map((c) => [c.id, c.razonSocial])), [clients.data]);
 
-  const visible = (servers.data ?? []).filter((s) => s.status !== 'ARCHIVED' && (clientId === '' || s.clientId === clientId));
+  // Esta pantalla es la del agente: un servidor que solo se vigila desde fuera (URL, ping)
+  // no tiene nada que mostrar aquí y se gestiona en «Inventario».
+  const hasAgent = (s: MonitorServer) => s.agentTokenCreatedAt !== null || s.agentLastSeenAt !== null;
+  const inScope = (servers.data ?? []).filter((s) => s.status !== 'ARCHIVED' && (clientId === '' || s.clientId === clientId));
+  const visible = inScope.filter(hasAgent);
+  const withoutAgent = inScope.length - visible.length;
   const views = useQueries({
     queries: visible.map((s) => ({
       queryKey: ['availability', 'agent', s.id],
@@ -42,7 +47,12 @@ export default function AvailabilityServersPage() {
 
       {servers.isLoading && <div style={{ fontSize: 13, color: '#6d7577' }}>Cargando…</div>}
       {servers.error && <div role="alert" style={{ fontSize: 13, color: '#b3261e' }}>No se pudieron cargar los servidores.</div>}
-      {servers.data && visible.length === 0 && <div style={{ fontSize: 13, color: '#6d7577' }}>No hay servidores. Se cargan en «Inventario».</div>}
+      {servers.data && visible.length === 0 && <div style={{ fontSize: 13, color: '#6d7577' }}>No hay servidores con agente. Se instala desde «Sondas» → «Agentes».</div>}
+      {withoutAgent > 0 && (
+        <div style={{ fontSize: 12, color: '#6d7577' }}>
+          {withoutAgent === 1 ? '1 servidor sin agente no se muestra aquí' : `${withoutAgent} servidores sin agente no se muestran aquí`}: sus servicios se ven en «Estado» y se gestionan en «Inventario».
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: 14 }}>
         {visible.map((s, n) => (

@@ -32,6 +32,8 @@ set -e
 # evidencias, mantenimientos y agente de servidor; aplicarla igual, a mano.
 # Migracion 038 (038_disponibilidad_historial_agente): media, maximo y errores
 # del resumen diario del agente para el historial; aplicarla igual, a mano.
+# Migracion 039 (039_disponibilidad_protocolo_http): protocolo HTTP en
+# monitor_services; aplicarla igual, a mano.
 cd /home/kubo/kubo
 git pull
 docker compose build backend monitor-worker web

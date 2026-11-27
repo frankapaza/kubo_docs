@@ -168,7 +168,7 @@ export default function AvailabilityInventoryPage() {
                               {svcs.map((v) => (
                                 <tr key={v.id} style={{ borderTop: '1px solid #eef0f1', opacity: v.status === 'ARCHIVED' ? 0.6 : 1 }}>
                                   <td style={{ ...td, fontWeight: 600 }}>{v.name}</td>
-                                  <td style={td}>{v.protocol} {v.target}{v.port ? `:${v.port}` : ''}</td>
+                                  <td style={td}>{v.protocol} {v.target}{v.protocol === 'TCP' && v.port ? `:${v.port}` : ''}</td>
                                   <td style={td}>{v.latencyThresholdMs} ms</td>
                                   <td style={td}>{CRITICALITY_LABELS[v.criticality]}</td>
                                   <td style={td}>{STATUS_TEXT[v.status]}</td>
@@ -328,7 +328,8 @@ function ServiceForm({ server, clientLabel, service, onCancel, onSaved }: {
     return () => { cancelled = true; };
   }, [server.clientId, service?.systemId]);
 
-  const portNum = port.trim() === '' ? null : Number(port);
+  const usesPort = protocol === 'TCP';
+  const portNum = !usesPort || port.trim() === '' ? null : Number(port);
   const thresholdNum = Number(threshold);
   const portOk = portNum === null ? protocol !== 'TCP' : Number.isInteger(portNum) && portNum >= 1 && portNum <= 65535;
   const canSubmit = !busy && name.trim() !== '' && target.trim() !== '' && portOk && Number.isInteger(thresholdNum) && thresholdNum >= 1 && thresholdNum <= 600000;
@@ -340,6 +341,8 @@ function ServiceForm({ server, clientLabel, service, onCancel, onSaved }: {
     const body: ServiceBody = {
       name: name.trim(), protocol, target: target.trim(), latencyThresholdMs: thresholdNum, criticality,
       ...(portNum !== null ? { port: portNum } : {}),
+      // Al pasar un servicio de TCP a otro protocolo se borra el puerto guardado.
+      ...(!usesPort && service?.port ? { port: null } : {}),
       ...(systemId !== '' ? { systemId } : {}),
     };
     try {
@@ -375,12 +378,14 @@ function ServiceForm({ server, clientLabel, service, onCancel, onSaved }: {
       </label>
       <label>
         <span style={labelStyle}>Destino *</span>
-        <input value={target} onChange={(e) => setTarget(e.target.value)} maxLength={255} style={inputStyle} placeholder={protocol === 'HTTPS' ? 'https://…' : 'IP o nombre'} />
+        <input value={target} onChange={(e) => setTarget(e.target.value)} maxLength={255} style={inputStyle} placeholder={protocol === 'HTTPS' ? 'https://dominio/ruta' : protocol === 'HTTP' ? 'http://IP:puerto/ruta' : 'IP o nombre (sin http://)'} />
       </label>
-      <label>
-        <span style={labelStyle}>Puerto{protocol === 'TCP' ? ' *' : ''}</span>
-        <input value={port} onChange={(e) => setPort(e.target.value)} inputMode="numeric" style={inputStyle} />
-      </label>
+      {usesPort && (
+        <label>
+          <span style={labelStyle}>Puerto *</span>
+          <input value={port} onChange={(e) => setPort(e.target.value)} inputMode="numeric" style={inputStyle} />
+        </label>
+      )}
       <label><span style={labelStyle}>Umbral de latencia (ms)</span><input value={threshold} onChange={(e) => setThreshold(e.target.value)} inputMode="numeric" style={inputStyle} /></label>
       <label>
         <span style={labelStyle}>Criticidad</span>
