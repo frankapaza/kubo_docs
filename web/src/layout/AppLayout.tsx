@@ -8,7 +8,7 @@ import { monitoringApi } from '../api/monitoring.api';
 import { useRealtime } from '../lib/realtime';
 import { workspaceApi } from '../api/workspace.api';
 import { roleLabels } from '../components/ui/Badge';
-import { ArchiveIcon, BellIcon, BookOpenIcon, BotIcon, FileTextIcon, FolderIcon, InboxIcon, KuboLogo, LogOutIcon, SettingsIcon, SparklesIcon, UsersIcon, ZapIcon } from '../components/ui/Icon';
+import { ArchiveIcon, BellIcon, BookOpenIcon, FileTextIcon, FolderIcon, InboxIcon, KuboLogo, LogOutIcon, SettingsIcon, SparklesIcon, UsersIcon, ZapIcon } from '../components/ui/Icon';
 // Nota: "InboxIcon" también se usa en la sección Tickets (nav principal); es intencional.
 import { toast } from '../ui/Toast';
 import { useNewTicketNotifier } from '../pages/tickets/useNewTicketNotifier';
@@ -171,17 +171,6 @@ export default function AppLayout() {
               Claves de desarrollo
             </NavLink>
           )}
-
-          <p className="px-3 py-1 mt-4 text-[11px] font-semibold text-kubo-nav-muted uppercase tracking-wider">
-            Agentes IA
-          </p>
-          <NavLink
-            to="/agents"
-            className={({ isActive }) => `${navItem} ${isActive ? navActive : navIdle}`}
-          >
-            <BotIcon size={18} />
-            Agentes
-          </NavLink>
 
           {canManageUsers(user) && (
             <>

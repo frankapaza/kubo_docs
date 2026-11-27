@@ -21,8 +21,6 @@ import InboundEmailPage from './pages/InboundEmailPage';
 import JiraReportPage from './pages/JiraReportPage';
 import DevReportBuilderPage from './pages/DevReportBuilderPage';
 import BrowserRecorderPage from './pages/BrowserRecorderPage';
-import AgentsPage from './pages/AgentsPage';
-import AgentChatPage from './pages/AgentChatPage';
 import TicketsListPage from './pages/TicketsListPage';
 import TicketDetailPage from './pages/TicketDetailPage';
 import WorkItemsBoardPage from './pages/WorkItemsBoardPage';
@@ -146,8 +144,6 @@ export default function App() {
           <Route path="/monitoreo/instalaciones" element={<MonitoringInstallationsPage />} />
           <Route path="/dev/claves" element={<DevKeysPage />} />
           <Route path="/work-items" element={<WorkItemsBoardPage />} />
-          <Route path="/agents" element={<AgentsPage />} />
-          <Route path="/agents/:type" element={<AgentChatPage />} />
           <Route path="/users" element={<UsersPage />} />
           <Route path="/admin/client-users" element={<ClientUsersPage />} />
           <Route path="/admin/ai-providers" element={<AIProvidersPage />} />
