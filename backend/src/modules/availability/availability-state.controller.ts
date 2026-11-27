@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Header, HttpCode, Param, ParseBoolPipe, ParseIntPipe, Post, Query, UseGuards } from '@nestjs/common';
+import { OptionalIntPipe } from '../../common/pipes/optional-int.pipe';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -14,9 +15,9 @@ export class AvailabilityStateController {
 
   @Get('state')
   state(
-    @Query('clientId', new ParseIntPipe({ optional: true })) clientId?: number,
+    @Query('clientId', OptionalIntPipe) clientId?: number,
     @Query('status') status?: string,
-    @Query('serverId', new ParseIntPipe({ optional: true })) serverId?: number,
+    @Query('serverId', OptionalIntPipe) serverId?: number,
   ) {
     return this.stateService.state({ clientId, status, serverId });
   }
@@ -25,9 +26,9 @@ export class AvailabilityStateController {
   @Header('Content-Type', 'text/csv; charset=utf-8')
   @Header('Content-Disposition', 'attachment; filename="estado-disponibilidad.csv"')
   stateCsv(
-    @Query('clientId', new ParseIntPipe({ optional: true })) clientId?: number,
+    @Query('clientId', OptionalIntPipe) clientId?: number,
     @Query('status') status?: string,
-    @Query('serverId', new ParseIntPipe({ optional: true })) serverId?: number,
+    @Query('serverId', OptionalIntPipe) serverId?: number,
   ) {
     return this.stateService.stateCsv({ clientId, status, serverId });
   }
@@ -41,10 +42,10 @@ export class AvailabilityStateController {
   @Get('incidents')
   listIncidents(
     @Query('open', new ParseBoolPipe({ optional: true })) open?: boolean,
-    @Query('clientId', new ParseIntPipe({ optional: true })) clientId?: number,
+    @Query('clientId', OptionalIntPipe) clientId?: number,
     @Query('from') from?: string,
     @Query('to') to?: string,
-    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+    @Query('limit', OptionalIntPipe) limit?: number,
   ) {
     return this.stateService.listIncidents({ limit, open, clientId, from: parseDate(from, 'from'), to: parseDate(to, 'to') });
   }
