@@ -7,7 +7,7 @@ import { TicketsModule } from '../tickets/tickets.module';
 import { WorkItemsModule } from '../work-items/work-items.module';
 import { DevAdminController } from './dev-admin.controller';
 import { DevApiController } from './dev-api.controller';
-import { DevApiService } from './dev-api.service';
+import { DEV_CONNECTOR_OPTIONS, DevApiService, DevConnectorOptions } from './dev-api.service';
 import { DevConnectorRepository } from './dev-connector.repository';
 import { DevKeyGuard, DevRateLimiter } from './dev-key.guard';
 import { DevKeysService } from './dev-keys.service';
@@ -32,6 +32,12 @@ import { DevRepo } from './entities/dev-repo.entity';
     DevKeysService,
     DevReposService,
     DevApiService,
+    {
+      provide: DEV_CONNECTOR_OPTIONS,
+      useFactory: (): DevConnectorOptions => ({
+        sensitiveActionsEnabled: String(process.env.DEV_SENSITIVE_ACTIONS ?? '').trim().toLowerCase() === 'true',
+      }),
+    },
     GithubWebhookService,
     DevKeyGuard,
     // Estado en memoria del proceso: un solo limitador para todas las peticiones.

@@ -491,7 +491,7 @@ export default function TicketDetailPage() {
                     : Number(ticket.systemId),
                 )}
               />
-              {(ticket.systemId === null || ticket.systemId === undefined) && !fromMonitoring && (
+              {(ticket.systemId === null || ticket.systemId === undefined) && !fromMonitoring && ticket.status !== 'RESUELTO' && ticket.status !== 'CERRADO' && (
                 <MissingSystemNotice
                   systems={systems}
                   busy={busy}

@@ -26,6 +26,7 @@ describe('conector de Claude (integración HTTP)', () => {
   const pendientes = jest.fn().mockResolvedValue({ cliente: 'Cobros Seguros', sistema: 'Cobranza', total: 0, items: [] });
   const estado = jest.fn().mockResolvedValue({ codigo: 'KB-0210', estado: 'EN_ATENCION' });
   const upsertLink = jest.fn().mockResolvedValue(undefined);
+  const persona = jest.fn().mockResolvedValue({ ok: true, nombre: 'Luis Gómez', correo: 'luis@kubo.pe' });
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -38,7 +39,7 @@ describe('conector de Claude (integración HTTP)', () => {
           provide: DevKeysService,
           useValue: { resolve: jest.fn(async (fp: string) => (fp === fingerprintDevKey(CLAVE) ? P : null)) },
         },
-        { provide: DevApiService, useValue: { pendientes, estado } },
+        { provide: DevApiService, useValue: { pendientes, estado, persona } },
         {
           provide: DevConnectorRepository,
           useValue: {
@@ -80,6 +81,14 @@ describe('conector de Claude (integración HTTP)', () => {
     expect(res.status).toBe(400);
     const ok = await conClave('/dev/items/KB-0210/estado', { method: 'POST', body: JSON.stringify({ estado: 'EN_ATENCION' }) });
     expect(ok.status).toBe(201);
+  });
+
+  it('personas?q= resuelve a quién se asignaría (para la confirmación del MCP)', async () => {
+    const res = await conClave('/dev/personas?q=gomez');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, nombre: 'Luis Gómez', correo: 'luis@kubo.pe' });
+    expect(persona).toHaveBeenCalledWith('gomez');
+    expect((await app.get('/dev/personas?q=gomez')).status).toBe(401);
   });
 
   describe('webhook', () => {

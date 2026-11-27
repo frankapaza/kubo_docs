@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
 
 import { DevApiService } from './dev-api.service';
 import { DevKeyGuard, DevRequest } from './dev-key.guard';
@@ -21,6 +21,12 @@ export class DevApiController {
   @Get('pendientes')
   pendientes(@Req() req: DevRequest) {
     return this.api.pendientes(req.dev!);
+  }
+
+  /** A quién se asignaría «q» (correo o nombre): el MCP lo muestra en la confirmación. */
+  @Get('personas')
+  personas(@Query('q') q?: string) {
+    return this.api.persona(String(q ?? '').slice(0, 180));
   }
 
   @Get('items/:code')

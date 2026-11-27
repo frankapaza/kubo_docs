@@ -139,8 +139,15 @@ Copiar el bloque de la sección 7 al `CLAUDE.md` en la raíz del repo y hacer co
 cliente o Derivado muestran un **cuadro en Claude Code** con el resumen exacto
 (el texto completo de la respuesta). Solo se ejecutan si la persona marca
 «Confirmo esta acción» y acepta; rechazar o cancelar no hace nada, y un cliente
-MCP que no sepa mostrar el cuadro tampoco. Llamar a la API del conector sin el
-MCP no pasa por el cuadro: la clave es personal.
+MCP que no sepa mostrar el cuadro tampoco. Al asignar, el cuadro muestra el
+nombre y el correo reales de la persona. Hay 10 minutos para decidir.
+
+**Apagado por defecto:** estas tres acciones responden «hazlo en DevDocs» hasta
+que el servidor tenga `DEV_SENSITIVE_ACTIONS=true`. El cuadro lo muestra Claude
+Code: quien tenga la clave `kdev_` puede llamar a la API sin pasar por él, así
+que la clave se guarda como una contraseña. Cada respuesta enviada así queda
+marcada en el historial interno del ticket («vía Claude», con el repositorio);
+el cliente no ve esa marca.
 
 **Claude NO puede:** enviar nada al cliente sin tu confirmación,
 cerrar, aceptar o rechazar requerimientos, cambiar prioridad o

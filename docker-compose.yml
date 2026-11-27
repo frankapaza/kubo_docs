@@ -232,6 +232,8 @@ services:
       LOKI_DATA_PATH: /loki-data
       LOKI_DISK_ALERT_PCT: ${LOKI_DISK_ALERT_PCT:-80}
       APPENDER_ASSETS_DIR: /app/assets/kubo-log-appender
+      # Conector de Claude: responder al cliente, asignar y Espera/Derivado. Apagado salvo "true".
+      DEV_SENSITIVE_ACTIONS: ${DEV_SENSITIVE_ACTIONS:-false}
     volumes:
       - backend_uploads:/app/uploads
       - loki_data:/loki-data:ro

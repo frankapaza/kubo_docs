@@ -74,11 +74,12 @@ function build(
     assign: jest.fn().mockResolvedValue({ ...TICKET, status: 'ASIGNADO' }),
     take: jest.fn().mockResolvedValue({ ...TICKET, status: 'EN_ATENCION' }),
   };
+  const ticketEvents = { record: jest.fn().mockResolvedValue({ id: 1 }) };
   const service = new DevApiService(
     data as never, messages as never, attachments as never, transitions as never, board as never, wiEvents as never,
-    assignment as never, docs as never,
+    assignment as never, docs as never, ticketEvents as never, { sensitiveActionsEnabled: true },
   );
-  return { service, data, messages, attachments, transitions, board, wiEvents, assignment, docs };
+  return { service, data, messages, attachments, transitions, board, wiEvents, assignment, docs, ticketEvents };
 }
 
 describe('DevApiService', () => {
@@ -492,5 +493,45 @@ describe('DevApiService: acciones confirmadas (estado, asignar, responder)', () 
     await expect(vacio.service.responder(P, 'KB-0210', '   ')).rejects.toBeInstanceOf(BadRequestException);
     const cerrado = build({ ticket: { ...MIO_EN_ATENCION, status: 'CERRADO' } });
     await expect(cerrado.service.responder(P, 'KB-0210', 'hola')).rejects.toBeInstanceOf(ConflictException);
+  });
+});
+
+
+describe('DevApiService: revisión final (marca, persona resuelta, interruptor)', () => {
+  const MIO = { ...TICKET, status: 'EN_ATENCION', assigneeUserId: 9 };
+
+  it('responder deja en el historial que lo envió el conector (via claude, repo y mensaje)', async () => {
+    const { service, ticketEvents } = build({ ticket: MIO });
+    await service.responder(P, 'KB-0210', 'Listo');
+    expect(ticketEvents.record).toHaveBeenCalledWith(expect.objectContaining({
+      ticketId: 100, type: 'COMMENT', actorUserId: 9,
+      payload: expect.objectContaining({ via: 'claude', repo: 'cobrosseguros/cobranza', accion: 'RESPUESTA_CLIENTE', messageId: 1 }),
+    }));
+  });
+
+  it('persona(): resuelve quién sería, o explica por qué no', async () => {
+    const { service } = build();
+    await expect(service.persona('gomez')).resolves.toEqual({ ok: true, nombre: 'Luis Gómez', correo: 'luis@kubo.pe' });
+    await expect(service.persona('pedro')).resolves.toMatchObject({ ok: false, motivo: expect.stringContaining('luis@kubo.pe') });
+  });
+
+  it('con el interruptor apagado, responder, asignar y pasar a espera/derivado -> 403 sin hacer nada', async () => {
+    const t = build({ ticket: MIO });
+    const off = new DevApiService(
+      t.data as never, t.messages as never, t.attachments as never, t.transitions as never, t.board as never, t.wiEvents as never,
+      t.assignment as never, t.docs as never, t.ticketEvents as never, { sensitiveActionsEnabled: false },
+    );
+    for (const call of [
+      () => off.responder(P, 'KB-0210', 'hola'),
+      () => off.asignar(P, 'KB-0210', 'luis@kubo.pe'),
+      () => off.estado(P, 'KB-0210', 'ESPERA_CLIENTE', 'motivo'),
+    ]) {
+      await expect(call()).rejects.toMatchObject({ status: 403, response: expect.objectContaining({ code: 'ACCION_DESHABILITADA' }) });
+    }
+    expect(t.messages.post).not.toHaveBeenCalled();
+    expect(t.assignment.assign).not.toHaveBeenCalled();
+    expect(t.transitions.transition).not.toHaveBeenCalled();
+    // Lo de siempre sigue funcionando.
+    await expect(off.estado(P, 'RQ-0045', 'EN_PROCESO')).resolves.toBeDefined();
   });
 });
