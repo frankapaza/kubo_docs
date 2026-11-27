@@ -36,8 +36,8 @@ export function emailButton(href: string, label: string): string {
   if (!/^https?:\/\//i.test(url)) return '';
   return (
     `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:18px 0"><tr>` +
-    `<td style="border-radius:8px;background:${KUBO_BLUE}">` +
-    `<a href="${escapeEmailHtml(url)}" target="_blank" style="display:inline-block;padding:12px 24px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px">${escapeEmailHtml(label)}</a>` +
+    `<td style="border-radius:8px;background:${KUBO_BLUE};padding:12px 24px">` +
+    `<a href="${escapeEmailHtml(url)}" target="_blank" style="display:inline-block;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:8px">${escapeEmailHtml(label)}</a>` +
     `</td></tr></table>`
   );
 }
@@ -66,7 +66,7 @@ export function wrapEmailLayout(contentHtml: string, opts: { logoSrc: string }):
 <body style="margin:0;padding:0;background:#f2f5f9">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f2f5f9;padding:28px 12px">
 <tr><td align="center">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e3e8ef">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e3e8ef">
 <tr><td style="padding:22px 28px 18px;border-bottom:3px solid ${KUBO_BLUE}">
 <img src="${escapeEmailHtml(opts.logoSrc)}" alt="KUBO" width="150" height="45" style="display:block;border:0;outline:none;width:150px;height:auto"/>
 </td></tr>

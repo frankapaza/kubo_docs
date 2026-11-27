@@ -148,3 +148,22 @@ describe('EmailService: todo correo sale con el marco Kubo y el logo incrustado'
     expect(m.attachments[1].content.subarray(0, 4).toString('hex')).toBe('89504e47');
   });
 });
+
+describe('EmailService.testConnection: la prueba SMTP también sale con el marco', () => {
+  beforeEach(() => {
+    createTransport.mockReset();
+    createTransport.mockReturnValue({
+      verify: jest.fn().mockResolvedValue(true),
+      sendMail: jest.fn().mockResolvedValue({ messageId: '<1@kuboti.com>', accepted: ['x'], rejected: [] }),
+    });
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('envuelve y adjunta el logo', async () => {
+    const service = montar({ SMTP_HOST: 'mail.kuboti.com', SMTP_USER: 'no-reply@kuboti.com', SMTP_PASS: 'x', SMTP_PORT: '587' });
+    await service.testConnection();
+    const m = correo();
+    expect(m.html).toContain('<!--kubo-layout-->');
+    expect(m.attachments).toEqual([expect.objectContaining({ cid: 'kubo-logo@kuboti.com' })]);
+  });
+});

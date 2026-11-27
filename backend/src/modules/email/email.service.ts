@@ -186,7 +186,8 @@ export class EmailService {
         to: userEmail,
         subject: 'Kubo DevDocs — Prueba de SMTP',
         text: 'Conexión SMTP configurada correctamente.',
-        html: '<p>Conexión SMTP configurada correctamente desde Kubo DevDocs.</p>',
+        html: wrapEmailLayout('<p>Conexión SMTP configurada correctamente desde Kubo DevDocs.</p>', { logoSrc: `cid:${KUBO_LOGO_CID}` }),
+        attachments: [kuboLogoAttachment()],
       });
       return { ok: true, sentTo: userEmail };
     } catch (err) {

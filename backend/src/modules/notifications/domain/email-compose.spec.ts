@@ -122,3 +122,40 @@ describe('composeEmail: contenido con diseño (spec 2026-11-28-correos-html)', (
   });
 });
 
+
+describe('composeEmail: pie en letra pequeña y enlaces con & (revisión final)', () => {
+  it('el pie de las plantillas de conversación (018) también va en letra pequeña y al final', () => {
+    const { html } = composeEmail(
+      {
+        subject: 's',
+        bodyMd: 'Hola.\n\nEste correo es automático. Si respondes, tu respuesta llega a un buzón que\nleemos, pero **no se registra en el ticket**.\n\n{{enlace_portal}}',
+        triggerKey: 'TICKET_MESSAGE_FROM_TEAM',
+      },
+      'CLIENT',
+      { codigo: 'KB-1', enlace_portal: 'https://docs.kuboti.com/portal/tickets/1' },
+    );
+    expect(html).toMatch(/font-size:12px[^>]*>Este correo es automático\. Si respondes/);
+    expect(html.indexOf('Este correo es automático')).toBeGreaterThan(html.indexOf('Responder en el ticket'));
+  });
+
+  it('un valor del cliente que dice «no se puede responder» no se encoge ni se mueve', () => {
+    const { html } = composeEmail({ subject: 's', bodyMd: 'Asunto: {{asunto}}', triggerKey: 'TICKET_CREATED' }, 'CLIENT', {
+      asunto: 'el sistema no se puede responder',
+    });
+    expect(html).not.toContain('font-size:12px;line-height:1.5;color:#7a8794');
+  });
+
+  it('un enlace del portal con & se quita igual de la línea suelta y va solo en el botón', () => {
+    const url = 'https://docs.kuboti.com/portal/tickets/1?a=1&b=2';
+    const { html } = composeEmail({ subject: 's', bodyMd: 'Míralo aquí:\n{{enlace_portal}}', triggerKey: 'TICKET_CREATED' }, 'CLIENT', {
+      enlace_portal: url,
+    });
+    expect(html.split('tickets/1?a=1&amp;b=2').length - 1).toBe(1);
+    expect(html).toContain('Míralo aquí.');
+  });
+
+  it('sin enlace del portal no hay recuadro de acción', () => {
+    const { html } = composeEmail({ subject: 's', bodyMd: 'Hola.', triggerKey: 'TICKET_CREATED' }, 'CLIENT', {});
+    expect(html).not.toContain('border-left:4px solid #053777');
+  });
+});

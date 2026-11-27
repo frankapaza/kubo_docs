@@ -41,3 +41,14 @@ describe('emailButton', () => {
     expect(emailButton('  ', 'x')).toBe('');
   });
 });
+
+describe('Outlook de escritorio (revisión final)', () => {
+  it('la tarjeta tiene ancho fijo de 600 para Outlook, además del max-width', () => {
+    const html = wrapEmailLayout('<p>x</p>', { logoSrc: 'cid:x' });
+    expect(html).toMatch(/<table[^>]*width="600"[^>]*style="[^"]*max-width:600px/);
+  });
+
+  it('el botón lleva el relleno en la celda, no solo en el enlace', () => {
+    expect(emailButton('https://x.pe', 'Ir')).toMatch(/<td[^>]*style="[^"]*padding:12px 24px/);
+  });
+});

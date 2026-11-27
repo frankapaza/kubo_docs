@@ -185,7 +185,9 @@ function textToSimpleHtml(text: string, action: EmailAction | null, header: stri
         return emailButton(url, url.includes('/portal/') ? 'Ver en el portal' : 'Abrir enlace');
       }
       const contenido = lineas.map(inlineMarkup).join('<br>');
-      if (/no se puede responder/i.test(bloque)) {
+      // El pie de las plantillas sembradas (015 y 018) empieza siempre así; se mira el
+      // comienzo del párrafo para no confundirlo con un valor del cliente.
+      if (/^Este correo es automático/i.test(bloque)) {
         return `<p style="margin:18px 0 0;font-size:12px;line-height:1.5;color:#7a8794">${contenido}</p>`;
       }
       return `<p style="margin:0 0 14px">${contenido}</p>`;
