@@ -246,6 +246,14 @@ describe('NotificationTemplatesService.preview', () => {
     expect(email.send).not.toHaveBeenCalled();
   });
 
+  it('se ve con el marco Kubo y el logo como data: URI (un iframe no resuelve cid:)', async () => {
+    const { service } = makeService();
+    const preview = await service.preview(1);
+    expect(preview.html).toContain('<!--kubo-layout-->');
+    expect(preview.html).toContain('src="data:image/png;base64,');
+    expect(preview.html).not.toContain('cid:');
+  });
+
   it('la plantilla de equipo se previsualiza con sus cinco variables adicionales, también sin enviar nada', async () => {
     const { service, email } = makeService();
     const preview = await service.preview(6); // TEAM: TICKET_CREATED_PORTAL
