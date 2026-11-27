@@ -6,6 +6,8 @@ import type { PortalRequirement } from '../../api/types';
 import { Card, CardBody } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { ArrowLeftIcon } from '../../components/ui/Icon';
+import { Button } from '../../components/ui/Button';
+import { parseCriteria } from '../requirements/requirement-template';
 import { fmtDate, fmtDateTime } from './PortalTicketsListPage';
 import { REQUIREMENT_STATUS_TONES, fmtCommittedDate } from './PortalRequirementsListPage';
 
@@ -134,6 +136,10 @@ export default function PortalRequirementDetailPage() {
             </div>
           )}
 
+          {requirement.status === 'Falta información' && (
+            <ProvideDetailCard requirement={requirement} onDone={(r) => setRequirement(r)} />
+          )}
+
           <Card>
             <CardBody>
               <h1 className="text-lg font-semibold text-slate-900">{requirement.title}</h1>
@@ -146,6 +152,96 @@ export default function PortalRequirementDetailPage() {
           </Card>
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * La casa pidió más detalle: se muestra la pregunta y un formulario para
+ * responder. Lo que se escribe se agrega a la descripción y el requerimiento
+ * vuelve a «Solicitado» para que lo evalúen.
+ */
+function ProvideDetailCard({
+  requirement,
+  onDone,
+}: {
+  requirement: PortalRequirement;
+  onDone: (r: PortalRequirement) => void;
+}) {
+  const [detail, setDetail] = useState('');
+  const [criteria, setCriteria] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sent, setSent] = useState(false);
+  const inFlight = useRef(false);
+
+  const submit = async () => {
+    if (inFlight.current || detail.trim().length < 3) return;
+    inFlight.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await portalApi.provideRequirementDetail(requirement.id, {
+        detail: detail.trim(),
+        acceptanceCriteria: parseCriteria(criteria),
+      });
+      setSent(true);
+      onDone(updated);
+    } catch (e: any) {
+      setError(
+        e?.response?.status === 403
+          ? 'Solo el administrador de tu empresa en el portal puede completar el requerimiento.'
+          : e?.response?.data?.message ?? 'No se pudo enviar el detalle. Inténtalo de nuevo.',
+      );
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  };
+
+  if (sent) return null;
+
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 space-y-3">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">Necesitamos más detalle</p>
+        <p className="mt-1 whitespace-pre-wrap text-sm text-amber-900">
+          {requirement.pendingQuestion ?? 'Completa el requerimiento con más detalle para poder evaluarlo.'}
+        </p>
+      </div>
+      {error && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+      <div>
+        <label className="label" htmlFor="rq-detail">Tu respuesta *</label>
+        <textarea
+          id="rq-detail"
+          className="input"
+          rows={5}
+          value={detail}
+          disabled={busy}
+          onChange={(e) => setDetail(e.target.value)}
+          placeholder="Responde a la pregunta con el mayor detalle posible. Si tienes capturas o un documento, menciónalo y te diremos cómo enviarlo."
+        />
+      </div>
+      <div>
+        <label className="label" htmlFor="rq-detail-criteria">Cómo sabremos que está bien (opcional, uno por línea)</label>
+        <textarea
+          id="rq-detail-criteria"
+          className="input"
+          rows={2}
+          value={criteria}
+          disabled={busy}
+          onChange={(e) => setCriteria(e.target.value)}
+        />
+      </div>
+      <div className="flex justify-end">
+        <Button type="button" variant="primary" onClick={submit} disabled={busy || detail.trim().length < 3} loading={busy}>
+          {busy ? 'Enviando…' : 'Enviar detalle'}
+        </Button>
+      </div>
     </div>
   );
 }

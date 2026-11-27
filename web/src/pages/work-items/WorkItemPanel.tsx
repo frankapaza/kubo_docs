@@ -10,6 +10,7 @@ import ClientSystemSelect from '../dev-connector/ClientSystemSelect';
 import CodeLinksPanel from '../dev-connector/CodeLinksPanel';
 import WorkItemDocumentsPanel from './WorkItemDocumentsPanel';
 import WorkItemConformityPanel from './WorkItemConformityPanel';
+import WorkItemSpecAssistant from './WorkItemSpecAssistant';
 
 export interface WorkItemPanelProps {
   workItemId: number;
@@ -354,6 +355,11 @@ export default function WorkItemPanel({ workItemId, onClose, onChanged }: WorkIt
               disabled={busy}
               onChange={handleSystemChange}
             />
+
+            <section>
+              <h3 style={{ margin: '0 0 12px', fontSize: 12, fontWeight: 600, color: '#6d7577' }}>Especificación con IA</h3>
+              <WorkItemSpecAssistant item={item} onChanged={reloadAfterChange} />
+            </section>
 
             <section>
               <h3 style={{ margin: '0 0 12px', fontSize: 12, fontWeight: 600, color: '#6d7577' }}>Documentos</h3>

@@ -174,7 +174,7 @@ describe('estados previos al tablero', () => {
 
   it('no son columnas del tablero', () => {
     expect(BOARD_COLUMNS).toEqual(['PENDIENTE', 'EN_PROCESO', 'PRUEBAS', 'CERRADO']);
-    expect(PRE_BOARD_STATUSES).toEqual(['SOLICITADO', 'RECHAZADO']);
+    expect(PRE_BOARD_STATUSES).toEqual(['SOLICITADO', 'RECHAZADO', 'FALTA_INFO']);
   });
 
   it('RECHAZADO exige motivo; SOLICITADO no', () => {
@@ -187,6 +187,8 @@ describe('estados previos al tablero', () => {
   it('assertMovable rechaza mover lo que aún no entró al tablero', () => {
     expect(() => assertMovable('SOLICITADO')).toThrow(/aceptado/i);
     expect(() => assertMovable('RECHAZADO')).toThrow(/rechazado/i);
+    // Esperando al cliente: tampoco se arrastra al tablero sin aceptarlo.
+    expect(() => assertMovable('FALTA_INFO')).toThrow(/aceptado/i);
   });
 
   it('assertMovable deja pasar cualquier estado del tablero', () => {

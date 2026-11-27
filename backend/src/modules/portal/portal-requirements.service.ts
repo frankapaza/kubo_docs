@@ -1,4 +1,6 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+
+import { PERU_TIME_ZONE } from '../../common/time-zone';
 
 import { WorkItemsRepository } from '../work-items/work-items.repository';
 import { WorkItem } from '../work-items/entities/work-item.entity';
@@ -6,7 +8,11 @@ import { WorkItemEvent } from '../work-items/entities/work-item-event.entity';
 import { DEFAULT_PRIORITY, PRE_BOARD_STATUSES } from '../work-items/domain/work-item-board';
 
 import { assertSessionScope, toIso } from './session-scope';
-import { CreatePortalRequirementDto } from './dto/create-portal-requirement.dto';
+import {
+  CreatePortalRequirementDto,
+  DESCRIPTION_MAX_CHARS,
+  ProvidePortalDetailDto,
+} from './dto/create-portal-requirement.dto';
 import { PortalRequirementView } from './dto/portal-requirement.dto';
 import { REQUIREMENT_STATUS_LABELS } from './domain/requirement-status-labels';
 
@@ -52,7 +58,8 @@ export class PortalRequirementsService {
           projectId: null,
           title: dto.title.trim(),
           descriptionMd: dto.descriptionMd.trim(),
-          acceptanceCriteria: null,
+          acceptanceCriteria: cleanCriteria(dto.acceptanceCriteria),
+          requestType: dto.requestType ?? null,
           labels: null,
           priority: DEFAULT_PRIORITY,
           status: 'SOLICITADO',
@@ -118,8 +125,68 @@ export class PortalRequirementsService {
     if (!w) throw this.noExiste();
 
     const reason = w.status === 'RECHAZADO' ? await this.repo.lastRejectionReason(requirementId) : null;
+    const question = w.status === 'FALTA_INFO' ? await this.repo.lastDetailQuestion(requirementId) : null;
 
-    return this.toPortalView(w, reason);
+    return this.toPortalView(w, reason, question);
+  }
+
+  /**
+   * El cliente responde a «Pedir más detalle»: lo que escribe se agrega al
+   * final de la descripción (no la reemplaza, para no perder lo que la casa ya
+   * leyó) y el requerimiento vuelve a Solicitados para que lo evalúen.
+   */
+  async provideDetail(
+    clientUserId: number,
+    clientId: number,
+    requirementId: number,
+    dto: ProvidePortalDetailDto,
+  ): Promise<PortalRequirementView> {
+    assertSessionScope(clientId, 'clientId', PortalRequirementsService.name);
+    assertSessionScope(clientUserId, 'clientUserId', PortalRequirementsService.name);
+
+    const w = await this.repo.findPortalRequirement(clientId, requirementId);
+    if (!w) throw this.noExiste();
+    if (w.status !== 'FALTA_INFO') {
+      throw new BadRequestException({
+        code: 'BAD_INPUT',
+        message: 'Este requerimiento no está esperando más detalle.',
+      });
+    }
+
+    const fecha = new Intl.DateTimeFormat('es-PE', { timeZone: PERU_TIME_ZONE, dateStyle: 'medium' }).format(new Date());
+    const agregado = `## Detalle agregado el ${fecha}\n${dto.detail.trim()}`;
+    const descripcion = w.descriptionMd?.trim() ? `${w.descriptionMd.trim()}\n\n${agregado}` : agregado;
+    if (descripcion.length > DESCRIPTION_MAX_CHARS) {
+      throw new BadRequestException({
+        code: 'BAD_INPUT',
+        message: 'La descripción quedaría demasiado larga: resume el detalle o adjúntalo como documento.',
+      });
+    }
+    const nuevos = cleanCriteria(dto.acceptanceCriteria) ?? [];
+    const criterios = nuevos.length ? [...(w.acceptanceCriteria ?? []), ...nuevos] : w.acceptanceCriteria;
+
+    return this.repo.runInTransaction(async (manager) => {
+      const itemRepo = manager.getRepository(WorkItem);
+      await itemRepo.update(requirementId, {
+        status: 'SOLICITADO',
+        descriptionMd: descripcion,
+        acceptanceCriteria: criterios ?? null,
+      });
+      const eventRepo = manager.getRepository(WorkItemEvent);
+      await eventRepo.save(
+        eventRepo.create({
+          workItemId: requirementId,
+          type: 'DETAIL_PROVIDED',
+          actorUserId: null,
+          actorClientUserId: clientUserId,
+          fromStatus: 'FALTA_INFO',
+          toStatus: 'SOLICITADO',
+          reason: null,
+          payload: null,
+        }),
+      );
+      return this.toPortalView({ ...w, status: 'SOLICITADO', descriptionMd: descripcion }, null);
+    });
   }
 
   /**
@@ -138,7 +205,11 @@ export class PortalRequirementsService {
    * Lista blanca campo a campo. Nunca `{...w}` menos claves: eso publica por
    * omisión cualquier columna que alguien añada mañana a la entidad.
    */
-  private toPortalView(w: WorkItem, rejectionReason: string | null): PortalRequirementView {
+  private toPortalView(
+    w: WorkItem,
+    rejectionReason: string | null,
+    pendingQuestion: string | null = null,
+  ): PortalRequirementView {
     return {
       id: Number(w.id),
       code: w.code ?? null,
@@ -156,6 +227,14 @@ export class PortalRequirementsService {
       closedAt: toIso(w.closedAt),
       createdAt: toIso(w.createdAt)!,
       rejectionReason: w.status === 'RECHAZADO' ? rejectionReason : null,
+      pendingQuestion: w.status === 'FALTA_INFO' ? pendingQuestion : null,
+      requestType: w.requestType ?? null,
     };
   }
+}
+
+/** Sin líneas vacías; `null` si no queda ninguna. */
+function cleanCriteria(list: string[] | undefined | null): string[] | null {
+  const out = (list ?? []).map((c) => c.trim()).filter(Boolean);
+  return out.length ? out : null;
 }

@@ -87,6 +87,7 @@ services:
       - ./backend/sql/migrations/030_logs_centralizados.sql:/docker-entrypoint-initdb.d/030_logs_centralizados.sql:ro
       - ./backend/sql/migrations/031_conector_repos.sql:/docker-entrypoint-initdb.d/031_conector_repos.sql:ro
       - ./backend/sql/migrations/032_documentos_requerimiento.sql:/docker-entrypoint-initdb.d/032_documentos_requerimiento.sql:ro
+      - ./backend/sql/migrations/033_detalle_requerimiento.sql:/docker-entrypoint-initdb.d/033_detalle_requerimiento.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s

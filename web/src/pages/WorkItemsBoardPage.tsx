@@ -87,6 +87,9 @@ export default function WorkItemsBoardPage() {
   const [agents, setAgents] = useState<SupportAgentView[]>([]);
   const [usersById, setUsersById] = useState<Map<number, string>>(new Map());
   const [openItemId, setOpenItemId] = useState<number | null>(null);
+  // Sube cada vez que el panel cambia algo, para que la bandeja de
+  // solicitados también se recargue (aceptar, pedir detalle desde el panel).
+  const [inboxKey, setInboxKey] = useState(0);
   const [newItemOpen, setNewItemOpen] = useState(false);
   const [outOfFlowOpen, setOutOfFlowOpen] = useState(false);
 
@@ -498,7 +501,12 @@ export default function WorkItemsBoardPage() {
         estado y se refresca sola; `onChanged` solo avisa a este tablero
         para que la columna PENDIENTE se entere del que se acaba de aceptar.
       */}
-      <RequirementIntakeInbox clients={clients} onChanged={() => void refetchList()} />
+      <RequirementIntakeInbox
+        clients={clients}
+        onChanged={() => void refetchList()}
+        onOpen={(i) => setOpenItemId(i.id)}
+        refreshKey={inboxKey}
+      />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
         {BOARD_COLUMNS.map((status) => (
@@ -574,7 +582,10 @@ export default function WorkItemsBoardPage() {
         <WorkItemPanel
           workItemId={openItemId}
           onClose={() => setOpenItemId(null)}
-          onChanged={() => void refetchList()}
+          onChanged={() => {
+            void refetchList();
+            setInboxKey((k) => k + 1);
+          }}
         />
       )}
 

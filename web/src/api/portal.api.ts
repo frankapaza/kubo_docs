@@ -197,8 +197,16 @@ export const portalApi = {
   getRequirement: (id: number) =>
     portalApiClient.get<PortalRequirement>(`/portal/requerimientos/${id}`).then((r) => r.data),
 
-  createRequirement: (body: { title: string; descriptionMd: string }) =>
-    portalApiClient.post<PortalRequirement>('/portal/requerimientos', body).then((r) => r.data),
+  createRequirement: (body: {
+    title: string;
+    descriptionMd: string;
+    requestType?: 'CAMBIO' | 'PROYECTO';
+    acceptanceCriteria?: string[];
+  }) => portalApiClient.post<PortalRequirement>('/portal/requerimientos', body).then((r) => r.data),
+
+  /** Responde a «Pedir más detalle»: agrega el texto y lo devuelve a Solicitado. */
+  provideRequirementDetail: (id: number, body: { detail: string; acceptanceCriteria?: string[] }) =>
+    portalApiClient.post<PortalRequirement>(`/portal/requerimientos/${id}/detalle`, body).then((r) => r.data),
 
   /**
    * Informe mensual (tarea 6 del backend). El backend rechaza el mes en

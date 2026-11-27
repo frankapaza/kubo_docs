@@ -28,6 +28,7 @@ import { ClientsModule } from './modules/clients/clients.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { WorkItemsModule } from './modules/work-items/work-items.module';
 import { WorkItemConformityModule } from './modules/work-item-conformity/work-item-conformity.module';
+import { RequirementDetailModule } from './modules/requirement-detail/requirement-detail.module';
 import { PortalModule } from './modules/portal/portal.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { DocumentSignatoriesModule } from './modules/document-signatories/document-signatories.module';
@@ -101,6 +102,7 @@ import { DevConnectorModule } from './modules/dev-connector/dev-connector.module
     TicketsModule,
     WorkItemsModule,
     WorkItemConformityModule,
+    RequirementDetailModule,
     PortalModule,
     DocumentsModule,
     DocumentSignatoriesModule,

@@ -608,7 +608,7 @@ export interface SupportAgentView extends SupportAgent {
 // siquiera tipaba.
 export type WorkItemStatus =
   | 'PENDIENTE' | 'EN_PROCESO' | 'PRUEBAS' | 'CERRADO' | 'BLOQUEADO' | 'CANCELADO'
-  | 'SOLICITADO' | 'RECHAZADO';
+  | 'SOLICITADO' | 'RECHAZADO' | 'FALTA_INFO';
 
 export type WorkItemPriority = 'ALTA' | 'MEDIA' | 'BAJA';
 
@@ -622,7 +622,10 @@ export type WorkItemPriority = 'ALTA' | 'MEDIA' | 'BAJA';
 export type WorkItemEventType =
   | 'CREATED' | 'MOVED' | 'ASSIGNED' | 'COMMENT' | 'BLOCKED' | 'UNBLOCKED'
   | 'CLOSED' | 'REOPENED' | 'CANCELLED' | 'PRIORITY_CHANGED'
-  | 'REQUESTED' | 'ACCEPTED' | 'REJECTED';
+  | 'REQUESTED' | 'ACCEPTED' | 'REJECTED' | 'DETAIL_REQUESTED' | 'DETAIL_PROVIDED';
+
+/** CAMBIO a un sistema existente o PROYECTO nuevo / prototipo (migración 033). */
+export type WorkItemRequestType = 'CAMBIO' | 'PROYECTO';
 
 export interface WorkItem {
   id: number;
@@ -635,6 +638,8 @@ export interface WorkItem {
   descriptionMd: string | null;
   acceptanceCriteria: string[] | null;
   labels: string[] | null;
+  /** Qué plantilla se usó al pedirlo; nulo en los anteriores. */
+  requestType: WorkItemRequestType | null;
   status: WorkItemStatus;
   priority: WorkItemPriority;
   assigneeUserId: number | null;
@@ -759,7 +764,7 @@ export interface PortalSession {
  */
 export type PortalRequirementStatusLabel =
   | 'Solicitado' | 'Aceptado, en cola' | 'En desarrollo' | 'En pruebas'
-  | 'Entregado' | 'Bloqueado' | 'Cancelado' | 'Rechazado';
+  | 'Entregado' | 'Bloqueado' | 'Cancelado' | 'Rechazado' | 'Falta información';
 
 export interface PortalRequirement {
   id: number;
@@ -790,6 +795,9 @@ export interface PortalRequirement {
    * (`GET /portal/requirements/:id`), que sí trae el motivo real.
    */
   rejectionReason: string | null;
+  /** Solo en «Falta información»: lo que la casa preguntó. */
+  pendingQuestion: string | null;
+  requestType: WorkItemRequestType | null;
 }
 
 // ---------------------------------------------------------------------------

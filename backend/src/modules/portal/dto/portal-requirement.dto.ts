@@ -9,7 +9,8 @@ export type PortalRequirementStatusLabel =
   | 'Entregado'
   | 'Bloqueado'
   | 'Cancelado'
-  | 'Rechazado';
+  | 'Rechazado'
+  | 'Falta información';
 
 /**
  * Lo único que el portal publica de un requerimiento. Lista blanca: lo que no
@@ -32,4 +33,8 @@ export interface PortalRequirementView {
   createdAt: string;
   /** Solo cuando el estado es Rechazado. */
   rejectionReason: string | null;
+  /** Solo en «Falta información»: la última pregunta de la casa. */
+  pendingQuestion: string | null;
+  /** CAMBIO o PROYECTO; nulo en los pedidos anteriores a la plantilla. */
+  requestType: 'CAMBIO' | 'PROYECTO' | null;
 }

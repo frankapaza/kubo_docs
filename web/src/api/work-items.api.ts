@@ -20,6 +20,7 @@ export interface CreateWorkItemBody {
   descriptionMd?: string;
   acceptanceCriteria?: string[];
   labels?: string[];
+  requestType?: 'CAMBIO' | 'PROYECTO';
   priority?: WorkItemPriority;
   assigneeUserId?: number;
   dueDate?: string;
@@ -55,6 +56,23 @@ export const workItemsApi = {
   /** Rechazar exige motivo, igual que el resto de estados fuera de flujo. */
   reject: (id: number, body: { reason: string }) =>
     api.post<WorkItem>(`/work-items/${id}/reject`, body).then((r) => r.data),
+
+  /** Lo devuelve al cliente con una pregunta (estado «Falta información») y le avisa por correo. */
+  requestDetail: (id: number, message: string) =>
+    api
+      .post<{ item: WorkItem; notified: boolean; emailError?: string }>(`/work-items/${id}/request-detail`, { message })
+      .then((r) => r.data),
+
+  /** Redacta la Especificación con IA y la deja como borrador en Documentos. */
+  draftSpec: (id: number) =>
+    api
+      .post<{ especificacion: WorkItemDoc; brief: string | null; briefDoc: WorkItemDoc | null; preguntas: string[] }>(
+        `/work-items/${id}/spec-draft`,
+        {},
+        // La IA puede tardar: más margen que el resto de llamadas.
+        { timeout: 120_000 },
+      )
+      .then((r) => r.data),
 };
 
 export type WorkItemDocKind = 'ESPECIFICACION' | 'MANUAL_USUARIO' | 'ACTA_CONFORMIDAD' | 'OTRO';

@@ -69,6 +69,7 @@ services:
       - ./backend/sql/migrations/030_logs_centralizados.sql:/docker-entrypoint-initdb.d/039_mig_030.sql:ro
       - ./backend/sql/migrations/031_conector_repos.sql:/docker-entrypoint-initdb.d/040_mig_031.sql:ro
       - ./backend/sql/migrations/032_documentos_requerimiento.sql:/docker-entrypoint-initdb.d/041_mig_032.sql:ro
+      - ./backend/sql/migrations/033_detalle_requerimiento.sql:/docker-entrypoint-initdb.d/041b_mig_033.sql:ro
       # Seeds — van detrás de todas las migraciones, así que el seed se
       # renumera cada vez que entra una migración nueva.
       - ./backend/sql/seed_document_templates.sql:/docker-entrypoint-initdb.d/041_seed_templates.sql:ro

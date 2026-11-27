@@ -146,9 +146,12 @@ En el detalle del requerimiento (tablero → clic en la tarjeta) está la secci�
 
 | Momento | Documento | Quién |
 |---|---|---|
-| Al aceptar | **Especificación del requerimiento**: objetivo, alcance (y lo que no incluye), reglas de negocio, pantallas, criterios de aceptación | El analista o el cliente la sube |
+| Al aceptar | **Especificación del requerimiento**: objetivo, alcance (y lo que no incluye), reglas de negocio, pantallas, criterios de aceptación | El analista o el cliente la sube, o se redacta con **Especificación con IA** (queda como borrador; en proyectos nuevos también genera el brief de prototipo) |
 | Al entregar a Pruebas | **Manual de usuario**: paso a paso para el usuario final | Claude lo redacta (`entregar_requerimiento`); queda como **borrador** hasta que alguien pulse **Aprobar** |
 | Al cerrar | **Acta de conformidad** firmada por el cliente | DevDocs la genera (sección **Acta de conformidad**, con el RQ en Pruebas) y la envía al cliente para firmar por enlace; al firmar, el PDF firmado queda en Documentos y el RQ pasa a **Cerrado** solo |
+
+Si el pedido llega incompleto, en **Solicitados** está **Pedir detalle**: el requerimiento pasa a
+«Falta información», el cliente recibe la pregunta por correo y la responde en el portal.
 
 La Especificación es **recomendada**: si falta, DevDocs lo avisa en el panel y
 Claude lo advierte al tomar el requerimiento.

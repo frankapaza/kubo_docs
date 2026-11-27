@@ -202,7 +202,7 @@ export class DevApiService {
         message: 'Este requerimiento ya está asignado a otra persona: pide que te lo reasignen en DevDocs.',
       });
     }
-    if (w.status === 'SOLICITADO') {
+    if (w.status === 'SOLICITADO' || w.status === 'FALTA_INFO') {
       throw new ConflictException({
         code: 'CONFLICT',
         message: 'El requerimiento aún no fue aceptado: acéptalo en DevDocs (fija la fecha comprometida) y luego tómalo.',

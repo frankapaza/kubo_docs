@@ -4,6 +4,7 @@ import { workItemsApi } from '../../api/work-items.api';
 import { clientUsersApi } from '../../api/client-users.api';
 import type { Client, WorkItem, WorkItemPriority } from '../../api/types';
 import ClientSystemSelect from '../dev-connector/ClientSystemSelect';
+import RequestDetailDialog from './RequestDetailDialog';
 
 export interface RequirementIntakeInboxProps {
   /** Empresas activas, ya cargadas por WorkItemsBoardPage: evita pedirlas dos veces. */
@@ -15,6 +16,10 @@ export interface RequirementIntakeInboxProps {
    * refresca.
    */
   onChanged: () => void;
+  /** Abre el detalle (WorkItemPanel): descripción, documentos, IA. */
+  onOpen?: (item: WorkItem) => void;
+  /** Cambia cuando algo fuera de la bandeja (el panel) movió un solicitado: recarga. */
+  refreshKey?: number;
 }
 
 const PRIORITIES: WorkItemPriority[] = ['ALTA', 'MEDIA', 'BAJA'];
@@ -420,7 +425,7 @@ function RejectDialog({ item, onCancel, onRejected }: RejectDialogProps) {
  * Se pinta **solo si hay al menos un solicitado**: una franja vacía
  * permanente enseña a ignorarla.
  */
-export default function RequirementIntakeInbox({ clients, onChanged }: RequirementIntakeInboxProps) {
+export default function RequirementIntakeInbox({ clients, onChanged, onOpen, refreshKey = 0 }: RequirementIntakeInboxProps) {
   const [items, setItems] = useState<WorkItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -453,6 +458,7 @@ export default function RequirementIntakeInbox({ clients, onChanged }: Requireme
 
   const [acceptTarget, setAcceptTarget] = useState<WorkItem | null>(null);
   const [rejectTarget, setRejectTarget] = useState<WorkItem | null>(null);
+  const [detailTarget, setDetailTarget] = useState<WorkItem | null>(null);
 
   const clientsById = useMemo(() => new Map(clients.map((c) => [c.id, c.razonSocial])), [clients]);
 
@@ -460,10 +466,11 @@ export default function RequirementIntakeInbox({ clients, onChanged }: Requireme
     let cancelled = false;
     setLoading(true);
     setError(null);
-    workItemsApi
-      .list({ status: 'SOLICITADO' })
-      .then((data) => {
-        if (!cancelled) setItems(data);
+    // Los que esperan respuesta de casa y los que esperan al cliente («Falta
+    // información»): los dos se aceptan o rechazan desde aquí.
+    Promise.all([workItemsApi.list({ status: 'SOLICITADO' }), workItemsApi.list({ status: 'FALTA_INFO' })])
+      .then(([solicitados, faltaInfo]) => {
+        if (!cancelled) setItems([...solicitados, ...faltaInfo]);
       })
       .catch((e) => {
         if (!cancelled) {
@@ -482,7 +489,7 @@ export default function RequirementIntakeInbox({ clients, onChanged }: Requireme
     };
   };
 
-  useEffect(() => load(), []);
+  useEffect(() => load(), [refreshKey]);
 
   // Resuelve "quién lo pidió" por empresa distinta presente en la bandeja.
   // Un fallo aquí no es un fallo de la bandeja: la fila simplemente cae al
@@ -526,6 +533,11 @@ export default function RequirementIntakeInbox({ clients, onChanged }: Requireme
     setRejectTarget(null);
     setItems((prev) => prev.filter((i) => i.id !== updated.id));
     onChanged();
+  };
+
+  const handleDetailRequested = (updated: WorkItem) => {
+    setDetailTarget(null);
+    setItems((prev) => prev.map((i) => (i.id === updated.id ? { ...i, status: updated.status } : i)));
   };
 
   /**
@@ -593,7 +605,25 @@ export default function RequirementIntakeInbox({ clients, onChanged }: Requireme
                 <td style={{ padding: '8px', fontFamily: "'IBM Plex Mono', monospace", fontSize: 12 }}>
                   {item.code ?? `#${item.id}`}
                 </td>
-                <td style={{ padding: '8px', fontWeight: 500 }}>{item.title}</td>
+                <td style={{ padding: '8px', fontWeight: 500 }}>
+                  {onOpen ? (
+                    <button
+                      type="button"
+                      onClick={() => onOpen(item)}
+                      title="Ver el detalle, los documentos y redactar la especificación"
+                      style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', fontWeight: 500, color: '#15191a', cursor: 'pointer', textAlign: 'left', textDecoration: 'underline', textDecorationColor: '#c9cdce', textUnderlineOffset: 3 }}
+                    >
+                      {item.title}
+                    </button>
+                  ) : (
+                    item.title
+                  )}
+                  {item.status === 'FALTA_INFO' && (
+                    <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 600, padding: '2px 7px', borderRadius: 4, background: 'oklch(0.95 0.05 78)', color: 'oklch(0.48 0.11 70)' }}>
+                      Esperando al cliente
+                    </span>
+                  )}
+                </td>
                 <td style={{ padding: '8px' }}>{clientLabel(item)}</td>
                 <td style={{ padding: '8px' }}>{requesterLabel(item)}</td>
                 <td style={{ padding: '8px', color: '#6d7577' }}>{fmtAlta(item.createdAt)}</td>
@@ -608,6 +638,17 @@ export default function RequirementIntakeInbox({ clients, onChanged }: Requireme
                     }}
                   >
                     Aceptar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDetailTarget(item)}
+                    aria-label={`Pedir más detalle de ${item.code ?? `requerimiento #${item.id}`}`}
+                    style={{
+                      fontSize: 12, fontWeight: 500, padding: '6px 11px', borderRadius: 6, marginRight: 6,
+                      background: '#fff', color: '#3a4041', border: '1px solid #d8dcdd', cursor: 'pointer',
+                    }}
+                  >
+                    {item.status === 'FALTA_INFO' ? 'Preguntar otra vez' : 'Pedir detalle'}
                   </button>
                   <button
                     type="button"
@@ -629,6 +670,7 @@ export default function RequirementIntakeInbox({ clients, onChanged }: Requireme
 
       <AcceptDialog item={acceptTarget} onCancel={() => setAcceptTarget(null)} onAccepted={handleAccepted} />
       <RejectDialog item={rejectTarget} onCancel={() => setRejectTarget(null)} onRejected={handleRejected} />
+      <RequestDetailDialog item={detailTarget} onCancel={() => setDetailTarget(null)} onDone={handleDetailRequested} />
     </section>
   );
 }

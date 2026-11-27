@@ -115,6 +115,12 @@ function makeService(filas: Partial<WorkItem>[] = [], eventosSemilla: Partial<Wo
       );
       return Promise.resolve(del.length > 0 ? (del[del.length - 1].reason ?? null) : null);
     }),
+    lastDetailQuestion: jest.fn().mockImplementation((workItemId: number) => {
+      const del = eventosSemilla.filter((e) =>
+        cumple(e as Record<string, unknown>, { workItemId, type: 'DETAIL_REQUESTED' }),
+      );
+      return Promise.resolve(del.length > 0 ? (del[del.length - 1].reason ?? null) : null);
+    }),
     runInTransaction: jest.fn().mockImplementation((work) => work(manager)),
   };
 
@@ -201,7 +207,9 @@ describe('PortalRequirementsService.create', () => {
         'descriptionMd',
         'id',
         'priority',
+        'pendingQuestion',
         'rejectionReason',
+        'requestType',
         'status',
         'title',
       ].sort(),
@@ -276,7 +284,9 @@ describe('PortalRequirementsService.findOne', () => {
         'descriptionMd',
         'id',
         'priority',
+        'pendingQuestion',
         'rejectionReason',
+        'requestType',
         'status',
         'title',
       ].sort(),
@@ -384,5 +394,53 @@ describe('el dto de alta', () => {
 
   it('un titulo de solo espacios no pasa: el trim va antes de validar', async () => {
     expect(await validar({ ...base, title: '   ' })).not.toEqual([]);
+  });
+});
+
+describe('PortalRequirementsService: pedir y completar detalle', () => {
+  it('al pedir, guarda el tipo de pedido y los criterios que escribió el cliente', async () => {
+    const { service, guardado } = makeService();
+    await service.create(3, 7, {
+      title: 'Dashboard de cobranza', descriptionMd: '## Idea\nTablero', requestType: 'PROYECTO',
+      acceptanceCriteria: ['Se ve el ranking', '  '],
+    } as CreatePortalRequirementDto);
+    expect(guardado).toMatchObject({ requestType: 'PROYECTO', acceptanceCriteria: ['Se ve el ranking'] });
+  });
+
+  it('el detalle de un requerimiento en falta de información trae la pregunta', async () => {
+    const { service } = makeService(
+      [fila({ status: 'FALTA_INFO' })],
+      [{ workItemId: 1, type: 'DETAIL_REQUESTED', reason: '¿Qué reporte?' }],
+    );
+    const v = await service.findOne(7, 1);
+    expect(v.status).toBe('Falta información');
+    expect(v.pendingQuestion).toBe('¿Qué reporte?');
+  });
+
+  it('completar agrega el detalle a la descripción y lo devuelve a Solicitado', async () => {
+    const { service, itemRepo, eventos } = makeService([fila({ status: 'FALTA_INFO', descriptionMd: 'Original' })]);
+    await service.provideDetail(3, 7, 1, { detail: 'Es el reporte de pagos' });
+    const [, patch] = itemRepo.update.mock.calls[0];
+    expect(patch.status).toBe('SOLICITADO');
+    expect(patch.descriptionMd).toMatch(/^Original\n\n## Detalle agregado el .+\nEs el reporte de pagos$/);
+    expect(eventos[0]).toMatchObject({
+      type: 'DETAIL_PROVIDED', actorClientUserId: 3, actorUserId: null, fromStatus: 'FALTA_INFO', toStatus: 'SOLICITADO',
+    });
+  });
+
+  it('solo se completa lo que está esperando detalle', async () => {
+    const { service, itemRepo } = makeService([fila({ status: 'SOLICITADO' })]);
+    await expect(service.provideDetail(3, 7, 1, { detail: 'algo' })).rejects.toThrow(/no está esperando/i);
+    expect(itemRepo.update).not.toHaveBeenCalled();
+  });
+
+  it('no se completa un requerimiento de otra empresa (404)', async () => {
+    const { service } = makeService([fila({ status: 'FALTA_INFO', clientId: 99 })]);
+    await expect(service.provideDetail(3, 7, 1, { detail: 'algo' })).rejects.toThrow(/no encontrado/i);
+  });
+
+  it('no deja superar el tope de la descripción', async () => {
+    const { service } = makeService([fila({ status: 'FALTA_INFO', descriptionMd: 'x'.repeat(16_300) })]);
+    await expect(service.provideDetail(3, 7, 1, { detail: 'y'.repeat(200) })).rejects.toThrow(/demasiado larga/i);
   });
 });

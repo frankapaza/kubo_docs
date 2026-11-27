@@ -157,4 +157,13 @@ export class WorkItemsRepository {
     });
     return ev?.reason ?? null;
   }
+
+  /** La última pregunta de «Pedir más detalle», para enseñarla en el portal. */
+  async lastDetailQuestion(workItemId: number): Promise<string | null> {
+    const ev = await this.eventsRepo.findOne({
+      where: { workItemId, type: 'DETAIL_REQUESTED' },
+      order: { createdAt: 'DESC', id: 'DESC' },
+    });
+    return ev?.reason ?? null;
+  }
 }

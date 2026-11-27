@@ -8,7 +8,8 @@ export type WorkItemStatus =
   | 'BLOQUEADO'
   | 'CANCELADO'
   | 'SOLICITADO'
-  | 'RECHAZADO';
+  | 'RECHAZADO'
+  | 'FALTA_INFO';
 
 export const WORK_ITEM_STATUSES: WorkItemStatus[] = [
   'PENDIENTE',
@@ -19,6 +20,7 @@ export const WORK_ITEM_STATUSES: WorkItemStatus[] = [
   'CANCELADO',
   'SOLICITADO',
   'RECHAZADO',
+  'FALTA_INFO',
 ];
 
 /** Las cuatro columnas de flujo del tablero, en orden de izquierda a derecha. */
@@ -67,7 +69,10 @@ export function assertReason(toStatus: WorkItemStatus, reason: string | null | u
  * Se sale por `WorkItemIntakeService.accept` o `.reject`, que son los únicos
  * sitios donde se fija la fecha comprometida o se exige el motivo.
  */
-export const PRE_BOARD_STATUSES: WorkItemStatus[] = ['SOLICITADO', 'RECHAZADO'];
+export const PRE_BOARD_STATUSES: WorkItemStatus[] = ['SOLICITADO', 'RECHAZADO', 'FALTA_INFO'];
+
+/** Esperan respuesta de la casa o del cliente antes de entrar al tablero: se pueden aceptar o rechazar. */
+export const AWAITING_ACCEPTANCE: WorkItemStatus[] = ['SOLICITADO', 'FALTA_INFO'];
 
 /**
  * Exige que el ítem ya esté en el tablero antes de dejar que alguien lo mueva.
@@ -86,7 +91,7 @@ export function assertMovable(fromStatus: WorkItemStatus): void {
   if (!PRE_BOARD_STATUSES.includes(fromStatus)) return;
 
   const message =
-    fromStatus === 'SOLICITADO'
+    AWAITING_ACCEPTANCE.includes(fromStatus)
       ? 'El requerimiento aún no ha sido aceptado: acéptalo antes de moverlo en el tablero.'
       : 'El requerimiento fue rechazado y no vuelve al tablero.';
 

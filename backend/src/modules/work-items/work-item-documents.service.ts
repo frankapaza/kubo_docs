@@ -210,13 +210,16 @@ export class WorkItemDocumentsService {
     });
   }
 
-  /** Un Markdown (el manual que redacta Claude) convertido a PDF con el estilo de los demás documentos. */
-  renderManualPdf(title: string, markdown: string): Promise<Buffer> {
+  /**
+   * Un Markdown convertido a PDF con el estilo de los demás documentos: el
+   * manual que redacta Claude, o la Especificación y el brief que redacta la IA.
+   */
+  renderManualPdf(title: string, markdown: string, subtitle = 'Manual de usuario'): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({
         size: 'A4',
         margins: { top: 60, bottom: 60, left: 56, right: 56 },
-        info: { Title: title, Author: 'Kubo DevDocs', Subject: 'Manual de usuario' },
+        info: { Title: title, Author: 'Kubo DevDocs', Subject: subtitle },
       });
       const chunks: Buffer[] = [];
       doc.on('data', (c: Buffer) => chunks.push(c));
@@ -225,7 +228,7 @@ export class WorkItemDocumentsService {
 
       doc.font('Helvetica-Bold').fontSize(16).fillColor(PDF_COLORS.ink).text(title);
       doc.moveDown(0.3);
-      doc.font('Helvetica').fontSize(9).fillColor(PDF_COLORS.muted).text('Manual de usuario · Kubo DevDocs');
+      doc.font('Helvetica').fontSize(9).fillColor(PDF_COLORS.muted).text(`${subtitle} · Kubo DevDocs`);
       doc.moveDown(1);
       this.md.drawBody(doc, markdown);
       doc.end();

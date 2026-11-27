@@ -185,7 +185,8 @@ jobs:
                      029_catalogo_de_sistemas \
                      030_logs_centralizados \
                      031_conector_repos \
-                     032_documentos_requerimiento; do
+                     032_documentos_requerimiento \
+                     033_detalle_requerimiento; do
               echo "--- $m"
               sql_file "backend/sql/migrations/$m.sql"
             done
