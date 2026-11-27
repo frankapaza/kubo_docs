@@ -2,11 +2,14 @@ import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import { WorkspaceService, ResolvedSmtpConfig } from '../workspace/workspace.service';
+import { KUBO_LOGO_CID, kuboLogoAttachment, wrapEmailLayout } from './email-layout';
 
 export interface EmailAttachment {
   filename: string;
   content: Buffer;
   contentType: string;
+  /** Para imágenes inline (`<img src="cid:...">`). */
+  cid?: string;
 }
 
 export interface SendEmailInput {
@@ -107,9 +110,10 @@ export class EmailService {
         cc: input.cc,
         bcc: input.bcc,
         subject: input.subject,
-        html: input.html,
+        // Marco Kubo con el logo incrustado para todos los correos (spec 2026-11-28).
+        html: wrapEmailLayout(input.html, { logoSrc: `cid:${KUBO_LOGO_CID}` }),
         text: input.text,
-        attachments: input.attachments,
+        attachments: [...(input.attachments ?? []), kuboLogoAttachment()],
         replyTo: input.replyTo ?? userEmail,
         headers: input.headers,
       });
