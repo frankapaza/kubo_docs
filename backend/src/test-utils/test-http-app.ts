@@ -5,6 +5,8 @@ import { HttpExceptionFilter } from '../common/filters/http-exception.filter';
 import { createGlobalValidationPipe } from '../common/validation/validation-pipe.factory';
 import { registerBulkSendJsonLimit } from '../modules/portal/bulk-send-json-limit';
 import { registerIngestJsonLimit } from '../modules/monitoring/ingest/ingest-json-limit';
+import { registerImportJsonLimit } from '../modules/availability/import-json-limit';
+import { registerProbeIngestJsonLimit } from '../modules/availability/probe-ingest-json-limit';
 import { registerGithubWebhookBody } from '../modules/dev-connector/github-webhook-body';
 
 /**
@@ -104,6 +106,8 @@ export async function startTestHttpApp(moduleRef: TestingModule): Promise<TestHt
   // habría leído (y rechazado) el cuerpo.
   registerBulkSendJsonLimit(app);
   registerIngestJsonLimit(app);
+  registerProbeIngestJsonLimit(app);
+  registerImportJsonLimit(app);
   registerGithubWebhookBody(app);
 
   await app.init();

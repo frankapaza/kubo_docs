@@ -1,0 +1,196 @@
+import Database from 'better-sqlite3';
+import type { CheckResult, ProbeSignal } from '@kubo/monitoring-core';
+import { EVENTS_TABLE_SQL, EventJournal } from './events/event-journal';
+
+export type Kind = 'CHECK' | 'SIGNAL';
+
+/** Filas que se conservan en dead_letter (se borran las más antiguas). */
+export const DEAD_LETTER_MAX = 5000;
+
+export type OutboxItem = { kind: 'CHECK'; item: CheckResult } | { kind: 'SIGNAL'; item: ProbeSignal };
+
+export function splitItems(items: OutboxItem[]): { checks: CheckResult[]; signals: ProbeSignal[] } {
+  const checks: CheckResult[] = [];
+  const signals: ProbeSignal[] = [];
+  for (const x of items) {
+    if (x.kind === 'CHECK') checks.push(x.item);
+    else signals.push(x.item);
+  }
+  return { checks, signals };
+}
+
+/**
+ * Cola de envío persistente (SQLite), última configuración conocida y diario de eventos.
+ *
+ * Checks y señales comparten una sola tabla con una secuencia autoincremental:
+ * `peekBatch` devuelve siempre un PREFIJO de la cola en orden de inserción, de
+ * modo que nunca sale una señal (ni un check) antes que otro anterior. Lo que
+ * se escribe aquí sobrevive a un reinicio: el motor encola en `onResult`, antes
+ * de devolver el control al `ProbeRunner`.
+ */
+export class Outbox {
+  private readonly db: Database.Database;
+  private readonly insertStmt: Database.Statement;
+  private readonly deleteStmt: Database.Statement;
+  /** Diario de eventos del motor (tabla `events` de esta misma base). */
+  readonly events: EventJournal;
+
+  constructor(file: string) {
+    this.db = new Database(file);
+    if (file !== ':memory:') this.db.pragma('journal_mode = WAL');
+    this.db.pragma('synchronous = FULL');
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS outbox (
+        seq     INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind    TEXT NOT NULL CHECK (kind IN ('CHECK', 'SIGNAL')),
+        id      TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        UNIQUE (kind, id)
+      );
+      CREATE TABLE IF NOT EXISTS config (
+        k       INTEGER PRIMARY KEY CHECK (k = 1),
+        version TEXT NOT NULL,
+        json    TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS dead_letter (
+        seq     INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind    TEXT NOT NULL,
+        id      TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        status  INTEGER NOT NULL,
+        error   TEXT NOT NULL,
+        at      TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS kv (
+        k TEXT PRIMARY KEY,
+        v TEXT NOT NULL
+      );
+      ${EVENTS_TABLE_SQL}
+    `);
+    this.insertStmt = this.db.prepare('INSERT OR IGNORE INTO outbox (kind, id, payload) VALUES (?, ?, ?)');
+    this.deleteStmt = this.db.prepare('DELETE FROM outbox WHERE kind = ? AND id = ?');
+    this.events = new EventJournal(this.db);
+  }
+
+  enqueueCheck(r: CheckResult): void {
+    this.insertStmt.run('CHECK', r.id, JSON.stringify(r));
+  }
+
+  enqueueSignal(s: ProbeSignal): void {
+    this.insertStmt.run('SIGNAL', s.id, JSON.stringify(s));
+  }
+
+  /** Un resultado y sus señales, en una sola transacción y en ese orden. */
+  enqueueResult(r: CheckResult, signals: ProbeSignal[]): void {
+    this.db.transaction(() => {
+      this.enqueueCheck(r);
+      for (const s of signals) this.enqueueSignal(s);
+    })();
+  }
+
+  /**
+   * El prefijo más largo de la cola con como mucho `max` checks y `maxSignals`
+   * señales (por defecto también `max`), en orden de inserción. Se corta en el
+   * primer elemento que no cabe, para no adelantar los posteriores.
+   */
+  peekBatch(max: number, maxSignals: number = max): { checks: CheckResult[]; signals: ProbeSignal[] } {
+    return splitItems(this.peekItems(max, maxSignals));
+  }
+
+  /** Igual que `peekBatch`, pero con checks y señales intercalados en su orden real. */
+  peekItems(max: number, maxSignals: number = max): OutboxItem[] {
+    const out: OutboxItem[] = [];
+    let nChecks = 0;
+    let nSignals = 0;
+    const rows = this.db
+      .prepare('SELECT kind, payload FROM outbox ORDER BY seq LIMIT ?')
+      .all(Math.max(0, max) + Math.max(0, maxSignals)) as { kind: Kind; payload: string }[];
+    for (const row of rows) {
+      if (row.kind === 'CHECK') {
+        if (nChecks >= max) break;
+        nChecks++;
+        out.push({ kind: 'CHECK', item: JSON.parse(row.payload) as CheckResult });
+      } else {
+        if (nSignals >= maxSignals) break;
+        nSignals++;
+        out.push({ kind: 'SIGNAL', item: JSON.parse(row.payload) as ProbeSignal });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Saca un elemento de la cola y lo guarda en `dead_letter` con el motivo: la central
+   * lo rechaza por sí solo (400/413) y reintentarlo bloquearía todo lo posterior.
+   */
+  deadLetter(kind: Kind, id: string, status: number, error: string): void {
+    this.db.transaction(() => {
+      const moved = this.db
+        .prepare(
+          'INSERT INTO dead_letter (kind, id, payload, status, error, at) SELECT kind, id, payload, ?, ?, ? FROM outbox WHERE kind = ? AND id = ?',
+        )
+        .run(status, error.slice(0, 1000), new Date().toISOString(), kind, id);
+      if (moved.changes === 0) return;
+      this.deleteStmt.run(kind, id);
+      this.db
+        .prepare('DELETE FROM dead_letter WHERE seq <= (SELECT MAX(seq) FROM dead_letter) - ?')
+        .run(DEAD_LETTER_MAX);
+    })();
+  }
+
+  deadLetters(): { kind: Kind; id: string; payload: string; status: number; error: string; at: string }[] {
+    return this.db.prepare('SELECT kind, id, payload, status, error, at FROM dead_letter ORDER BY seq').all() as {
+      kind: Kind;
+      id: string;
+      payload: string;
+      status: number;
+      error: string;
+      at: string;
+    }[];
+  }
+
+  ack(checkIds: string[], signalIds: string[]): void {
+    this.db.transaction(() => {
+      for (const id of checkIds) this.deleteStmt.run('CHECK', id);
+      for (const id of signalIds) this.deleteStmt.run('SIGNAL', id);
+    })();
+  }
+
+  saveConfig(version: string, json: string): void {
+    this.db
+      .prepare('INSERT INTO config (k, version, json) VALUES (1, ?, ?) ON CONFLICT(k) DO UPDATE SET version = excluded.version, json = excluded.json')
+      .run(version, json);
+  }
+
+  loadConfig(): { version: string; json: string } | null {
+    const row = this.db.prepare('SELECT version, json FROM config WHERE k = 1').get() as { version: string; json: string } | undefined;
+    return row ? { version: row.version, json: row.json } : null;
+  }
+
+  /** Último estado combinado recibido (JSON): el widget lo ve aunque se reinicie sin red. */
+  saveState(json: string): void {
+    this.saveKv('state', json);
+  }
+
+  loadState(): string | null {
+    return this.loadKv('state');
+  }
+
+  /** Valor (texto) guardado bajo `k` en la tabla `kv`. */
+  saveKv(k: string, v: string): void {
+    this.db.prepare('INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v').run(k, v);
+  }
+
+  loadKv(k: string): string | null {
+    const row = this.db.prepare('SELECT v FROM kv WHERE k = ?').get(k) as { v: string } | undefined;
+    return row ? row.v : null;
+  }
+
+  pendingCount(): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM outbox').get() as { n: number }).n;
+  }
+
+  close(): void {
+    if (this.db.open) this.db.close();
+  }
+}

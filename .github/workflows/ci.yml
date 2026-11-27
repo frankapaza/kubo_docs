@@ -11,7 +11,8 @@ name: CI
 #  disparados por el mismo `push`--, un CI en rojo tampoco impedía desplegar:
 #  los dos arrancaban a la vez y el despliegue no miraba al otro.
 #
-#  Ahora son tres trabajos, en paralelo porque no dependen entre sí, y
+#  Ahora son cinco trabajos (los dos últimos, del monitoreo de disponibilidad:
+#  su núcleo y el motor de la oficina), en paralelo porque no dependen entre sí, y
 #  `deploy.yml` **no arranca hasta que este workflow termina en verde**
 #  (`workflow_run`; ver la cabecera de aquel fichero).
 #
@@ -125,4 +126,65 @@ jobs:
       # tiene el frontend, porque `web` no tiene suite de pruebas.
       - name: Compilar
         working-directory: web
+        run: npm run build
+
+  # Núcleo de medición del monitoreo de disponibilidad: lo usan la sonda de la
+  # oficina (desktop/engine, por dependencia `file:`) y el backend (copia
+  # sincronizada en src/modules/availability/core, que el trabajo `backend`
+  # ya prueba con su suite). Aquí se prueba la fuente.
+  monitoring-core:
+    name: Monitoreo — núcleo (pruebas y compilación)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+          cache-dependency-path: packages/monitoring-core/package-lock.json
+
+      - name: Instalar dependencias
+        working-directory: packages/monitoring-core
+        run: npm ci
+
+      - name: Pruebas
+        working-directory: packages/monitoring-core
+        run: npm test
+
+      - name: Compilar
+        working-directory: packages/monitoring-core
+        run: npm run build
+
+  # Motor de la oficina (servicio de Windows). Importa `@kubo/monitoring-core`
+  # desde su `dist/`, así que primero se compila el núcleo. Las pruebas que solo
+  # valen en Windows (DPAPI) se saltan solas fuera de él.
+  monitor-engine:
+    name: Monitoreo — motor de la oficina (pruebas y compilación)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+          cache-dependency-path: |
+            packages/monitoring-core/package-lock.json
+            desktop/engine/package-lock.json
+
+      - name: Compilar el núcleo (dependencia file:)
+        working-directory: packages/monitoring-core
+        run: npm ci && npm run build
+
+      - name: Instalar dependencias
+        working-directory: desktop/engine
+        run: npm ci
+
+      - name: Pruebas
+        working-directory: desktop/engine
+        run: npm test
+
+      - name: Compilar
+        working-directory: desktop/engine
         run: npm run build

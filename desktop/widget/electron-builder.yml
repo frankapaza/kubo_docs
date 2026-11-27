@@ -1,0 +1,28 @@
+appId: com.kubo.monitor.widget
+productName: KUBO Monitor
+copyright: KUBO
+directories:
+  output: dist
+  buildResources: assets
+files:
+  - out/**/*
+  - '!out/**/*.map'
+  - assets/**/*
+  - package.json
+asar: true
+# El ejecutable empaquetado ignora ELECTRON_RUN_AS_NODE (no se puede usar como un Node cualquiera).
+electronFuses:
+  runAsNode: false
+win:
+  target: nsis
+  icon: assets/icon.png
+  executableName: KUBO Monitor
+# Instalador por usuario, sin elevación; el arranque con la sesión lo registra la app al primer inicio
+# y el desinstalador lo quita (installer/uninstall.nsh; no en las actualizaciones).
+nsis:
+  include: installer/uninstall.nsh
+  oneClick: true
+  perMachine: false
+  allowElevation: false
+  artifactName: KUBO-Monitor-Setup-${version}.${ext}
+  shortcutName: KUBO Monitor

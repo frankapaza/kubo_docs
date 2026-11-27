@@ -89,6 +89,11 @@ services:
       - ./backend/sql/migrations/032_documentos_requerimiento.sql:/docker-entrypoint-initdb.d/032_documentos_requerimiento.sql:ro
       - ./backend/sql/migrations/033_detalle_requerimiento.sql:/docker-entrypoint-initdb.d/033_detalle_requerimiento.sql:ro
       - ./backend/sql/migrations/034_adjuntos_cliente_requerimiento.sql:/docker-entrypoint-initdb.d/034_adjuntos_cliente_requerimiento.sql:ro
+      - ./backend/sql/migrations/035_disponibilidad_nucleo.sql:/docker-entrypoint-initdb.d/035_disponibilidad_nucleo.sql:ro
+      # La 036 anade monitor_probes.silence_alerted_at (aviso por silencio de una sonda).
+      - ./backend/sql/migrations/036_disponibilidad_escritorio.sql:/docker-entrypoint-initdb.d/036_disponibilidad_escritorio.sql:ro
+      # La 037 crea las tablas del informe mensual, evidencias, mantenimiento y agente.
+      - ./backend/sql/migrations/037_disponibilidad_informe.sql:/docker-entrypoint-initdb.d/037_disponibilidad_informe.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s
@@ -103,6 +108,32 @@ services:
     command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
     volumes:
       - redis_data:/data
+    networks:
+      - internal
+
+  # Sonda kubo-01 del monitoreo de disponibilidad: el mismo codigo del backend,
+  # otro punto de entrada. SOLO mide (escribe checks y senales en MySQL y recoge
+  # sus ordenes MANUAL/CROSS); el evaluador y la purga corren en `backend`. Por
+  # eso solo necesita MySQL: sin Redis, colas, cron ni volumen de uploads, que
+  # duplicarian los consumidores y trabajos programados del backend.
+  # Sin puertos ni entrada en el Caddyfile.
+  # Requiere la migracion 032 aplicada (busca la sonda 'kubo-01' al arrancar).
+  monitor-worker:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    mem_limit: 512m
+    command: ["node", "dist/monitoring-worker.js"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: ${DB_ROOT_PASSWORD}
+      DB_NAME: ${DB_NAME}
     networks:
       - internal
 

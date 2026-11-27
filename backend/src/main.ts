@@ -8,6 +8,8 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { createGlobalValidationPipe } from './common/validation/validation-pipe.factory';
 import { registerBulkSendJsonLimit } from './modules/portal/bulk-send-json-limit';
 import { registerIngestJsonLimit } from './modules/monitoring/ingest/ingest-json-limit';
+import { registerImportJsonLimit } from './modules/availability/import-json-limit';
+import { registerProbeIngestJsonLimit } from './modules/availability/probe-ingest-json-limit';
 import { CorsIoAdapter } from './common/realtime/cors-io.adapter';
 import { registerGithubWebhookBody } from './modules/dev-connector/github-webhook-body';
 
@@ -22,6 +24,10 @@ async function bootstrap(): Promise<void> {
   registerBulkSendJsonLimit(app);
   // Ídem para la ingesta de logs: 2 MB descomprimidos (el appender manda gzip).
   registerIngestJsonLimit(app);
+  // Y la ingesta de la sonda (1 MB, token kmp_) y la del agente (64 KB, token kma_).
+  registerProbeIngestJsonLimit(app);
+  // Y la importación CSV del inventario (256 KB).
+  registerImportJsonLimit(app);
   // Ídem para el webhook de GitHub: guarda el cuerpo crudo para verificar la firma HMAC.
   registerGithubWebhookBody(app);
 

@@ -97,6 +97,23 @@ describe('AuditInterceptor: la ingesta de logs', () => {
     expect(repo.save).toHaveBeenCalledTimes(1);
   });
 
+  it('el lote de la sonda de monitoreo (POST /ingest/probe/batch) no se audita, con o sin prefijo y barra final', async () => {
+    for (const path of ['/api/v1/ingest/probe/batch', '/ingest/probe/batch/', '/api/v1/ingest/probe/batch?x=1']) {
+      const { interceptor, repo } = makeInterceptor();
+      const ctx = ctxPost(path, { version: '1', checks: [{ id: 'c' }], signals: [] }, { authorization: 'Bearer kmp_' + 'a'.repeat(43) });
+      await firstValueFrom(interceptor.intercept(ctx, { handle: () => of({ acceptedChecks: 1 }) }));
+      await new Promise((r) => setImmediate(r));
+      expect(repo.save).not.toHaveBeenCalled();
+    }
+  });
+
+  it('una ruta que solo se parece al lote de la sonda sí se audita', async () => {
+    const { interceptor, repo } = makeInterceptor();
+    await firstValueFrom(interceptor.intercept(ctxPost('/api/v1/ingest/probe/batch-otro', {}), next));
+    await new Promise((r) => setImmediate(r));
+    expect(repo.save).toHaveBeenCalledTimes(1);
+  });
+
   it('el webhook de GitHub no se audita (JSON de GitHub con correos, sin actor)', async () => {
     const { interceptor, repo } = makeInterceptor();
     const ctx = ctxPost('/api/v1/dev/github/webhook', { commits: [{ author: { email: 'x@y.z' } }] });

@@ -25,8 +25,12 @@ interface AuditActor {
   clientUserId: number | null;
 }
 
-/** `POST /api/v1/ingest/logs` (el appender). Anclado al final: `/ingest/logs-otros` sí se audita. */
-const INGESTA_DE_LOGS = /\/ingest\/logs\/?(?:\?.*)?$/;
+/**
+ * Ingesta de máquinas: `POST /api/v1/ingest/logs` (el appender) y `POST /api/v1/ingest/probe/batch`
+ * (las sondas de monitoreo, un lote cada ~15 s). Anclado al final: `/ingest/logs-otros` sí se audita.
+ * El `GET /ingest/probe/sync` no muta y no se audita de todos modos.
+ */
+const INGESTA_DE_MAQUINAS = /\/ingest\/(logs|probe\/batch)\/?(?:\?.*)?$/;
 
 /**
  * `POST /api/v1/dev/github/webhook`: tráfico de máquina de GitHub, sin actor, y
@@ -50,12 +54,12 @@ export class AuditInterceptor implements NestInterceptor {
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const req = context.switchToHttp().getRequest<Request & { user?: AuditPrincipal }>();
-    // La ingesta de logs queda fuera de la auditoría (Review Focus 3): cada
+    // La ingesta de logs y la de las sondas quedan fuera de la auditoría (Review Focus 3): cada
     // lote —hasta 2 MB, cientos por minuto— llenaría audit_log, y no es una
     // acción de nadie sino tráfico de máquina. Se compara el final del camino
     // para que valga con o sin el prefijo global.
     const path = req.path ?? req.url ?? '';
-    if (INGESTA_DE_LOGS.test(path) || WEBHOOK_DE_GITHUB.test(path)) return next.handle();
+    if (INGESTA_DE_MAQUINAS.test(path) || WEBHOOK_DE_GITHUB.test(path)) return next.handle();
     const method = req.method.toUpperCase();
     const isMutation = ['POST', 'PATCH', 'PUT', 'DELETE'].includes(method);
     const actor = AuditInterceptor.resolveActor(req.user);

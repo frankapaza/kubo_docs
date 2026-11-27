@@ -1,0 +1,85 @@
+/* Alturas fijas: deben coincidir con src/shared/window-position.ts (barra 40, fila 56, resumen 190, salud 170). */
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; padding: 0; height: 100%; background: transparent; overflow: hidden; }
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px;
+  color: #15191a;
+  user-select: none;
+}
+button { font: inherit; cursor: pointer; }
+
+.widget {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid #d8dcdd;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.bar {
+  height: 38px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  -webkit-app-region: drag;
+}
+.dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.dot.pulse { animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+.headline { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.time { color: #6d7577; font-variant-numeric: tabular-nums; font-size: 12px; }
+/* En una zona de arrastre no hay :hover: las herramientas quedan siempre visibles, tenues. */
+.tools { display: flex; gap: 1px; -webkit-app-region: no-drag; }
+.tools button { background: transparent; border: 0; color: #a3aaac; padding: 0 3px; font-size: 12px; }
+.tools button:hover { color: #15191a; }
+
+.rows { flex: 1; overflow-y: auto; }
+.row {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid #fff;
+}
+.row.child { padding-left: 28px; }
+.mark { width: 14px; flex: none; text-align: center; font-weight: 700; }
+.row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  text-align: left;
+}
+.row-title, .row-detail { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row-title { font-weight: 600; }
+.row-detail { color: #3d4446; font-size: 12px; }
+.row-main:hover .row-title { text-decoration: underline; }
+.unfold { background: transparent; border: 0; color: #3d4446; font-size: 14px; padding: 4px 6px; }
+
+.panel { flex: none; border-top: 1px solid #e6e9ea; padding: 8px 12px; overflow-y: auto; }
+.panel.summary { height: 190px; }
+.panel.health { height: 170px; }
+.panel header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.panel header button {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: #fff;
+  border: 1px solid #d8dcdd;
+}
+.panel ul { margin: 0; padding-left: 18px; }
+.panel li { margin: 3px 0; }
+.panel dl { margin: 0; }
+.panel dl div { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; border-bottom: 1px solid #f1f3f4; }
+.panel dt { color: #6d7577; }
+.panel dd { margin: 0; font-weight: 600; text-align: right; }

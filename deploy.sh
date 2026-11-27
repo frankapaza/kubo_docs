@@ -20,8 +20,18 @@ set -e
 # Si se olvida, el backend aborta al arrancar (PortalSchemaValidator) diciendo
 # que migracion falta. Procedimiento completo en COMANDOS.txt, "PASO 3-bis".
 # -----------------------------------------------------------------------------
+#
+# Migraciones 035 y 036 (monitoreo de disponibilidad; la 031 es la del
+# conector y 032-034 las de requerimientos): aplicarlas a mano, en orden, ANTES de este deploy en una base
+# con datos, igual que las anteriores. La 035 crea la sonda
+# 'kubo-01' que busca el servicio monitor-worker; sin ella el worker aborta
+# al arrancar ("aplicar la migracion 035"). La 036 anade
+# monitor_probes.silence_alerted_at (aviso por silencio de una sonda). El worker solo mide; la
+# evaluacion de incidentes y la purga corren en el backend.
+# Migracion 037 (037_disponibilidad_informe): tablas del informe mensual,
+# evidencias, mantenimientos y agente de servidor; aplicarla igual, a mano.
 cd /home/kubo/kubo
 git pull
-docker compose build backend web
+docker compose build backend monitor-worker web
 docker compose up -d
 echo "Deploy completado"

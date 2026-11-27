@@ -42,6 +42,33 @@ describe('la última migración está en las tres listas de despliegue', () => {
   });
 });
 
+/**
+ * Dos ramas que escriben su migración a la vez cogen el mismo número (pasó con
+ * la 031: conector y disponibilidad). Los nombres distintos ocultan el choque
+ * y el orden de aplicación queda al azar del nombre; se renumera al integrar.
+ */
+describe('no hay dos migraciones con el mismo número', () => {
+  it('cada prefijo NNN_ es único', () => {
+    const numeros = readdirSync(MIGRACIONES)
+      .filter((n) => /^\d{3}_.+\.sql$/.test(n))
+      .map((n) => n.slice(0, 3));
+    const repetidos = numeros.filter((n, i) => numeros.indexOf(n) !== i);
+    expect(repetidos).toEqual([]);
+  });
+});
+
+describe('las migraciones de disponibilidad están en las tres listas de despliegue', () => {
+  const NOMBRES = [
+    '035_disponibilidad_nucleo',
+    '036_disponibilidad_escritorio',
+    '037_disponibilidad_informe',
+  ];
+  it.each(LISTAS_DE_DESPLIEGUE)('%s las nombra', (lista) => {
+    const texto = readFileSync(lista, 'utf8');
+    for (const nombre of NOMBRES) expect(texto).toContain(nombre);
+  });
+});
+
 describe('la migración del catálogo no borra ni una fila', () => {
   const sql = () =>
     readFileSync(join(MIGRACIONES, '029_catalogo_de_sistemas.sql'), 'utf8').toUpperCase();
@@ -118,5 +145,30 @@ describe('la migración del conector de tickets', () => {
 
   it('da a work_items su sistema', () => {
     expect(sql()).toMatch(/'WORK_ITEMS',\s*'CLIENT_SYSTEM_ID'/);
+  });
+});
+
+describe('deploy.sh nombra la migración 037 (aviso de aplicarla a mano)', () => {
+  it('la menciona', () => {
+    expect(readFileSync(join(RAIZ, 'deploy.sh'), 'utf8')).toContain('037_disponibilidad_informe');
+  });
+});
+
+describe('el bucle de migraciones de deploy.yml', () => {
+  /** Las palabras entre `for m in` y `; do`, con las continuaciones de línea resueltas. */
+  function palabras(): string[] {
+    const yml = readFileSync(LISTAS_DE_DESPLIEGUE[0], 'utf8').replace(/\r\n/g, '\n');
+    const m = yml.match(/for m in([\s\S]*?);\s*do/);
+    if (!m) throw new Error('No se encontró el bucle for m in de deploy.yml.');
+    // La barra invertida de continuación se quita; una «\n» literal queda como palabra y se detecta.
+    return m[1].replace(/\\\n/g, ' ').split(/\s+/).filter(Boolean);
+  }
+
+  it('solo contiene nombres de migración (ninguna palabra suelta)', () => {
+    for (const w of palabras()) expect(w).toMatch(/^\d{3}_[a-z0-9_]+$/);
+  });
+
+  it('incluye la 037', () => {
+    expect(palabras()).toContain('037_disponibilidad_informe');
   });
 });

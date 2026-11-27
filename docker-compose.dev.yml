@@ -71,9 +71,12 @@ services:
       - ./backend/sql/migrations/032_documentos_requerimiento.sql:/docker-entrypoint-initdb.d/041_mig_032.sql:ro
       - ./backend/sql/migrations/033_detalle_requerimiento.sql:/docker-entrypoint-initdb.d/041b_mig_033.sql:ro
       - ./backend/sql/migrations/034_adjuntos_cliente_requerimiento.sql:/docker-entrypoint-initdb.d/041c_mig_034.sql:ro
+      - ./backend/sql/migrations/035_disponibilidad_nucleo.sql:/docker-entrypoint-initdb.d/042_mig_035.sql:ro
+      - ./backend/sql/migrations/036_disponibilidad_escritorio.sql:/docker-entrypoint-initdb.d/043_mig_036.sql:ro
+      - ./backend/sql/migrations/037_disponibilidad_informe.sql:/docker-entrypoint-initdb.d/044_mig_037.sql:ro
       # Seeds — van detrás de todas las migraciones, así que el seed se
       # renumera cada vez que entra una migración nueva.
-      - ./backend/sql/seed_document_templates.sql:/docker-entrypoint-initdb.d/041_seed_templates.sql:ro
+      - ./backend/sql/seed_document_templates.sql:/docker-entrypoint-initdb.d/045_seed_templates.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
       interval: 10s
@@ -89,6 +92,29 @@ services:
     command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
     volumes:
       - redis_dev_data:/data
+
+  # Sonda kubo-01 (monitoreo de disponibilidad): solo mide, el evaluador corre
+  # en el backend. Opcional en desarrollo: va en el perfil `monitoreo`, así que
+  # un `up -d` normal NO la levanta (sin la migración 032 abortaría en bucle).
+  # Se levanta con:
+  #   docker compose -f docker-compose.dev.yml --profile monitoreo up -d --build
+  monitor-worker:
+    profiles: ["monitoreo"]
+    build:
+      context: ./backend
+    container_name: kubo-monitor-worker-dev
+    restart: unless-stopped
+    command: ["node", "dist/monitoring-worker.js"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_NAME: kubo_devdocs
 
   # Loki de desarrollo: el backend local (fuera de Docker) lo alcanza por Solo en 127.0.0.1: Loki no tiene autenticacion.
   # localhost:3100. En produccion NO lleva `ports`.

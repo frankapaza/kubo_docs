@@ -31,6 +31,13 @@ import MonitoringErrorsPage from './pages/monitoring/MonitoringErrorsPage';
 import MonitoringErrorDetailPage from './pages/monitoring/MonitoringErrorDetailPage';
 import MonitoringLogsPage from './pages/monitoring/MonitoringLogsPage';
 import MonitoringInstallationsPage from './pages/monitoring/MonitoringInstallationsPage';
+import AvailabilityStatePage from './pages/availability/AvailabilityStatePage';
+import AvailabilityIncidentsPage from './pages/availability/AvailabilityIncidentsPage';
+import AvailabilityIncidentDetailPage from './pages/availability/AvailabilityIncidentDetailPage';
+import AvailabilityInventoryPage from './pages/availability/AvailabilityInventoryPage';
+import AvailabilityProbesPage from './pages/availability/AvailabilityProbesPage';
+import AvailabilityReportPage from './pages/availability/AvailabilityReportPage';
+import AvailabilityServersPage from './pages/availability/AvailabilityServersPage';
 import PortalLoginPage from './pages/portal/PortalLoginPage';
 import PortalTicketsListPage from './pages/portal/PortalTicketsListPage';
 import PortalTicketDetailPage from './pages/portal/PortalTicketDetailPage';
@@ -138,6 +145,13 @@ export default function App() {
           <Route path="/actas/:actaId" element={<ActaEditorPage />} />
           <Route path="/tickets" element={<TicketsListPage />} />
           <Route path="/tickets/:ticketId" element={<TicketDetailPage />} />
+          <Route path="/monitoreo/estado" element={<AvailabilityStatePage />} />
+          <Route path="/monitoreo/incidentes" element={<AvailabilityIncidentsPage />} />
+          <Route path="/monitoreo/incidentes/:id" element={<AvailabilityIncidentDetailPage />} />
+          <Route path="/monitoreo/inventario" element={<AvailabilityInventoryPage />} />
+          <Route path="/monitoreo/disponibilidad" element={<AvailabilityReportPage />} />
+          <Route path="/monitoreo/servidores" element={<AvailabilityServersPage />} />
+          <Route path="/monitoreo/sondas" element={<AvailabilityProbesPage />} />
           <Route path="/monitoreo/errores" element={<MonitoringErrorsPage />} />
           <Route path="/monitoreo/errores/:errorId" element={<MonitoringErrorDetailPage />} />
           <Route path="/monitoreo/logs" element={<MonitoringLogsPage />} />

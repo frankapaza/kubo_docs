@@ -1,0 +1,160 @@
+# Monitoreo de disponibilidad · Lista de despliegue a producción
+
+> **Renumeración (2026-11-26):** al integrar `main`, que trajo las migraciones 032–034 de requerimientos, las de monitoreo pasaron a ser 035 (núcleo), 036 (escritorio) y 037 (informe y agente). En los demás documentos de monitoreo, un «032/033/034» de monitoreo equivale hoy a 035/036/037.
+
+Para el responsable. Cubre la Entrega 1 (núcleo: central, sonda `kubo-01`, motor de la oficina), la Entrega 2 (widget de escritorio y aviso por silencio de una sonda) y la Entrega 3 (informe mensual, mantenimientos, WinMTR, importación CSV y agente de servidor), ya integradas con `main` (conector de tickets).
+
+**Migraciones implicadas, en este orden:**
+
+| Nº | Fichero | De quién | Qué hace |
+|----|---------|----------|----------|
+| 031 | `backend/sql/migrations/031_conector_repos.sql` | conector (ya en `main`) | tablas `dev_repos`, `dev_keys`, `dev_links`; `work_items.client_system_id` |
+| 032–034 | `032_documentos_requerimiento`, `033_detalle_requerimiento`, `034_adjuntos_cliente_requerimiento` | requerimientos (ya en `main`) | no son del monitoreo; `deploy.yml` las aplica antes que las nuestras |
+| 035 | `backend/sql/migrations/035_disponibilidad_nucleo.sql` | monitoreo (antes 032) | tablas `monitor_*`, sondas `kubo-01` y `oficina-01`, usuario de sistema `monitoreo@sistema.kubo` (inactivo, sin contraseña válida) |
+| 036 | `backend/sql/migrations/036_disponibilidad_escritorio.sql` | monitoreo (antes 033) | columna `monitor_probes.silence_alerted_at` |
+| 037 | `backend/sql/migrations/037_disponibilidad_informe.sql` | monitoreo (Entrega 3, antes 034) | 8 tablas (resúmenes diarios, informe mensual, evidencia, mantenimientos, muestras y resúmenes del agente…), 4 columnas del agente en `monitor_servers` e índice `idx_monitor_checks_probe_started` en `monitor_checks` |
+
+Las de monitoreo (035–037) y la 031 son aditivas e idempotentes (guardadas con `information_schema`, `CREATE TABLE IF NOT EXISTS`, `INSERT ... WHERE NOT EXISTS` / `INSERT IGNORE`): volver a aplicarlas no hace nada. Ninguna siembra plantillas de aviso, así que el control «Plantillas de aviso: 9» de `deploy.yml` no cambia. La 036 necesita la 035 (altera `monitor_probes`) y la 037 también (altera `monitor_servers` y `monitor_checks`).
+
+---
+
+## 0. Antes de empezar
+
+- [ ] La rama está integrada en `main` y el **CI de `main` está en verde** (incluye los trabajos «Monitoreo — núcleo» y el del motor de la oficina). `deploy.yml` solo se dispara tras un CI correcto (`workflow_run`) o a mano (`workflow_dispatch`).
+- [ ] Tiene a mano: acceso SSH al VPS (`/home/kubo/kubo`), una cuenta ADMIN de la web, y acceso de administrador a la PC de la oficina.
+
+## 1. Respaldo de la base
+
+`deploy.yml` lo hace solo (paso 2): `mysqldump --single-transaction --routines` a `$HOME/respaldo-pre-deploy-<fecha>.sql`, aborta si pesa menos de 10 000 bytes y conserva los diez últimos.
+
+- [ ] Si despliega a mano, haga usted el respaldo primero:
+
+  ```bash
+  cd /home/kubo/kubo
+  docker compose exec -T mysql \
+    sh -c 'exec mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction --routines "$MYSQL_DATABASE"' \
+    > $HOME/respaldo-pre-monitoreo-$(date +%F-%H%M%S).sql
+  ls -l $HOME/respaldo-pre-monitoreo-*.sql   # que no pese casi nada = no siga
+  ```
+
+## 2. Migraciones 031 (conector), 032–034 (requerimientos) y 035, 036 y 037 (monitoreo)
+
+**Camino normal: `deploy.yml`.** En su paso 4 aplica, en orden, `010 … 030`, `031_conector_repos`, `032 … 034` de requerimientos, `035_disponibilidad_nucleo`, `036_disponibilidad_escritorio`, `037_disponibilidad_informe` (la 011 no: sigue siendo manual). Con `set -e`, cualquier fallo corta el despliegue **antes** de reconstruir: la versión vieja sigue sirviendo.
+
+- [ ] **Respaldo antes de la 037** (ver paso 1; `deploy.yml` lo hace solo). La 037 crea un índice en `monitor_checks`, que puede ser la tabla más grande: en un VPS con muchos checks tarda y bloquea escrituras un momento, así que conviene desplegar en una hora tranquila.
+- [ ] Revise en el log de la acción que aparecen `--- 031_conector_repos`, `--- 035_disponibilidad_nucleo`, `--- 036_disponibilidad_escritorio` y `--- 037_disponibilidad_informe` sin error, y que el paso 5 dice «Eventos pendientes de notificar: 0» y «Plantillas de aviso: 9».
+
+**Camino manual** (si se despliega con `deploy.sh`, que **no** aplica migraciones):
+
+```bash
+cd /home/kubo/kubo
+git pull
+for m in 031_conector_repos 032_documentos_requerimiento 033_detalle_requerimiento 034_adjuntos_cliente_requerimiento 035_disponibilidad_nucleo 036_disponibilidad_escritorio 037_disponibilidad_informe; do
+  echo "--- $m"
+  docker compose exec -T mysql \
+    sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' \
+    < backend/sql/migrations/$m.sql || break
+done
+```
+
+(Las comillas simples del `sh -c` hacen falta: la contraseña vive dentro del contenedor.)
+
+- [ ] Compruebe:
+
+  ```bash
+  docker compose exec -T mysql sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -N "$MYSQL_DATABASE"' <<'SQL'
+  SELECT code FROM monitor_probes;                                   -- kubo-01, oficina-01
+  SELECT email, is_active FROM users WHERE email='monitoreo@sistema.kubo';  -- 1 fila, is_active 0
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+   WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='monitor_probes' AND COLUMN_NAME='silence_alerted_at';  -- 1
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+   WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='monitor_servers' AND COLUMN_NAME IN
+     ('agent_watch_services','agent_token_created_at','agent_silence_alerted_at','agent_version');  -- 4
+  SELECT COUNT(*) FROM information_schema.STATISTICS
+   WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='monitor_checks' AND INDEX_NAME='idx_monitor_checks_probe_started';  -- >= 1
+  SQL
+  ```
+
+## 3. Construir y levantar `backend` y `monitor-worker`
+
+`deploy.yml` (paso 6) hace `docker compose build backend monitor-worker web` y `docker compose up -d`. Con `deploy.sh` es lo mismo (`git pull`, `build backend monitor-worker web`, `up -d`), pero las migraciones del paso 2 tienen que ir **antes**.
+
+- [ ] `docker compose ps` muestra `backend`, `monitor-worker` y `web` en marcha.
+
+## 4. Comprobar el arranque
+
+- [ ] Backend: en `docker compose logs backend`, «Nest application successfully started». Ojo: si faltara la 035 el backend arranca igual; el fallo llega al crear el primer ticket automático («Falta el usuario de monitoreo: aplicar la migración 035») y lo delata antes el worker (punto siguiente).
+- [ ] Sonda del centro de datos: en `docker compose logs monitor-worker`, la línea **«Sonda kubo-01 iniciada»**. `deploy.yml` la espera (paso 7b, hasta 30 × 5 s) y, si no aparece, marca el despliegue como fallido aunque el backend esté en pie. Sin la 035 el worker aborta con «No existe la sonda 'kubo-01' en monitor_probes: aplicar la migración 035.».
+
+## 5. Revisar la web
+
+- [ ] Entre como ADMIN en `https://docs.kuboti.com/monitoreo/estado`: la página carga (sin servicios todavía, o con los que haya en Inventario).
+- [ ] `/monitoreo/sondas` lista `kubo-01` (con último contacto reciente) y `oficina-01` (sin contacto aún).
+
+## 6. Emitir el token de la oficina
+
+- [ ] **Monitoreo → Sondas → oficina-01 → Emitir token** (solo ADMIN; `POST /api/v1/availability/probes/:id/token`). El token `kmp_…` se muestra **una sola vez**; emitir otro revoca el anterior. Cópielo solo hasta el paso 7.
+
+## 7. Instalar el motor (servicio de Windows) en la PC de la oficina
+
+Instrucciones completas en `desktop/engine/README.md` («Compilar» e «Instalar (como administrador)»). Resumen:
+
+- [ ] **Node 20 LTS de 64 bits instalado para todo el equipo** con el instalador oficial (`C:\Program Files\nodejs\node.exe`). No vale un Node por usuario (nvm, scoop, fnm, uno bajo `C:\Users\…`): el instalador se niega.
+- [ ] Compile con Node 20: `packages\monitoring-core` (`npm install; npm run build`) y luego `desktop\engine` (`npm install; npm run build`). Copie la carpeta del motor compilada (con `node_modules` y `dist`) a, p. ej., `C:\Program Files\KUBO\engine`.
+- [ ] En PowerShell como administrador:
+
+  ```powershell
+  cd "C:\Program Files\KUBO\engine"
+  Read-Host "Token kmp_" | node dist\service\install.js --user OFICINA\<usuario> --central https://docs.kuboti.com --token-stdin
+  ```
+
+  (`--user`: el usuario de escritorio que usará el widget; `--dry-run` para ver lo que haría.)
+- [ ] Compruebe: el servicio arranca solo con Windows; `/monitoreo/sondas` muestra a `oficina-01` con contacto reciente; y la API local responde:
+  `curl.exe -H "X-Kubo-Secret: $(Get-Content $env:ProgramData\KUBO\Monitor\local-api.secret)" http://127.0.0.1:47800/v1/status`.
+
+## 8. Instalar el widget
+
+Instrucciones en `desktop/widget/README.md` («Empaquetado»).
+
+- [ ] En una máquina de compilación: `cd desktop\widget; npm install; npm run dist` → instalador NSIS por usuario (sin elevación) en `desktop\widget\dist\`.
+- [ ] Ejecútelo **con la sesión del usuario indicado en `--user`** en la PC de la oficina. Queda registrado para arrancar con la sesión; una sola instancia.
+- [ ] Compruebe: barra «KUBO · Todo operativo · hh:mm», icono en la bandeja, y «Probar notificación» desde el menú de la bandeja muestra un aviso de Windows.
+
+## 9. Variable `FRONTEND_URL` y publicación del agente
+
+- [ ] **`FRONTEND_URL` debe ser la URL pública** (`https://docs.kuboti.com`, sin barra final). La central la escribe en el script de instalación del agente (`install-kubo-agent.ps1`) y en los enlaces de los correos de silencio. Si falta, usa `http://localhost:5173`; como no es `https://`, `kubo-agent.exe configure` la rechaza (código de salida 3) y la instalación falla. Lo mismo pasa con cualquier `FRONTEND_URL` que no sea `https://`. Revise el `.env` del VPS **antes** de emitir el primer token (no se reproduce aquí).
+- [ ] **El agente no lo despliega CI ni `deploy.yml`.** Se compila localmente (`cd agent`; `powershell -ExecutionPolicy Bypass -File .\build.ps1`; genera `agent\publish\kubo-agent.exe` y su SHA-256) y el personal lo copia al servidor junto con `install-kubo-agent.ps1`. Anote el SHA-256 de la versión que instala. No está en CI: `dotnet test` se corre a mano en Windows.
+- [ ] **Autorización del cliente.** Instalar el agente en un servidor de Contacto Eficaz (incluido `VMI2571371`) requiere su **autorización por escrito** antes de empezar. Sin ella no se instala.
+- [ ] **Primero en un servidor de prueba:** instalar con el script, comprobar que la muestra aparece en Monitoreo → Servidores, revocar el token (el agente registra 401 en el Visor de eventos) y desinstalar (`uninstall-kubo-agent.ps1`). Pasos y pruebas de disco y de silencio: `2026-11-24-monitoreo-entrega-3-aceptacion.md`, sección 4.
+- [ ] Tras instalar, **borre `install-kubo-agent.ps1`** del servidor y de donde se descargó: contiene el token en claro.
+- [ ] Informe: el cron del día 1 lo genera el backend; si el backend estuvo apagado ese día, `catchUp` lo rehace al arrancar. Revise el informe del mes en curso (parcial) durante los siete días de revisión.
+
+## 10. Cargar `VMI2571371` en Inventario
+
+Solo con su visto bueno tras leer `2026-11-23-monitoreo-entrega-1-aceptacion.md` («Cambios respecto al plan», «Limitaciones conocidas») `2026-11-24-monitoreo-entrega-2-aceptacion.md` y `2026-11-24-monitoreo-entrega-3-aceptacion.md`, y con los pendientes que allí bloquean la carga ya hechos (servicio de Windows en la oficina, la prueba de corte de internet y, para el agente, la prueba en un servidor de prueba y la autorización escrita del cliente).
+
+- [ ] **Monitoreo → Inventario** (`/monitoreo/inventario`): alta del servidor `VMI2571371` y sus servicios.
+- [ ] En `/monitoreo/estado` aparecen y pasan a «operativo» en unos minutos; el widget de la oficina los muestra.
+
+---
+
+## Si algo falla (vuelta atrás)
+
+**Falla una migración (paso 2).**
+- Con `deploy.yml`: el `set -e` corta antes de reconstruir; la versión anterior sigue sirviendo. Lea el error en el log de la acción, corríjalo y vuelva a lanzar (`workflow_dispatch`): las migraciones ya aplicadas no hacen nada la segunda vez.
+- A mano: el bucle se detiene en la que falla (`|| break`); no levante el backend nuevo. Las ya aplicadas no estorban a la versión vieja (solo añaden tablas y columnas nulables).
+- Si una ejecución se cortó a medias puede quedar un procedimiento auxiliar (`kubo_add_column_031`, `kubo_add_index_031`, `kubo_upgrade_035`, `kubo_add_column_036`, y los de la 037 `kubo_*_037`): cada migración hace `DROP PROCEDURE IF EXISTS` al empezar, así que basta con reaplicarla.
+- La 036 y la 037 dependen de la 035: no las aplique solas.
+- Restaurar el respaldo solo hace falta si algo tocó datos existentes, que no es el caso de estas migraciones. Si aun así se decide, pare antes el backend y el worker para que nada escriba mientras se restaura (`docker compose stop backend monitor-worker`) y levántelos al terminar. Restaurar el volcado no elimina las tablas que crearon las migraciones nuevas (`monitor_*`, `dev_*`): quedan ahí, lo cual es inofensivo.
+
+  ```bash
+  docker compose exec -T mysql sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' < $HOME/respaldo-pre-deploy-<fecha>.sql
+  ```
+
+**El backend no arranca (paso 4).** `deploy.yml` imprime el log y el nombre del respaldo. Las migraciones son aditivas: la versión anterior vuelve con `git checkout <commit-anterior> && docker compose up -d --build`. La versión anterior no tiene el servicio `monitor-worker` en el compose: añada `--remove-orphans` (o `docker compose stop monitor-worker`) para no dejarlo corriendo suelto. Antes del siguiente despliegue vuelva a la rama con `git checkout main`: ese checkout deja el VPS en HEAD desacoplado y el `git pull` con el que empieza `deploy.yml` fallaría bajo `set -e`.
+
+**El backend arranca pero `monitor-worker` no («Sonda kubo-01 iniciada» no aparece).** El despliegue se marca fallido, pero la web funciona. Mire `docker compose logs --tail 120 monitor-worker`: lo habitual es que falte la 035 (no existe `kubo-01`) o que no conecte a MySQL. Aplique la 032 y `docker compose up -d monitor-worker`. Mientras tanto solo falta la medición desde el centro de datos.
+
+**El motor de la oficina no se instala o no reporta.** No afecta a la central. Desinstalar: `node dist\service\uninstall.js` (conserva los datos; `--purge` los borra). Si el token se filtró o se perdió, emita otro en Sondas (revoca el anterior) y reinstale con `--token-stdin`. A los 10 minutos sin contacto la central avisa por correo a los administradores (una vez por silencio).
+
+**Quitar el monitoreo del todo** no requiere borrar tablas: basta con parar `monitor-worker` y no cargar servicios. No borre las tablas `monitor_*` sin un respaldo.
