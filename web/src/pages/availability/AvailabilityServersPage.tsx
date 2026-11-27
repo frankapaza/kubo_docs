@@ -5,7 +5,11 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { AgentView, availabilityApi, MonitorServer } from '../../api/availability.api';
 import { clientsApi } from '../../api/clients.api';
 import { inputStyle } from './availability-ui';
-import { agentStatus, fmtLima, isDiskLow, sparkPoints } from './report-format';
+import { agentStatus, diskLevel, DISK_TREND_MIN_SPAN_DAYS, fmtGB, fmtLima, sparkPoints } from './report-format';
+
+/** Color del espacio usado según el nivel; el libre siempre en verde. */
+const USED_COLOR = { ok: '#64748b', warning: '#d97706', critical: '#d93025' } as const;
+const FREE_COLOR = '#2e9e5b';
 
 const card: React.CSSProperties = { border: '1px solid #e6e9ea', borderRadius: 10, padding: 14, background: '#fff', display: 'flex', flexDirection: 'column', gap: 10 };
 const sub: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: '#6d7577', textTransform: 'uppercase', letterSpacing: 0.4 };
@@ -100,23 +104,7 @@ function ServerCard({ server, clientLabel, view, loading, failed, highlighted }:
 
           <div>
             <div style={sub}>Discos</div>
-            {view.disks.length === 0 ? <div style={{ fontSize: 12, color: '#6d7577' }}>Sin discos reportados.</div> : view.disks.map((d) => {
-              const low = isDiskLow(d.freePct);
-              const pct = d.freePct ?? 0;
-              return (
-                <div key={d.name} style={{ marginTop: 6 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                    <span style={{ fontWeight: 600 }}>{d.name}</span>
-                    <span style={{ color: low ? '#a35c00' : '#6d7577', fontWeight: low ? 600 : 400 }}>
-                      {d.freePct === null ? '—' : `${d.freePct} % libre`}{d.daysToFull !== null ? ` · ≈ ${Math.round(d.daysToFull)} días para llenarse` : ''}
-                    </span>
-                  </div>
-                  <div role="img" aria-label={`${d.name}: ${pct} % libre`} style={{ height: 6, borderRadius: 3, background: '#eef0f1', overflow: 'hidden' }}>
-                    <div style={{ width: `${Math.min(100, Math.max(0, pct))}%`, height: '100%', background: low ? '#e69500' : '#2e9e5b' }} />
-                  </div>
-                </div>
-              );
-            })}
+            {view.disks.length === 0 ? <div style={{ fontSize: 12, color: '#6d7577' }}>Sin discos reportados.</div> : view.disks.map((d) => <DiskRow key={d.name} disk={d} />)}
           </div>
 
           {view.iisPools && (
@@ -141,6 +129,53 @@ function ServerCard({ server, clientLabel, view, loading, failed, highlighted }:
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * Disco como en Windows: a la izquierda lo usado (gris; ámbar con menos del
+ * 20 % libre; rojo con menos del 10 %, el umbral del aviso), a la derecha lo
+ * libre en verde. Debajo, la estimación de llenado cuando ya hay 3 días de datos.
+ */
+function DiskRow({ disk: d }: { disk: AgentView['disks'][number] }) {
+  const total = Number(d.totalBytes);
+  const free = Number(d.freeBytes);
+  const used = Math.max(0, total - free);
+  const freePct = d.freePct;
+  const level = diskLevel(freePct);
+  const usedPct = total > 0 ? Math.min(100, Math.max(0, (used / total) * 100)) : 0;
+  const levelText = level === 'critical' ? 'Espacio crítico' : level === 'warning' ? 'Poco espacio' : null;
+  const trend =
+    d.daysToFull !== null
+      ? `≈ ${Math.round(d.daysToFull)} días para llenarse`
+      : d.trendDays < DISK_TREND_MIN_SPAN_DAYS
+        ? `calculando tendencia (${d.trendDays.toFixed(1)}/${DISK_TREND_MIN_SPAN_DAYS} días)`
+        : 'sin tendencia a llenarse';
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12 }}>
+        <span style={{ fontWeight: 600 }}>
+          {d.name}
+          {levelText && <span style={{ marginLeft: 6, color: USED_COLOR[level] }}>{levelText}</span>}
+        </span>
+        <span style={{ fontWeight: 600, color: level === 'ok' ? '#1f2937' : USED_COLOR[level], fontVariantNumeric: 'tabular-nums' }}>
+          {total > 0 ? `${fmtGB(free)} libres (${freePct} %)` : '—'}
+        </span>
+      </div>
+      <div
+        role="img"
+        aria-label={`${d.name}: ${fmtGB(used)} usados, ${fmtGB(free)} libres de ${fmtGB(total)}`}
+        title={`Usado ${usedPct.toFixed(1)} % · Libre ${freePct ?? 0} %`}
+        style={{ display: 'flex', gap: 2, height: 8, marginTop: 3 }}
+      >
+        {usedPct > 0 && <div style={{ width: `${usedPct}%`, background: USED_COLOR[level], borderRadius: usedPct >= 100 ? 4 : '4px 0 0 4px' }} />}
+        {usedPct < 100 && <div style={{ flex: 1, background: FREE_COLOR, borderRadius: usedPct > 0 ? '0 4px 4px 0' : 4 }} />}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11, color: '#6d7577', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
+        <span>{total > 0 ? `${fmtGB(used)} usados de ${fmtGB(total)}` : ''}</span>
+        <span>{trend}</span>
+      </div>
+    </div>
   );
 }
 

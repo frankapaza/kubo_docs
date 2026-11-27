@@ -4,7 +4,7 @@ import { Between, MoreThanOrEqual, Repository } from 'typeorm';
 import { dayHistory, HISTORY_RANGES, HistoryPoint, HistoryRange, monthHistory, yearHistory, yearStartDate } from './domain/agent-history';
 import { limaDateOf, limaDayBounds } from './domain/expected-slots';
 import { MonitorAgentDailyRollup } from './entities/monitor-agent-daily-rollup.entity';
-import { estimateDaysToFull } from './domain/disk-trend';
+import { estimateDaysToFull, trendSpanDays } from './domain/disk-trend';
 import { AgentSampleDto, AgentSampleResponse } from './dto/agent.dto';
 import { AgentDisk, AgentIisPool, AgentServiceStatus, MonitorAgentSample } from './entities/monitor-agent-sample.entity';
 import { MonitorServer } from './entities/monitor-server.entity';
@@ -19,8 +19,10 @@ const TREND_DAYS = 7;
 export interface AgentDiskView extends AgentDisk {
   /** Porcentaje libre con 2 decimales; null si el total es 0. */
   freePct: number | null;
-  /** Días estimados hasta llenarse (1 decimal); null si no baja o no hay datos. */
+  /** Días estimados hasta llenarse (1 decimal); null si no baja o hay menos de 3 días de datos. */
   daysToFull: number | null;
+  /** Días de historia del disco en la ventana de 7 días (1 decimal): la estimación pide 3. */
+  trendDays: number;
 }
 
 export interface AgentView {
@@ -108,6 +110,7 @@ export class AvailabilityAgentService {
         freeBytes: free,
         freePct: total > 0 ? round((free / total) * 100, 2) : null,
         daysToFull: days === null ? null : round(days, 1),
+        trendDays: round(trendSpanDays(points), 1),
       };
     });
 
