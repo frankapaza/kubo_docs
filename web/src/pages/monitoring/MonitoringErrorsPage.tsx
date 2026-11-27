@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -12,12 +12,30 @@ const GRID = '96px minmax(220px, 1fr) 190px 130px 90px 150px 100px';
 
 type Orden = 'ultima' | 'cantidad';
 
+/** Inicio del día de hace 7 días, en hora local: el rango por defecto de la lista. */
+function lastWeekStart(): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - 7);
+  return d.toISOString();
+}
+
 export default function MonitoringErrorsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [params, setParams] = useSearchParams();
 
   const filters = filtersFromParams(params);
+
+  // Al entrar sin fechas, se filtra la última semana y se ve en el campo «Desde».
+  // Solo al montar: si luego se borra la fecha, la lista muestra todo.
+  useEffect(() => {
+    if (params.get('desde') || params.get('hasta')) return;
+    const p = new URLSearchParams(params);
+    p.set('desde', lastWeekStart());
+    setParams(p, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const orden: Orden = params.get('orden') === 'cantidad' ? 'cantidad' : 'ultima';
   const page = Math.max(1, Number(params.get('page')) || 1);
 
