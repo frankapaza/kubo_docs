@@ -47,7 +47,7 @@ export class DatacenterProbeService implements OnApplicationBootstrap, OnApplica
   async onApplicationBootstrap(): Promise<void> {
     const probe = await this.probes.findOneBy({ code: DATACENTER_PROBE_CODE });
     if (!probe) {
-      throw new Error(`No existe la sonda '${DATACENTER_PROBE_CODE}' en monitor_probes: aplicar la migración 032.`);
+      throw new Error(`No existe la sonda '${DATACENTER_PROBE_CODE}' en monitor_probes: aplicar la migración 035.`);
     }
     this.probe = probe;
     const runner = this.createRunner({

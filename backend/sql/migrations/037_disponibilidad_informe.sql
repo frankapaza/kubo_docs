@@ -1,5 +1,5 @@
 -- =========================================================================
---  Migración 034 — Disponibilidad: informe mensual, evidencias, mantenimiento
+--  Migración 037 — Disponibilidad: informe mensual, evidencias, mantenimiento
 --  y agente de servidor
 -- =========================================================================
 --    · monitor_maintenance          ventanas de mantenimiento (de un servidor
@@ -16,7 +16,7 @@
 --
 --  Todos los instantes son DATETIME(3) en UTC.
 --  Idempotente: CREATE TABLE IF NOT EXISTS y altas guardadas con
---  information_schema (patrón de la 033). No borra ni vacía nada.
+--  information_schema (patrón de la 036). No borra ni vacía nada.
 -- =========================================================================
 
 USE kubo_devdocs;
@@ -141,10 +141,10 @@ CREATE TABLE IF NOT EXISTS monitor_monthly_reports (
 -- -------------------------------------------------------------------------
 -- 2) Columnas e índice nuevos en tablas existentes (guardados)
 -- -------------------------------------------------------------------------
-DROP PROCEDURE IF EXISTS kubo_add_column_034;
-DROP PROCEDURE IF EXISTS kubo_add_index_034;
+DROP PROCEDURE IF EXISTS kubo_add_column_037;
+DROP PROCEDURE IF EXISTS kubo_add_index_037;
 DELIMITER //
-CREATE PROCEDURE kubo_add_column_034(
+CREATE PROCEDURE kubo_add_column_037(
   IN p_table VARCHAR(64), IN p_column VARCHAR(64), IN p_ddl VARCHAR(512))
 BEGIN
   IF NOT EXISTS (
@@ -156,7 +156,7 @@ BEGIN
     PREPARE st FROM @sql; EXECUTE st; DEALLOCATE PREPARE st;
   END IF;
 END //
-CREATE PROCEDURE kubo_add_index_034(
+CREATE PROCEDURE kubo_add_index_037(
   IN p_table VARCHAR(64), IN p_index VARCHAR(64), IN p_ddl VARCHAR(512))
 BEGIN
   IF NOT EXISTS (
@@ -170,21 +170,21 @@ BEGIN
 END //
 DELIMITER ;
 
-CALL kubo_add_column_034('monitor_servers', 'agent_watch_services',
+CALL kubo_add_column_037('monitor_servers', 'agent_watch_services',
   "agent_watch_services JSON NULL "
   "COMMENT 'servicios de Windows que el agente debe vigilar' "
   "AFTER agent_last_seen_at");
-CALL kubo_add_column_034('monitor_servers', 'agent_token_created_at',
+CALL kubo_add_column_037('monitor_servers', 'agent_token_created_at',
   "agent_token_created_at DATETIME(3) NULL AFTER agent_watch_services");
-CALL kubo_add_column_034('monitor_servers', 'agent_silence_alerted_at',
+CALL kubo_add_column_037('monitor_servers', 'agent_silence_alerted_at',
   "agent_silence_alerted_at DATETIME(3) NULL "
   "COMMENT 'cuando se aviso que el agente dejo de reportar; NULL = sin aviso' "
   "AFTER agent_token_created_at");
-CALL kubo_add_column_034('monitor_servers', 'agent_version',
+CALL kubo_add_column_037('monitor_servers', 'agent_version',
   "agent_version VARCHAR(40) NULL AFTER agent_silence_alerted_at");
 
-CALL kubo_add_index_034('monitor_checks', 'idx_monitor_checks_probe_started',
+CALL kubo_add_index_037('monitor_checks', 'idx_monitor_checks_probe_started',
   "idx_monitor_checks_probe_started (probe_id, started_at)");
 
-DROP PROCEDURE IF EXISTS kubo_add_column_034;
-DROP PROCEDURE IF EXISTS kubo_add_index_034;
+DROP PROCEDURE IF EXISTS kubo_add_column_037;
+DROP PROCEDURE IF EXISTS kubo_add_index_037;

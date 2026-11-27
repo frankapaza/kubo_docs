@@ -15,11 +15,19 @@ import { UpdateSignatoryDto } from './dto/update-signatory.dto';
 import { EmailService } from '../email/email.service';
 import { WorkspaceService } from '../workspace/workspace.service';
 import { CommercialDocument } from '../documents/entities/commercial-document.entity';
+import { Subject } from 'rxjs';
 
 const TOKEN_TTL_DAYS = 7;
 
 @Injectable()
 export class DocumentSignatoriesService {
+  /**
+   * Avisa cada firma confirmada. Lo escucha el acta de conformidad de un
+   * requerimiento, que se cierra cuando firman todos. Se emite con la firma ya
+   * guardada: un fallo de quien escucha no afecta a la firma.
+   */
+  readonly signed$ = new Subject<{ documentId: number }>();
+
   constructor(
     private readonly repo: DocumentSignatoriesRepository,
     private readonly email: EmailService,
@@ -170,6 +178,7 @@ export class DocumentSignatoriesService {
       signedAt: now,
       signedIp: ip,
     });
+    this.signed$.next({ documentId: Number(sig.documentId) });
 
     return { message: 'Firma registrada correctamente.', signedAt: now };
   }

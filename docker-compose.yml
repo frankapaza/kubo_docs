@@ -86,11 +86,14 @@ services:
       # MONITOREO a tickets.origin. Los logs en si van a Loki, no a MySQL.
       - ./backend/sql/migrations/030_logs_centralizados.sql:/docker-entrypoint-initdb.d/030_logs_centralizados.sql:ro
       - ./backend/sql/migrations/031_conector_repos.sql:/docker-entrypoint-initdb.d/031_conector_repos.sql:ro
-      - ./backend/sql/migrations/032_disponibilidad_nucleo.sql:/docker-entrypoint-initdb.d/032_disponibilidad_nucleo.sql:ro
-      # La 033 anade monitor_probes.silence_alerted_at (aviso por silencio de una sonda).
-      - ./backend/sql/migrations/033_disponibilidad_escritorio.sql:/docker-entrypoint-initdb.d/033_disponibilidad_escritorio.sql:ro
-      # La 034 crea las tablas del informe mensual, evidencias, mantenimiento y agente.
-      - ./backend/sql/migrations/034_disponibilidad_informe.sql:/docker-entrypoint-initdb.d/034_disponibilidad_informe.sql:ro
+      - ./backend/sql/migrations/032_documentos_requerimiento.sql:/docker-entrypoint-initdb.d/032_documentos_requerimiento.sql:ro
+      - ./backend/sql/migrations/033_detalle_requerimiento.sql:/docker-entrypoint-initdb.d/033_detalle_requerimiento.sql:ro
+      - ./backend/sql/migrations/034_adjuntos_cliente_requerimiento.sql:/docker-entrypoint-initdb.d/034_adjuntos_cliente_requerimiento.sql:ro
+      - ./backend/sql/migrations/035_disponibilidad_nucleo.sql:/docker-entrypoint-initdb.d/035_disponibilidad_nucleo.sql:ro
+      # La 036 anade monitor_probes.silence_alerted_at (aviso por silencio de una sonda).
+      - ./backend/sql/migrations/036_disponibilidad_escritorio.sql:/docker-entrypoint-initdb.d/036_disponibilidad_escritorio.sql:ro
+      # La 037 crea las tablas del informe mensual, evidencias, mantenimiento y agente.
+      - ./backend/sql/migrations/037_disponibilidad_informe.sql:/docker-entrypoint-initdb.d/037_disponibilidad_informe.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s

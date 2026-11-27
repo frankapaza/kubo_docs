@@ -5,7 +5,7 @@ import { ClientAdminGuard } from './guards/client-admin.guard';
 import { CurrentClientUser } from './decorators/current-client-user.decorator';
 import { AuthClientUser } from './strategies/client-jwt.strategy';
 import { PortalRequirementsService } from './portal-requirements.service';
-import { CreatePortalRequirementDto } from './dto/create-portal-requirement.dto';
+import { CreatePortalRequirementDto, ProvidePortalDetailDto } from './dto/create-portal-requirement.dto';
 import { PortalRequirementView } from './dto/portal-requirement.dto';
 
 /**
@@ -50,5 +50,16 @@ export class PortalRequirementsController {
     @Param('id', requirementIdPipe) id: number,
   ): Promise<PortalRequirementView> {
     return this.service.findOne(user.clientId, id);
+  }
+
+  /** Responde a «Pedir más detalle». Mismo permiso que pedir un requerimiento. */
+  @Post(':id/detalle')
+  @UseGuards(ClientAdminGuard)
+  provideDetail(
+    @CurrentClientUser() user: AuthClientUser,
+    @Param('id', requirementIdPipe) id: number,
+    @Body() dto: ProvidePortalDetailDto,
+  ): Promise<PortalRequirementView> {
+    return this.service.provideDetail(user.clientUserId, user.clientId, id, dto);
   }
 }

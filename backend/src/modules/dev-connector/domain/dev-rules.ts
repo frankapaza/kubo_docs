@@ -16,7 +16,8 @@ export function normalizeCode(raw: string): { kind: ItemKind; code: string } | n
 
 /**
  * La lista blanca de la spec (§4.1). Lo que no está aquí lo hace una persona en
- * DevDocs: resolver y cerrar exigen evidencia y hablan con el cliente.
+ * DevDocs, o la hace una herramienta propia que exige evidencia: resolver un
+ * ticket (resolver_ticket) y entregar un RQ a Pruebas (entregar_requerimiento).
  */
 const ALLOWED: Record<ItemKind, ReadonlyArray<readonly [string, string]>> = {
   KB: [
@@ -25,7 +26,6 @@ const ALLOWED: Record<ItemKind, ReadonlyArray<readonly [string, string]>> = {
   ],
   RQ: [
     ['PENDIENTE', 'EN_PROCESO'],
-    ['EN_PROCESO', 'PRUEBAS'],
   ],
 };
 

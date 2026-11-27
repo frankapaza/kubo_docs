@@ -1,7 +1,7 @@
 import type { ServiceTarget } from './core';
 
 /**
- * Usuario de sistema (migración 032) que firma los tickets automáticos del
+ * Usuario de sistema (migración 035) que firma los tickets automáticos del
  * monitoreo. Está inactivo: no puede iniciar sesión.
  */
 export const MONITORING_ACTOR_EMAIL = 'monitoreo@sistema.kubo';

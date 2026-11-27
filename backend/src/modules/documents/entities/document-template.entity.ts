@@ -14,7 +14,8 @@ export type DocumentType =
   | 'SOW'
   | 'TDR'
   | 'ADDENDUM'
-  | 'OTHER';
+  | 'OTHER'
+  | 'ACTA_CONFORMIDAD';
 
 export const DOCUMENT_TYPES: DocumentType[] = [
   'CONTRACT',
@@ -24,6 +25,7 @@ export const DOCUMENT_TYPES: DocumentType[] = [
   'TDR',
   'ADDENDUM',
   'OTHER',
+  'ACTA_CONFORMIDAD',
 ];
 
 export interface TemplateVariable {

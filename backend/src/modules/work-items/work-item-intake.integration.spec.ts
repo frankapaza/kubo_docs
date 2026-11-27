@@ -9,6 +9,7 @@ import { WorkItemsController } from './work-items.controller';
 import { WorkItemsService } from './work-items.service';
 import { WorkItemBoardService } from './work-item-board.service';
 import { WorkItemIntakeService } from './work-item-intake.service';
+import { WorkItemDocumentsService } from './work-item-documents.service';
 
 /**
  * Ronda de correcciones 1 de la tarea 9, punto 3: `@Matches` es la única
@@ -53,6 +54,7 @@ describe('POST /work-items/:id/accept — formato de committedDate (integración
         { provide: WorkItemsService, useValue: {} },
         { provide: WorkItemBoardService, useValue: {} },
         { provide: WorkItemIntakeService, useValue: { accept, reject: jest.fn() } },
+        { provide: WorkItemDocumentsService, useValue: {} },
       ],
     }).compile();
 

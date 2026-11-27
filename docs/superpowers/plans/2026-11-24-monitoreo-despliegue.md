@@ -1,5 +1,7 @@
 # Monitoreo de disponibilidad · Lista de despliegue a producción
 
+> **Renumeración (2026-11-26):** al integrar `main`, que trajo las migraciones 032–034 de requerimientos, las de monitoreo pasaron a ser 035 (núcleo), 036 (escritorio) y 037 (informe y agente). En los demás documentos de monitoreo, un «032/033/034» de monitoreo equivale hoy a 035/036/037.
+
 Para el responsable. Cubre la Entrega 1 (núcleo: central, sonda `kubo-01`, motor de la oficina), la Entrega 2 (widget de escritorio y aviso por silencio de una sonda) y la Entrega 3 (informe mensual, mantenimientos, WinMTR, importación CSV y agente de servidor), ya integradas con `main` (conector de tickets).
 
 **Migraciones implicadas, en este orden:**
@@ -7,11 +9,12 @@ Para el responsable. Cubre la Entrega 1 (núcleo: central, sonda `kubo-01`, moto
 | Nº | Fichero | De quién | Qué hace |
 |----|---------|----------|----------|
 | 031 | `backend/sql/migrations/031_conector_repos.sql` | conector (ya en `main`) | tablas `dev_repos`, `dev_keys`, `dev_links`; `work_items.client_system_id` |
-| 032 | `backend/sql/migrations/032_disponibilidad_nucleo.sql` | monitoreo (antes 031) | tablas `monitor_*`, sondas `kubo-01` y `oficina-01`, usuario de sistema `monitoreo@sistema.kubo` (inactivo, sin contraseña válida) |
-| 033 | `backend/sql/migrations/033_disponibilidad_escritorio.sql` | monitoreo (antes 032) | columna `monitor_probes.silence_alerted_at` |
-| 034 | `backend/sql/migrations/034_disponibilidad_informe.sql` | monitoreo (Entrega 3) | 8 tablas (resúmenes diarios, informe mensual, evidencia, mantenimientos, muestras y resúmenes del agente…), 4 columnas del agente en `monitor_servers` e índice `idx_monitor_checks_probe_started` en `monitor_checks` |
+| 032–034 | `032_documentos_requerimiento`, `033_detalle_requerimiento`, `034_adjuntos_cliente_requerimiento` | requerimientos (ya en `main`) | no son del monitoreo; `deploy.yml` las aplica antes que las nuestras |
+| 035 | `backend/sql/migrations/035_disponibilidad_nucleo.sql` | monitoreo (antes 032) | tablas `monitor_*`, sondas `kubo-01` y `oficina-01`, usuario de sistema `monitoreo@sistema.kubo` (inactivo, sin contraseña válida) |
+| 036 | `backend/sql/migrations/036_disponibilidad_escritorio.sql` | monitoreo (antes 033) | columna `monitor_probes.silence_alerted_at` |
+| 037 | `backend/sql/migrations/037_disponibilidad_informe.sql` | monitoreo (Entrega 3, antes 034) | 8 tablas (resúmenes diarios, informe mensual, evidencia, mantenimientos, muestras y resúmenes del agente…), 4 columnas del agente en `monitor_servers` e índice `idx_monitor_checks_probe_started` en `monitor_checks` |
 
-Las cuatro son aditivas e idempotentes (guardadas con `information_schema`, `CREATE TABLE IF NOT EXISTS`, `INSERT ... WHERE NOT EXISTS` / `INSERT IGNORE`): volver a aplicarlas no hace nada. Ninguna siembra plantillas de aviso, así que el control «Plantillas de aviso: 9» de `deploy.yml` no cambia. La 033 necesita la 032 (altera `monitor_probes`) y la 034 también (altera `monitor_servers` y `monitor_checks`).
+Las de monitoreo (035–037) y la 031 son aditivas e idempotentes (guardadas con `information_schema`, `CREATE TABLE IF NOT EXISTS`, `INSERT ... WHERE NOT EXISTS` / `INSERT IGNORE`): volver a aplicarlas no hace nada. Ninguna siembra plantillas de aviso, así que el control «Plantillas de aviso: 9» de `deploy.yml` no cambia. La 036 necesita la 035 (altera `monitor_probes`) y la 037 también (altera `monitor_servers` y `monitor_checks`).
 
 ---
 
@@ -34,19 +37,19 @@ Las cuatro son aditivas e idempotentes (guardadas con `information_schema`, `CRE
   ls -l $HOME/respaldo-pre-monitoreo-*.sql   # que no pese casi nada = no siga
   ```
 
-## 2. Migraciones 031 (conector), 032, 033 y 034
+## 2. Migraciones 031 (conector), 032–034 (requerimientos) y 035, 036 y 037 (monitoreo)
 
-**Camino normal: `deploy.yml`.** En su paso 4 aplica, en orden, `010 … 030`, `031_conector_repos`, `032_disponibilidad_nucleo`, `033_disponibilidad_escritorio`, `034_disponibilidad_informe` (la 011 no: sigue siendo manual). Con `set -e`, cualquier fallo corta el despliegue **antes** de reconstruir: la versión vieja sigue sirviendo.
+**Camino normal: `deploy.yml`.** En su paso 4 aplica, en orden, `010 … 030`, `031_conector_repos`, `032 … 034` de requerimientos, `035_disponibilidad_nucleo`, `036_disponibilidad_escritorio`, `037_disponibilidad_informe` (la 011 no: sigue siendo manual). Con `set -e`, cualquier fallo corta el despliegue **antes** de reconstruir: la versión vieja sigue sirviendo.
 
-- [ ] **Respaldo antes de la 034** (ver paso 1; `deploy.yml` lo hace solo). La 034 crea un índice en `monitor_checks`, que puede ser la tabla más grande: en un VPS con muchos checks tarda y bloquea escrituras un momento, así que conviene desplegar en una hora tranquila.
-- [ ] Revise en el log de la acción que aparecen `--- 031_conector_repos`, `--- 032_disponibilidad_nucleo`, `--- 033_disponibilidad_escritorio` y `--- 034_disponibilidad_informe` sin error, y que el paso 5 dice «Eventos pendientes de notificar: 0» y «Plantillas de aviso: 9».
+- [ ] **Respaldo antes de la 037** (ver paso 1; `deploy.yml` lo hace solo). La 037 crea un índice en `monitor_checks`, que puede ser la tabla más grande: en un VPS con muchos checks tarda y bloquea escrituras un momento, así que conviene desplegar en una hora tranquila.
+- [ ] Revise en el log de la acción que aparecen `--- 031_conector_repos`, `--- 035_disponibilidad_nucleo`, `--- 036_disponibilidad_escritorio` y `--- 037_disponibilidad_informe` sin error, y que el paso 5 dice «Eventos pendientes de notificar: 0» y «Plantillas de aviso: 9».
 
 **Camino manual** (si se despliega con `deploy.sh`, que **no** aplica migraciones):
 
 ```bash
 cd /home/kubo/kubo
 git pull
-for m in 031_conector_repos 032_disponibilidad_nucleo 033_disponibilidad_escritorio 034_disponibilidad_informe; do
+for m in 031_conector_repos 032_documentos_requerimiento 033_detalle_requerimiento 034_adjuntos_cliente_requerimiento 035_disponibilidad_nucleo 036_disponibilidad_escritorio 037_disponibilidad_informe; do
   echo "--- $m"
   docker compose exec -T mysql \
     sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" "$MYSQL_DATABASE"' \
@@ -80,8 +83,8 @@ done
 
 ## 4. Comprobar el arranque
 
-- [ ] Backend: en `docker compose logs backend`, «Nest application successfully started». Ojo: si faltara la 032 el backend arranca igual; el fallo llega al crear el primer ticket automático («Falta el usuario de monitoreo: aplicar la migración 032») y lo delata antes el worker (punto siguiente).
-- [ ] Sonda del centro de datos: en `docker compose logs monitor-worker`, la línea **«Sonda kubo-01 iniciada»**. `deploy.yml` la espera (paso 7b, hasta 30 × 5 s) y, si no aparece, marca el despliegue como fallido aunque el backend esté en pie. Sin la 032 el worker aborta con «No existe la sonda 'kubo-01' en monitor_probes: aplicar la migración 032.».
+- [ ] Backend: en `docker compose logs backend`, «Nest application successfully started». Ojo: si faltara la 035 el backend arranca igual; el fallo llega al crear el primer ticket automático («Falta el usuario de monitoreo: aplicar la migración 035») y lo delata antes el worker (punto siguiente).
+- [ ] Sonda del centro de datos: en `docker compose logs monitor-worker`, la línea **«Sonda kubo-01 iniciada»**. `deploy.yml` la espera (paso 7b, hasta 30 × 5 s) y, si no aparece, marca el despliegue como fallido aunque el backend esté en pie. Sin la 035 el worker aborta con «No existe la sonda 'kubo-01' en monitor_probes: aplicar la migración 035.».
 
 ## 5. Revisar la web
 
@@ -140,8 +143,8 @@ Solo con su visto bueno tras leer `2026-11-23-monitoreo-entrega-1-aceptacion.md`
 **Falla una migración (paso 2).**
 - Con `deploy.yml`: el `set -e` corta antes de reconstruir; la versión anterior sigue sirviendo. Lea el error en el log de la acción, corríjalo y vuelva a lanzar (`workflow_dispatch`): las migraciones ya aplicadas no hacen nada la segunda vez.
 - A mano: el bucle se detiene en la que falla (`|| break`); no levante el backend nuevo. Las ya aplicadas no estorban a la versión vieja (solo añaden tablas y columnas nulables).
-- Si una ejecución se cortó a medias puede quedar un procedimiento auxiliar (`kubo_add_column_031`, `kubo_add_index_031`, `kubo_upgrade_032`, `kubo_add_column_033`, y los de la 034 `kubo_*_034`): cada migración hace `DROP PROCEDURE IF EXISTS` al empezar, así que basta con reaplicarla.
-- La 033 y la 034 dependen de la 032: no las aplique solas.
+- Si una ejecución se cortó a medias puede quedar un procedimiento auxiliar (`kubo_add_column_031`, `kubo_add_index_031`, `kubo_upgrade_035`, `kubo_add_column_036`, y los de la 037 `kubo_*_037`): cada migración hace `DROP PROCEDURE IF EXISTS` al empezar, así que basta con reaplicarla.
+- La 036 y la 037 dependen de la 035: no las aplique solas.
 - Restaurar el respaldo solo hace falta si algo tocó datos existentes, que no es el caso de estas migraciones. Si aun así se decide, pare antes el backend y el worker para que nada escriba mientras se restaura (`docker compose stop backend monitor-worker`) y levántelos al terminar. Restaurar el volcado no elimina las tablas que crearon las migraciones nuevas (`monitor_*`, `dev_*`): quedan ahí, lo cual es inofensivo.
 
   ```bash
@@ -150,7 +153,7 @@ Solo con su visto bueno tras leer `2026-11-23-monitoreo-entrega-1-aceptacion.md`
 
 **El backend no arranca (paso 4).** `deploy.yml` imprime el log y el nombre del respaldo. Las migraciones son aditivas: la versión anterior vuelve con `git checkout <commit-anterior> && docker compose up -d --build`. La versión anterior no tiene el servicio `monitor-worker` en el compose: añada `--remove-orphans` (o `docker compose stop monitor-worker`) para no dejarlo corriendo suelto. Antes del siguiente despliegue vuelva a la rama con `git checkout main`: ese checkout deja el VPS en HEAD desacoplado y el `git pull` con el que empieza `deploy.yml` fallaría bajo `set -e`.
 
-**El backend arranca pero `monitor-worker` no («Sonda kubo-01 iniciada» no aparece).** El despliegue se marca fallido, pero la web funciona. Mire `docker compose logs --tail 120 monitor-worker`: lo habitual es que falte la 032 (no existe `kubo-01`) o que no conecte a MySQL. Aplique la 032 y `docker compose up -d monitor-worker`. Mientras tanto solo falta la medición desde el centro de datos.
+**El backend arranca pero `monitor-worker` no («Sonda kubo-01 iniciada» no aparece).** El despliegue se marca fallido, pero la web funciona. Mire `docker compose logs --tail 120 monitor-worker`: lo habitual es que falte la 035 (no existe `kubo-01`) o que no conecte a MySQL. Aplique la 032 y `docker compose up -d monitor-worker`. Mientras tanto solo falta la medición desde el centro de datos.
 
 **El motor de la oficina no se instala o no reporta.** No afecta a la central. Desinstalar: `node dist\service\uninstall.js` (conserva los datos; `--purge` los borra). Si el token se filtró o se perdió, emita otro en Sondas (revoca el anterior) y reinstale con `--token-stdin`. A los 10 minutos sin contacto la central avisa por correo a los administradores (una vez por silencio).
 

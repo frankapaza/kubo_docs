@@ -1,6 +1,6 @@
 # Aceptación de la Entrega 2 (Escritorio) — Monitoreo de disponibilidad
 
-> **Renumeración (2026-11-24):** al integrar `main`, que trajo el conector de tickets con su `031_conector_repos.sql`, las migraciones de disponibilidad pasaron a ser `032_disponibilidad_nucleo.sql` (antes 031) y `033_disponibilidad_escritorio.sql` (antes 032). Este documento usa ya los números nuevos; los mensajes de commit citados conservan el número con el que se hicieron.
+> **Renumeración (2026-11-24):** al integrar `main`, que trajo el conector de tickets con su `031_conector_repos.sql`, las migraciones de disponibilidad pasaron a ser `035_disponibilidad_nucleo.sql` (antes 031) y `036_disponibilidad_escritorio.sql` (antes 032). Este documento usa ya los números nuevos; los mensajes de commit citados conservan el número con el que se hicieron.
 
 Fecha de las comprobaciones: **2026-11-24**. Rama: `feat/monitoreo-escritorio` (sin publicar, sin fusionar).
 Criterios: secciones «El widget», «Notificaciones de Windows» y «Vigilancia de las propias sondas» de `docs/superpowers/specs/2026-11-23-monitoreo-disponibilidad-design.md`.

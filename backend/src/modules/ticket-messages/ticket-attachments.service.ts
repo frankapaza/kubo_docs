@@ -216,7 +216,7 @@ const NOMBRE_POR_OMISION = 'archivo';
  * empiece por punto se esconde en un `ls`, y uno que acabe en punto o espacio no
  * se puede crear en Windows si alguien lo guarda tal cual.
  */
-function sanitizeFilename(raw: string): string {
+export function sanitizeFilename(raw: string): string {
   const limpio = (raw ?? '')
     .replace(CARACTERES_INVISIBLES, '')
     .replace(CARACTERES_PROHIBIDOS, '_')
@@ -249,7 +249,7 @@ function sanitizeFilename(raw: string): string {
  * descomposición puede sacar caracteres nuevos (`½` -> `1⁄2`), y se acota al
  * mismo largo que la columna: `NFKD` puede alargar la cadena (`ﬁ` -> `fi`).
  */
-function toHeaderFilename(filename: string): string {
+export function toHeaderFilename(filename: string): string {
   const ascii = (filename ?? '')
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')

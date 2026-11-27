@@ -3,8 +3,10 @@ import { useEffect, useState } from 'react';
 import { workItemsApi } from '../../api/work-items.api';
 import { clientsApi } from '../../api/clients.api';
 import { supportAgentsApi } from '../../api/tickets.api';
-import type { Client, SupportAgentView, WorkItem, WorkItemPriority } from '../../api/types';
+import type { Client, SupportAgentView, WorkItem, WorkItemPriority, WorkItemRequestType } from '../../api/types';
 import ClientSystemSelect from '../dev-connector/ClientSystemSelect';
+import RequirementTemplateFields from '../requirements/RequirementTemplateFields';
+import { composeDescription, parseCriteria, TemplateAnswers } from '../requirements/requirement-template';
 
 export interface NewWorkItemDialogProps {
   open: boolean;
@@ -30,10 +32,8 @@ const labelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 600, marginB
  * Alta de un requerimiento. Mismo patrón de diálogo que NewTicketDialog
  * (role="dialog", Escape, backdrop, stopPropagation en el panel interno).
  *
- * No incluye criterios de aceptación: por diseño de esta tarea, ese campo
- * solo se muestra en WorkItemPanel una vez creado el ítem (POST
- * /work-items acepta acceptanceCriteria, pero el formulario de alta no lo
- * pide todavía).
+ * Usa el mismo formulario guiado que el portal (tipo de pedido, secciones y
+ * criterios de aceptación), sin secciones obligatorias.
  *
  * La prioridad elegida aquí decide dónde cae el ítem dentro de PENDIENTE:
  * WorkItemsService.create calcula la posición por banda de prioridad
@@ -43,7 +43,9 @@ export default function NewWorkItemDialog({ open, onCancel, onCreated }: NewWork
   const [clientId, setClientId] = useState<number | ''>('');
   const [clientSystemId, setClientSystemId] = useState<number | null>(null);
   const [title, setTitle] = useState('');
-  const [descriptionMd, setDescriptionMd] = useState('');
+  const [requestType, setRequestType] = useState<WorkItemRequestType>('CAMBIO');
+  const [answers, setAnswers] = useState<TemplateAnswers>({});
+  const [criteria, setCriteria] = useState('');
   const [priority, setPriority] = useState<WorkItemPriority>('MEDIA');
   const [assigneeUserId, setAssigneeUserId] = useState<number | ''>('');
   const [dueDate, setDueDate] = useState('');
@@ -62,7 +64,9 @@ export default function NewWorkItemDialog({ open, onCancel, onCreated }: NewWork
     setClientId('');
     setClientSystemId(null);
     setTitle('');
-    setDescriptionMd('');
+    setRequestType('CAMBIO');
+    setAnswers({});
+    setCriteria('');
     setPriority('MEDIA');
     setAssigneeUserId('');
     setDueDate('');
@@ -119,11 +123,15 @@ export default function NewWorkItemDialog({ open, onCancel, onCreated }: NewWork
     setBusy(true);
     setError(null);
     try {
+      const descriptionMd = composeDescription(requestType, answers);
+      const acceptanceCriteria = parseCriteria(criteria);
       const created = await workItemsApi.create({
         clientId: Number(clientId),
         clientSystemId: clientSystemId ?? undefined,
         title: title.trim(),
-        descriptionMd: descriptionMd.trim() || undefined,
+        descriptionMd: descriptionMd || undefined,
+        acceptanceCriteria: acceptanceCriteria.length ? acceptanceCriteria : undefined,
+        requestType,
         priority,
         assigneeUserId: assigneeUserId || undefined,
         dueDate: dueDate || undefined,
@@ -151,7 +159,7 @@ export default function NewWorkItemDialog({ open, onCancel, onCreated }: NewWork
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: '#fff', borderRadius: 10, padding: 22, width: 560, maxWidth: '96vw',
+          background: '#fff', borderRadius: 10, padding: 22, width: 640, maxWidth: '96vw',
           display: 'flex', flexDirection: 'column', gap: 16,
         }}
       >
@@ -211,16 +219,18 @@ export default function NewWorkItemDialog({ open, onCancel, onCreated }: NewWork
           />
         </label>
 
-        <label htmlFor="new-wi-description">
-          <span style={labelStyle}>Descripción</span>
-          <textarea
-            id="new-wi-description"
-            value={descriptionMd}
-            rows={4}
-            onChange={(e) => setDescriptionMd(e.target.value)}
-            style={{ ...inputStyle, resize: 'vertical' }}
-          />
-        </label>
+        <RequirementTemplateFields
+          type={requestType}
+          onTypeChange={setRequestType}
+          answers={answers}
+          onAnswersChange={setAnswers}
+          criteria={criteria}
+          onCriteriaChange={setCriteria}
+          disabled={busy}
+        />
+        <span style={{ fontSize: 11, color: '#6d7577', marginTop: -8 }}>
+          Aquí ninguna sección es obligatoria; en el portal el cliente sí debe completar las marcadas con *.
+        </span>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <label htmlFor="new-wi-priority">

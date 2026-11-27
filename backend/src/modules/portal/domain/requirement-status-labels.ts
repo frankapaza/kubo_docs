@@ -25,4 +25,5 @@ export const REQUIREMENT_STATUS_LABELS: Record<WorkItemStatus, PortalRequirement
   BLOQUEADO: 'Bloqueado',
   CANCELADO: 'Cancelado',
   RECHAZADO: 'Rechazado',
+  FALTA_INFO: 'Falta información',
 };

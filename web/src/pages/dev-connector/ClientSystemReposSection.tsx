@@ -57,6 +57,16 @@ export default function ClientSystemReposSection({ clientSystemId, systemName }:
     onError: (e) => toast.error(apiError(e, 'No se pudo regenerar el secreto.')),
   });
 
+  const remove = useMutation({
+    mutationFn: (id: number) => devConnectorApi.removeRepo(id),
+    onSuccess: (out) => {
+      toast.success(`${out.githubFullName} quitado. Ya puedes registrarlo en otro sistema.`);
+      qc.invalidateQueries({ queryKey: ['dev-repos'] });
+      qc.invalidateQueries({ queryKey: ['dev-keys'] });
+    },
+    onError: (e) => toast.error(apiError(e, 'No se pudo quitar el repositorio.')),
+  });
+
   return (
     <div style={{ marginLeft: 16, padding: '6px 0 10px', display: 'flex', flexDirection: 'column', gap: 6 }}>
       <span style={{ fontSize: 11, fontWeight: 600, color: '#6d7577', textTransform: 'uppercase', letterSpacing: 0.4 }}>
@@ -87,6 +97,19 @@ export default function ClientSystemReposSection({ clientSystemId, systemName }:
               </button>
               <button type="button" style={smallButton} disabled={toggle.isPending} onClick={() => toggle.mutate(r)}>
                 {r.isActive ? 'Desactivar' : 'Activar'}
+              </button>
+              <button type="button" style={{ ...smallButton, color: '#b42318' }} disabled={remove.isPending}
+                onClick={() => {
+                  if (window.confirm(
+                    `Quitar ${r.githubFullName} de ${systemName}:\n\n` +
+                    '· se borran las claves de desarrollo de este repo (Claude dejará de conectarse con ellas)\n' +
+                    '· se borra el código vinculado (ramas, commits y PR) de sus tickets\n' +
+                    '· el webhook de GitHub deja de valer; bórralo allí o pega el secreto nuevo al registrarlo otra vez\n\n¿Continuar?',
+                  )) {
+                    remove.mutate(r.id);
+                  }
+                }}>
+                Quitar
               </button>
             </>
           )}

@@ -29,6 +29,11 @@ import { AssignTicketDto } from './dto/assign-ticket.dto';
 import { EscalateTicketDto } from './dto/escalate-ticket.dto';
 import { OverridePriorityDto } from './dto/override-priority.dto';
 import { ArchiveTicketDto } from './dto/archive-ticket.dto';
+import { ChangeTicketClientDto } from './dto/change-client.dto';
+import { ConcludeTicketDto } from './dto/conclude-ticket.dto';
+import { TicketConclusionService } from './ticket-conclusion.service';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { RolesGuard } from '../../common/guards/roles.guard';
 import { TicketsRealtimeGateway } from './tickets-realtime.gateway';
 import { ServiceCategory } from './entities/ticket.entity';
 import { TicketStatus } from './domain/ticket-state-machine';
@@ -45,6 +50,7 @@ export class TicketsController {
     private readonly assignment: TicketAssignmentService,
     private readonly ai: TicketAIService,
     private readonly realtime: TicketsRealtimeGateway,
+    private readonly conclusion: TicketConclusionService,
   ) {}
 
   /**
@@ -144,6 +150,14 @@ export class TicketsController {
     return this.changed(this.service.archive(id, user.id, dto.reason));
   }
 
+  /** Pasa el ticket a otro cliente (solo ADMIN): sistema, usuario de avisos y proyecto incluidos. */
+  @Post(':id/client')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  changeClient(@Param('id', ParseIntPipe) id: number, @Body() dto: ChangeTicketClientDto) {
+    return this.changed(this.service.changeClient(id, dto));
+  }
+
   @Post(':id/unarchive')
   unarchive(@CurrentUser() user: AuthUser, @Param('id', ParseIntPipe) id: number) {
     return this.changed(this.service.unarchive(id, user.id));
@@ -161,6 +175,28 @@ export class TicketsController {
       toStatus: dto.toStatus,
       reason: dto.reason,
       resolutionMd: dto.resolutionMd,
+      rootCause: dto.rootCause,
+      correctiveAction: dto.correctiveAction,
+    }));
+  }
+
+  /**
+   * Solo ADMIN: da por concluido un ticket ya atendido con una observación
+   * general (resuelto y cerrado por el camino normal). Lo usa el cierre en
+   * lote de la bandeja.
+   */
+  @Post(':id/conclude')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  conclude(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ConcludeTicketDto,
+  ) {
+    return this.changed(this.conclusion.conclude({
+      ticketId: id,
+      actorUserId: user.id,
+      solucion: dto.solucion,
       rootCause: dto.rootCause,
       correctiveAction: dto.correctiveAction,
     }));

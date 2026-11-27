@@ -1,12 +1,17 @@
 import { MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
 import { ticketsApi, supportAgentsApi } from '../api/tickets.api';
-import type { Ticket, TicketStatus } from '../api/types';
+import type { Client, Ticket, TicketStatus } from '../api/types';
+import { clientsApi } from '../api/clients.api';
 import { useRealtime } from '../lib/realtime';
 import { toast } from '../ui/Toast';
 import { STATUS_STYLES, PRIORITY_STYLES, STATUS_LABELS, slaBarColor } from './tickets/ticket-ui';
 import NewTicketDialog from './tickets/NewTicketDialog';
+import ChangeClientDialog from './tickets/ChangeClientDialog';
+import ConcludeTicketsDialog, { ConcludeValues } from './tickets/ConcludeTicketsDialog';
+import { useAuth } from '../auth/AuthContext';
+import { canManageUsers } from '../auth/permissions';
 
 type Chip = 'Todos' | 'Abiertos' | 'P1' | 'SLA en riesgo' | 'Archivados' | TicketStatus;
 
@@ -21,10 +26,22 @@ const chipLabel = (c: Chip): string =>
 
 const SEARCH_DEBOUNCE_MS = 280;
 
-const GRID_COLUMNS = '82px 1fr 118px 96px 116px 110px 130px 84px';
+const BASE_COLUMNS = '82px 1fr 118px 96px 116px 110px 130px 84px';
+
+const errMsg = (err: unknown): string | undefined =>
+  (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
 
 export default function TicketsListPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  // Mover tickets de cliente es solo de ADMIN (igual que en el detalle).
+  const isAdmin = canManageUsers(user);
+  const GRID_COLUMNS = isAdmin ? `28px ${BASE_COLUMNS}` : BASE_COLUMNS;
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const [busyLabel, setBusyLabel] = useState('Moviendo tickets…');
+  const [concludeOpen, setConcludeOpen] = useState(false);
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [filter, setFilter] = useState<Chip>('Todos');
   const [qInput, setQInput] = useState('');
@@ -33,6 +50,23 @@ export default function TicketsListPage() {
   const [error, setError] = useState<string | null>(null);
   const [usersById, setUsersById] = useState<Map<number, string>>(new Map());
   const [newTicketOpen, setNewTicketOpen] = useState(false);
+  // El cliente va en la URL (?cliente=9) para poder compartir o guardar la bandeja filtrada.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const clientFilter = Number(searchParams.get('cliente')) || null;
+  const [clients, setClients] = useState<Client[]>([]);
+  const setClientFilter = (id: number | null) => {
+    const next = new URLSearchParams(searchParams);
+    if (id) next.set('cliente', String(id));
+    else next.delete('cliente');
+    setSearchParams(next, { replace: true });
+  };
+
+  useEffect(() => {
+    clientsApi
+      .list()
+      .then((list) => setClients([...list].sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, 'es'))))
+      .catch((e) => console.warn('[TicketsListPage] No se pudo cargar la lista de clientes para el filtro.', e));
+  }, []);
 
   // Resuelve assigneeUserId -> nombre a partir de GET /support-agents, que
   // no tiene restricción de rol (a diferencia de GET /users, reservado a
@@ -88,6 +122,7 @@ export default function TicketsListPage() {
         excludeClosed: filter === 'Todos' ? true : undefined,
         archived: filter === 'Archivados' ? true : undefined,
         q: q || undefined,
+        clientId: clientFilter ?? undefined,
       })
       .then((data) => {
         if (!cancelled) setTickets(data);
@@ -101,9 +136,89 @@ export default function TicketsListPage() {
     return () => {
       cancelled = true;
     };
-  }, [filter, q, reloadTick]);
+  }, [filter, q, clientFilter, reloadTick]);
 
   const count = useMemo(() => tickets.length, [tickets]);
+
+  // La selección solo vale para lo que se está viendo: al cambiar de filtro,
+  // búsqueda o cliente se descarta, para no mover tickets que ya no están a la vista.
+  useEffect(() => {
+    setSelected(new Set());
+  }, [filter, q, clientFilter]);
+
+  const visibleSelected = tickets.filter((t) => selected.has(t.id));
+  const allSelected = tickets.length > 0 && visibleSelected.length === tickets.length;
+
+  const toggleOne = (e: MouseEvent, id: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(tickets.map((t) => t.id)));
+
+  // Reusa POST /tickets/:id/client ticket por ticket: las mismas validaciones
+  // que en el detalle. Uno que falle no detiene a los demás; al final se
+  // informa cuáles no se movieron y quedan seleccionados para reintentar.
+  const moveSelected = async (v: { clientId: number; systemId: number | null; clientUserId: number | null }) => {
+    setMoveOpen(false);
+    setBusyLabel('Moviendo tickets…');
+    setMoving(true);
+    const failed: { t: Ticket; msg: string }[] = [];
+    let ok = 0;
+    for (const t of visibleSelected) {
+      try {
+        await ticketsApi.changeClient(t.id, v);
+        ok++;
+      } catch (err) {
+        failed.push({ t, msg: errMsg(err) ?? 'error' });
+      }
+    }
+    setMoving(false);
+    setSelected(new Set(failed.map((f) => f.t.id)));
+    onChanged();
+    if (ok) toast.success(`${ok} ticket${ok === 1 ? '' : 's'} movido${ok === 1 ? '' : 's'} de cliente`);
+    if (failed.length) {
+      const first = failed[0];
+      toast.error(
+        `${failed.length} no se movieron (siguen seleccionados). ${first.t.code ?? `#${first.t.id}`}: ${first.msg}`,
+      );
+    }
+  };
+
+  // Concluir en lote: POST /tickets/:id/conclude ticket por ticket, mismo
+  // criterio que mover. Los cerrados ya no se pueden concluir y se saltan.
+  const concludeSelected = async (v: ConcludeValues) => {
+    setConcludeOpen(false);
+    setBusyLabel('Concluyendo tickets…');
+    setMoving(true);
+    const failed: { t: Ticket; msg: string }[] = [];
+    let ok = 0;
+    for (const t of visibleSelected) {
+      if (t.status === 'CERRADO') continue;
+      try {
+        await ticketsApi.conclude(t.id, v);
+        ok++;
+      } catch (err) {
+        failed.push({ t, msg: errMsg(err) ?? 'error' });
+      }
+    }
+    setMoving(false);
+    setSelected(new Set(failed.map((f) => f.t.id)));
+    onChanged();
+    if (ok) toast.success(`${ok} ticket${ok === 1 ? '' : 's'} concluido${ok === 1 ? '' : 's'} (resuelto y cerrado)`);
+    if (failed.length) {
+      const first = failed[0];
+      toast.error(
+        `${failed.length} no se concluyeron (siguen seleccionados). ${first.t.code ?? `#${first.t.id}`}: ${first.msg}`,
+      );
+    }
+  };
 
   // Se puede archivar en cualquier estado. Es reversible (filtro "Archivados"),
   // por eso no pide confirmación. Se quita de la lista al momento; el aviso en
@@ -117,8 +232,7 @@ export default function TicketsListPage() {
       setTickets((list) => list.filter((x) => x.id !== t.id));
       toast.success(`${t.code ?? `#${t.id}`} ${t.archivedAt ? 'desarchivado' : 'archivado'}`);
     } catch (err) {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      toast.error(msg ?? 'No se pudo actualizar el ticket');
+      toast.error(errMsg(err) ?? 'No se pudo actualizar el ticket');
     }
   };
 
@@ -153,19 +267,76 @@ export default function TicketsListPage() {
               {chipLabel(c)}
             </button>
           ))}
+          <select
+            value={clientFilter ?? ''}
+            onChange={(e) => setClientFilter(e.target.value ? Number(e.target.value) : null)}
+            aria-label="Filtrar por cliente"
+            style={{
+              marginLeft: 'auto', fontSize: 12, padding: '6px 10px', borderRadius: 6, maxWidth: 220,
+              border: `1px solid ${clientFilter ? '#15191a' : '#dfe3e4'}`, background: '#fff', color: '#3a4041',
+            }}
+          >
+            <option value="">Todos los clientes</option>
+            {clients.map((c) => (
+              <option key={c.id} value={c.id}>{c.razonSocial}</option>
+            ))}
+          </select>
           <input
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
             placeholder="Buscar por código, asunto o texto"
             aria-label="Buscar tickets por código, asunto o texto"
-            style={{ marginLeft: 'auto', fontSize: 12, padding: '6px 10px', border: '1px solid #dfe3e4', borderRadius: 6, minWidth: 240 }}
+            style={{ fontSize: 12, padding: '6px 10px', border: '1px solid #dfe3e4', borderRadius: 6, minWidth: 240 }}
           />
           <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: '#6d7577' }}>
             {count} tickets
           </span>
         </div>
 
+        {isAdmin && (visibleSelected.length > 0 || moving) && (
+          <div style={{ padding: '10px 18px', borderBottom: '1px solid #eceeef', background: '#f4f7f7', display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}>
+            <span style={{ fontWeight: 600 }}>
+              {moving ? busyLabel : `${visibleSelected.length} seleccionado${visibleSelected.length === 1 ? '' : 's'}`}
+            </span>
+            <button
+              type="button"
+              disabled={moving}
+              onClick={() => setMoveOpen(true)}
+              style={{ fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 6, border: 'none', background: moving ? '#c9cdce' : '#15191a', color: '#fff', cursor: moving ? 'not-allowed' : 'pointer' }}
+            >
+              Cambiar cliente
+            </button>
+            <button
+              type="button"
+              disabled={moving || visibleSelected.every((t) => t.status === 'CERRADO')}
+              onClick={() => setConcludeOpen(true)}
+              title="Resolver y cerrar los seleccionados con una observación general"
+              style={{ fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 6, border: '1px solid #15191a', background: '#fff', color: '#15191a', cursor: moving ? 'not-allowed' : 'pointer' }}
+            >
+              Concluir
+            </button>
+            <button
+              type="button"
+              disabled={moving}
+              onClick={() => setSelected(new Set())}
+              style={{ fontSize: 12, padding: '6px 12px', borderRadius: 6, border: '1px solid #dfe3e4', background: '#fff', color: '#3a4041', cursor: 'pointer' }}
+            >
+              Quitar selección
+            </button>
+          </div>
+        )}
+
         <div style={{ display: 'grid', gridTemplateColumns: GRID_COLUMNS, gap: 12, padding: '10px 18px', borderBottom: '1px solid #eceeef', background: '#fafbfb', fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#6d7577' }}>
+          {isAdmin && (
+            <input
+              type="checkbox"
+              checked={allSelected}
+              disabled={tickets.length === 0 || moving}
+              onChange={toggleAll}
+              aria-label="Seleccionar todos los tickets de la lista"
+              style={{ margin: 0, cursor: 'pointer' }}
+            />
+          )}
           <span>Ticket</span><span>Asunto</span><span>Categoría</span>
           <span>Prior.</span><span>Estado</span><span>Asignado</span><span>SLA</span><span />
         </div>
@@ -188,8 +359,21 @@ export default function TicketsListPage() {
             <Link
               key={t.id}
               to={`/tickets/${t.id}`}
-              style={{ display: 'grid', gridTemplateColumns: GRID_COLUMNS, gap: 12, alignItems: 'center', padding: '13px 18px', borderBottom: '1px solid #f1f3f3', cursor: 'pointer', color: 'inherit', textDecoration: 'none' }}
+              style={{ display: 'grid', gridTemplateColumns: GRID_COLUMNS, gap: 12, alignItems: 'center', padding: '13px 18px', borderBottom: '1px solid #f1f3f3', cursor: 'pointer', color: 'inherit', textDecoration: 'none', background: selected.has(t.id) ? '#f4f7f7' : undefined }}
             >
+              {isAdmin && (
+                // La fila es un enlace: el clic en la casilla no debe abrir el ticket.
+                <span onClick={(e) => !moving && toggleOne(e, t.id)} style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(t.id)}
+                    readOnly
+                    disabled={moving}
+                    aria-label={`Seleccionar ${t.code ?? `ticket ${t.id}`}`}
+                    style={{ margin: 0, cursor: 'pointer', pointerEvents: 'none' }}
+                  />
+                </span>
+              )}
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: '#6d7577' }}>{t.code}</span>
               <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {t.subject ?? t.rawText.slice(0, 80)}
@@ -220,6 +404,25 @@ export default function TicketsListPage() {
           );
         })}
       </section>
+
+      {isAdmin && (
+        <ChangeClientDialog
+          open={moveOpen}
+          // La selección puede mezclar clientes: no se excluye ninguno de la lista.
+          currentClientId={null}
+          count={visibleSelected.length}
+          onCancel={() => setMoveOpen(false)}
+          onConfirm={moveSelected}
+        />
+      )}
+      {isAdmin && (
+        <ConcludeTicketsDialog
+          open={concludeOpen}
+          count={visibleSelected.filter((t) => t.status !== 'CERRADO').length}
+          onCancel={() => setConcludeOpen(false)}
+          onConfirm={concludeSelected}
+        />
+      )}
 
       <NewTicketDialog
         open={newTicketOpen}

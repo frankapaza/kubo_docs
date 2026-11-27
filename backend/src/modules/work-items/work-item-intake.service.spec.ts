@@ -199,3 +199,51 @@ describe('WorkItemIntakeService.reject', () => {
     expect(eventos).toHaveLength(0);
   });
 });
+
+describe('WorkItemIntakeService.requestDetail', () => {
+  it('pasa a FALTA_INFO y deja la pregunta en el evento', async () => {
+    const { service, patches, eventos } = makeService(fila({ status: 'SOLICITADO' }));
+    await service.requestDetail(1, 5, '¿Qué reporte exactamente?');
+    expect(patches[0]).toEqual({ status: 'FALTA_INFO' });
+    expect(eventos[0]).toMatchObject({
+      type: 'DETAIL_REQUESTED', actorUserId: 5, fromStatus: 'SOLICITADO', toStatus: 'FALTA_INFO',
+      reason: '¿Qué reporte exactamente?',
+    });
+  });
+
+  it('se puede volver a preguntar mientras espera al cliente', async () => {
+    const { service, eventos } = makeService(fila({ status: 'FALTA_INFO' }));
+    await service.requestDetail(1, 5, 'Y también: ¿qué columnas?');
+    expect(eventos[0]).toMatchObject({ fromStatus: 'FALTA_INFO', toStatus: 'FALTA_INFO' });
+  });
+
+  it('exige la pregunta', async () => {
+    const { service, patches } = makeService(fila({ status: 'SOLICITADO' }));
+    await expect(service.requestDetail(1, 5, '  ')).rejects.toThrow(/qué falta/i);
+    expect(patches).toHaveLength(0);
+  });
+
+  it('un requerimiento ya aceptado no se devuelve al cliente', async () => {
+    const { service, patches } = makeService(fila({ status: 'PENDIENTE' }));
+    await expect(service.requestDetail(1, 5, 'pregunta')).rejects.toThrow(/no está pendiente de aceptación/i);
+    expect(patches).toHaveLength(0);
+  });
+});
+
+describe('WorkItemIntakeService: aceptar o rechazar mientras falta información', () => {
+  afterEach(() => jest.useRealTimers());
+
+  it('se puede aceptar aunque el cliente no haya respondido', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-07T15:00:00Z'));
+    const { service, patches, eventos } = makeService(fila({ status: 'FALTA_INFO' }));
+    await service.accept(1, 5, { priority: 'MEDIA', committedDate: '2026-09-30' });
+    expect(patches[0]).toMatchObject({ status: 'PENDIENTE' });
+    expect(eventos[0]).toMatchObject({ fromStatus: 'FALTA_INFO' });
+  });
+
+  it('se puede rechazar', async () => {
+    const { service, eventos } = makeService(fila({ status: 'FALTA_INFO' }));
+    await service.reject(1, 5, { reason: 'El cliente no respondió' });
+    expect(eventos[0]).toMatchObject({ fromStatus: 'FALTA_INFO', toStatus: 'RECHAZADO' });
+  });
+});

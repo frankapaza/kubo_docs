@@ -59,7 +59,7 @@ La web no tiene ejecutor de pruebas: las pantallas se cubren con la compilación
 
 ## 3. Decisiones y cambios respecto al plan
 
-1. **Migración `034_disponibilidad_informe.sql`**: 8 tablas, 4 columnas del agente en `monitor_servers` e índice `idx_monitor_checks_probe_started`. Es aditiva e idempotente (guardada con `information_schema`; probada dos veces en MySQL 8 desechable). Tiene un CHECK «exactamente uno de `server_id` / `service_id`» en mantenimientos. `deploy.yml`, `docker-compose.yml` y `docker-compose.dev.yml` la incluyen; la guarda `migraciones-desplegadas.spec.ts` exige que las listas coincidan y detecta un `\n` literal.
+1. **Migración `037_disponibilidad_informe.sql`**: 8 tablas, 4 columnas del agente en `monitor_servers` e índice `idx_monitor_checks_probe_started`. Es aditiva e idempotente (guardada con `information_schema`; probada dos veces en MySQL 8 desechable). Tiene un CHECK «exactamente uno de `server_id` / `service_id`» en mantenimientos. `deploy.yml`, `docker-compose.yml` y `docker-compose.dev.yml` la incluyen; la guarda `migraciones-desplegadas.spec.ts` exige que las listas coincidan y detecta un `\n` literal.
 2. **Cubetas de latencia:** 18 límites inferiores en ms; la última cubeta es `[10000, +∞)`. El plan decía «+∞, 19 cubetas», un desliz de notación (un límite inferior infinito no se puede llenar ni serializar en JSON).
 3. **Resúmenes diarios:** no se crean filas para una sonda antes de su primer check; el informe trata un par (servicio, sonda) sin filas como cobertura nula. Cada noche se recalculan siempre **ayer y anteayer**, para absorber lo que la cola de la oficina sube tarde tras un corte.
 4. **Mantenimiento:** poner un comentario o subir la prioridad de un ticket que ya existe sigue permitido durante la ventana (los tickets son internos); lo que se bloquea es **abrir** ticket y avisar.
@@ -106,7 +106,7 @@ La web no tiene ejecutor de pruebas: las pantallas se cubren con la compilación
 - La importación CSV: un archivo con la primera línea en blanco puede detectar mal el separador; el límite JSON de 256 KB puede quedarse corto para un CSV cercano a ese tamaño (se acepta hasta 256 K caracteres); validar y escribir no comparten transacción (una carrera extrema puede fallar al escribir, nunca duplicar). La exportación antepone `'` a celdas que parecen fórmulas y la importación no lo quita.
 - Una recuperación de hermano oculta tras la fila congelada de un padre en mantenimiento se ve al terminar la ventana.
 - Residuales menores de la Entrega 3 (ver `progress.md` del plan): sin índice en `agent_token_hash` (poca cantidad de servidores), comillas tipográficas en el script de instalación, un hueco de sonda de menos de 10 minutos tras restar una caída, y silencios que cruzan la medianoche no se parten.
-- Las migraciones `003` a `010` no son idempotentes (preexistente; la 032 a 034 sí).
+- Las migraciones `003` a `010` no son idempotentes (preexistente; las de monitoreo, 035 a 037, sí).
 - Quedan avisos de `npm audit` sin atender en el widget.
 
 ## 6. Capturas

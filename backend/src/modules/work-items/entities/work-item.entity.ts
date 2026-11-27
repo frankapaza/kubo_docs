@@ -19,6 +19,11 @@ export type WorkItemOrigin = 'INTERNO' | 'PORTAL';
 
 export const WORK_ITEM_ORIGINS: WorkItemOrigin[] = ['INTERNO', 'PORTAL'];
 
+/** CAMBIO a un sistema existente o PROYECTO nuevo / prototipo. Migración 033. */
+export type WorkItemRequestType = 'CAMBIO' | 'PROYECTO';
+
+export const WORK_ITEM_REQUEST_TYPES: WorkItemRequestType[] = ['CAMBIO', 'PROYECTO'];
+
 @Entity('work_items')
 @Index('idx_wi_client', ['clientId'])
 @Index('idx_wi_status', ['status'])
@@ -52,6 +57,10 @@ export class WorkItem {
   @Column({ type: 'enum', enum: WORK_ITEM_ORIGINS, default: 'INTERNO' })
   origin!: WorkItemOrigin;
 
+  /** Qué plantilla se usó al pedirlo; nulo en los anteriores a la 033. */
+  @Column({ name: 'request_type', type: 'enum', enum: WORK_ITEM_REQUEST_TYPES, nullable: true })
+  requestType!: WorkItemRequestType | null;
+
   @Column({ name: 'project_id', type: 'bigint', unsigned: true, nullable: true })
   projectId!: number | null;
 
@@ -84,6 +93,10 @@ export class WorkItem {
 
   @Column({ name: 'closed_at', type: 'datetime', nullable: true })
   closedAt!: Date | null;
+
+  /** Acta de conformidad (documento comercial) enviada a firma. Migración 032. */
+  @Column({ name: 'conformity_document_id', type: 'bigint', unsigned: true, nullable: true })
+  conformityDocumentId!: number | null;
 
   /** Nulo cuando lo creó un usuario de cliente desde el portal. */
   @Column({ name: 'created_by', type: 'bigint', unsigned: true, nullable: true })

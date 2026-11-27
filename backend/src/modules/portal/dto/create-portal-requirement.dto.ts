@@ -1,5 +1,7 @@
-import { IsString, MaxLength, MinLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { Transform } from 'class-transformer';
+
+import { WORK_ITEM_REQUEST_TYPES, WorkItemRequestType } from '../../work-items/entities/work-item.entity';
 
 /**
  * `description_md` es TEXT utf8mb4: su tope son 65535 **bytes**, no
@@ -46,4 +48,37 @@ export class CreatePortalRequirementDto {
     message: `La descripción no puede superar los ${DESCRIPTION_MAX_CHARS} caracteres.`,
   })
   descriptionMd!: string;
+
+  /** Qué plantilla usó: cambio a un sistema existente o proyecto nuevo. */
+  @IsOptional()
+  @IsIn(WORK_ITEM_REQUEST_TYPES, { message: 'El tipo de pedido no es válido.' })
+  requestType?: WorkItemRequestType;
+
+  /** «Cómo sabremos que está bien», una línea por criterio. */
+  @IsOptional()
+  @IsArray({ message: 'Los criterios de aceptación no son válidos.' })
+  @ArrayMaxSize(30, { message: 'Como máximo 30 criterios de aceptación.' })
+  @IsString({ each: true, message: 'Los criterios de aceptación no son válidos.' })
+  @MaxLength(500, { each: true, message: 'Cada criterio puede tener como máximo 500 caracteres.' })
+  acceptanceCriteria?: string[];
 }
+
+/** Lo que el cliente agrega cuando la casa le pidió más detalle. */
+export class ProvidePortalDetailDto {
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString({ message: 'El detalle es obligatorio.' })
+  @MinLength(3, { message: 'El detalle debe tener al menos 3 caracteres.' })
+  @MaxLength(DESCRIPTION_MAX_CHARS, {
+    message: `El detalle no puede superar los ${DESCRIPTION_MAX_CHARS} caracteres.`,
+  })
+  detail!: string;
+
+  @IsOptional()
+  @IsArray({ message: 'Los criterios de aceptación no son válidos.' })
+  @ArrayMaxSize(30, { message: 'Como máximo 30 criterios de aceptación.' })
+  @IsString({ each: true, message: 'Los criterios de aceptación no son válidos.' })
+  @MaxLength(500, { each: true, message: 'Cada criterio puede tener como máximo 500 caracteres.' })
+  acceptanceCriteria?: string[];
+}
+
+export { DESCRIPTION_MAX_CHARS };

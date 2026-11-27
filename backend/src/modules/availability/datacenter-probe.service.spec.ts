@@ -45,7 +45,7 @@ describe('DatacenterProbeService', () => {
 
   it('falla con un mensaje claro si no existe la sonda kubo-01', async () => {
     const t = setup({ probe: null });
-    await expect(t.svc.onApplicationBootstrap()).rejects.toThrow(/migración 032/);
+    await expect(t.svc.onApplicationBootstrap()).rejects.toThrow(/migración 035/);
   });
 
   it('entrega cada resultado a acceptBatch con la sonda kubo-01', async () => {

@@ -15,6 +15,27 @@ import type { DropTarget } from './work-items/BoardColumn';
 import WorkItemPanel from './work-items/WorkItemPanel';
 import NewWorkItemDialog from './work-items/NewWorkItemDialog';
 import RequirementIntakeInbox from './work-items/RequirementIntakeInbox';
+import { clientColor } from './work-items/client-colors';
+
+/** El punto de color de cada columna del tablero. */
+const COLUMN_DOTS: Partial<Record<WorkItemStatus, string>> = {
+  PENDIENTE: '#94A3B8',
+  EN_PROCESO: '#F59E0B',
+  PRUEBAS: '#3B82F6',
+  CERRADO: '#22A06B',
+  BLOQUEADO: '#C2413A',
+  CANCELADO: '#6B7280',
+  RECHAZADO: '#9B1F52',
+};
+
+function chipStyle(active: boolean): React.CSSProperties {
+  return {
+    cursor: 'pointer', font: 'inherit', fontSize: 12, fontWeight: active ? 600 : 500, padding: '6px 12px', borderRadius: 999,
+    border: `1px solid ${active ? 'var(--k-ink, #15191a)' : 'var(--k-border, #dfe3e4)'}`,
+    background: active ? 'var(--k-ink, #15191a)' : '#fff',
+    color: active ? '#fff' : 'var(--k-ink, #3a4041)',
+  };
+}
 
 const SEARCH_DEBOUNCE_MS = 280;
 
@@ -78,6 +99,9 @@ export default function WorkItemsBoardPage() {
   const assigneeIdParam = searchParams.get('assigneeId') ?? '';
   const dueFilterParam = (searchParams.get('dueFilter') ?? '') as DueFilterValue;
   const qParam = searchParams.get('q') ?? '';
+  const tab: 'bandeja' | 'tablero' = searchParams.get('tab') === 'tablero' ? 'tablero' : 'bandeja';
+  const [inboxCount, setInboxCount] = useState<number | null>(null);
+  const [boardClients, setBoardClients] = useState<Array<{ id: number; name: string; count: number }>>([]);
 
   const [qInput, setQInput] = useState(qParam);
   const [items, setItems] = useState<WorkItem[]>([]);
@@ -87,6 +111,9 @@ export default function WorkItemsBoardPage() {
   const [agents, setAgents] = useState<SupportAgentView[]>([]);
   const [usersById, setUsersById] = useState<Map<number, string>>(new Map());
   const [openItemId, setOpenItemId] = useState<number | null>(null);
+  // Sube cada vez que el panel cambia algo, para que la bandeja de
+  // solicitados también se recargue (aceptar, pedir detalle desde el panel).
+  const [inboxKey, setInboxKey] = useState(0);
   const [newItemOpen, setNewItemOpen] = useState(false);
   const [outOfFlowOpen, setOutOfFlowOpen] = useState(false);
 
@@ -259,6 +286,31 @@ export default function WorkItemsBoardPage() {
     }
   };
 
+  const clientsById = useMemo(() => new Map(clients.map((c) => [c.id, c.razonSocial])), [clients]);
+  const clientLabel = (item: WorkItem): string =>
+    clientsById.get(item.clientId) ?? `Cliente #${item.clientId}`;
+
+  const boardCount = loading && items.length === 0
+    ? null
+    : items.filter((i) => BOARD_COLUMNS.includes(i.status)).length;
+
+  // Los chips de cliente salen de lo que hay en el tablero SIN filtro de
+  // cliente; con un cliente elegido se conservan los de antes, para poder
+  // cambiar a otro sin volver a «Todos».
+  useEffect(() => {
+    if (clientIdParam || loading) return;
+    const counts = new Map<number, number>();
+    for (const i of items) {
+      if (BOARD_COLUMNS.includes(i.status) || OUT_OF_FLOW_STATUSES.includes(i.status)) {
+        counts.set(i.clientId, (counts.get(i.clientId) ?? 0) + 1);
+      }
+    }
+    setBoardClients(
+      Array.from(counts, ([id, count]) => ({ id, count, name: clientsById.get(id) ?? `Cliente #${id}` }))
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+    );
+  }, [items, clientIdParam, loading, clientsById]);
+
   const assigneeLabel = (item: WorkItem): string =>
     item.assigneeUserId
       ? usersById.get(item.assigneeUserId) ?? String(item.assigneeUserId)
@@ -406,27 +458,73 @@ export default function WorkItemsBoardPage() {
         </button>
       </div>
 
+      <div role="tablist" aria-label="Vistas de requerimientos" style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--k-border, #e2e5e6)' }}>
+        {([
+          { key: 'bandeja', label: 'Bandeja', count: inboxCount },
+          { key: 'tablero', label: 'Tablero', count: boardCount },
+        ] as const).map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.key}
+            onClick={() => setParam('tab', t.key === 'bandeja' ? '' : t.key)}
+            style={{
+              font: 'inherit', fontSize: 13, fontWeight: tab === t.key ? 700 : 500, padding: '10px 14px',
+              background: 'none', border: 'none', cursor: 'pointer', marginBottom: -1,
+              borderBottom: `2px solid ${tab === t.key ? 'var(--k-primary, #15191a)' : 'transparent'}`,
+              color: tab === t.key ? 'var(--k-ink, #15191a)' : 'var(--k-muted, #6d7577)',
+              display: 'inline-flex', alignItems: 'center', gap: 7,
+            }}
+          >
+            {t.label}
+            {t.count != null && (
+              <span
+                style={{
+                  fontSize: 11, fontWeight: 700, padding: '1px 7px', borderRadius: 999,
+                  background: t.key === 'bandeja' && t.count > 0 ? 'var(--k-accent-soft, #e3ecfb)' : 'var(--k-column, #eef0f1)',
+                  color: t.key === 'bandeja' && t.count > 0 ? 'var(--k-accent-ink, #1d4e9e)' : 'var(--k-muted, #6d7577)',
+                }}
+              >
+                {t.count}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/*
+        La bandeja (solicitados y «falta información») se queda montada aunque
+        se mire el tablero: así el número de la pestaña sigue al día.
+      */}
+      <div hidden={tab !== 'bandeja'}>
+        <RequirementIntakeInbox
+          clients={clients}
+          onChanged={() => void refetchList()}
+          onOpen={(i) => setOpenItemId(i.id)}
+          refreshKey={inboxKey}
+          onCount={setInboxCount}
+        />
+        {inboxCount === 0 && (
+          <div
+            style={{
+              padding: '28px 18px', textAlign: 'center', fontSize: 13, color: 'var(--k-muted, #6d7577)',
+              background: '#fff', border: '1px dashed var(--k-border, #dfe3e4)', borderRadius: 12,
+            }}
+          >
+            No hay requerimientos por evaluar. Los nuevos pedidos del portal aparecerán aquí.
+          </div>
+        )}
+      </div>
+
+      {tab === 'tablero' && (
+      <>
       <section
         style={{
           background: '#fff', border: '1px solid #e2e5e6', borderRadius: 10,
           padding: '13px 18px', display: 'flex', gap: 14, alignItems: 'flex-end', flexWrap: 'wrap',
         }}
       >
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: '#6d7577' }}>
-          Cliente
-          <select
-            value={clientIdParam}
-            onChange={(e) => setParam('clientId', e.target.value)}
-            aria-label="Filtrar por cliente"
-            style={{ fontSize: 12, padding: '6px 8px', border: '1px solid #dfe3e4', borderRadius: 6 }}
-          >
-            <option value="">Todos</option>
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>{c.razonSocial}</option>
-            ))}
-          </select>
-        </label>
-
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11, color: '#6d7577' }}>
           Prioridad
           <select
@@ -488,27 +586,50 @@ export default function WorkItemsBoardPage() {
         />
       </section>
 
+      {/* Filtro por cliente: un chip de su color por cada cliente con algo en el tablero. */}
+      <div role="group" aria-label="Filtrar por cliente" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--k-muted, #6d7577)', marginRight: 2 }}>Cliente</span>
+        <button
+          type="button"
+          aria-pressed={!clientIdParam}
+          onClick={() => setParam('clientId', '')}
+          style={chipStyle(!clientIdParam)}
+        >
+          Todos
+        </button>
+        {boardClients.map((c) => {
+          const active = clientIdParam === String(c.id);
+          const color = clientColor(c.id);
+          return (
+            <button
+              key={c.id}
+              type="button"
+              aria-pressed={active}
+              onClick={() => setParam('clientId', active ? '' : String(c.id))}
+              style={{ ...chipStyle(active), display: 'inline-flex', alignItems: 'center', gap: 7 }}
+            >
+              <span aria-hidden="true" style={{ width: 10, height: 10, borderRadius: 3, background: color.solid }} />
+              {c.name}
+              <span style={{ opacity: 0.7 }}>{c.count}</span>
+            </button>
+          );
+        })}
+      </div>
+
       {error && <div style={{ fontSize: 13, color: 'oklch(0.5 0.16 25)' }}>{error}</div>}
       {loading && <div style={{ fontSize: 13, color: '#6d7577' }}>Cargando…</div>}
 
-      {/*
-        Encima del tablero, no dentro: son requerimientos SOLICITADOS, que no
-        tienen columna propia — todavía no hay compromiso de prioridad ni
-        fecha que los ubique en ninguna. Se pide con su propio filtro de
-        estado y se refresca sola; `onChanged` solo avisa a este tablero
-        para que la columna PENDIENTE se entere del que se acaba de aceptar.
-      */}
-      <RequirementIntakeInbox clients={clients} onChanged={() => void refetchList()} />
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 14 }}>
         {BOARD_COLUMNS.map((status) => (
           <BoardColumn
             key={status}
             status={status}
             label={STATUS_LABELS[status]}
+            dot={COLUMN_DOTS[status]}
             items={columns.get(status) ?? []}
             loading={loading}
             assigneeLabel={assigneeLabel}
+            clientLabel={clientLabel}
             onOpen={(i) => setOpenItemId(i.id)}
             onMove={handleMoveFromMenu}
             draggingId={draggingId}
@@ -554,6 +675,7 @@ export default function WorkItemsBoardPage() {
                 items={outOfFlowByStatus.get(status) ?? []}
                 loading={loading}
                 assigneeLabel={assigneeLabel}
+                clientLabel={clientLabel}
                 onOpen={(i) => setOpenItemId(i.id)}
                 onMove={handleMoveFromMenu}
                 draggingId={draggingId}
@@ -569,12 +691,17 @@ export default function WorkItemsBoardPage() {
           </div>
         )}
       </section>
+      </>
+      )}
 
       {openItemId !== null && (
         <WorkItemPanel
           workItemId={openItemId}
           onClose={() => setOpenItemId(null)}
-          onChanged={() => void refetchList()}
+          onChanged={() => {
+            void refetchList();
+            setInboxKey((k) => k + 1);
+          }}
         />
       )}
 

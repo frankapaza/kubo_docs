@@ -15,6 +15,10 @@ export interface BoardColumnProps {
   items: WorkItem[];
   loading: boolean;
   assigneeLabel: (item: WorkItem) => string;
+  /** Nombre del cliente de la tarjeta (su color sale del id). */
+  clientLabel?: (item: WorkItem) => string | null;
+  /** Color del punto junto al título de la columna. */
+  dot?: string;
   onOpen: (item: WorkItem) => void;
   onMove: (item: WorkItem, toStatus: WorkItemStatus) => void;
   draggingId: number | null;
@@ -43,7 +47,7 @@ const DROP_INDICATOR = (
  * página le indica.
  */
 export default function BoardColumn({
-  status, label, items, loading, assigneeLabel, onOpen, onMove, draggingId, dropTarget,
+  status, label, items, loading, assigneeLabel, clientLabel, dot, onOpen, onMove, draggingId, dropTarget,
   onDragStartCard, onDragEndCard, onColumnDragOver, onColumnDragLeave, onColumnDrop, minHeight,
 }: BoardColumnProps) {
   return (
@@ -53,13 +57,21 @@ export default function BoardColumn({
       onDragLeave={(e) => onColumnDragLeave(e, status)}
       onDrop={(e) => onColumnDrop(e, status)}
       style={{
-        background: '#f5f6f6', border: '1px solid #e2e5e6', borderRadius: 10, padding: 10,
+        background: 'var(--k-column, #f5f6f6)', border: '1px solid var(--k-border, #e2e5e6)', borderRadius: 12, padding: 10,
         display: 'flex', flexDirection: 'column', gap: 8, minHeight: minHeight ?? 220,
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 4px' }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: '#15191a' }}>{label}</span>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: '#6d7577' }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--k-ink, #15191a)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          {dot && <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 999, background: dot }} />}
+          {label}
+        </span>
+        <span
+          style={{
+            fontSize: 11, fontWeight: 700, color: 'var(--k-muted, #6d7577)', background: '#fff',
+            border: '1px solid var(--k-border, #e2e5e6)', borderRadius: 999, padding: '1px 8px',
+          }}
+        >
           {items.length}
         </span>
       </div>
@@ -72,6 +84,7 @@ export default function BoardColumn({
           <WorkItemCard
             item={item}
             assigneeName={assigneeLabel(item)}
+            clientName={clientLabel?.(item) ?? null}
             onOpen={onOpen}
             onMove={onMove}
             dragging={draggingId === item.id}

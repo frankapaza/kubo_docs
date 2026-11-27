@@ -32,6 +32,7 @@ export const REQUIREMENT_STATUS_TONES: Record<PortalRequirementStatusLabel, Badg
   Bloqueado: 'danger',
   Cancelado: 'neutral',
   Rechazado: 'danger',
+  'Falta información': 'warning',
 };
 
 /**

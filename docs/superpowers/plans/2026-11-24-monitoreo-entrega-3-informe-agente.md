@@ -54,7 +54,7 @@ Cada una lleva su coste si resulta equivocada.
 ## Global Constraints
 
 - Todos los instantes se guardan en UTC. Los días y meses de resúmenes e informes son de Lima (`America/Lima`, UTC−5 fijo). Para formatear se usan `common/peru-*`.
-- La plantilla de las migraciones es la de `032_disponibilidad_nucleo.sql`:
+- La plantilla de las migraciones es la de `035_disponibilidad_nucleo.sql`:
   - `CREATE TABLE IF NOT EXISTS`;
   - índices y columnas protegidos contra `information_schema`, con procedimientos temporales `kubo_*_034`;
   - `USE kubo_devdocs;`.
@@ -92,7 +92,7 @@ Cada una lleva su coste si resulta equivocada.
 ## Task 1: Migración 034 y entidades
 
 **Files:**
-- Create: `backend/sql/migrations/034_disponibilidad_informe.sql`
+- Create: `backend/sql/migrations/037_disponibilidad_informe.sql`
 - Create: `backend/src/modules/availability/entities/` →
   - `monitor-maintenance.entity.ts`
   - `monitor-evidence.entity.ts`
@@ -112,7 +112,7 @@ Cada una lleva su coste si resulta equivocada.
   - `docker-compose.dev.yml`;
   - `deploy.sh`.
 
-  La guarda `backend/src/common/migraciones-desplegadas.spec.ts` exige que `034_disponibilidad_informe` aparezca en las tres listas y que el número no se repita.
+  La guarda `backend/src/common/migraciones-desplegadas.spec.ts` exige que `037_disponibilidad_informe` aparezca en las tres listas y que el número no se repita.
 
 **Tablas** (todas `BIGINT UNSIGNED` como id autoincremental salvo que se diga otra cosa):
 

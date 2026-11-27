@@ -20,7 +20,6 @@ describe('canAgentTransition', () => {
     ['KB', 'ASIGNADO', 'EN_ATENCION'],
     ['KB', 'ESPERA_CLIENTE', 'EN_ATENCION'],
     ['RQ', 'PENDIENTE', 'EN_PROCESO'],
-    ['RQ', 'EN_PROCESO', 'PRUEBAS'],
   ] as const)('%s %s → %s permitido', (kind, from, to) => {
     expect(canAgentTransition(kind, from, to)).toBe(true);
   });
@@ -32,6 +31,8 @@ describe('canAgentTransition', () => {
     ['RQ', 'PRUEBAS', 'CERRADO'],
     ['RQ', 'SOLICITADO', 'EN_PROCESO'],
     ['RQ', 'PENDIENTE', 'PRUEBAS'],
+    // A Pruebas solo con evidencia y manual: entregar_requerimiento.
+    ['RQ', 'EN_PROCESO', 'PRUEBAS'],
   ] as const)('%s %s → %s prohibido', (kind, from, to) => {
     expect(canAgentTransition(kind, from, to)).toBe(false);
   });

@@ -3,10 +3,13 @@ import type { FocusEvent } from 'react';
 
 import type { WorkItem, WorkItemStatus } from '../../api/types';
 import { ALL_STATUSES, PRIORITY_STYLES, STATUS_LABELS, dueDateStyle } from './workitem-ui';
+import { clientColor } from './client-colors';
 
 export interface WorkItemCardProps {
   item: WorkItem;
   assigneeName: string;
+  /** Nombre del cliente: con él la tarjeta lleva la franja y la etiqueta de su color. */
+  clientName?: string | null;
   onOpen: (item: WorkItem) => void;
   /**
    * Disparado por el menú «Mover a…». El índice de destino (al final de la
@@ -144,8 +147,9 @@ function MoveMenu({
  * <div onClick>.
  */
 export default function WorkItemCard({
-  item, assigneeName, onOpen, onMove, onDragStart, onDragEnd, dragging,
+  item, assigneeName, clientName, onOpen, onMove, onDragStart, onDragEnd, dragging,
 }: WorkItemCardProps) {
+  const color = clientColor(item.clientId);
   const priorityStyle = PRIORITY_STYLES[item.priority];
   const due = dueDateStyle(item.dueDate, item.status);
   const label = item.code ?? `requerimiento #${item.id}`;
@@ -162,8 +166,10 @@ export default function WorkItemCard({
       onDragEnd={onDragEnd}
       style={{
         background: '#fff',
-        border: '1px solid #e2e5e6',
-        borderRadius: 8,
+        border: '1px solid var(--k-border, #e2e5e6)',
+        borderTop: `4px solid ${color.solid}`,
+        borderRadius: 10,
+        boxShadow: '0 1px 2px rgba(16, 24, 32, 0.05)',
         padding: '10px 12px',
         display: 'flex',
         flexDirection: 'column',
@@ -218,6 +224,20 @@ export default function WorkItemCard({
           {formatDueDate(item.dueDate)}
         </span>
       </div>
+
+      {clientName && (
+        <span
+          title={clientName}
+          style={{
+            alignSelf: 'flex-start', maxWidth: '100%', display: 'inline-flex', alignItems: 'center', gap: 6,
+            fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999,
+            background: color.soft, color: color.ink, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
+          }}
+        >
+          <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 999, background: color.solid, flex: 'none' }} />
+          {clientName}
+        </span>
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <span style={{ fontSize: 11, color: '#6d7577' }}>{assigneeName}</span>

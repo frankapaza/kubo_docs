@@ -20,6 +20,7 @@ import { SlaService } from './sla.service';
 import { TicketsService } from './tickets.service';
 import { TicketTransitionsService } from './ticket-transitions.service';
 import { TicketAssignmentService } from './ticket-assignment.service';
+import { TicketConclusionService } from './ticket-conclusion.service';
 import { TicketAIService } from './ticket-ai.service';
 import { ClientSystemsService } from './client-systems.service';
 import { SystemsService } from './systems.service';
@@ -62,6 +63,7 @@ import { DocumentsModule } from '../documents/documents.module';
     TicketsService,
     TicketTransitionsService,
     TicketAssignmentService,
+    TicketConclusionService,
     TicketAIService,
     ClientSystemsService,
     SystemsRepository,

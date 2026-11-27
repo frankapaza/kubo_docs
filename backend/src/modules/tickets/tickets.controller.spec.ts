@@ -14,6 +14,7 @@ describe('TicketsController.list: archivados', () => {
       {} as any,
       {} as any,
       { notifyChanged: jest.fn() } as any,
+      {} as any,
     );
     return { controller, service };
   };

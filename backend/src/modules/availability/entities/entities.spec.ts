@@ -94,7 +94,7 @@ describe('columnas booleanas', () => {
   });
 });
 
-describe('entidades del informe y el agente (migración 034)', () => {
+describe('entidades del informe y el agente (migración 037)', () => {
   const ds = buildMetadata();
   const modulo = readFileSync(join(__dirname, '..', 'availability.module.ts'), 'utf8');
 

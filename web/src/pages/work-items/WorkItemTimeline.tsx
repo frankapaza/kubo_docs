@@ -23,6 +23,8 @@ const EVENT_LABELS: Record<WorkItemEventType, string> = {
   REQUESTED: 'Solicitado',
   ACCEPTED: 'Aceptado',
   REJECTED: 'Rechazado',
+  DETAIL_REQUESTED: 'Pidió más detalle al cliente',
+  DETAIL_PROVIDED: 'El cliente completó el detalle',
 };
 
 export interface WorkItemTimelineProps {

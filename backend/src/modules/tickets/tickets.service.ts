@@ -9,6 +9,8 @@ import { ClientSystemsRepository } from './client-systems.repository';
 
 import { Ticket } from './entities/ticket.entity';
 import { TicketEvent } from './entities/ticket-event.entity';
+import { ClientUser } from '../portal/entities/client-user.entity';
+import { Project } from '../projects/entities/project.entity';
 import {
   TicketMessage,
   TicketMessageVisibility,
@@ -394,6 +396,62 @@ export class TicketsService {
 
     const updated = await this.repo.update(id, patch);
     return updated!;
+  }
+
+  /**
+   * Pasa un ticket a otro cliente (p. ej. uno que entró a nombre de la empresa
+   * equivocada). Además del cliente se mueve lo que cuelga de él:
+   *
+   *  - el **sistema**, que tiene que ser una asignación activa del cliente
+   *    nuevo (y es obligatorio si ese cliente tiene alguna);
+   *  - el **usuario del cliente que recibe los avisos** (`created_by_client_user_id`,
+   *    a quien el despachador escribe): uno activo del cliente nuevo, o
+   *    ninguno. Nunca se queda uno del cliente anterior;
+   *  - el **proyecto**, que se suelta si era del cliente anterior.
+   *
+   * El rastro queda en `audit_log` (la ruta es un POST del personal).
+   */
+  async changeClient(
+    id: number,
+    input: { clientId: number; systemId?: number | null; clientUserId?: number | null },
+  ): Promise<Ticket> {
+    const current = await this.findByIdOrFail(id);
+    await this.clients.findByIdOrFail(input.clientId);
+    const systemId = resolveTicketSystem({
+      requirement: 'EXIGIDO',
+      clientId: input.clientId,
+      systemId: input.systemId,
+      activeSystems: await this.systems.listActiveByClient(input.clientId),
+    });
+
+    return this.repo.runInTransaction(async (manager) => {
+      let clientUserId: number | null = null;
+      if (input.clientUserId !== undefined && input.clientUserId !== null) {
+        const u = await manager.getRepository(ClientUser).findOneBy({ id: input.clientUserId });
+        if (!u || Number(u.clientId) !== Number(input.clientId) || !Number(u.isActive)) {
+          throw new BadRequestException({
+            code: 'BAD_INPUT',
+            message: 'El usuario elegido no es un usuario activo del cliente nuevo.',
+          });
+        }
+        clientUserId = Number(u.id);
+      }
+
+      let projectId: number | null = current.projectId ?? null;
+      if (projectId !== null) {
+        const p = await manager.getRepository(Project).findOneBy({ id: projectId });
+        if (!p || Number(p.clientId) !== Number(input.clientId)) projectId = null;
+      }
+
+      const ticketRepo = manager.getRepository(Ticket);
+      await ticketRepo.update(id, {
+        clientId: input.clientId,
+        systemId,
+        createdByClientUserId: clientUserId,
+        projectId,
+      });
+      return (await ticketRepo.findOneBy({ id }))!;
+    });
   }
 
   async remove(id: number): Promise<void> {

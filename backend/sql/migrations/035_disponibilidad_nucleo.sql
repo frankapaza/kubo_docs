@@ -1,5 +1,5 @@
 -- =========================================================================
---  Migración 032 — Disponibilidad: núcleo del monitoreo de servidores y
+--  Migración 035 — Disponibilidad: núcleo del monitoreo de servidores y
 --  servicios de los clientes
 -- =========================================================================
 --  Las sondas (una en la oficina, otra en el centro de datos) comprueban
@@ -203,9 +203,9 @@ CREATE TABLE IF NOT EXISTS monitor_probe_states (
 --   · idx_monitor_checks_order       búsqueda del resultado de un cruce (probe_id, order_id)
 --   · monitor_probe_signals.type     valor STATE_SYNC
 --   · monitor_probe_states.state_changed_at
-DROP PROCEDURE IF EXISTS kubo_upgrade_032;
+DROP PROCEDURE IF EXISTS kubo_upgrade_035;
 DELIMITER //
-CREATE PROCEDURE kubo_upgrade_032()
+CREATE PROCEDURE kubo_upgrade_035()
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.STATISTICS
@@ -244,8 +244,8 @@ BEGIN
   END IF;
 END //
 DELIMITER ;
-CALL kubo_upgrade_032();
-DROP PROCEDURE IF EXISTS kubo_upgrade_032;
+CALL kubo_upgrade_035();
+DROP PROCEDURE IF EXISTS kubo_upgrade_035;
 
 -- -------------------------------------------------------------------------
 -- 4) Incidentes

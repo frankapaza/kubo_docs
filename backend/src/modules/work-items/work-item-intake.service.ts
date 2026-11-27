@@ -6,7 +6,7 @@ import { WorkItem } from './entities/work-item.entity';
 import { WorkItemEvent } from './entities/work-item-event.entity';
 import { AcceptWorkItemDto } from './dto/accept-work-item.dto';
 import { RejectWorkItemDto } from './dto/reject-work-item.dto';
-import { assertReason, insertionIndex, reorder, WorkItemStatus } from './domain/work-item-board';
+import { assertReason, AWAITING_ACCEPTANCE, insertionIndex, reorder, WorkItemStatus } from './domain/work-item-board';
 
 /**
  * La respuesta de la casa a un requerimiento pedido desde el portal: acepta
@@ -68,7 +68,7 @@ export class WorkItemIntakeService {
           // Nulo: quien acepta es siempre alguien de casa. El cliente pide;
           // no se acepta a sí mismo.
           actorClientUserId: null,
-          fromStatus: 'SOLICITADO',
+          fromStatus: actual.status,
           toStatus: 'PENDIENTE',
           reason: null,
           payload: { priority: dto.priority, committedDate: dto.committedDate },
@@ -115,7 +115,7 @@ export class WorkItemIntakeService {
           type: 'REJECTED',
           actorUserId,
           actorClientUserId: null,
-          fromStatus: 'SOLICITADO',
+          fromStatus: actual.status,
           toStatus: 'RECHAZADO',
           reason: dto.reason,
           payload: null,
@@ -130,8 +130,42 @@ export class WorkItemIntakeService {
     });
   }
 
+  /**
+   * Devuelve la petición al cliente con una pregunta: pasa a FALTA_INFO hasta
+   * que la complete desde el portal. Se puede repetir mientras espera. El
+   * correo al cliente lo manda `RequirementDetailService` después del commit.
+   */
+  async requestDetail(id: number, actorUserId: number, message: string): Promise<WorkItem> {
+    const pregunta = message?.trim();
+    if (!pregunta) {
+      throw new BadRequestException({ code: 'BAD_INPUT', message: 'Escribe qué falta para poder evaluar el requerimiento.' });
+    }
+    return this.repo.runInTransaction(async (manager) => {
+      const itemRepo = manager.getRepository(WorkItem);
+      const actual = await itemRepo.findOne({ where: { id } });
+      if (!actual) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Requerimiento no encontrado' });
+      this.assertEsperandoAceptacion(actual.status);
+
+      await itemRepo.update(id, { status: 'FALTA_INFO' });
+      const eventRepo = manager.getRepository(WorkItemEvent);
+      await eventRepo.save(
+        eventRepo.create({
+          workItemId: id,
+          type: 'DETAIL_REQUESTED',
+          actorUserId,
+          actorClientUserId: null,
+          fromStatus: actual.status,
+          toStatus: 'FALTA_INFO',
+          reason: pregunta,
+          payload: null,
+        }),
+      );
+      return (await itemRepo.findOne({ where: { id } })) ?? { ...actual, status: 'FALTA_INFO' };
+    });
+  }
+
   private assertEsperandoAceptacion(status: WorkItemStatus): void {
-    if (status === 'SOLICITADO') return;
+    if (AWAITING_ACCEPTANCE.includes(status)) return;
     throw new BadRequestException({
       code: 'BAD_INPUT',
       message: 'El requerimiento no está pendiente de aceptación.',

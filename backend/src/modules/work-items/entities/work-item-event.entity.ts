@@ -14,7 +14,9 @@ export type WorkItemEventType =
   | 'PRIORITY_CHANGED'
   | 'REQUESTED'
   | 'ACCEPTED'
-  | 'REJECTED';
+  | 'REJECTED'
+  | 'DETAIL_REQUESTED'
+  | 'DETAIL_PROVIDED';
 
 export const WORK_ITEM_EVENT_TYPES: WorkItemEventType[] = [
   'CREATED',
@@ -30,6 +32,8 @@ export const WORK_ITEM_EVENT_TYPES: WorkItemEventType[] = [
   'REQUESTED',
   'ACCEPTED',
   'REJECTED',
+  'DETAIL_REQUESTED',
+  'DETAIL_PROVIDED',
 ];
 
 /** Append-only: nunca se actualiza ni se borra. */

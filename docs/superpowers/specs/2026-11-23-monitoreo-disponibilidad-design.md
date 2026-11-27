@@ -58,7 +58,7 @@ Este diseño se escribió mirando una rama anterior. Al empezar la implementaci�
 - El código de disponibilidad va en `backend/src/modules/availability/` y `web/src/pages/availability/`.
 - La API del personal va bajo `/api/v1/availability/*`; la ingesta de las sondas, bajo `/api/v1/ingest/probe/*`, junto a la `/api/v1/ingest/logs` existente.
 - Las pantallas nuevas se suman al menú «Monitoreo» existente: `/monitoreo/estado`, `/monitoreo/incidentes`, `/monitoreo/inventario`, `/monitoreo/sondas`.
-- Las migraciones empiezan en `032_`: `main` trajo después el conector de tickets con su `031_conector_repos.sql`, y al integrarlo las de disponibilidad se renumeraron (`032_disponibilidad_nucleo.sql`, antes 031; `033_disponibilidad_escritorio.sql`, antes 032).
+- Las migraciones empiezan en `032_`: `main` trajo después el conector de tickets con su `031_conector_repos.sql`, y al integrarlo las de disponibilidad se renumeraron (`035_disponibilidad_nucleo.sql`, antes 031; `036_disponibilidad_escritorio.sql`, antes 032).
 - `monitor_services.system_id` sigue apuntando a `client_systems` (la pareja cliente-producto del catálogo), igual que `tickets.system_id`.
 
 ## Fuera de alcance

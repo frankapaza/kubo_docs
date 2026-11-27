@@ -5,8 +5,17 @@ import {
   PORTAL_REQUIREMENT_TITLE_MAX_LENGTH,
   PORTAL_REQUIREMENT_DESCRIPTION_MAX_LENGTH,
 } from '../../api/portal.api';
-import type { PortalRequirement } from '../../api/types';
+import type { PortalRequirement, WorkItemRequestType } from '../../api/types';
 import { Button } from '../../components/ui/Button';
+import { toast } from '../../ui/Toast';
+import RequirementFilePicker, { uploadRequirementFiles } from './RequirementFilePicker';
+import RequirementTemplateFields from '../requirements/RequirementTemplateFields';
+import {
+  composeDescription,
+  missingSections,
+  parseCriteria,
+  TemplateAnswers,
+} from '../requirements/requirement-template';
 
 interface Props {
   open: boolean;
@@ -33,7 +42,12 @@ function toErrorList(e: any): string[] {
 
 export default function NewPortalRequirementDialog({ open, onCancel, onCreated }: Props) {
   const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
+  const [type, setType] = useState<WorkItemRequestType>('CAMBIO');
+  const [answers, setAnswers] = useState<TemplateAnswers>({});
+  const [criteria, setCriteria] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
+  const description = composeDescription(type, answers);
+  const missing = missingSections(type, answers);
 
   const [busy, setBusy] = useState(false);
   // Lista y no cadena: un 400 de validación puede traer varios motivos a la
@@ -71,7 +85,10 @@ export default function NewPortalRequirementDialog({ open, onCancel, onCreated }
   useEffect(() => {
     if (!open) return;
     setTitle('');
-    setDescription('');
+    setType('CAMBIO');
+    setAnswers({});
+    setCriteria('');
+    setFiles([]);
     setErrors([]);
     setBusy(false);
   }, [open]);
@@ -97,7 +114,8 @@ export default function NewPortalRequirementDialog({ open, onCancel, onCreated }
 
   // Guarda de vida: un título o una descripción de solo espacios no deben
   // poder enviarse, aunque `length` los cuente como si tuvieran contenido.
-  const canSubmit = title.trim().length > 0 && description.trim().length > 0;
+  const tooLong = description.length > PORTAL_REQUIREMENT_DESCRIPTION_MAX_LENGTH;
+  const canSubmit = title.trim().length >= 3 && missing.length === 0 && !tooLong;
 
   const submit = async () => {
     // La guarda, antes que nada y sin ningún `await` por delante: entre esta
@@ -115,7 +133,11 @@ export default function NewPortalRequirementDialog({ open, onCancel, onCreated }
 
   const create = async () => {
     if (!canSubmit) {
-      setErrors(['El título y la descripción son obligatorios.']);
+      setErrors(
+        tooLong
+          ? ['El texto es demasiado largo: resúmelo y adjunta el detalle como documento.']
+          : [`Completa el título y: ${missing.join(', ')}.`],
+      );
       return;
     }
 
@@ -131,7 +153,17 @@ export default function NewPortalRequirementDialog({ open, onCancel, onCreated }
       const created = await portalApi.createRequirement({
         title: title.trim(),
         descriptionMd: description.trim(),
+        requestType: type,
+        acceptanceCriteria: parseCriteria(criteria),
       });
+      // Los archivos se cuelgan del requerimiento ya creado. Si alguno falla,
+      // el requerimiento igual quedó: se avisa cuál y se puede subir desde el detalle.
+      const failed = files.length ? await uploadRequirementFiles(created.id, files) : [];
+      if (failed.length) {
+        toast.warning(
+          `El requerimiento se envió, pero no se pudo subir: ${failed.map((f) => `${f.name} (${f.reason})`).join('; ')}. Puedes adjuntarlos desde su detalle.`,
+        );
+      }
       if (!alive.current) return;
       setBusy(false);
       onCreated(created);
@@ -154,13 +186,14 @@ export default function NewPortalRequirementDialog({ open, onCancel, onCreated }
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-pop"
+        className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-pop"
       >
         <h2 id="new-portal-requirement-title" className="text-lg font-semibold text-slate-900">
           Pedir un requerimiento
         </h2>
         <p className="text-sm text-slate-500 mt-1">
-          Cuéntanos qué necesitas construir; nuestro equipo lo revisará y te dirá cuándo se compromete.
+          Cuéntanos qué necesitas con el mayor detalle posible: mientras más claro, más rápido lo evaluamos y te
+          decimos cuándo se compromete. Los campos con * son obligatorios.
         </p>
 
         {errors.length > 0 && (
@@ -200,24 +233,21 @@ export default function NewPortalRequirementDialog({ open, onCancel, onCreated }
             </p>
           </div>
 
-          <div>
-            <label className="label" htmlFor="portal-requirement-description">
-              Descripción *
-            </label>
-            <textarea
-              id="portal-requirement-description"
-              className="input"
-              rows={6}
-              value={description}
-              maxLength={PORTAL_REQUIREMENT_DESCRIPTION_MAX_LENGTH}
-              disabled={busy}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Describe con el mayor detalle posible qué necesitas y para qué"
-            />
-            <p className="mt-1 text-right text-xs text-slate-400">
-              {description.length}/{PORTAL_REQUIREMENT_DESCRIPTION_MAX_LENGTH}
+          <RequirementTemplateFields
+            type={type}
+            onTypeChange={setType}
+            answers={answers}
+            onAnswersChange={setAnswers}
+            criteria={criteria}
+            onCriteriaChange={setCriteria}
+            disabled={busy}
+          />
+          <RequirementFilePicker id="portal-requirement-files" files={files} onChange={setFiles} disabled={busy} />
+          {tooLong && (
+            <p className="text-xs text-red-600">
+              El texto supera los {PORTAL_REQUIREMENT_DESCRIPTION_MAX_LENGTH} caracteres: resúmelo.
             </p>
-          </div>
+          )}
         </div>
 
         <div className="mt-6 flex justify-end gap-2">

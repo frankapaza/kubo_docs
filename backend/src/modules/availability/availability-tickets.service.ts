@@ -64,7 +64,7 @@ export class AvailabilityTicketsService {
       const user = await this.users.findByEmail(MONITORING_ACTOR_EMAIL);
       if (!user)
         throw new Error(
-          'Falta el usuario de monitoreo: aplicar la migración 032',
+          'Falta el usuario de monitoreo: aplicar la migración 035',
         );
       this.monitoringUserId = Number(user.id);
     }

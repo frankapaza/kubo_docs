@@ -1,6 +1,6 @@
 # Monitoreo · Entrega 2 (Escritorio) Implementation Plan
 
-> **Renumeración (2026-11-24):** al integrar `main`, que trajo el conector de tickets con su `031_conector_repos.sql`, las migraciones de disponibilidad pasaron a ser `032_disponibilidad_nucleo.sql` (antes 031) y `033_disponibilidad_escritorio.sql` (antes 032). Este documento usa ya los números nuevos; los mensajes de commit citados conservan el número con el que se hicieron.
+> **Renumeración (2026-11-24):** al integrar `main`, que trajo el conector de tickets con su `031_conector_repos.sql`, las migraciones de disponibilidad pasaron a ser `035_disponibilidad_nucleo.sql` (antes 031) y `036_disponibilidad_escritorio.sql` (antes 032). Este documento usa ya los números nuevos; los mensajes de commit citados conservan el número con el que se hicieron.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -57,7 +57,7 @@ backend/src/modules/availability/
   availability-ingest.service.ts           (sync rellena ticketCode)
   probe-silence.watch.ts                   (vigilante de sondas mudas)
   domain/probe-silence.ts                  (regla pura)
-backend/sql/migrations/033_disponibilidad_escritorio.sql
+backend/sql/migrations/036_disponibilidad_escritorio.sql
 desktop/engine/src/
   events/diff-states.ts                    (transiciones → eventos, puro)
   events/event-journal.ts                  (tabla events en el Outbox)
@@ -144,7 +144,7 @@ desktop/widget/
 ### Task 3: La central avisa cuando una sonda deja de reportar
 
 **Files:**
-- Create: `backend/src/modules/availability/domain/probe-silence.ts`, `backend/src/modules/availability/probe-silence.watch.ts`, `backend/sql/migrations/033_disponibilidad_escritorio.sql`
+- Create: `backend/src/modules/availability/domain/probe-silence.ts`, `backend/src/modules/availability/probe-silence.watch.ts`, `backend/sql/migrations/036_disponibilidad_escritorio.sql`
 - Modify: entidad `MonitorProbe` (columna nueva), `availability.module.ts` (proveedor; importa `EmailModule` y `UsersModule`), las tres listas de migraciones que exige `src/common/migraciones-desplegadas.spec.ts` (deploy.yml, docker-compose.yml, docker-compose.dev.yml)
 - Test: `domain/probe-silence.spec.ts`, `probe-silence.watch.spec.ts`
 

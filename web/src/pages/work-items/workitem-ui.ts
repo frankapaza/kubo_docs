@@ -26,6 +26,7 @@ export const STATUS_LABELS: Record<WorkItemStatus, string> = {
   // porque son dos de los ocho valores reales de WorkItemStatus.
   SOLICITADO: 'Solicitado',
   RECHAZADO: 'Rechazado',
+  FALTA_INFO: 'Falta información',
 };
 
 export const PRIORITY_STYLES: Record<WorkItemPriority, Swatch> = {

@@ -70,6 +70,7 @@ export class WorkItemsService {
           title: dto.title.trim(),
           descriptionMd: dto.descriptionMd ?? null,
           acceptanceCriteria: dto.acceptanceCriteria ?? null,
+          requestType: dto.requestType ?? null,
           labels: dto.labels ?? null,
           priority,
           status: 'PENDIENTE',

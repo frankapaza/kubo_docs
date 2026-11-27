@@ -1,6 +1,6 @@
 # Monitoreo · Entrega 1 (Núcleo) Implementation Plan
 
-> **Renumeración (2026-11-24):** al integrar `main`, que trajo el conector de tickets con su `031_conector_repos.sql`, las migraciones de disponibilidad pasaron a ser `032_disponibilidad_nucleo.sql` (antes 031) y `033_disponibilidad_escritorio.sql` (antes 032). Este documento usa ya los números nuevos; los mensajes de commit citados conservan el número con el que se hicieron.
+> **Renumeración (2026-11-24):** al integrar `main`, que trajo el conector de tickets con su `031_conector_repos.sql`, las migraciones de disponibilidad pasaron a ser `035_disponibilidad_nucleo.sql` (antes 031) y `036_disponibilidad_escritorio.sql` (antes 032). Este documento usa ya los números nuevos; los mensajes de commit citados conservan el número con el que se hicieron.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -69,7 +69,7 @@ packages/monitoring-core/
   src/runner.ts           ejecutor: franjas, reintentos, concurrencia, sin solapes
   test/*.spec.ts
 backend/scripts/sync-monitoring-core.mjs
-backend/sql/migrations/032_disponibilidad_nucleo.sql
+backend/sql/migrations/035_disponibilidad_nucleo.sql
 backend/src/modules/availability/
   core/                   COPIA GENERADA de packages/monitoring-core/src
   entities/*.entity.ts
@@ -271,7 +271,7 @@ web/src/pages/availability/{AvailabilityStatePage,AvailabilityIncidentsPage,Avai
 ### Task 5: Copia de `monitoring-core` en el backend, migración 032 y entidades
 
 **Files:**
-- Create: `backend/scripts/sync-monitoring-core.mjs`, `backend/src/modules/availability/core/**` (generado), `backend/sql/migrations/032_disponibilidad_nucleo.sql`, `backend/src/modules/availability/entities/*.entity.ts`
+- Create: `backend/scripts/sync-monitoring-core.mjs`, `backend/src/modules/availability/core/**` (generado), `backend/sql/migrations/035_disponibilidad_nucleo.sql`, `backend/src/modules/availability/entities/*.entity.ts`
 - Modify: `backend/package.json` (`"prebuild": "node scripts/sync-monitoring-core.mjs --check --skip-if-missing"`), `backend/Dockerfile` (añadir `COPY scripts ./scripts` antes de `RUN npm run build` en la etapa `builder`)
 - Test: `backend/src/modules/availability/entities/entities.spec.ts`
 
@@ -296,7 +296,7 @@ web/src/pages/availability/{AvailabilityStatePage,AvailabilityIncidentsPage,Avai
 - [ ] **Step 3: Write the failing test** `entities.spec.ts`: construye un `DataSource` de TypeORM con las entidades nuevas sin conectar (`new DataSource({ type: 'mysql', entities: [...] }).buildMetadatas()`) y afirma `MonitorCheck` tiene clave primaria `['probeId','id']`, `MonitorProbeSignal` tiene índice único `['probeId','uuid']`.
 - [ ] **Step 4: Run** `npx jest src/modules/availability/entities` → FAIL.
 - [ ] **Step 5: Implement** migración, entidades y constante. El origen `MONITOREO` ya existe (migración 030): no se toca.
-- [ ] **Step 6: Apply the migration twice** contra la base local de desarrollo (`docker compose -f docker-compose.dev.yml up -d mysql`, luego `mysql ... < backend/sql/migrations/032_disponibilidad_nucleo.sql` dos veces) → la segunda vez sin errores ni cambios. Comprobar `SELECT code, kind FROM monitor_probes` → 2 filas y `SELECT is_active FROM users WHERE email='monitoreo@sistema.kubo'` → 0.
+- [ ] **Step 6: Apply the migration twice** contra la base local de desarrollo (`docker compose -f docker-compose.dev.yml up -d mysql`, luego `mysql ... < backend/sql/migrations/035_disponibilidad_nucleo.sql` dos veces) → la segunda vez sin errores ni cambios. Comprobar `SELECT code, kind FROM monitor_probes` → 2 filas y `SELECT is_active FROM users WHERE email='monitoreo@sistema.kubo'` → 0.
 - [ ] **Step 7: Run** `npx jest src/modules/availability/entities && npm run build` → PASS y build sin errores.
 - [ ] **Step 8: Commit** `feat(disponibilidad): migración 031 y entidades`
 
