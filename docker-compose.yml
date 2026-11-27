@@ -94,6 +94,8 @@ services:
       - ./backend/sql/migrations/036_disponibilidad_escritorio.sql:/docker-entrypoint-initdb.d/036_disponibilidad_escritorio.sql:ro
       # La 037 crea las tablas del informe mensual, evidencias, mantenimiento y agente.
       - ./backend/sql/migrations/037_disponibilidad_informe.sql:/docker-entrypoint-initdb.d/037_disponibilidad_informe.sql:ro
+      # La 038 anade media, maximo y errores al resumen diario del agente (historial).
+      - ./backend/sql/migrations/038_disponibilidad_historial_agente.sql:/docker-entrypoint-initdb.d/038_disponibilidad_historial_agente.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s

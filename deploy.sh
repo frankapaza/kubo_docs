@@ -30,6 +30,8 @@ set -e
 # evaluacion de incidentes y la purga corren en el backend.
 # Migracion 037 (037_disponibilidad_informe): tablas del informe mensual,
 # evidencias, mantenimientos y agente de servidor; aplicarla igual, a mano.
+# Migracion 038 (038_disponibilidad_historial_agente): media, maximo y errores
+# del resumen diario del agente para el historial; aplicarla igual, a mano.
 cd /home/kubo/kubo
 git pull
 docker compose build backend monitor-worker web

@@ -62,6 +62,7 @@ describe('las migraciones de disponibilidad están en las tres listas de desplie
     '035_disponibilidad_nucleo',
     '036_disponibilidad_escritorio',
     '037_disponibilidad_informe',
+    '038_disponibilidad_historial_agente',
   ];
   it.each(LISTAS_DE_DESPLIEGUE)('%s las nombra', (lista) => {
     const texto = readFileSync(lista, 'utf8');
@@ -170,5 +171,9 @@ describe('el bucle de migraciones de deploy.yml', () => {
 
   it('incluye la 037', () => {
     expect(palabras()).toContain('037_disponibilidad_informe');
+  });
+
+  it('incluye la 038', () => {
+    expect(palabras()).toContain('038_disponibilidad_historial_agente');
   });
 });

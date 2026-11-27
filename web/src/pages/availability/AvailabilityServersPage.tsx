@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 
 import { AgentView, availabilityApi, MonitorServer } from '../../api/availability.api';
 import { clientsApi } from '../../api/clients.api';
@@ -76,7 +76,7 @@ function ServerCard({ server, clientLabel, view, loading, failed, highlighted }:
     <section ref={ref} id={`server-${server.id}`} style={{ ...card, ...(highlighted ? { borderColor: '#2563eb', boxShadow: '0 0 0 2px #bfdbfe' } : null) }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start' }}>
         <div>
-          <div style={{ fontWeight: 700, fontSize: 15 }}>{server.name}</div>
+          <Link to={`/monitoreo/servidores/${server.id}`} title='Ver historial de CPU, RAM y errores' style={{ fontWeight: 700, fontSize: 15, color: 'inherit', textDecoration: 'underline', textDecorationColor: '#c4c9cb', textUnderlineOffset: 3 }}>{server.name}</Link>
           <div style={{ fontSize: 12, color: '#6d7577' }}>{clientLabel}{server.host ? ` · ${server.host}` : ''}</div>
         </div>
         <span style={{ background: chip.bg, color: chip.fg, borderRadius: 4, padding: '2px 7px', fontSize: 12, fontWeight: 600, textAlign: 'right' }}>{chip.t}</span>

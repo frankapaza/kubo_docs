@@ -1,5 +1,6 @@
 import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 import { AgentDisk } from './monitor-agent-sample.entity';
+import { decimalANumero } from './numeric.transformer';
 
 /** Resumen diario del agente de un servidor. `date` es 'YYYY-MM-DD'. */
 @Entity('monitor_agent_daily_rollups')
@@ -25,4 +26,21 @@ export class MonitorAgentDailyRollup {
 
   @Column({ name: 'disks_close', type: 'json' })
   disksClose!: AgentDisk[];
+
+  /** Media y máximo del día (migración 038). NULL en días resumidos antes de la 038. */
+  @Column({ name: 'cpu_avg', type: 'decimal', precision: 5, scale: 2, nullable: true, transformer: decimalANumero })
+  cpuAvg!: number | null;
+
+  @Column({ name: 'cpu_max', type: 'decimal', precision: 5, scale: 2, nullable: true, transformer: decimalANumero })
+  cpuMax!: number | null;
+
+  @Column({ name: 'ram_avg', type: 'decimal', precision: 5, scale: 2, nullable: true, transformer: decimalANumero })
+  ramAvg!: number | null;
+
+  @Column({ name: 'ram_max', type: 'decimal', precision: 5, scale: 2, nullable: true, transformer: decimalANumero })
+  ramMax!: number | null;
+
+  /** Errores del Visor de eventos sumados en el día (migración 038). */
+  @Column({ name: 'event_errors', type: 'int', default: 0 })
+  eventErrors!: number;
 }

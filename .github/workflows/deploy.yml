@@ -190,7 +190,8 @@ jobs:
                      034_adjuntos_cliente_requerimiento \
                      035_disponibilidad_nucleo \
                      036_disponibilidad_escritorio \
-                     037_disponibilidad_informe; do
+                     037_disponibilidad_informe \
+                     038_disponibilidad_historial_agente; do
               echo "--- $m"
               sql_file "backend/sql/migrations/$m.sql"
             done
