@@ -5,6 +5,7 @@ import { ApiKeysService } from './api-keys.service';
 import { fingerprintApiKey, generateApiKey } from './domain/api-key';
 import { IntegrationController } from './integration.controller';
 import { IntegrationQueryService } from './integration-query.service';
+import { IntegrationSummaryService } from './integration-summary.service';
 
 describe('IntegrationController (HTTP, guarda real)', () => {
   let app: TestHttpApp;
@@ -17,6 +18,7 @@ describe('IntegrationController (HTTP, guarda real)', () => {
     requerimiento: jest.fn(async () => ({ id: 3 })),
     sistemas: jest.fn(async () => []),
   };
+  const summary = { resumen: jest.fn(async () => ({ abiertos: { porEstado: {}, porPrioridad: {} }, meses: [] })) };
   const auth = { Authorization: `Bearer ${key}` };
 
   beforeAll(async () => {
@@ -28,6 +30,7 @@ describe('IntegrationController (HTTP, guarda real)', () => {
         ApiClientRateLimiter,
         { provide: ApiKeysService, useValue: keys },
         { provide: IntegrationQueryService, useValue: query },
+        { provide: IntegrationSummaryService, useValue: summary },
       ],
     }).compile();
     app = await startTestHttpApp(ref);
@@ -52,6 +55,14 @@ describe('IntegrationController (HTTP, guarda real)', () => {
     expect((await app.raw('/integracion/tickets?estado=FOO', { method: 'GET', headers: auth })).status).toBe(400);
     expect((await app.raw('/integracion/tickets?clientId=2', { method: 'GET', headers: auth })).status).toBe(400);
     expect(query.tickets).not.toHaveBeenCalled();
+  });
+
+  it('GET /integracion/resumen?desde=2026-01&hasta=2026-03 -> 3 meses; mes inválido -> 400', async () => {
+    const res = await app.raw('/integracion/resumen?desde=2026-01&hasta=2026-03', { method: 'GET', headers: auth });
+    expect(res.status).toBe(200);
+    expect(summary.resumen).toHaveBeenCalledWith(10, [{ year: 2026, month: 1 }, { year: 2026, month: 2 }, { year: 2026, month: 3 }]);
+    expect((await app.raw('/integracion/resumen?desde=2026-13', { method: 'GET', headers: auth })).status).toBe(400);
+    expect((await app.raw('/integracion/resumen?desde=2026-01&desde=2026-02', { method: 'GET', headers: auth })).status).toBe(400);
   });
 
   it('POST, PUT o DELETE sobre la API -> 405', async () => {

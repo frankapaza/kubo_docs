@@ -13,6 +13,7 @@ import { ApiKeysService } from './api-keys.service';
 import { ClientApiKey } from './entities/client-api-key.entity';
 import { IntegrationController } from './integration.controller';
 import { IntegrationQueryService } from './integration-query.service';
+import { IntegrationSummaryService } from './integration-summary.service';
 
 /** API de integración para clientes. Spec: 2026-11-27-api-integracion-clientes-design.md. */
 @Module({
@@ -28,6 +29,7 @@ import { IntegrationQueryService } from './integration-query.service';
     ApiKeysService,
     ApiKeyGuard,
     IntegrationQueryService,
+    IntegrationSummaryService,
     // Estado en memoria del proceso: un limitador por clave y otro por cliente.
     ApiKeyRateLimiter,
     ApiClientRateLimiter,

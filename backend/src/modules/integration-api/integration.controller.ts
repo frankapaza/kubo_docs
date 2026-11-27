@@ -1,9 +1,11 @@
-import { All, Controller, Get, HttpException, HttpStatus, Param, Query, Req, UseGuards } from '@nestjs/common';
+import { All, BadRequestException, Controller, Get, HttpException, HttpStatus, Param, Query, Req, UseGuards } from '@nestjs/common';
 
 import { ApiKeyGuard, IntegrationRequest } from './api-key.guard';
 import { parseListQuery } from './domain/list-query';
 import { RequerimientoApiView, SistemaApiView, TicketApiDetail, TicketApiView } from './domain/views';
+import { parseMonthRange, ResumenApi } from './domain/summary';
 import { IntegrationQueryService, Page, REQUIREMENT_FILTERS, TICKET_FILTERS } from './integration-query.service';
+import { IntegrationSummaryService } from './integration-summary.service';
 
 /** El cliente sale de la clave; la guarda ya lo dejó en la petición. */
 const clientOf = (req: IntegrationRequest): number => req.integration!.clientId;
@@ -15,7 +17,19 @@ const clientOf = (req: IntegrationRequest): number => req.integration!.clientId;
 @Controller('integracion')
 @UseGuards(ApiKeyGuard)
 export class IntegrationController {
-  constructor(private readonly query: IntegrationQueryService) {}
+  constructor(
+    private readonly query: IntegrationQueryService,
+    private readonly summary: IntegrationSummaryService,
+  ) {}
+
+  /** Métricas por mes (Perú) con el cálculo del informe mensual. `desde`/`hasta` en YYYY-MM. */
+  @Get('resumen')
+  resumen(@Req() req: IntegrationRequest, @Query() q: Record<string, unknown>): Promise<ResumenApi> {
+    const extra = Object.keys(q).filter((k) => !['desde', 'hasta', 'formato'].includes(k));
+    if (extra.length) throw new BadRequestException({ code: 'BAD_INPUT', message: `Parámetros no admitidos: ${extra.join(', ')}` });
+    const one = (k: string) => (typeof q[k] === 'string' ? (q[k] as string) : q[k] === undefined ? undefined : '#');
+    return this.summary.resumen(clientOf(req), parseMonthRange(one('desde'), one('hasta'), new Date()));
+  }
 
   @Get('sistemas')
   sistemas(@Req() req: IntegrationRequest): Promise<SistemaApiView[]> {
