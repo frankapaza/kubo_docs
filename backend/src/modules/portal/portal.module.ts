@@ -101,6 +101,7 @@ import { UsersModule } from '../users/users.module';
   // desde su propio comentario). Es la única puerta al portal que consume un
   // módulo fuera de él, y va en un solo sentido: el portal no conoce el correo
   // entrante.
-  exports: [ClientUsersRepository, ClientUsersService],
+  // La API de integración reutiliza la frontera del portal (mismas vistas, mismos filtros).
+  exports: [ClientUsersRepository, ClientUsersService, PortalTicketsService, PortalRequirementsService, PortalReportsService],
 })
 export class PortalModule {}
