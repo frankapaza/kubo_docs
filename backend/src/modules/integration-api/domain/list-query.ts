@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { PERU_UTC_OFFSET_MINUTES } from '../../../common/peru-month';
 
 /** Último par (`actualizadoEn`, `id`) entregado: la página siguiente empieza justo después. */
 export interface Cursor {
@@ -53,10 +54,22 @@ function oneString(q: Record<string, unknown>, k: string): string | undefined {
   return v.trim();
 }
 
-function date(q: Record<string, unknown>, k: string): Date | undefined {
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+const DAY_MS = 86_400_000;
+
+/**
+ * Una fecha sin hora es un día civil de Lima, como en el resto del producto
+ * (informe mensual, /resumen): `desde` empieza a las 00:00 de Lima y `hasta`
+ * llega hasta el último milisegundo de ese día. Con hora y zona, tal cual.
+ */
+function date(q: Record<string, unknown>, k: string, endOfDay = false): Date | undefined {
   const v = oneString(q, k);
   if (v === undefined || v === '') return undefined;
-  const d = ISO.test(v) ? new Date(v) : null;
+  let d: Date | null = ISO.test(v) ? new Date(v) : null;
+  if (d && DATE_ONLY.test(v)) {
+    const limaMidnight = d.getTime() - PERU_UTC_OFFSET_MINUTES * 60_000;
+    d = new Date(endOfDay ? limaMidnight + DAY_MS - 1 : limaMidnight);
+  }
   if (!d || Number.isNaN(d.getTime())) throw bad(`«${k}» debe ser una fecha ISO 8601 (p. ej. 2026-11-01 o 2026-11-01T00:00:00Z)`);
   return d;
 }
@@ -91,7 +104,7 @@ export function parseListQuery(
   }
 
   for (const k of ['creadosDesde', 'creadosHasta', 'actualizadosDesde'] as const) {
-    const d = date(q, k);
+    const d = date(q, k, k === 'creadosHasta');
     if (d) out[k] = d;
   }
 

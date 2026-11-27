@@ -20,7 +20,7 @@ const FILTERS: Array<[string, string]> = [
   ['estado', 'Uno o varios separados por coma. Tickets: NUEVO, TRIAJE, ASIGNADO, EN_ATENCION, ESPERA_CLIENTE, DERIVADO, RESUELTO, CERRADO. Requerimientos: el valor de estadoCodigo.'],
   ['prioridad', 'Tickets: P1 a P4. Requerimientos: ALTA, MEDIA, BAJA.'],
   ['sistemaId', 'Un sistema de /sistemas.'],
-  ['creadosDesde, creadosHasta', 'Fecha ISO 8601, p. ej. 2026-11-01 o 2026-11-01T00:00:00Z.'],
+  ['creadosDesde, creadosHasta', 'Fecha ISO 8601. Sin hora (2026-11-01) es un día de Lima: creadosHasta=2026-11-30 incluye todo el 30. Con hora, indica la zona (2026-11-01T00:00:00Z).'],
   ['actualizadosDesde', 'Solo lo que cambió desde esa fecha: guarda el actualizadoEn mayor que recibiste y úsalo la próxima vez.'],
   ['limite', 'Registros por página: 100 por defecto, hasta 500 (5000 en CSV).'],
   ['cursor', 'El siguienteCursor de la respuesta anterior, para pedir la página siguiente.'],
@@ -104,6 +104,11 @@ curl -H "Authorization: Bearer kci_TU_CLAVE" "${INTEGRATION_API_BASE}/resumen"`}
           <li>En «Parámetros del encabezado de solicitud HTTP» añade <code className="rounded bg-slate-100 px-1 text-xs">Authorization</code> con el valor <code className="rounded bg-slate-100 px-1 text-xs">Bearer kci_TU_CLAVE</code>.</li>
           <li>Acepta, elige acceso «Anónimo» y expande la columna <code className="rounded bg-slate-100 px-1 text-xs">datos</code>.</li>
         </ol>
+        <p role="note" className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900">
+          <strong>Cada llamada trae como máximo 500 registros</strong> (5000 en CSV). Si la respuesta trae un <code className="rounded bg-white px-1 text-xs">siguienteCursor</code> distinto de null, hay más:
+          pídelos añadiendo <code className="rounded bg-white px-1 text-xs">&amp;cursor=…</code> con ese valor. Para un dashboard con todo el histórico usa el CSV con <code className="rounded bg-white px-1 text-xs">limite=5000</code>,
+          o <code className="rounded bg-white px-1 text-xs">/resumen</code> si solo necesitas cifras por mes.
+        </p>
         <p className="text-slate-600">
           En Excel: Datos → Obtener datos → Desde la web, con la misma URL y cabecera, o abre directamente el CSV descargado.
         </p>

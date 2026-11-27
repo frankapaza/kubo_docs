@@ -37,9 +37,20 @@ describe('parseListQuery', () => {
   it('fechas ISO válidas se convierten; texto libre -> 400', () => {
     const q = parseListQuery({ actualizadosDesde: '2026-11-01T00:00:00Z', creadosHasta: '2026-11-30' }, { estados: T, prioridades: P, csv: false });
     expect(q.actualizadosDesde).toEqual(new Date('2026-11-01T00:00:00Z'));
-    expect(q.creadosHasta).toEqual(new Date('2026-11-30T00:00:00Z'));
     expect(() => parseListQuery({ actualizadosDesde: 'ayer' }, { estados: T, prioridades: P, csv: false })).toThrow(expect.objectContaining(bad));
   });
+  it('una fecha sin hora es un día de Lima: desde = 00:00 Lima; hasta = fin de ese día en Lima', () => {
+    const q = parseListQuery({ creadosDesde: '2026-11-01', creadosHasta: '2026-11-30', actualizadosDesde: '2026-11-15' }, { estados: T, prioridades: P, csv: false });
+    expect(q.creadosDesde).toEqual(new Date('2026-11-01T05:00:00.000Z'));
+    expect(q.actualizadosDesde).toEqual(new Date('2026-11-15T05:00:00.000Z'));
+    expect(q.creadosHasta).toEqual(new Date('2026-12-01T04:59:59.999Z'));
+  });
+
+  it('con hora y zona se respeta tal cual', () => {
+    const q = parseListQuery({ creadosHasta: '2026-11-30T12:00:00Z' }, { estados: T, prioridades: P, csv: false });
+    expect(q.creadosHasta).toEqual(new Date('2026-11-30T12:00:00Z'));
+  });
+
   it('sistemaId entero positivo; otro valor -> 400', () => {
     expect(parseListQuery({ sistemaId: '12' }, { estados: T, prioridades: P, csv: false }).sistemaId).toBe(12);
     expect(() => parseListQuery({ sistemaId: 'x' }, { estados: T, prioridades: P, csv: false })).toThrow(expect.objectContaining(bad));

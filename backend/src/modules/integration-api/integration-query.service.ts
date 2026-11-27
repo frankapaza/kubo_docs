@@ -8,7 +8,7 @@ import { ClientSystemsRepository } from '../tickets/client-systems.repository';
 import { TICKET_PRIORITIES } from '../tickets/domain/ticket-priority';
 import { TICKET_STATUSES } from '../tickets/domain/ticket-state-machine';
 import { INTERNAL_TICKET_ORIGINS, Ticket } from '../tickets/entities/ticket.entity';
-import { WORK_ITEM_PRIORITIES, WORK_ITEM_STATUSES } from '../work-items/domain/work-item-board';
+import { PRE_BOARD_STATUSES, WORK_ITEM_PRIORITIES, WORK_ITEM_STATUSES } from '../work-items/domain/work-item-board';
 import { WorkItem } from '../work-items/entities/work-item.entity';
 import { encodeCursor, ListQuery } from './domain/list-query';
 import {
@@ -85,7 +85,12 @@ export class IntegrationQueryService {
       .where('w.client_id = :clientId', { clientId })
       .andWhere("w.origin = 'PORTAL'");
     if (q.estados) qb.andWhere('w.status IN (:...estados)', { estados: q.estados });
-    if (q.prioridades) qb.andWhere('w.priority IN (:...prioridades)', { prioridades: q.prioridades });
+    if (q.prioridades) {
+      qb.andWhere('w.priority IN (:...prioridades)', { prioridades: q.prioridades });
+      // La prioridad de un requerimiento aún no aceptado no se publica (sale null):
+      // filtrar por ella no puede revelarla ni meter en el grupo los que no la tienen.
+      qb.andWhere('w.status NOT IN (:...preBoard)', { preBoard: PRE_BOARD_STATUSES });
+    }
     if (q.sistemaId) qb.andWhere('w.client_system_id = :sistemaId', { sistemaId: q.sistemaId });
     applyCommon(qb, 'w', q);
     return page(await qb.getMany(), q.limite, (w) => toRequerimientoApiView(w));
