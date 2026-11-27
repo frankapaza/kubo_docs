@@ -185,7 +185,7 @@ services:
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_ACCESS_EXPIRES_IN: 15m
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
-      JWT_REFRESH_EXPIRES_IN: 7d
+      JWT_REFRESH_EXPIRES_IN: 90d
       # Secretos del portal de clientes. Deben ser distintos de los del
       # personal: JwtSecretsValidator aborta el arranque si se repiten.
       JWT_CLIENT_ACCESS_SECRET: ${JWT_CLIENT_ACCESS_SECRET}
