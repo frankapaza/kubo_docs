@@ -125,7 +125,8 @@ export default function AvailabilityStatePage() {
       </div>
 
       {state.isLoading && <div style={{ fontSize: 13, color: '#6d7577' }}>Cargando…</div>}
-      {state.error && <div role="alert" style={{ fontSize: 13, color: '#b3261e' }}>No se pudo cargar el estado.</div>}
+      {/* Solo si no hay datos: un refresco fallido (p. ej. durante un despliegue) no debe tapar la tabla que sigue siendo válida. */}
+      {state.error && !state.data && <div role="alert" style={{ fontSize: 13, color: '#b3261e' }}>No se pudo cargar el estado.</div>}
 
       {state.data && (
         state.data.length === 0 ? (

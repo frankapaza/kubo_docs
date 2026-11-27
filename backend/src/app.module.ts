@@ -42,6 +42,7 @@ import { InboundEmailModule } from './modules/inbound-email/inbound-email.module
 import { MonitoringModule } from './modules/monitoring/monitoring.module';
 import { AvailabilityModule } from './modules/availability/availability.module';
 import { DevConnectorModule } from './modules/dev-connector/dev-connector.module';
+import { IntegrationApiModule } from './modules/integration-api/integration-api.module';
 
 @Module({
   imports: [
@@ -89,6 +90,7 @@ import { DevConnectorModule } from './modules/dev-connector/dev-connector.module
     MonitoringModule,
     AvailabilityModule,
     DevConnectorModule,
+    IntegrationApiModule,
   ],
   providers: [
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },

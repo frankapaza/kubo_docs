@@ -89,6 +89,17 @@ const CLIENT_VISIBLE_EVENT_TYPES: ReadonlySet<PortalVisibleEventType> =
  * parámetro es `T`, no `unknown`); lo que se comprueba de verdad en tiempo de
  * ejecución sigue siendo la pertenencia al conjunto.
  */
+/**
+ * La regla de `visibleDescription` como función, para que la API de
+ * integración publique exactamente la misma descripción que el portal.
+ */
+export function portalVisibleDescription(t: Pick<Ticket, 'descriptionMd' | 'origin' | 'createdByClientUserId' | 'rawText'>): string | null {
+  if (t.descriptionMd) return t.descriptionMd;
+  const loEscribioElCliente =
+    t.origin === 'PORTAL' && t.createdByClientUserId !== null && t.createdByClientUserId !== undefined;
+  return loEscribioElCliente ? t.rawText ?? null : null;
+}
+
 function isClientVisible(e: TicketEvent): e is ClientVisibleEvent {
   return CLIENT_VISIBLE_EVENT_TYPES.has(e.type as PortalVisibleEventType);
 }
@@ -247,10 +258,7 @@ export class PortalTicketsService {
    * deja de usarse solo.
    */
   private visibleDescription(t: Ticket): string | null {
-    if (t.descriptionMd) return t.descriptionMd;
-    const loEscribioElCliente =
-      t.origin === 'PORTAL' && t.createdByClientUserId !== null && t.createdByClientUserId !== undefined;
-    return loEscribioElCliente ? t.rawText ?? null : null;
+    return portalVisibleDescription(t);
   }
 
   /**

@@ -47,6 +47,7 @@ import PortalRequirementDetailPage from './pages/portal/PortalRequirementDetailP
 import PortalMonthlyReportPage from './pages/portal/PortalMonthlyReportPage';
 import PortalHelpPage from './pages/portal/PortalHelpPage';
 import PortalUsersPage from './pages/portal/PortalUsersPage';
+import PortalIntegrationsPage from './pages/portal/PortalIntegrationsPage';
 import PortalAcceptInvitationPage from './pages/portal/PortalAcceptInvitationPage';
 import DevKeysPage from './pages/dev-connector/DevKeysPage';
 import { ProtectedRoute } from './auth/ProtectedRoute';
@@ -108,6 +109,7 @@ export default function App() {
               y lo que hace es enseñar el error que responde el servidor.
             */}
             <Route path="/portal/equipo" element={<PortalUsersPage />} />
+            <Route path="/portal/integraciones" element={<PortalIntegrationsPage />} />
             {/*
               Manual del cliente. Va aquí dentro, y no como ruta suelta, por
               dos motivos: comparte la cabecera del portal (que es desde donde

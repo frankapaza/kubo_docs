@@ -95,6 +95,18 @@ export default function PortalLayout() {
                 Mi equipo
               </NavLink>
             )}
+            {clientUser?.isAdmin && (
+              <NavLink
+                to="/portal/integraciones"
+                className={({ isActive }) =>
+                  `text-sm font-medium transition ${
+                    isActive ? 'text-kubo-primary' : 'text-slate-600 hover:text-slate-900'
+                  }`
+                }
+              >
+                Integraciones
+              </NavLink>
+            )}
             <NavLink
               to="/portal/help"
               className={({ isActive }) =>

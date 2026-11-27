@@ -64,6 +64,7 @@ describe('las migraciones de disponibilidad están en las tres listas de desplie
     '037_disponibilidad_informe',
     '038_disponibilidad_historial_agente',
     '039_disponibilidad_protocolo_http',
+    '040_api_integracion_clientes',
   ];
   it.each(LISTAS_DE_DESPLIEGUE)('%s las nombra', (lista) => {
     const texto = readFileSync(lista, 'utf8');
@@ -180,5 +181,9 @@ describe('el bucle de migraciones de deploy.yml', () => {
 
   it('incluye la 039', () => {
     expect(palabras()).toContain('039_disponibilidad_protocolo_http');
+  });
+
+  it('incluye la 040', () => {
+    expect(palabras()).toContain('040_api_integracion_clientes');
   });
 });
