@@ -10,6 +10,7 @@ import { LogInstallation } from './entities/log-installation.entity';
 import { LogInstallationSource } from './entities/log-installation-source.entity';
 import { AppenderPackageService } from './appender-package.service';
 import { DiskWatchService } from './disk-watch.service';
+import { LogDigestService } from './log-digest.service';
 import { MonitoringRetentionScheduler } from './monitoring-retention.scheduler';
 import { ErrorActionsService } from './error-actions.service';
 import { ErrorGroupsRepository } from './error-groups.repository';
@@ -50,6 +51,7 @@ import { LokiClient } from './loki/loki.client';
     // Mantenimiento: purga de 180 días, vigilancia del disco y paquete del appender.
     MonitoringRetentionScheduler,
     DiskWatchService,
+    LogDigestService,
     AppenderPackageService,
   ],
   controllers: [InstallationsController, ErrorsController, IngestController, LogsController],

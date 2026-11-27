@@ -18,6 +18,7 @@ import { ErrorEventInput, ErrorGroupsService, OccurrenceContext } from '../error
 import { InstallationsService, ResolvedInstallation } from '../installations.service';
 import { LokiClient, LokiLabels, LokiStream } from '../loki/loki.client';
 import { IngestRateLimiter } from './ingest-rate-limiter';
+import { LogDigestService } from '../log-digest.service';
 import { RecentBatches } from './recent-batches';
 
 /** Propiedad con la que un aplicativo compartido dice de qué cliente es el evento. */
@@ -68,6 +69,7 @@ export class IngestService {
     private readonly gateway: TicketsRealtimeGateway,
     private readonly limiter: IngestRateLimiter,
     private readonly recent: RecentBatches,
+    private readonly digest: LogDigestService,
   ) {}
 
   /**
@@ -191,6 +193,12 @@ export class IngestService {
         // errores para siempre.
         reservation.release();
         this.log.error(`No se pudieron registrar los errores de la instalación ${inst.id}: ${(e as Error)?.message ?? e}`);
+      }
+      // Al resumen de 30 min, solo lotes nuevos (un reintento no cuenta dos veces).
+      try {
+        this.digest.record(inst.displayName, batch.aplicativo, batch.servidor, accepted.map((a) => a.ev.nivel));
+      } catch (e) {
+        this.log.warn(`No se pudo sumar al resumen de logs: ${(e as Error)?.message ?? e}`);
       }
       // El gateway ya se protege de sus propios fallos; aun así el vivo es un
       // extra y nunca debe tumbar la recepción.

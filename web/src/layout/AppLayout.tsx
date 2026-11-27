@@ -13,6 +13,7 @@ import { ArchiveIcon, BellIcon, BookOpenIcon, FileTextIcon, FolderIcon, InboxIco
 import { toast } from '../ui/Toast';
 import { useNewTicketNotifier } from '../pages/tickets/useNewTicketNotifier';
 import { useNewErrorNotifier } from '../pages/monitoring/useNewErrorNotifier';
+import NotificationPermissionBanner from './NotificationPermissionBanner';
 // Nota: "UsersIcon" también se usa en la sección Clientes; es intencional.
 
 export default function AppLayout() {
@@ -326,6 +327,7 @@ export default function AppLayout() {
          * el ojo pierde el salto de renglon.
          */}
         <div className="px-8 py-8">
+          <NotificationPermissionBanner />
           <Outlet />
         </div>
       </main>

@@ -129,6 +129,11 @@ export class TicketsRealtimeGateway implements OnGatewayConnection {
     this.emit('errors:changed', {});
   }
 
+  /** Resumen periódico de logs (ver LogDigestService). Sin import del tipo: el módulo de tickets no depende del de monitoreo. */
+  notifyLogDigest(p: object): void {
+    this.emit('logs:resumen', p);
+  }
+
   notifyDiskAlert(p: { usedPct: number; threshold: number }): void {
     this.emit('monitoreo:disco', p);
   }

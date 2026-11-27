@@ -65,6 +65,7 @@ const makeService = () => {
   const gateway = { publishLogLines: jest.fn() };
   const limiter = new IngestRateLimiter();
   const recent = new RecentBatches();
+  const digest = { record: jest.fn() };
   const service = new IngestService(
     loki as any,
     installations as any,
@@ -73,8 +74,9 @@ const makeService = () => {
     gateway as any,
     limiter,
     recent,
+    digest as any,
   );
-  return { service, loki, pushed, installations, errors, clients, gateway, limiter, recent };
+  return { service, loki, pushed, installations, errors, clients, gateway, limiter, recent, digest };
 };
 
 /** Todas las entradas de todos los streams de un push, con sus etiquetas. */
@@ -92,6 +94,15 @@ const statusOf = async (p: Promise<unknown>): Promise<number> => {
 };
 
 describe('IngestService', () => {
+  it('suma al resumen de logs los niveles aceptados, una sola vez por lote', async () => {
+    const { service, digest } = makeService();
+    const body = lote({ eventos: [evento({ nivel: 'DEBUG' }), evento({ nivel: 'INFO' }), evento({ nivel: 'ERROR' })] });
+    await service.ingest(deCliente(), body, AHORA);
+    await service.ingest(deCliente(), body, AHORA);
+    expect(digest.record).toHaveBeenCalledTimes(1);
+    expect(digest.record).toHaveBeenCalledWith('ACME · Facturador', 'Facturador', 'SRV-01', ['INFO', 'ERROR']);
+  });
+
   it('descarta lo que está por debajo del nivel mínimo y lo cuenta', async () => {
     const { service, pushed } = makeService();
     const r = await service.ingest(
