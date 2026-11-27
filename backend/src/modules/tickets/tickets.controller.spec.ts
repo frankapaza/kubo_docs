@@ -88,3 +88,36 @@ describe('TicketsController: sistema antes de trabajar', () => {
     expect(assignment.take).not.toHaveBeenCalled();
   });
 });
+
+describe('TicketsController: tickets sin sistema', () => {
+  const make = () => {
+    const service = {
+      list: jest.fn().mockResolvedValue([]),
+      summaryWithoutSystem: jest.fn().mockResolvedValue([
+        { clientId: 1, cliente: 'GrupoVyV', total: 8 },
+        { clientId: 2, cliente: 'PROSOL', total: 1 },
+      ]),
+    };
+    const controller = new TicketsController(service as any, {} as any, {} as any, {} as any, { notifyChanged: jest.fn() } as any, {} as any, {} as any);
+    return { controller, service };
+  };
+
+  it('sinSistema=1 llega al repositorio como filtro; sin el parámetro, no', async () => {
+    const { controller, service } = make();
+    await controller.list(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, '1');
+    expect(service.list).toHaveBeenCalledWith(expect.objectContaining({ sinSistema: true }));
+    await controller.list();
+    expect(service.list).toHaveBeenLastCalledWith(expect.objectContaining({ sinSistema: false }));
+  });
+
+  it('el resumen suma el total de todos los clientes', async () => {
+    const { controller } = make();
+    await expect(controller.withoutSystemSummary()).resolves.toEqual({
+      total: 9,
+      porCliente: [
+        { clientId: 1, cliente: 'GrupoVyV', total: 8 },
+        { clientId: 2, cliente: 'PROSOL', total: 1 },
+      ],
+    });
+  });
+});

@@ -144,6 +144,10 @@ export class TicketsService {
     return t;
   }
 
+  summaryWithoutSystem(): Promise<Array<{ clientId: number; cliente: string; total: number }>> {
+    return this.repo.summaryWithoutSystem();
+  }
+
   async list(filters: TicketListFilters): Promise<DecoratedTicket[]> {
     const now = new Date();
     const rows = await this.repo.list(filters);

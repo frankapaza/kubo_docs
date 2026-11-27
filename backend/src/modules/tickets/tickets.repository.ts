@@ -10,6 +10,7 @@ import {
   MoreThanOrEqual,
   Not,
   Repository,
+  SelectQueryBuilder,
 } from 'typeorm';
 
 import { Ticket, ServiceCategory, INTERNAL_TICKET_ORIGINS } from './entities/ticket.entity';
@@ -25,6 +26,12 @@ export interface TicketListFilters {
    * tickets son del equipo por decisión del responsable y el cliente no los ve.
    */
   excludeInternal?: boolean;
+  /**
+   * Solo los pendientes de clasificar: sin sistema, abiertos, no archivados,
+   * de origen no interno y de un cliente que sí tiene sistemas activos. Es la
+   * lista que abre el aviso «tickets sin sistema» (spec 2026-11-27-sistema-obligatorio).
+   */
+  sinSistema?: boolean;
   systemId?: number;
   priority?: TicketPriority;
   assigneeUserId?: number;
@@ -83,6 +90,7 @@ export class TicketsRepository {
     // sale salvo en su propio filtro. Pero solo se filtra si quien llama lo
     // pide; antes se aplicaba siempre y el portal perdía los tickets que el
     // equipo archivaba.
+    if (filters.sinSistema) applyWithoutSystem(qb);
     if (filters.archived === true) qb.andWhere('t.archived_at IS NOT NULL');
     else if (filters.archived === false) qb.andWhere('t.archived_at IS NULL');
     if (filters.q) {
@@ -93,6 +101,23 @@ export class TicketsRepository {
 
     qb.orderBy('t.created_at', 'DESC').limit(500);
     return qb.getMany();
+  }
+
+  /** Cuántos tickets pendientes de clasificar hay, por cliente (mismas condiciones que `sinSistema`). */
+  async summaryWithoutSystem(): Promise<Array<{ clientId: number; cliente: string; total: number }>> {
+    const qb = this.repo
+      .createQueryBuilder('t')
+      .innerJoin('clients', 'c', 'c.id = t.client_id')
+      .select('t.client_id', 'clientId')
+      .addSelect('c.razon_social', 'cliente')
+      .addSelect('COUNT(*)', 'total');
+    applyWithoutSystem(qb);
+    const rows: Array<{ clientId: string | number; cliente: string; total: string | number }> = await qb
+      .groupBy('t.client_id')
+      .addGroupBy('c.razon_social')
+      .orderBy('total', 'DESC')
+      .getRawMany();
+    return rows.map((r) => ({ clientId: Number(r.clientId), cliente: r.cliente, total: Number(r.total) }));
   }
 
   findById(id: number): Promise<Ticket | null> {
@@ -225,4 +250,17 @@ export class TicketsRepository {
       where: { clientId, origin: Not(In(INTERNAL_TICKET_ORIGINS)), resolvedAt: And(MoreThanOrEqual(from), LessThan(to)) },
     });
   }
+}
+
+/**
+ * Pendientes de clasificar: sin sistema, abiertos, no archivados, de origen no
+ * interno y de un cliente con al menos un sistema activo (si no tiene ninguno,
+ * no hay nada que elegir: eso lo avisa «clientes sin sistemas»).
+ */
+function applyWithoutSystem(qb: SelectQueryBuilder<Ticket>): void {
+  qb.andWhere('t.system_id IS NULL')
+    .andWhere("t.status NOT IN ('RESUELTO', 'CERRADO')")
+    .andWhere('t.archived_at IS NULL')
+    .andWhere('t.origin NOT IN (:...sinSistemaInternos)', { sinSistemaInternos: INTERNAL_TICKET_ORIGINS })
+    .andWhere('EXISTS (SELECT 1 FROM client_systems cs WHERE cs.client_id = t.client_id AND cs.is_active = 1)');
 }

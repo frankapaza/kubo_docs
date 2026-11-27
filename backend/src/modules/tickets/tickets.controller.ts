@@ -103,6 +103,7 @@ export class TicketsController {
     @Query('q') q?: string,
     @Query('excludeClosed') excludeClosed?: string,
     @Query('archived') archived?: string,
+    @Query('sinSistema') sinSistema?: string,
   ) {
     return this.service.list({
       status,
@@ -119,7 +120,15 @@ export class TicketsController {
       // los archivados por omisión. El repositorio solo filtra si se lo piden
       // (el portal no lo pide), así que esta es la puerta que lo decide.
       archived: archived === 'true',
+      sinSistema: sinSistema === '1' || sinSistema === 'true',
     });
+  }
+
+  /** Aviso del panel: tickets abiertos sin sistema de clientes que sí tienen sistemas. */
+  @Get('sin-sistema/resumen')
+  async withoutSystemSummary(): Promise<{ total: number; porCliente: Array<{ clientId: number; cliente: string; total: number }> }> {
+    const porCliente = await this.service.summaryWithoutSystem();
+    return { total: porCliente.reduce((a, c) => a + c.total, 0), porCliente };
   }
 
   @Get(':id')

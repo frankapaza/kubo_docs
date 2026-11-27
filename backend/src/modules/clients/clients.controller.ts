@@ -30,6 +30,12 @@ export class ClientsController {
     return this.service.list({ status, q });
   }
 
+  /** Clientes que operan sin sistemas activos (aviso de la lista de clientes). */
+  @Get('sin-sistemas')
+  withoutSystems() {
+    return this.service.listWithoutActiveSystems();
+  }
+
   @Get(':id')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.service.findByIdOrFail(id);
