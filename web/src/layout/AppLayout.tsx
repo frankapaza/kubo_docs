@@ -133,25 +133,8 @@ export default function AppLayout() {
           </NavLink>
 
           <p className="px-3 py-1 mt-4 text-[11px] font-semibold text-kubo-nav-muted uppercase tracking-wider">
-            Monitoreo
+            Errores de sistema
           </p>
-          {([
-            ['/monitoreo/estado', 'Estado', ZapIcon],
-            ['/monitoreo/incidentes', 'Incidentes', ClockIcon],
-            ['/monitoreo/servidores', 'Servidores', ArchiveIcon],
-            ['/monitoreo/disponibilidad', 'Disponibilidad', ClockIcon],
-            ['/monitoreo/inventario', 'Inventario', ArchiveIcon],
-            ['/monitoreo/sondas', 'Sondas', RefreshIcon],
-          ] as const).map(([to, label, Icon]) => (
-            <NavLink
-              key={to}
-              to={to}
-              className={({ isActive }) => `${navItem} ${isActive ? navActive : navIdle}`}
-            >
-              <Icon size={18} />
-              {label}
-            </NavLink>
-          ))}
           <NavLink
             to="/monitoreo/errores"
             className={({ isActive }) => `${navItem} ${isActive ? navActive : navIdle}`}
@@ -189,6 +172,27 @@ export default function AppLayout() {
               Claves de desarrollo
             </NavLink>
           )}
+
+          <p className="px-3 py-1 mt-4 text-[11px] font-semibold text-kubo-nav-muted uppercase tracking-wider">
+            Monitoreo
+          </p>
+          {([
+            ['/monitoreo/estado', 'Estado', ZapIcon],
+            ['/monitoreo/incidentes', 'Incidentes', ClockIcon],
+            ['/monitoreo/servidores', 'Servidores', ArchiveIcon],
+            ['/monitoreo/disponibilidad', 'Disponibilidad', ClockIcon],
+            ['/monitoreo/inventario', 'Inventario', ArchiveIcon],
+            ['/monitoreo/sondas', 'Sondas', RefreshIcon],
+          ] as const).map(([to, label, Icon]) => (
+            <NavLink
+              key={to}
+              to={to}
+              className={({ isActive }) => `${navItem} ${isActive ? navActive : navIdle}`}
+            >
+              <Icon size={18} />
+              {label}
+            </NavLink>
+          ))}
 
           {canManageUsers(user) && (
             <>

@@ -63,8 +63,8 @@ export function fmtCheck(c: CheckRow): string {
 }
 
 type ApiError = { response?: { status?: number; data?: { message?: string } } };
-export const apiMessage = (e: unknown, fallback: string): string => (e as ApiError).response?.data?.message ?? fallback;
-export const apiStatus = (e: unknown): number | undefined => (e as ApiError).response?.status;
+export const apiMessage = (e: unknown, fallback: string): string => (e as ApiError | null)?.response?.data?.message ?? fallback;
+export const apiStatus = (e: unknown): number | undefined => (e as ApiError | null)?.response?.status;
 
 export const btn: React.CSSProperties = { fontSize: 12, padding: '6px 10px', borderRadius: 6, background: '#fff', border: '1px solid #d8dcdd', cursor: 'pointer' };
 export const btnPrimary: React.CSSProperties = { fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: '#15191a', color: '#fff', border: 'none', cursor: 'pointer' };
