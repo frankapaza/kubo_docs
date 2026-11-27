@@ -12,12 +12,12 @@ import { ERROR_STATUS_LABELS, ERROR_STATUS_STYLES, fmtDateTime } from './monitor
 
 const FIVE_MIN_MS = 5 * 60 * 1000;
 
-const card: React.CSSProperties = { background: '#fff', border: '1px solid #e2e5e6', borderRadius: 10, padding: '16px 18px' };
+const card: React.CSSProperties = { background: '#fff', border: '1px solid var(--k-border)', borderRadius: 10, padding: '16px 18px' };
 const h2: React.CSSProperties = { margin: '0 0 10px', fontSize: 13, fontWeight: 600 };
 const btn = (primary: boolean): React.CSSProperties => ({
   fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, cursor: 'pointer', textDecoration: 'none',
-  background: primary ? '#15191a' : '#fff', color: primary ? '#fff' : '#15191a',
-  border: primary ? 'none' : '1px solid #d8dcdd',
+  background: primary ? 'var(--k-ink)' : '#fff', color: primary ? '#fff' : 'var(--k-ink)',
+  border: primary ? 'none' : '1px solid var(--k-border-strong)',
 });
 
 const msgOf = (e: unknown, fallback: string) =>
@@ -26,8 +26,8 @@ const msgOf = (e: unknown, fallback: string) =>
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ minWidth: 0 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: '#6d7577', marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 13, color: '#15191a', overflowWrap: 'anywhere' }}>{children}</div>
+      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--k-muted)', marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 13, color: 'var(--k-ink)', overflowWrap: 'anywhere' }}>{children}</div>
     </div>
   );
 }
@@ -53,14 +53,14 @@ function ResolveNoteDialog({ open, busy, onCancel, onConfirm }: {
     >
       <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', borderRadius: 10, padding: 22, width: 460, maxWidth: '92vw', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <h2 id="resolve-error-title" style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Marcar el error como resuelto</h2>
-        <span style={{ fontSize: 12, color: '#6d7577', lineHeight: 1.5 }}>
+        <span style={{ fontSize: 12, color: 'var(--k-muted)', lineHeight: 1.5 }}>
           Si vuelve a ocurrir, el error se reabre solo y avisa.
         </span>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
           <span style={{ fontSize: 12, fontWeight: 600 }}>Nota (opcional)</span>
           <textarea
             value={note} rows={3} maxLength={1000} onChange={(e) => setNote(e.target.value)}
-            style={{ fontSize: 13, padding: 9, border: '1px solid #dfe3e4', borderRadius: 6, resize: 'vertical', fontFamily: 'inherit' }}
+            style={{ fontSize: 13, padding: 9, border: '1px solid var(--k-border)', borderRadius: 6, resize: 'vertical', fontFamily: 'inherit' }}
           />
         </label>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -96,7 +96,7 @@ export default function MonitoringErrorDetailPage() {
 
   useRealtime('errors:changed', useCallback(() => { void reload(); }, [reload]));
 
-  if (isLoading) return <div style={{ padding: 26, fontSize: 13, color: '#6d7577' }}>Cargando…</div>;
+  if (isLoading) return <div style={{ padding: 26, fontSize: 13, color: 'var(--k-muted)' }}>Cargando…</div>;
   if (error || !group) {
     return (
       <div style={{ padding: 26, display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -155,7 +155,7 @@ export default function MonitoringErrorDetailPage() {
 
   return (
     <div style={{ padding: 26, display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 1100 }}>
-      <Link to="/monitoreo/errores" style={{ fontSize: 12, color: '#6d7577', textDecoration: 'none' }}>← Errores</Link>
+      <Link to="/monitoreo/errores" style={{ fontSize: 12, color: 'var(--k-muted)', textDecoration: 'none' }}>← Errores</Link>
 
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
         <div style={{ minWidth: 0, flex: '1 1 400px' }}>
@@ -222,18 +222,18 @@ export default function MonitoringErrorDetailPage() {
             {last.exception}
           </pre>
         ) : (
-          <span style={{ fontSize: 12, color: '#6d7577' }}>La última ocurrencia no trae traza.</span>
+          <span style={{ fontSize: 12, color: 'var(--k-muted)' }}>La última ocurrencia no trae traza.</span>
         )}
       </section>
 
       <section style={card}>
         <h2 style={h2}>Ocurrencias recientes ({group.occurrences.length})</h2>
-        {group.occurrences.length === 0 && <span style={{ fontSize: 12, color: '#6d7577' }}>Sin muestras guardadas.</span>}
+        {group.occurrences.length === 0 && <span style={{ fontSize: 12, color: 'var(--k-muted)' }}>Sin muestras guardadas.</span>}
         {group.occurrences.map((o) => (
-          <details key={o.id} style={{ borderTop: '1px solid #f1f3f3', padding: '8px 0' }}>
+          <details key={o.id} style={{ borderTop: '1px solid var(--k-border-soft)', padding: '8px 0' }}>
             <summary style={{ cursor: 'pointer', fontSize: 12, display: 'flex', gap: 10, listStyle: 'revert' }}>
-              <span style={{ color: '#6d7577', whiteSpace: 'nowrap' }}>{fmtDateTime(o.occurredAt)}</span>
-              <span style={{ color: '#6d7577' }}>{o.servidor}</span>
+              <span style={{ color: 'var(--k-muted)', whiteSpace: 'nowrap' }}>{fmtDateTime(o.occurredAt)}</span>
+              <span style={{ color: 'var(--k-muted)' }}>{o.servidor}</span>
               <span style={{ overflowWrap: 'anywhere' }}>{o.message}</span>
             </summary>
             <div style={{ marginTop: 8, display: 'grid', gap: 8, fontSize: 12 }}>
@@ -249,7 +249,7 @@ export default function MonitoringErrorDetailPage() {
                   <tbody>
                     {Object.entries(o.properties).map(([k, v]) => (
                       <tr key={k}>
-                        <td style={{ padding: '2px 10px 2px 0', fontWeight: 600, color: '#6d7577', verticalAlign: 'top' }}>{k}</td>
+                        <td style={{ padding: '2px 10px 2px 0', fontWeight: 600, color: 'var(--k-muted)', verticalAlign: 'top' }}>{k}</td>
                         <td style={{ padding: '2px 0', overflowWrap: 'anywhere' }}>{v}</td>
                       </tr>
                     ))}

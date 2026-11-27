@@ -55,13 +55,13 @@ const PUBLIC_SKIN: VisibilitySkin = {
   visibility: 'PUBLICA',
   chip: 'Respuesta al cliente',
   action: 'Responder al cliente',
-  chipClass: 'bg-indigo-100 text-indigo-800 ring-1 ring-inset ring-indigo-300',
+  chipClass: 'bg-cyan-100 text-cyan-800 ring-1 ring-inset ring-cyan-300',
   cardClass: 'border-slate-200 bg-white',
-  composerClass: 'border-indigo-400 bg-indigo-50/60',
-  noticeClass: 'bg-indigo-100 text-indigo-900 ring-1 ring-inset ring-indigo-300',
+  composerClass: 'border-cyan-400 bg-cyan-50/60',
+  noticeClass: 'bg-cyan-100 text-cyan-900 ring-1 ring-inset ring-cyan-300',
   buttonClass:
-    'bg-indigo-600 text-white hover:bg-indigo-700 focus:ring-indigo-500/40 shadow-sm',
-  railStyle: { background: '#4f46e5' },
+    'bg-cyan-600 text-white hover:bg-cyan-700 focus:ring-cyan-500/40 shadow-sm',
+  railStyle: { background: '#0e7490' },
 };
 
 const INTERNAL_SKIN: VisibilitySkin = {

@@ -230,7 +230,7 @@ export const EyeIcon = (p: IconProps) => (
 
 export const KuboLogo = ({ size = 28 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <rect width="32" height="32" rx="8" fill="#4F46E5" />
+    <rect width="32" height="32" rx="8" fill="#0E7490" />
     <path
       d="M10 8v16M10 16l7-7M10 16l7 7"
       stroke="white"

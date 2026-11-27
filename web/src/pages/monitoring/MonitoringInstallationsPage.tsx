@@ -24,17 +24,17 @@ type ApiError = { response?: { data?: { message?: string } } };
 const apiMessage = (e: unknown, fallback: string) => (e as ApiError).response?.data?.message ?? fallback;
 
 const inputStyle: React.CSSProperties = {
-  fontSize: 13, padding: '8px 10px', border: '1px solid #dfe3e4', borderRadius: 6,
+  fontSize: 13, padding: '8px 10px', border: '1px solid var(--k-border)', borderRadius: 6,
   fontFamily: 'inherit', width: '100%', boxSizing: 'border-box',
 };
 const labelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 600, marginBottom: 5, display: 'block' };
-const btn: React.CSSProperties = { fontSize: 12, padding: '6px 10px', borderRadius: 6, background: '#fff', border: '1px solid #d8dcdd', cursor: 'pointer' };
-const btnPrimary: React.CSSProperties = { fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: '#15191a', color: '#fff', border: 'none', cursor: 'pointer' };
+const btn: React.CSSProperties = { fontSize: 12, padding: '6px 10px', borderRadius: 6, background: '#fff', border: '1px solid var(--k-border-strong)', cursor: 'pointer' };
+const btnPrimary: React.CSSProperties = { fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: 'var(--k-primary)', color: '#fff', border: 'none', cursor: 'pointer' };
 
 const KEY_STYLES: Record<KeyStatus, { bg: string; fg: string; label: string }> = {
   ACTIVA: { bg: '#e6f4ea', fg: '#1e7a3c', label: 'Activa' },
   REVOCADA: { bg: '#fdecea', fg: '#b3261e', label: 'Revocada' },
-  SIN_CLAVE: { bg: '#eef0f1', fg: '#6d7577', label: 'Sin clave' },
+  SIN_CLAVE: { bg: 'var(--k-surface-2)', fg: 'var(--k-muted)', label: 'Sin clave' },
 };
 
 /** La URL que se pega en log4net.config: sale del origen actual para valer en cualquier entorno. */
@@ -177,17 +177,17 @@ function InstallationsAdmin() {
         <button type="button" style={btn} onClick={copyUrl}>Copiar</button>
       </div>
 
-      {installations.isLoading && <div style={{ fontSize: 13, color: '#6d7577' }}>Cargando…</div>}
+      {installations.isLoading && <div style={{ fontSize: 13, color: 'var(--k-muted)' }}>Cargando…</div>}
       {installations.error && <div role="alert" style={{ fontSize: 13, color: '#b3261e' }}>No se pudieron cargar las instalaciones.</div>}
 
       {installations.data && (
         installations.data.length === 0 ? (
-          <div style={{ fontSize: 13, color: '#6d7577' }}>Aún no hay instalaciones. Crea la primera con «Nueva instalación».</div>
+          <div style={{ fontSize: 13, color: 'var(--k-muted)' }}>Aún no hay instalaciones. Crea la primera con «Nueva instalación».</div>
         ) : (
           <div style={{ overflowX: 'auto', border: '1px solid #e6e9ea', borderRadius: 8 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
-                <tr style={{ textAlign: 'left', background: '#f7f8f8', color: '#6d7577', fontSize: 12 }}>
+                <tr style={{ textAlign: 'left', background: '#f7f8f8', color: 'var(--k-muted)', fontSize: 12 }}>
                   {['Instalación', 'Último envío', 'Aplicativos y servidores', 'Clave', 'Nivel mínimo', ''].map((h, n) => (
                     <th key={n} style={{ padding: '8px 10px', fontWeight: 600 }}>{h}</th>
                   ))}
@@ -197,10 +197,10 @@ function InstallationsAdmin() {
                 {installations.data.map((i) => {
                   const ks = KEY_STYLES[i.keyStatus];
                   return (
-                    <tr key={i.id} style={{ borderTop: '1px solid #eef0f1', verticalAlign: 'top' }}>
+                    <tr key={i.id} style={{ borderTop: '1px solid var(--k-surface-2)', verticalAlign: 'top' }}>
                       <td style={{ padding: '8px 10px' }}>
                         <div style={{ fontWeight: 600 }}>{i.kind === 'CLIENTE' ? i.clientName : i.displayName}</div>
-                        <div style={{ fontSize: 12, color: '#6d7577' }}>
+                        <div style={{ fontSize: 12, color: 'var(--k-muted)' }}>
                           {i.kind === 'CLIENTE' ? i.systemName : `Interna${i.systemName ? ` · ${i.systemName}` : ''}`}
                         </div>
                       </td>
@@ -209,7 +209,7 @@ function InstallationsAdmin() {
                         {i.sources.length === 0 ? '—' : i.sources.map((s) => (
                           <div key={`${s.aplicativo}|${s.servidor}`} style={{ fontSize: 12 }}>
                             {s.aplicativo} · {s.servidor}
-                            {s.appenderVersion && <span style={{ color: '#6d7577' }}> (v{s.appenderVersion})</span>}
+                            {s.appenderVersion && <span style={{ color: 'var(--k-muted)' }}> (v{s.appenderVersion})</span>}
                           </div>
                         ))}
                       </td>
@@ -254,7 +254,7 @@ function InstallationsAdmin() {
 
       <section>
         <h2 style={{ fontSize: 15, fontWeight: 600, margin: '0 0 8px' }}>Manual de implementación</h2>
-        {manual.isLoading && <div style={{ fontSize: 13, color: '#6d7577' }}>Cargando…</div>}
+        {manual.isLoading && <div style={{ fontSize: 13, color: 'var(--k-muted)' }}>Cargando…</div>}
         {manual.error && <div role="alert" style={{ fontSize: 13, color: '#b3261e' }}>No se pudo cargar el manual.</div>}
         {manual.data && (
           // sandbox vacío: sin scripts ni mismo origen. El manual es HTML generado y se trata como no confiable.
@@ -371,7 +371,7 @@ function NewInstallationDialog({ open, onCancel, onCreated }: {
             </label>
             {clientId !== '' && (
               assignments !== null && assignments.length === 0 ? (
-                <span style={{ fontSize: 12, color: '#6d7577', lineHeight: 1.4 }}>
+                <span style={{ fontSize: 12, color: 'var(--k-muted)', lineHeight: 1.4 }}>
                   Este cliente no tiene sistemas del catálogo asignados y activos. Asígnalos primero en la ficha del cliente.
                 </span>
               ) : (
@@ -411,7 +411,7 @@ function NewInstallationDialog({ open, onCancel, onCreated }: {
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button type="button" style={{ ...btn, padding: '9px 14px', fontSize: 13 }} onClick={onCancel} disabled={busy}>Cancelar</button>
-          <button type="button" style={{ ...btnPrimary, background: canSubmit ? '#15191a' : '#c9cdce', cursor: canSubmit ? 'pointer' : 'not-allowed' }} onClick={submit} disabled={!canSubmit}>
+          <button type="button" style={{ ...btnPrimary, background: canSubmit ? 'var(--k-ink)' : 'var(--k-disabled)', cursor: canSubmit ? 'pointer' : 'not-allowed' }} onClick={submit} disabled={!canSubmit}>
             {busy ? 'Creando…' : 'Crear y ver clave'}
           </button>
         </div>

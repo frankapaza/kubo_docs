@@ -32,7 +32,7 @@ export interface BoardColumnProps {
 }
 
 const DROP_INDICATOR = (
-  <div aria-hidden="true" style={{ height: 3, borderRadius: 2, background: '#15191a', margin: '0 2px' }} />
+  <div aria-hidden="true" style={{ height: 3, borderRadius: 2, background: 'var(--k-primary)', margin: '0 2px' }} />
 );
 
 /**
@@ -57,26 +57,26 @@ export default function BoardColumn({
       onDragLeave={(e) => onColumnDragLeave(e, status)}
       onDrop={(e) => onColumnDrop(e, status)}
       style={{
-        background: 'var(--k-column, #f5f6f6)', border: '1px solid var(--k-border, #e2e5e6)', borderRadius: 12, padding: 10,
+        background: 'var(--k-column)', border: '1px solid var(--k-border)', borderRadius: 12, padding: 10,
         display: 'flex', flexDirection: 'column', gap: 8, minHeight: minHeight ?? 220,
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 4px' }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--k-ink, #15191a)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--k-ink)', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           {dot && <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 999, background: dot }} />}
           {label}
         </span>
         <span
           style={{
-            fontSize: 11, fontWeight: 700, color: 'var(--k-muted, #6d7577)', background: '#fff',
-            border: '1px solid var(--k-border, #e2e5e6)', borderRadius: 999, padding: '1px 8px',
+            fontSize: 11, fontWeight: 700, color: 'var(--k-muted)', background: '#fff',
+            border: '1px solid var(--k-border)', borderRadius: 999, padding: '1px 8px',
           }}
         >
           {items.length}
         </span>
       </div>
       {!loading && items.length === 0 && (
-        <div style={{ fontSize: 12, color: '#9aa1a2', padding: '8px 4px' }}>Sin ítems</div>
+        <div style={{ fontSize: 12, color: 'var(--k-faint)', padding: '8px 4px' }}>Sin ítems</div>
       )}
       {items.map((item, idx) => (
         <Fragment key={item.id}>

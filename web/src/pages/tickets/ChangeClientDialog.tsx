@@ -15,7 +15,7 @@ interface Props {
 }
 
 const selectStyle: React.CSSProperties = {
-  fontSize: 13, padding: '8px 10px', border: '1px solid #dfe3e4', borderRadius: 6, width: '100%', boxSizing: 'border-box',
+  fontSize: 13, padding: '8px 10px', border: '1px solid var(--k-border)', borderRadius: 6, width: '100%', boxSizing: 'border-box',
 };
 const labelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 5 };
 
@@ -133,14 +133,14 @@ export default function ChangeClientDialog({ open, currentClientId, count = 1, o
           </>
         )}
 
-        <p style={{ margin: 0, fontSize: 12, color: '#6d7577', lineHeight: 1.5 }}>
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--k-muted)', lineHeight: 1.5 }}>
           {count > 1 ? 'Cada ticket' : 'El ticket'} conserva su código, estado, conversación y SLA. Deja de verse en el portal del cliente anterior y
           pasa a verse en el del nuevo. Si tenía un proyecto del cliente anterior, se suelta.
         </p>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button type="button" onClick={onCancel}
-            style={{ fontSize: 13, padding: '8px 14px', borderRadius: 6, border: '1px solid #d8dcdd', background: '#fff', cursor: 'pointer' }}>
+            style={{ fontSize: 13, padding: '8px 14px', borderRadius: 6, border: '1px solid var(--k-border-strong)', background: '#fff', cursor: 'pointer' }}>
             Cancelar
           </button>
           <button
@@ -156,7 +156,7 @@ export default function ChangeClientDialog({ open, currentClientId, count = 1, o
             }
             style={{
               fontSize: 13, fontWeight: 600, padding: '8px 14px', borderRadius: 6, border: 'none',
-              background: ready ? '#15191a' : '#c9cdce', color: '#fff', cursor: ready ? 'pointer' : 'not-allowed',
+              background: ready ? 'var(--k-ink)' : 'var(--k-disabled)', color: '#fff', cursor: ready ? 'pointer' : 'not-allowed',
             }}
           >
             {count > 1 ? `Mover ${count} tickets` : 'Mover ticket'}

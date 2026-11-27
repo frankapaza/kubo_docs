@@ -41,17 +41,17 @@ export const STATUS_STYLES: Record<TicketStatus, Swatch> = {
   TRIAJE:         { bg: 'oklch(0.95 0.04 290)', fg: 'oklch(0.45 0.13 290)' },
   ASIGNADO:       { bg: 'oklch(0.94 0.05 78)',  fg: 'oklch(0.5 0.11 70)' },
   EN_ATENCION:    { bg: 'oklch(0.94 0.05 78)',  fg: 'oklch(0.5 0.11 70)' },
-  ESPERA_CLIENTE: { bg: '#eceeef',              fg: '#4a5052' },
+  ESPERA_CLIENTE: { bg: 'var(--k-border-soft)',              fg: 'var(--k-ink-2)' },
   DERIVADO:       { bg: 'oklch(0.95 0.04 290)', fg: 'oklch(0.45 0.13 290)' },
   RESUELTO:       { bg: 'oklch(0.94 0.05 150)', fg: 'oklch(0.45 0.11 150)' },
-  CERRADO:        { bg: '#eceeef',              fg: '#4a5052' },
+  CERRADO:        { bg: 'var(--k-border-soft)',              fg: 'var(--k-ink-2)' },
 };
 
 export const PRIORITY_STYLES: Record<TicketPriority, Swatch> = {
   P1: { bg: 'oklch(0.94 0.04 25)',  fg: 'oklch(0.5 0.16 25)' },
   P2: { bg: 'oklch(0.94 0.05 78)',  fg: 'oklch(0.5 0.11 70)' },
   P3: { bg: 'oklch(0.95 0.03 205)', fg: 'oklch(0.52 0.1 205)' },
-  P4: { bg: '#eceeef',              fg: '#4a5052' },
+  P4: { bg: 'var(--k-border-soft)',              fg: 'var(--k-ink-2)' },
 };
 
 export const STATUS_LABELS: Record<TicketStatus, string> = {
@@ -71,7 +71,7 @@ export const TIMELINE_EVENT_DOTS: Partial<Record<TicketEventType, string>> = {
   TRIAGED: 'oklch(0.45 0.13 290)',
   ESCALATED: 'oklch(0.45 0.13 290)',
   RESOLVED: 'oklch(0.45 0.11 150)',
-  CLOSED: '#4a5052',
+  CLOSED: 'var(--k-ink-2)',
   SLA_AT_RISK: 'oklch(0.5 0.16 25)',
   REOPENED: 'oklch(0.5 0.11 70)',
 };
@@ -79,7 +79,7 @@ export const TIMELINE_EVENT_DOTS: Partial<Record<TicketEventType, string>> = {
 /** Verde con margen, ámbar acercándose al umbral, rojo pasado o vencido. */
 export function slaBarColor(pct: number | null, overdue: boolean): string {
   if (overdue) return 'oklch(0.5 0.16 25)';
-  if (pct === null) return '#e2e5e6';
+  if (pct === null) return 'var(--k-border)';
   if (pct >= 70) return 'oklch(0.5 0.16 25)';
   if (pct >= 45) return 'oklch(0.68 0.14 78)';
   return 'oklch(0.6 0.12 150)';

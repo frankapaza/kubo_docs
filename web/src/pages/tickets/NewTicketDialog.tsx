@@ -49,7 +49,7 @@ interface Props {
 const inputStyle: React.CSSProperties = {
   fontSize: 13,
   padding: '8px 10px',
-  border: '1px solid #dfe3e4',
+  border: '1px solid var(--k-border)',
   borderRadius: 6,
   fontFamily: 'inherit',
   width: '100%',
@@ -337,7 +337,7 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
           <h2 id="new-ticket-dialog-title" style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
             Nuevo ticket
           </h2>
-          <span style={{ fontSize: 12, color: '#6d7577' }}>
+          <span style={{ fontSize: 12, color: 'var(--k-muted)' }}>
             Captura el texto tal como llega. Podrás estructurarlo con IA después de crearlo.
           </span>
         </div>
@@ -348,7 +348,7 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid #eceeef' }}>
+        <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--k-border-soft)' }}>
           {(['text', 'audio', 'live'] as CaptureMode[]).map((m) => (
             <button
               key={m}
@@ -360,9 +360,9 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
                 fontWeight: 500,
                 padding: '8px 10px',
                 border: 'none',
-                borderBottom: mode === m ? '2px solid #15191a' : '2px solid transparent',
+                borderBottom: mode === m ? '2px solid var(--k-ink)' : '2px solid transparent',
                 background: 'transparent',
-                color: mode === m ? '#15191a' : '#6d7577',
+                color: mode === m ? 'var(--k-ink)' : 'var(--k-muted)',
                 cursor: 'pointer',
                 marginBottom: -1,
               }}
@@ -428,10 +428,10 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
                 a quién pedírselo: un enlace a una grilla de solo lectura
                 prometería una salida que no está.
               */
-              <span id="new-ticket-system" style={{ display: 'block', fontSize: 12, color: '#6d7577', lineHeight: 1.4 }}>
+              <span id="new-ticket-system" style={{ display: 'block', fontSize: 12, color: 'var(--k-muted)', lineHeight: 1.4 }}>
                 {SIN_SISTEMAS_PANEL}{' '}
                 {canManageClientSystems(user) ? (
-                  <Link to={clientSystemsHref(Number(clientId))} style={{ color: '#15191a', fontWeight: 600 }}>
+                  <Link to={clientSystemsHref(Number(clientId))} style={{ color: 'var(--k-ink)', fontWeight: 600 }}>
                     {SIN_SISTEMAS_PANEL_ENLACE}
                   </Link>
                 ) : (
@@ -444,7 +444,7 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
                 value={systemId}
                 disabled={systemField !== 'ELEGIBLE'}
                 onChange={(e) => setSystemId(e.target.value ? Number(e.target.value) : '')}
-                style={{ ...inputStyle, cursor: systemField === 'ELEGIBLE' ? 'pointer' : 'not-allowed', background: systemField === 'ELEGIBLE' ? '#fff' : '#f5f6f6' }}
+                style={{ ...inputStyle, cursor: systemField === 'ELEGIBLE' ? 'pointer' : 'not-allowed', background: systemField === 'ELEGIBLE' ? '#fff' : 'var(--k-column)' }}
               >
                 <option value="">{clientId ? ELIGE_SISTEMA_OPCION : 'Elige un cliente primero'}</option>
                 {/*
@@ -494,7 +494,7 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
                 hacerle llegar algo al cliente tiene la conversación del ticket,
                 con sus dos botones y su confirmación.
               */
-              <span style={{ display: 'block', marginTop: 2, fontSize: 11, color: '#6d7577' }}>
+              <span style={{ display: 'block', marginTop: 2, fontSize: 11, color: 'var(--k-muted)' }}>
                 Quedan como nota interna: el cliente no los ve. Para hacerle llegar algo,
                 respóndele desde la conversación del ticket.
               </span>
@@ -596,7 +596,7 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
           </div>
         </div>
         {(!impact || !urgency) && (
-          <span style={{ fontSize: 11, color: '#6d7577', marginTop: -10 }}>
+          <span style={{ fontSize: 11, color: 'var(--k-muted)', marginTop: -10 }}>
             Sin impacto y urgencia definidos, el ticket se crea en P3 por defecto.
           </span>
         )}
@@ -621,18 +621,18 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
                 {issue.message}
               </span>
             ))}
-            <span style={{ fontSize: 11, color: '#6d7577' }}>
+            <span style={{ fontSize: 11, color: 'var(--k-muted)' }}>
               Puedes adjuntarlos desde la conversación del ticket.
             </span>
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', borderTop: '1px solid #eceeef', paddingTop: 14 }}>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', borderTop: '1px solid var(--k-border-soft)', paddingTop: 14 }}>
           {createdTicket ? (
             <button
               type="button"
               onClick={() => onCreated(createdTicket)}
-              style={{ fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: '#15191a', color: '#fff', border: 'none', cursor: 'pointer' }}
+              style={{ fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: 'var(--k-primary)', color: '#fff', border: 'none', cursor: 'pointer' }}
             >
               Ver el ticket
             </button>
@@ -642,7 +642,7 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
                 type="button"
                 onClick={onCancel}
                 disabled={busy}
-                style={{ fontSize: 13, padding: '9px 14px', borderRadius: 7, background: '#fff', border: '1px solid #d8dcdd', cursor: 'pointer' }}
+                style={{ fontSize: 13, padding: '9px 14px', borderRadius: 7, background: '#fff', border: '1px solid var(--k-border-strong)', cursor: 'pointer' }}
               >
                 Cancelar
               </button>
@@ -655,7 +655,7 @@ export default function NewTicketDialog({ open, onCancel, onCreated }: Props) {
                   fontWeight: 600,
                   padding: '9px 14px',
                   borderRadius: 7,
-                  background: busy || !rawText.trim() || missingSystem ? '#c9cdce' : '#15191a',
+                  background: busy || !rawText.trim() || missingSystem ? 'var(--k-disabled)' : 'var(--k-primary)',
                   color: '#fff',
                   border: 'none',
                   cursor: busy || !rawText.trim() || missingSystem ? 'not-allowed' : 'pointer',
@@ -698,7 +698,7 @@ function AudioFileCapture({ onTranscribed }: { onTranscribed: (text: string) => 
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 12, borderRadius: 8, border: '1px dashed #d8dcdd', background: '#fafbfb' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 12, borderRadius: 8, border: '1px dashed var(--k-border-strong)', background: 'var(--k-surface-2)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <input
           type="file"
@@ -711,12 +711,12 @@ function AudioFileCapture({ onTranscribed }: { onTranscribed: (text: string) => 
           type="button"
           disabled={!file || busy}
           onClick={transcribe}
-          style={{ fontSize: 12, fontWeight: 600, padding: '7px 12px', borderRadius: 6, background: !file || busy ? '#c9cdce' : '#15191a', color: '#fff', border: 'none', cursor: !file || busy ? 'not-allowed' : 'pointer' }}
+          style={{ fontSize: 12, fontWeight: 600, padding: '7px 12px', borderRadius: 6, background: !file || busy ? 'var(--k-disabled)' : 'var(--k-primary)', color: '#fff', border: 'none', cursor: !file || busy ? 'not-allowed' : 'pointer' }}
         >
           {busy ? 'Transcribiendo…' : 'Transcribir'}
         </button>
       </div>
-      <span style={{ fontSize: 11, color: '#6d7577' }}>
+      <span style={{ fontSize: 11, color: 'var(--k-muted)' }}>
         Nota de voz de WhatsApp (.opus, .m4a, .mp3) u otro audio. Máximo 25 MB.
       </span>
       {error && <span role="alert" style={{ fontSize: 12, color: 'oklch(0.5 0.16 25)' }}>{error}</span>}
@@ -789,13 +789,13 @@ function LiveMicCapture({ onTranscribed }: { onTranscribed: (text: string) => vo
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 12, borderRadius: 8, border: '1px dashed #d8dcdd', background: '#fafbfb' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: 12, borderRadius: 8, border: '1px dashed var(--k-border-strong)', background: 'var(--k-surface-2)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         {!recording && !busy && (
           <button
             type="button"
             onClick={start}
-            style={{ fontSize: 12, fontWeight: 600, padding: '7px 12px', borderRadius: 6, background: '#15191a', color: '#fff', border: 'none', cursor: 'pointer' }}
+            style={{ fontSize: 12, fontWeight: 600, padding: '7px 12px', borderRadius: 6, background: 'var(--k-primary)', color: '#fff', border: 'none', cursor: 'pointer' }}
           >
             Empezar a grabar
           </button>
@@ -815,10 +815,10 @@ function LiveMicCapture({ onTranscribed }: { onTranscribed: (text: string) => vo
             </button>
           </>
         )}
-        {busy && <span style={{ fontSize: 12, color: '#6d7577' }}>Transcribiendo…</span>}
+        {busy && <span style={{ fontSize: 12, color: 'var(--k-muted)' }}>Transcribiendo…</span>}
       </div>
       {!recording && !busy && (
-        <span style={{ fontSize: 11, color: '#6d7577' }}>Dicta la solicitud. Al detener, se transcribe automáticamente.</span>
+        <span style={{ fontSize: 11, color: 'var(--k-muted)' }}>Dicta la solicitud. Al detener, se transcribe automáticamente.</span>
       )}
       {error && <span role="alert" style={{ fontSize: 12, color: 'oklch(0.5 0.16 25)' }}>{error}</span>}
     </div>

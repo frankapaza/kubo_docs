@@ -47,7 +47,7 @@ export default function DevKeysPage() {
     <div style={{ padding: 24, maxWidth: 980, display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div>
         <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>Mis claves de desarrollo</h1>
-        <p style={{ margin: '6px 0 0', fontSize: 13, color: '#6d7577', lineHeight: 1.5 }}>
+        <p style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--k-muted)', lineHeight: 1.5 }}>
           Cada clave conecta Claude Code, dentro de un repositorio, con los tickets y requerimientos de su cliente y
           sistema. Crea una por repo y por laptop; si la pierdes o cambias de equipo, revócala y crea otra.
         </p>
@@ -64,7 +64,7 @@ export default function DevKeysPage() {
           value={repoId}
           onChange={(e) => setRepoId(e.target.value ? Number(e.target.value) : '')}
           aria-label="Repositorio"
-          style={{ fontSize: 13, padding: '8px 10px', border: '1px solid #dfe3e4', borderRadius: 6, minWidth: 320 }}
+          style={{ fontSize: 13, padding: '8px 10px', border: '1px solid var(--k-border)', borderRadius: 6, minWidth: 320 }}
         >
           <option value="">Elige un repositorio registrado…</option>
           {activeRepos.map((r) => (
@@ -76,12 +76,12 @@ export default function DevKeysPage() {
         <button
           type="submit"
           disabled={repoId === '' || issue.isPending}
-          style={{ fontSize: 13, fontWeight: 600, padding: '8px 14px', borderRadius: 6, background: repoId === '' ? '#c9cdce' : '#15191a', color: '#fff', border: 'none', cursor: repoId === '' ? 'not-allowed' : 'pointer' }}
+          style={{ fontSize: 13, fontWeight: 600, padding: '8px 14px', borderRadius: 6, background: repoId === '' ? 'var(--k-disabled)' : 'var(--k-primary)', color: '#fff', border: 'none', cursor: repoId === '' ? 'not-allowed' : 'pointer' }}
         >
           Nueva clave
         </button>
         {activeRepos.length === 0 && !repos.isLoading && (
-          <span style={{ fontSize: 12, color: '#6d7577' }}>
+          <span style={{ fontSize: 12, color: 'var(--k-muted)' }}>
             No hay repos registrados: un administrador los registra en Clientes → Sistemas.
           </span>
         )}
@@ -89,7 +89,7 @@ export default function DevKeysPage() {
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
         <thead>
-          <tr style={{ textAlign: 'left', color: '#6d7577', fontSize: 11, textTransform: 'uppercase' }}>
+          <tr style={{ textAlign: 'left', color: 'var(--k-muted)', fontSize: 11, textTransform: 'uppercase' }}>
             <th style={{ padding: '8px 6px' }}>Repositorio</th>
             <th style={{ padding: '8px 6px' }}>Cliente · Sistema</th>
             <th style={{ padding: '8px 6px' }}>Clave</th>
@@ -100,13 +100,13 @@ export default function DevKeysPage() {
         </thead>
         <tbody>
           {keys.isLoading && (
-            <tr><td colSpan={6} style={{ padding: 10, color: '#6d7577' }}>Cargando…</td></tr>
+            <tr><td colSpan={6} style={{ padding: 10, color: 'var(--k-muted)' }}>Cargando…</td></tr>
           )}
           {keys.data?.length === 0 && (
-            <tr><td colSpan={6} style={{ padding: 10, color: '#6d7577' }}>Aún no tienes claves.</td></tr>
+            <tr><td colSpan={6} style={{ padding: 10, color: 'var(--k-muted)' }}>Aún no tienes claves.</td></tr>
           )}
           {keys.data?.map((k) => (
-            <tr key={k.id} style={{ borderTop: '1px solid #f1f3f3', color: k.status === 'REVOCADA' ? '#9aa0a1' : undefined }}>
+            <tr key={k.id} style={{ borderTop: '1px solid var(--k-border-soft)', color: k.status === 'REVOCADA' ? 'var(--k-faint)' : undefined }}>
               <td style={{ padding: '8px 6px' }}>{k.repoFullName}</td>
               <td style={{ padding: '8px 6px' }}>{k.clientName} · {k.systemName}</td>
               <td style={{ padding: '8px 6px', fontFamily: 'ui-monospace, Consolas, monospace' }}>{k.keyPrefix}…</td>
@@ -120,7 +120,7 @@ export default function DevKeysPage() {
                     onClick={() => {
                       if (window.confirm(`La clave ${k.keyPrefix}… dejará de funcionar al instante. ¿Revocar?`)) revoke.mutate(k.id);
                     }}
-                    style={{ fontSize: 12, padding: '5px 10px', borderRadius: 6, background: '#fff', border: '1px solid #d8dcdd', cursor: 'pointer' }}
+                    style={{ fontSize: 12, padding: '5px 10px', borderRadius: 6, background: '#fff', border: '1px solid var(--k-border-strong)', cursor: 'pointer' }}
                   >
                     Revocar
                   </button>
@@ -141,7 +141,7 @@ export default function DevKeysPage() {
         ] : []}
         onClose={() => setIssued(null)}
       >
-        <p style={{ margin: 0, fontSize: 12, lineHeight: 1.6, color: '#4b5355' }}>
+        <p style={{ margin: 0, fontSize: 12, lineHeight: 1.6, color: 'var(--k-ink-2)' }}>
           Requiere el MCP instalado en la laptop (<code>git clone</code> de <code>kubo-devdocs-mcp</code> en
           <code> C:\kubo</code>, luego <code>npm ci</code> y <code>npm run build</code>). Después abre Claude en esa carpeta y
           escribe <code>/mcp</code>: debe aparecer <strong>kubo-devdocs</strong> conectado.

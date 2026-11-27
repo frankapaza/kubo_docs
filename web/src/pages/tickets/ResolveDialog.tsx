@@ -34,7 +34,7 @@ export default function ResolveDialog({ open, onCancel, onConfirm }: Props) {
         value={value}
         rows={rows}
         onChange={(e) => set(e.target.value)}
-        style={{ fontSize: 13, padding: 9, border: '1px solid #dfe3e4', borderRadius: 6, resize: 'vertical', fontFamily: 'inherit' }}
+        style={{ fontSize: 13, padding: 9, border: '1px solid var(--k-border)', borderRadius: 6, resize: 'vertical', fontFamily: 'inherit' }}
       />
     </label>
   );
@@ -52,20 +52,20 @@ export default function ResolveDialog({ open, onCancel, onConfirm }: Props) {
         style={{ background: '#fff', borderRadius: 10, padding: 22, width: 560, maxWidth: '92vw', display: 'flex', flexDirection: 'column', gap: 14 }}
       >
         <h2 id="resolve-dialog-title" style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Marcar como resuelto</h2>
-        <span style={{ fontSize: 12, color: '#6d7577', lineHeight: 1.5 }}>
+        <span style={{ fontSize: 12, color: 'var(--k-muted)', lineHeight: 1.5 }}>
           Los tres campos son obligatorios: sin ellos el ticket no se puede resolver.
         </span>
         {field('Solución aplicada', resolutionMd, setResolutionMd, 4, 'resolve-solution')}
         {field('Causa raíz', rootCause, setRootCause, 2, 'resolve-root-cause')}
         {field('Acción correctiva / preventiva', correctiveAction, setCorrectiveAction, 2, 'resolve-corrective-action')}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button onClick={onCancel} style={{ fontSize: 13, padding: '9px 14px', borderRadius: 7, background: '#fff', border: '1px solid #d8dcdd', cursor: 'pointer' }}>
+          <button onClick={onCancel} style={{ fontSize: 13, padding: '9px 14px', borderRadius: 7, background: '#fff', border: '1px solid var(--k-border-strong)', cursor: 'pointer' }}>
             Cancelar
           </button>
           <button
             disabled={!ready}
             onClick={() => onConfirm({ resolutionMd, rootCause, correctiveAction })}
-            style={{ fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: ready ? '#15191a' : '#c9cdce', color: '#fff', border: 'none', cursor: ready ? 'pointer' : 'not-allowed' }}
+            style={{ fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: ready ? 'var(--k-ink)' : 'var(--k-disabled)', color: '#fff', border: 'none', cursor: ready ? 'pointer' : 'not-allowed' }}
           >
             Resolver
           </button>

@@ -8,7 +8,7 @@ const agents = [
     description:
       'Experto en metodologías ágiles para software, salud, manufactura, finanzas y más. Te ayuda con Scrum, Kanban, SAFe, retrospectivas, historias de usuario, OKRs y transformaciones organizacionales.',
     icon: ZapIcon,
-    color: 'from-violet-500 to-indigo-600',
+    color: 'from-violet-500 to-cyan-600',
     bg: 'bg-violet-50',
     border: 'border-violet-200',
     badge: 'text-violet-700 bg-violet-100',
@@ -35,7 +35,7 @@ export default function AgentsPage() {
     <div>
       <div className="mb-8">
         <div className="flex items-center gap-3 mb-2">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-kubo-primary to-indigo-600 flex items-center justify-center">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-kubo-primary to-cyan-600 flex items-center justify-center">
             <BotIcon size={18} className="text-white" />
           </div>
           <h1 className="text-2xl font-bold text-slate-900">Agentes IA</h1>

@@ -14,18 +14,18 @@ function apiError(e: unknown, fallback: string): string {
 const FECHA = new Intl.DateTimeFormat('es-PE', { dateStyle: 'medium', timeStyle: 'short' });
 
 const input: React.CSSProperties = {
-  fontSize: 12, padding: '6px 8px', border: '1px solid #dfe3e4', borderRadius: 6, width: '100%', boxSizing: 'border-box',
+  fontSize: 12, padding: '6px 8px', border: '1px solid var(--k-border)', borderRadius: 6, width: '100%', boxSizing: 'border-box',
 };
 const button: React.CSSProperties = {
-  fontSize: 12, padding: '6px 12px', borderRadius: 6, border: '1px solid #dfe3e4', background: '#fff', cursor: 'pointer',
+  fontSize: 12, padding: '6px 12px', borderRadius: 6, border: '1px solid var(--k-border)', background: '#fff', cursor: 'pointer',
 };
-const primary: React.CSSProperties = { ...button, background: '#15191a', color: '#fff', border: 'none', fontWeight: 600 };
+const primary: React.CSSProperties = { ...button, background: 'var(--k-primary)', color: '#fff', border: 'none', fontWeight: 600 };
 
 const STATUS: Record<string, { label: string; bg: string; fg: string }> = {
   SENT: { label: 'Enviada a firma', bg: '#fff7e6', fg: '#8a5a00' },
   SIGNED: { label: 'Firmada', bg: '#e8f6ee', fg: '#1d6b3f' },
-  DRAFT: { label: 'Borrador', bg: '#f1f3f3', fg: '#4a5052' },
-  CANCELLED: { label: 'Anulada', bg: '#f1f3f3', fg: '#6d7577' },
+  DRAFT: { label: 'Borrador', bg: 'var(--k-border-soft)', fg: 'var(--k-ink-2)' },
+  CANCELLED: { label: 'Anulada', bg: 'var(--k-border-soft)', fg: 'var(--k-muted)' },
   EXPIRED: { label: 'Vencida', bg: '#fdecec', fg: '#9b2c2c' },
 };
 
@@ -85,7 +85,7 @@ export default function WorkItemConformityPanel({
     onError: (e) => toast.error(apiError(e, 'No se pudo anular.')),
   });
 
-  if (acta.isLoading) return <div style={{ fontSize: 12, color: '#6d7577' }}>Cargando…</div>;
+  if (acta.isLoading) return <div style={{ fontSize: 12, color: 'var(--k-muted)' }}>Cargando…</div>;
 
   const a = acta.data;
   const busy = create.isPending || resend.isPending || cancel.isPending;
@@ -96,10 +96,10 @@ export default function WorkItemConformityPanel({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontWeight: 600, padding: '2px 8px', borderRadius: 4, background: st.bg, color: st.fg }}>{st.label}</span>
-          <span style={{ color: '#6d7577' }}>generada el {FECHA.format(new Date(a.createdAt))}</span>
+          <span style={{ color: 'var(--k-muted)' }}>generada el {FECHA.format(new Date(a.createdAt))}</span>
         </div>
         {a.signatories.map((s) => (
-          <div key={s.id} style={{ padding: '8px 10px', border: '1px solid #eceeef', borderRadius: 6 }}>
+          <div key={s.id} style={{ padding: '8px 10px', border: '1px solid var(--k-border-soft)', borderRadius: 6 }}>
             <strong>{s.fullName}</strong>
             {s.role ? ` · ${s.role}` : ''} · {s.email ?? 'sin correo'}
             <div style={{ color: s.status === 'SIGNED' ? '#1d6b3f' : '#8a5a00', marginTop: 2 }}>
@@ -130,7 +130,7 @@ export default function WorkItemConformityPanel({
           )}
         </div>
         {a.status === 'SIGNED' && (
-          <div style={{ color: '#6d7577' }}>El PDF firmado está en Documentos y el requerimiento se cerró.</div>
+          <div style={{ color: 'var(--k-muted)' }}>El PDF firmado está en Documentos y el requerimiento se cerró.</div>
         )}
       </div>
     );
@@ -138,7 +138,7 @@ export default function WorkItemConformityPanel({
 
   if (status !== 'PRUEBAS') {
     return (
-      <div style={{ fontSize: 12, color: '#6d7577' }}>
+      <div style={{ fontSize: 12, color: 'var(--k-muted)' }}>
         Se genera cuando el requerimiento está en <strong>Pruebas</strong>: el cliente lo firma por enlace y, al firmar, el
         requerimiento se cierra.
       </div>
@@ -150,7 +150,7 @@ export default function WorkItemConformityPanel({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12 }}>
-      <div style={{ color: '#6d7577' }}>
+      <div style={{ color: 'var(--k-muted)' }}>
         DevDocs arma el acta con los criterios de aceptación, el código entregado y los documentos vigentes, y se la envía
         al cliente para firmar por enlace. Al firmar, el requerimiento pasa a <strong>Cerrado</strong>.
       </div>

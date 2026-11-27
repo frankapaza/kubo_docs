@@ -37,7 +37,7 @@ function LogLineRow({ line, clienteNombre }: { line: LogRowData; clienteNombre?:
   const props = line.propiedades ? Object.entries(line.propiedades) : [];
 
   return (
-    <div style={{ borderBottom: '1px solid #eef0f1', fontSize: 12 }}>
+    <div style={{ borderBottom: '1px solid var(--k-surface-2)', fontSize: 12 }}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -48,7 +48,7 @@ function LogLineRow({ line, clienteNombre }: { line: LogRowData; clienteNombre?:
           fontFamily: 'inherit', fontSize: 'inherit',
         }}
       >
-        <span style={{ fontFamily: 'monospace', color: '#6d7577', flex: 'none' }}>{fmtTime(line.ts)}</span>
+        <span style={{ fontFamily: 'monospace', color: 'var(--k-muted)', flex: 'none' }}>{fmtTime(line.ts)}</span>
         <span
           style={{
             flex: 'none', width: 52, textAlign: 'center', borderRadius: 4, padding: '1px 0',
@@ -57,15 +57,15 @@ function LogLineRow({ line, clienteNombre }: { line: LogRowData; clienteNombre?:
         >
           {line.nivel}
         </span>
-        <span style={{ flex: 'none', maxWidth: 260, color: '#3a4041', ...ellipsis }}>
+        <span style={{ flex: 'none', maxWidth: 260, color: 'var(--k-ink-2)', ...ellipsis }}>
           {[clienteNombre, line.aplicativo, line.servidor].filter(Boolean).join(' · ')}
         </span>
-        <span style={{ flex: 'none', maxWidth: 220, color: '#6d7577', ...ellipsis }}>{line.logger}</span>
+        <span style={{ flex: 'none', maxWidth: 220, color: 'var(--k-muted)', ...ellipsis }}>{line.logger}</span>
         <span style={{ flex: 1, minWidth: 0, fontFamily: 'monospace', ...ellipsis }}>{line.mensaje}</span>
       </button>
       {open && (
         <div style={{ padding: '6px 12px 10px 24px', background: '#f6f8f8', display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ color: '#6d7577' }}>Hilo: {line.hilo ?? '—'}</div>
+          <div style={{ color: 'var(--k-muted)' }}>Hilo: {line.hilo ?? '—'}</div>
           <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 12 }}>{line.mensaje}</pre>
           {line.excepcion && (
             <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 11, color: '#b3261e', maxHeight: 360, overflow: 'auto' }}>
@@ -76,7 +76,7 @@ function LogLineRow({ line, clienteNombre }: { line: LogRowData; clienteNombre?:
             <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '2px 12px' }}>
               {props.map(([k, v]) => (
                 <div key={k} style={{ display: 'contents' }}>
-                  <dt style={{ color: '#6d7577' }}>{k}</dt>
+                  <dt style={{ color: 'var(--k-muted)' }}>{k}</dt>
                   <dd style={{ margin: 0, wordBreak: 'break-word' }}>{v}</dd>
                 </div>
               ))}

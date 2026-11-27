@@ -12,7 +12,7 @@ const AGENT_META: Record<
     name: 'Kubo Agile Coach',
     subtitle: 'Experto en metodologías ágiles · Scrum · Kanban · SAFe · OKRs',
     color: 'text-violet-700',
-    gradient: 'from-violet-500 to-indigo-600',
+    gradient: 'from-violet-500 to-cyan-600',
     Icon: ZapIcon,
   },
   documentation: {

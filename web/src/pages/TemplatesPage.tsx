@@ -78,7 +78,7 @@ export default function TemplatesPage() {
           <button
             key={t.id}
             onClick={() => setEditingId(t.id)}
-            className="text-left bg-white border border-slate-200 rounded-xl p-5 hover:shadow-pop hover:border-indigo-200 transition"
+            className="text-left bg-white border border-slate-200 rounded-xl p-5 hover:shadow-pop hover:border-cyan-200 transition"
           >
             <div className="flex items-start justify-between gap-2 mb-2">
               <div className="flex items-center gap-2">

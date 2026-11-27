@@ -105,7 +105,7 @@ function localInputToIso(v: string): string | undefined {
 const controlStyle: React.CSSProperties = {
   fontSize: 12,
   padding: '6px 8px',
-  border: '1px solid #dfe3e4',
+  border: '1px solid var(--k-border)',
   borderRadius: 6,
   background: '#fff',
   fontFamily: 'inherit',
@@ -117,7 +117,7 @@ const labelStyle: React.CSSProperties = {
   gap: 3,
   fontSize: 11,
   fontWeight: 600,
-  color: '#6d7577',
+  color: 'var(--k-muted)',
 };
 
 export default function MonitoringFilters({ value, onChange, show }: Props) {
@@ -293,7 +293,7 @@ export default function MonitoringFilters({ value, onChange, show }: Props) {
         <button
           type="button"
           onClick={() => onChange({})}
-          style={{ ...controlStyle, cursor: 'pointer', color: '#3a4041' }}
+          style={{ ...controlStyle, cursor: 'pointer', color: 'var(--k-ink-2)' }}
         >
           Limpiar
         </button>

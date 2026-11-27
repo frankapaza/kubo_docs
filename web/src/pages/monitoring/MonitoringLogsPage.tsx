@@ -20,8 +20,8 @@ const DEFAULT_RANGE_MS = 60 * 60 * 1000;
 const TOP_EPSILON = 24;
 
 const btn: React.CSSProperties = {
-  fontSize: 12, padding: '6px 10px', border: '1px solid #dfe3e4', borderRadius: 6,
-  background: '#fff', cursor: 'pointer', color: '#3a4041', fontFamily: 'inherit',
+  fontSize: 12, padding: '6px 10px', border: '1px solid var(--k-border)', borderRadius: 6,
+  background: '#fff', cursor: 'pointer', color: 'var(--k-ink-2)', fontFamily: 'inherit',
 };
 
 export default function MonitoringLogsPage() {
@@ -183,10 +183,10 @@ export default function MonitoringLogsPage() {
 
       <MonitoringFilters value={filters} onChange={changeFilters} show={fields} />
       {!live && !filters.desde && !filters.hasta && (
-        <div style={{ fontSize: 11, color: '#6d7577' }}>Mostrando la última hora. Elige un rango para ver otra.</div>
+        <div style={{ fontSize: 11, color: 'var(--k-muted)' }}>Mostrando la última hora. Elige un rango para ver otra.</div>
       )}
       {live && (
-        <div style={{ fontSize: 11, color: '#6d7577' }}>
+        <div style={{ fontSize: 11, color: 'var(--k-muted)' }}>
           En vivo: solo llegan líneas nuevas que cumplan los filtros (se conservan las {MAX_LIVE} últimas).
         </div>
       )}
@@ -206,13 +206,13 @@ export default function MonitoringLogsPage() {
       <div
         ref={scroller}
         onScroll={onScroll}
-        style={{ border: '1px solid #dfe3e4', borderRadius: 8, background: '#fff', maxHeight: '70vh', overflow: 'auto' }}
+        style={{ border: '1px solid var(--k-border)', borderRadius: 8, background: '#fff', maxHeight: '70vh', overflow: 'auto' }}
       >
         {failed && <div style={{ padding: 16, color: '#b3261e', fontSize: 13 }}>No se pudieron cargar los logs.</div>}
-        {!live && search.isLoading && <div style={{ padding: 16, fontSize: 13, color: '#6d7577' }}>Cargando…</div>}
+        {!live && search.isLoading && <div style={{ padding: 16, fontSize: 13, color: 'var(--k-muted)' }}>Cargando…</div>}
         {rows.map((r) => <LogLineRow key={r.key} line={r} clienteNombre={clienteNombre(r.clienteId)} />)}
         {!failed && !(!live && search.isLoading) && rows.length === 0 && (
-          <div style={{ padding: 16, fontSize: 13, color: '#6d7577' }}>
+          <div style={{ padding: 16, fontSize: 13, color: 'var(--k-muted)' }}>
             {live ? 'Esperando líneas nuevas…' : 'No hay logs para estos filtros.'}
           </div>
         )}

@@ -34,8 +34,8 @@ function formatDueDate(dueDate: string | null): string {
 }
 
 const fieldRow: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', gap: 8 };
-const fieldLabel: React.CSSProperties = { color: '#6d7577' };
-const fieldValue: React.CSSProperties = { color: '#3a4041', textAlign: 'right' };
+const fieldLabel: React.CSSProperties = { color: 'var(--k-muted)' };
+const fieldValue: React.CSSProperties = { color: 'var(--k-ink-2)', textAlign: 'right' };
 
 /**
  * Panel lateral de detalle: se abre desde una tarjeta del tablero (Tarea
@@ -224,7 +224,7 @@ export default function WorkItemPanel({ workItemId, onClose, onChanged }: WorkIt
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
           <div>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: '#6d7577' }}>{label}</span>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: 'var(--k-muted)' }}>{label}</span>
             <h2 id="work-item-panel-title" style={{ margin: '4px 0 0', fontSize: 16, fontWeight: 600 }}>
               {item?.title ?? 'Requerimiento'}
             </h2>
@@ -239,7 +239,7 @@ export default function WorkItemPanel({ workItemId, onClose, onChanged }: WorkIt
           </button>
         </div>
 
-        {loading && <span style={{ fontSize: 13, color: '#6d7577' }}>Cargando…</span>}
+        {loading && <span style={{ fontSize: 13, color: 'var(--k-muted)' }}>Cargando…</span>}
         {loadError && (
           <span role="alert" style={{ fontSize: 13, color: 'oklch(0.5 0.16 25)' }}>{loadError}</span>
         )}
@@ -270,18 +270,18 @@ export default function WorkItemPanel({ workItemId, onClose, onChanged }: WorkIt
             )}
 
             <section>
-              <h3 style={{ margin: '0 0 6px', fontSize: 12, fontWeight: 600, color: '#6d7577' }}>Descripción</h3>
-              <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: '#3a4041', whiteSpace: 'pre-wrap' }}>
+              <h3 style={{ margin: '0 0 6px', fontSize: 12, fontWeight: 600, color: 'var(--k-muted)' }}>Descripción</h3>
+              <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, color: 'var(--k-ink-2)', whiteSpace: 'pre-wrap' }}>
                 {item.descriptionMd || 'Sin descripción.'}
               </p>
             </section>
 
             {item.acceptanceCriteria && item.acceptanceCriteria.length > 0 && (
               <section>
-                <h3 style={{ margin: '0 0 6px', fontSize: 12, fontWeight: 600, color: '#6d7577' }}>
+                <h3 style={{ margin: '0 0 6px', fontSize: 12, fontWeight: 600, color: 'var(--k-muted)' }}>
                   Criterios de aceptación
                 </h3>
-                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.6, color: '#3a4041' }}>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.6, color: 'var(--k-ink-2)' }}>
                   {item.acceptanceCriteria.map((c, idx) => (
                     <li key={idx}>{c}</li>
                   ))}
@@ -303,7 +303,7 @@ export default function WorkItemPanel({ workItemId, onClose, onChanged }: WorkIt
                 <span style={fieldValue}>{formatDueDate(item.dueDate)}</span>
               </div>
             </section>
-            <span style={{ fontSize: 11, color: '#9aa1a2', lineHeight: 1.5, marginTop: -8 }}>
+            <span style={{ fontSize: 11, color: 'var(--k-faint)', lineHeight: 1.5, marginTop: -8 }}>
               La fecha objetivo es una meta que se propone el equipo, no un compromiso de SLA con el cliente.
             </span>
 
@@ -316,7 +316,7 @@ export default function WorkItemPanel({ workItemId, onClose, onChanged }: WorkIt
                 aria-label={`Cambiar prioridad de ${label}`}
                 onChange={(e) => handlePriorityChange(e.target.value as WorkItemPriority)}
                 style={{
-                  fontSize: 13, padding: '8px 10px', border: '1px solid #dfe3e4', borderRadius: 6,
+                  fontSize: 13, padding: '8px 10px', border: '1px solid var(--k-border)', borderRadius: 6,
                   width: '100%', boxSizing: 'border-box',
                   background: PRIORITY_STYLES[item.priority].bg, color: PRIORITY_STYLES[item.priority].fg,
                   fontWeight: 600,
@@ -337,7 +337,7 @@ export default function WorkItemPanel({ workItemId, onClose, onChanged }: WorkIt
                 aria-label={`Cambiar asignado de ${label}`}
                 onChange={(e) => handleAssigneeChange(e.target.value)}
                 style={{
-                  fontSize: 13, padding: '8px 10px', border: '1px solid #dfe3e4', borderRadius: 6,
+                  fontSize: 13, padding: '8px 10px', border: '1px solid var(--k-border)', borderRadius: 6,
                   width: '100%', boxSizing: 'border-box',
                 }}
               >
@@ -357,17 +357,17 @@ export default function WorkItemPanel({ workItemId, onClose, onChanged }: WorkIt
             />
 
             <section>
-              <h3 style={{ margin: '0 0 12px', fontSize: 12, fontWeight: 600, color: '#6d7577' }}>Especificación con IA</h3>
+              <h3 style={{ margin: '0 0 12px', fontSize: 12, fontWeight: 600, color: 'var(--k-muted)' }}>Especificación con IA</h3>
               <WorkItemSpecAssistant item={item} onChanged={reloadAfterChange} />
             </section>
 
             <section>
-              <h3 style={{ margin: '0 0 12px', fontSize: 12, fontWeight: 600, color: '#6d7577' }}>Documentos</h3>
+              <h3 style={{ margin: '0 0 12px', fontSize: 12, fontWeight: 600, color: 'var(--k-muted)' }}>Documentos</h3>
               <WorkItemDocumentsPanel workItemId={workItemId} onChanged={reloadAfterChange} />
             </section>
 
             <section>
-              <h3 style={{ margin: '0 0 12px', fontSize: 12, fontWeight: 600, color: '#6d7577' }}>Acta de conformidad</h3>
+              <h3 style={{ margin: '0 0 12px', fontSize: 12, fontWeight: 600, color: 'var(--k-muted)' }}>Acta de conformidad</h3>
               <WorkItemConformityPanel
                 workItemId={workItemId}
                 clientId={item.clientId}
@@ -377,12 +377,12 @@ export default function WorkItemPanel({ workItemId, onClose, onChanged }: WorkIt
             </section>
 
             <section>
-              <h3 style={{ margin: '0 0 12px', fontSize: 12, fontWeight: 600, color: '#6d7577' }}>Código</h3>
+              <h3 style={{ margin: '0 0 12px', fontSize: 12, fontWeight: 600, color: 'var(--k-muted)' }}>Código</h3>
               <CodeLinksPanel target={{ workItemId }} />
             </section>
 
             <section>
-              <h3 style={{ margin: '0 0 12px', fontSize: 12, fontWeight: 600, color: '#6d7577' }}>Historial</h3>
+              <h3 style={{ margin: '0 0 12px', fontSize: 12, fontWeight: 600, color: 'var(--k-muted)' }}>Historial</h3>
               <WorkItemTimeline events={detail!.timeline} usersById={usersById} />
             </section>
           </>

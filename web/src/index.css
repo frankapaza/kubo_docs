@@ -4,6 +4,30 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Paleta «Océano». Los estilos en línea de las pantallas usan estas variables
+ * (var(--k-…)); los de Tailwind, los colores `kubo-*` de tailwind.config.js,
+ * con los mismos valores. Para cambiar la paleta, se cambian los dos lugares.
+ */
+:root {
+  --k-primary: #0E7490;
+  --k-primary-dark: #0B5A70;
+  --k-accent: #14B8A6;
+  --k-accent-soft: #CCF1EC;
+  --k-accent-ink: #0B5E57;
+  --k-bg: #F3F7F9;
+  --k-surface-2: #F6F9FA;
+  --k-column: #EAF0F3;
+  --k-border: #DCE4EA;
+  --k-border-strong: #CBD6DE;
+  --k-border-soft: #E9EFF2;
+  --k-ink: #10232F;
+  --k-ink-2: #34495A;
+  --k-muted: #566672;
+  --k-faint: #8696A1;
+  --k-disabled: #B9C6CE;
+}
+
 @layer base {
   html, body, #root {
     @apply h-full;

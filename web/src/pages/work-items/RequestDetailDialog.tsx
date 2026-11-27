@@ -14,7 +14,7 @@ interface Props {
 }
 
 const fieldStyle: React.CSSProperties = {
-  fontSize: 13, padding: '8px 10px', border: '1px solid #dfe3e4', borderRadius: 6,
+  fontSize: 13, padding: '8px 10px', border: '1px solid var(--k-border)', borderRadius: 6,
   fontFamily: 'inherit', width: '100%', boxSizing: 'border-box', resize: 'vertical',
 };
 
@@ -84,7 +84,7 @@ export default function RequestDetailDialog({ item, initialMessage, onCancel, on
         <h2 id="request-detail-title" style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>
           Pedir más detalle · {item.code ?? `#${item.id}`}
         </h2>
-        <span style={{ fontSize: 12, color: '#6d7577' }}>{item.title}</span>
+        <span style={{ fontSize: 12, color: 'var(--k-muted)' }}>{item.title}</span>
 
         {error && (
           <div role="alert" style={{ fontSize: 12, color: 'oklch(0.5 0.16 25)', background: 'oklch(0.97 0.02 25)', padding: '8px 10px', borderRadius: 6 }}>
@@ -105,7 +105,7 @@ export default function RequestDetailDialog({ item, initialMessage, onCancel, on
             style={fieldStyle}
           />
         </label>
-        <span style={{ fontSize: 11, color: '#6d7577', lineHeight: 1.5 }}>
+        <span style={{ fontSize: 11, color: 'var(--k-muted)', lineHeight: 1.5 }}>
           El cliente verá este texto en su portal{sinAutor ? '' : ' y le llegará por correo'}. El requerimiento queda en
           «Falta información» hasta que responda; igual puedes aceptarlo o rechazarlo antes.
         </span>
@@ -115,7 +115,7 @@ export default function RequestDetailDialog({ item, initialMessage, onCancel, on
             type="button"
             onClick={onCancel}
             disabled={busy}
-            style={{ fontSize: 13, padding: '8px 14px', borderRadius: 6, border: '1px solid #d8dcdd', background: '#fff', cursor: 'pointer' }}
+            style={{ fontSize: 13, padding: '8px 14px', borderRadius: 6, border: '1px solid var(--k-border-strong)', background: '#fff', cursor: 'pointer' }}
           >
             Cancelar
           </button>
@@ -125,7 +125,7 @@ export default function RequestDetailDialog({ item, initialMessage, onCancel, on
             disabled={busy || !canSubmit}
             style={{
               fontSize: 13, fontWeight: 600, padding: '8px 14px', borderRadius: 6, border: 'none', color: '#fff',
-              background: busy || !canSubmit ? '#c9cdce' : '#15191a', cursor: busy || !canSubmit ? 'not-allowed' : 'pointer',
+              background: busy || !canSubmit ? 'var(--k-disabled)' : 'var(--k-primary)', cursor: busy || !canSubmit ? 'not-allowed' : 'pointer',
             }}
           >
             {busy ? 'Enviando…' : 'Enviar al cliente'}

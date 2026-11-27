@@ -75,12 +75,12 @@ export default function MonitoringErrorsPage() {
     <div style={{ padding: 26, display: 'flex', flexDirection: 'column', gap: 22 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <h1 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Errores</h1>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#6d7577' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--k-muted)' }}>
           Ordenar por
           <select
             value={orden}
             onChange={(e) => setOrden(e.target.value as Orden)}
-            style={{ fontSize: 12, padding: '6px 8px', border: '1px solid #dfe3e4', borderRadius: 6, background: '#fff' }}
+            style={{ fontSize: 12, padding: '6px 8px', border: '1px solid var(--k-border)', borderRadius: 6, background: '#fff' }}
           >
             <option value="ultima">Última vez</option>
             <option value="cantidad">Cantidad</option>
@@ -88,8 +88,8 @@ export default function MonitoringErrorsPage() {
         </label>
       </div>
 
-      <section style={{ background: '#fff', border: '1px solid #e2e5e6', borderRadius: 10, overflow: 'hidden' }}>
-        <div style={{ padding: '13px 18px', borderBottom: '1px solid #eceeef' }}>
+      <section style={{ background: '#fff', border: '1px solid var(--k-border)', borderRadius: 10, overflow: 'hidden' }}>
+        <div style={{ padding: '13px 18px', borderBottom: '1px solid var(--k-border-soft)' }}>
           <MonitoringFilters
             value={filters}
             onChange={changeFilters}
@@ -102,7 +102,7 @@ export default function MonitoringErrorsPage() {
             <div
               style={{
                 display: 'grid', gridTemplateColumns: GRID, gap: 12, padding: '10px 18px',
-                fontSize: 11, fontWeight: 600, color: '#6d7577', borderBottom: '1px solid #eceeef',
+                fontSize: 11, fontWeight: 600, color: 'var(--k-muted)', borderBottom: '1px solid var(--k-border-soft)',
               }}
             >
               <span>Estado</span>
@@ -114,7 +114,7 @@ export default function MonitoringErrorsPage() {
               <span>Ticket</span>
             </div>
 
-            {isLoading && <div style={{ padding: 18, fontSize: 13, color: '#6d7577' }}>Cargando…</div>}
+            {isLoading && <div style={{ padding: 18, fontSize: 13, color: 'var(--k-muted)' }}>Cargando…</div>}
             {error && !data && (
               <div role="alert" style={{ padding: 18, fontSize: 13, color: 'oklch(0.5 0.16 25)' }}>
                 {(error as { response?: { data?: { message?: string } } })?.response?.data?.message ??
@@ -122,7 +122,7 @@ export default function MonitoringErrorsPage() {
               </div>
             )}
             {!isLoading && !error && items.length === 0 && (
-              <div style={{ padding: 18, fontSize: 13, color: '#6d7577' }}>No hay errores con estos filtros.</div>
+              <div style={{ padding: 18, fontSize: 13, color: 'var(--k-muted)' }}>No hay errores con estos filtros.</div>
             )}
 
             {items.map((g) => {
@@ -134,7 +134,7 @@ export default function MonitoringErrorsPage() {
                   to={`/monitoreo/errores/${g.id}`}
                   style={{
                     display: 'grid', gridTemplateColumns: GRID, gap: 12, padding: '12px 18px',
-                    alignItems: 'center', borderBottom: '1px solid #f1f3f3', textDecoration: 'none',
+                    alignItems: 'center', borderBottom: '1px solid var(--k-border-soft)', textDecoration: 'none',
                     color: 'inherit', fontSize: 13,
                   }}
                 >
@@ -151,16 +151,16 @@ export default function MonitoringErrorsPage() {
                       <span style={{ fontSize: 11, color: '#a35c00' }}>Reabierto{g.reopenReason ? `: ${g.reopenReason}` : ''}</span>
                     )}
                   </span>
-                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#3a4041' }}>
+                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--k-ink-2)' }}>
                     {g.clientName ?? 'Interno'} · {g.systemName ?? '—'}
                   </span>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#3a4041' }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--k-ink-2)' }}>
                     {g.aplicativo}
                   </span>
                   <span style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                     {g.occurrencesTotal.toLocaleString('es-PE')}
                   </span>
-                  <span style={{ fontSize: 12, color: '#3a4041' }}>{fmtDateTime(g.lastSeenAt)}</span>
+                  <span style={{ fontSize: 12, color: 'var(--k-ink-2)' }}>{fmtDateTime(g.lastSeenAt)}</span>
                   <span>
                     {g.ticket && ticketId !== undefined ? (
                       // Un `<a>` dentro del `<a>` de la fila no es válido: el enlace al
@@ -194,7 +194,7 @@ export default function MonitoringErrorsPage() {
           </div>
         </div>
 
-        <div style={{ padding: '12px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12, color: '#6d7577' }}>
+        <div style={{ padding: '12px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 12, color: 'var(--k-muted)' }}>
           <span>{total.toLocaleString('es-PE')} errores</span>
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <button type="button" disabled={page <= 1} onClick={() => goPage(page - 1)} style={pagerBtn(page <= 1)}>
@@ -212,6 +212,6 @@ export default function MonitoringErrorsPage() {
 }
 
 const pagerBtn = (disabled: boolean): React.CSSProperties => ({
-  fontSize: 12, padding: '5px 10px', borderRadius: 6, border: '1px solid #dfe3e4', background: '#fff',
-  color: '#3a4041', cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
+  fontSize: 12, padding: '5px 10px', borderRadius: 6, border: '1px solid var(--k-border)', background: '#fff',
+  color: 'var(--k-ink-2)', cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
 });

@@ -12,6 +12,7 @@ import ChangeClientDialog from './tickets/ChangeClientDialog';
 import ConcludeTicketsDialog, { ConcludeValues } from './tickets/ConcludeTicketsDialog';
 import { useAuth } from '../auth/AuthContext';
 import { canManageUsers } from '../auth/permissions';
+import { ClientTag } from './work-items/client-colors';
 
 type Chip = 'Todos' | 'Abiertos' | 'P1' | 'SLA en riesgo' | 'Archivados' | TicketStatus;
 
@@ -54,6 +55,7 @@ export default function TicketsListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const clientFilter = Number(searchParams.get('cliente')) || null;
   const [clients, setClients] = useState<Client[]>([]);
+  const clientsById = useMemo(() => new Map(clients.map((c) => [c.id, c.razonSocial])), [clients]);
   const setClientFilter = (id: number | null) => {
     const next = new URLSearchParams(searchParams);
     if (id) next.set('cliente', String(id));
@@ -243,14 +245,14 @@ export default function TicketsListPage() {
         <button
           type="button"
           onClick={() => setNewTicketOpen(true)}
-          style={{ fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: '#15191a', color: '#fff', border: 'none', cursor: 'pointer' }}
+          style={{ fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: 'var(--k-primary)', color: '#fff', border: 'none', cursor: 'pointer' }}
         >
           + Nuevo ticket
         </button>
       </div>
 
-      <section style={{ background: '#fff', border: '1px solid #e2e5e6', borderRadius: 10, overflow: 'hidden' }}>
-        <div style={{ padding: '13px 18px', borderBottom: '1px solid #eceeef', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <section style={{ background: '#fff', border: '1px solid var(--k-border)', borderRadius: 10, overflow: 'hidden' }}>
+        <div style={{ padding: '13px 18px', borderBottom: '1px solid var(--k-border-soft)', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           {CHIPS.map((c) => (
             <button
               key={c}
@@ -259,9 +261,9 @@ export default function TicketsListPage() {
               style={{
                 cursor: 'pointer', fontSize: 12, fontWeight: 500, padding: '6px 12px',
                 borderRadius: 16,
-                border: `1px solid ${filter === c ? '#15191a' : '#dfe3e4'}`,
-                background: filter === c ? '#15191a' : '#fff',
-                color: filter === c ? '#fff' : '#3a4041',
+                border: `1px solid ${filter === c ? 'var(--k-ink)' : 'var(--k-border)'}`,
+                background: filter === c ? 'var(--k-ink)' : '#fff',
+                color: filter === c ? '#fff' : 'var(--k-ink-2)',
               }}
             >
               {chipLabel(c)}
@@ -273,7 +275,7 @@ export default function TicketsListPage() {
             aria-label="Filtrar por cliente"
             style={{
               marginLeft: 'auto', fontSize: 12, padding: '6px 10px', borderRadius: 6, maxWidth: 220,
-              border: `1px solid ${clientFilter ? '#15191a' : '#dfe3e4'}`, background: '#fff', color: '#3a4041',
+              border: `1px solid ${clientFilter ? 'var(--k-ink)' : 'var(--k-border)'}`, background: '#fff', color: 'var(--k-ink-2)',
             }}
           >
             <option value="">Todos los clientes</option>
@@ -286,15 +288,15 @@ export default function TicketsListPage() {
             onChange={(e) => setQInput(e.target.value)}
             placeholder="Buscar por código, asunto o texto"
             aria-label="Buscar tickets por código, asunto o texto"
-            style={{ fontSize: 12, padding: '6px 10px', border: '1px solid #dfe3e4', borderRadius: 6, minWidth: 240 }}
+            style={{ fontSize: 12, padding: '6px 10px', border: '1px solid var(--k-border)', borderRadius: 6, minWidth: 240 }}
           />
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: '#6d7577' }}>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: 'var(--k-muted)' }}>
             {count} tickets
           </span>
         </div>
 
         {isAdmin && (visibleSelected.length > 0 || moving) && (
-          <div style={{ padding: '10px 18px', borderBottom: '1px solid #eceeef', background: '#f4f7f7', display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}>
+          <div style={{ padding: '10px 18px', borderBottom: '1px solid var(--k-border-soft)', background: 'var(--k-surface-2)', display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}>
             <span style={{ fontWeight: 600 }}>
               {moving ? busyLabel : `${visibleSelected.length} seleccionado${visibleSelected.length === 1 ? '' : 's'}`}
             </span>
@@ -302,7 +304,7 @@ export default function TicketsListPage() {
               type="button"
               disabled={moving}
               onClick={() => setMoveOpen(true)}
-              style={{ fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 6, border: 'none', background: moving ? '#c9cdce' : '#15191a', color: '#fff', cursor: moving ? 'not-allowed' : 'pointer' }}
+              style={{ fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 6, border: 'none', background: moving ? 'var(--k-disabled)' : 'var(--k-primary)', color: '#fff', cursor: moving ? 'not-allowed' : 'pointer' }}
             >
               Cambiar cliente
             </button>
@@ -311,7 +313,7 @@ export default function TicketsListPage() {
               disabled={moving || visibleSelected.every((t) => t.status === 'CERRADO')}
               onClick={() => setConcludeOpen(true)}
               title="Resolver y cerrar los seleccionados con una observación general"
-              style={{ fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 6, border: '1px solid #15191a', background: '#fff', color: '#15191a', cursor: moving ? 'not-allowed' : 'pointer' }}
+              style={{ fontSize: 12, fontWeight: 600, padding: '6px 12px', borderRadius: 6, border: '1px solid var(--k-ink)', background: '#fff', color: 'var(--k-ink)', cursor: moving ? 'not-allowed' : 'pointer' }}
             >
               Concluir
             </button>
@@ -319,14 +321,14 @@ export default function TicketsListPage() {
               type="button"
               disabled={moving}
               onClick={() => setSelected(new Set())}
-              style={{ fontSize: 12, padding: '6px 12px', borderRadius: 6, border: '1px solid #dfe3e4', background: '#fff', color: '#3a4041', cursor: 'pointer' }}
+              style={{ fontSize: 12, padding: '6px 12px', borderRadius: 6, border: '1px solid var(--k-border)', background: '#fff', color: 'var(--k-ink-2)', cursor: 'pointer' }}
             >
               Quitar selección
             </button>
           </div>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: GRID_COLUMNS, gap: 12, padding: '10px 18px', borderBottom: '1px solid #eceeef', background: '#fafbfb', fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#6d7577' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: GRID_COLUMNS, gap: 12, padding: '10px 18px', borderBottom: '1px solid var(--k-border-soft)', background: 'var(--k-surface-2)', fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--k-muted)' }}>
           {isAdmin && (
             <input
               type="checkbox"
@@ -341,10 +343,10 @@ export default function TicketsListPage() {
           <span>Prior.</span><span>Estado</span><span>Asignado</span><span>SLA</span><span />
         </div>
 
-        {loading && <div style={{ padding: 18, fontSize: 13, color: '#6d7577' }}>Cargando…</div>}
+        {loading && <div style={{ padding: 18, fontSize: 13, color: 'var(--k-muted)' }}>Cargando…</div>}
         {error && <div style={{ padding: 18, fontSize: 13, color: 'oklch(0.5 0.16 25)' }}>{error}</div>}
         {!loading && !error && tickets.length === 0 && (
-          <div style={{ padding: 18, fontSize: 13, color: '#6d7577' }}>
+          <div style={{ padding: 18, fontSize: 13, color: 'var(--k-muted)' }}>
             No hay tickets que coincidan con el filtro.
           </div>
         )}
@@ -359,7 +361,7 @@ export default function TicketsListPage() {
             <Link
               key={t.id}
               to={`/tickets/${t.id}`}
-              style={{ display: 'grid', gridTemplateColumns: GRID_COLUMNS, gap: 12, alignItems: 'center', padding: '13px 18px', borderBottom: '1px solid #f1f3f3', cursor: 'pointer', color: 'inherit', textDecoration: 'none', background: selected.has(t.id) ? '#f4f7f7' : undefined }}
+              style={{ display: 'grid', gridTemplateColumns: GRID_COLUMNS, gap: 12, alignItems: 'center', padding: '13px 18px', borderBottom: '1px solid var(--k-border-soft)', cursor: 'pointer', color: 'inherit', textDecoration: 'none', background: selected.has(t.id) ? 'var(--k-surface-2)' : undefined }}
             >
               {isAdmin && (
                 // La fila es un enlace: el clic en la casilla no debe abrir el ticket.
@@ -374,29 +376,36 @@ export default function TicketsListPage() {
                   />
                 </span>
               )}
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: '#6d7577' }}>{t.code}</span>
-              <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {t.subject ?? t.rawText.slice(0, 80)}
+              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: 'var(--k-muted)' }}>{t.code}</span>
+              <span style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+                <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {t.subject ?? t.rawText.slice(0, 80)}
+                </span>
+                {t.clientId != null && !clientFilter && (
+                  <span style={{ display: 'flex' }}>
+                    <ClientTag clientId={t.clientId} name={clientsById.get(t.clientId) ?? `Cliente #${t.clientId}`} />
+                  </span>
+                )}
               </span>
-              <span style={{ fontSize: 12, color: '#4a5052' }}>{t.serviceCategory ?? '—'}</span>
+              <span style={{ fontSize: 12, color: 'var(--k-ink-2)' }}>{t.serviceCategory ?? '—'}</span>
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, fontWeight: 600, justifySelf: 'start', padding: '2px 7px', borderRadius: 4, background: pr.bg, color: pr.fg }}>
                 {t.priority}
               </span>
               <span style={{ fontSize: 11, fontWeight: 600, justifySelf: 'start', padding: '3px 8px', borderRadius: 4, background: st.bg, color: st.fg }}>
                 {STATUS_LABELS[t.status]}
               </span>
-              <span style={{ fontSize: 12, color: '#4a5052' }}>{assigneeLabel}</span>
+              <span style={{ fontSize: 12, color: 'var(--k-ink-2)' }}>{assigneeLabel}</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <div style={{ flex: 1, height: 5, borderRadius: 3, background: '#eceeef' }}>
+                <div style={{ flex: 1, height: 5, borderRadius: 3, background: 'var(--k-border-soft)' }}>
                   <div style={{ height: '100%', width: `${t.slaPct ?? 0}%`, background: slaBarColor(t.slaPct, t.slaOverdue), borderRadius: 3 }} />
                 </div>
-                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: '#6d7577' }}>{t.slaLabel}</span>
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: 'var(--k-muted)' }}>{t.slaLabel}</span>
               </div>
               <button
                 type="button"
                 onClick={(e) => toggleArchive(e, t)}
                 title={t.archivedAt ? 'Devolver a la bandeja' : 'Quitar de la bandeja (reversible)'}
-                style={{ justifySelf: 'end', cursor: 'pointer', fontSize: 11, fontWeight: 500, padding: '4px 9px', borderRadius: 6, border: '1px solid #dfe3e4', background: '#fff', color: '#3a4041' }}
+                style={{ justifySelf: 'end', cursor: 'pointer', fontSize: 11, fontWeight: 500, padding: '4px 9px', borderRadius: 6, border: '1px solid var(--k-border)', background: '#fff', color: 'var(--k-ink-2)' }}
               >
                 {t.archivedAt ? 'Desarchivar' : 'Archivar'}
               </button>

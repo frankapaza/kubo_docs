@@ -40,7 +40,7 @@ function fmt(v: string | null): string {
 
 const cardStyle: React.CSSProperties = {
   background: '#fff',
-  border: '1px solid #e2e5e6',
+  border: '1px solid var(--k-border)',
   borderRadius: 10,
   padding: 18,
 };
@@ -50,9 +50,9 @@ const actionButtonStyle = (variant: 'primary' | 'secondary' = 'secondary'): Reac
   fontWeight: 600,
   padding: '9px 14px',
   borderRadius: 7,
-  border: variant === 'primary' ? 'none' : '1px solid #d8dcdd',
-  background: variant === 'primary' ? '#15191a' : '#fff',
-  color: variant === 'primary' ? '#fff' : '#3a4041',
+  border: variant === 'primary' ? 'none' : '1px solid var(--k-border-strong)',
+  background: variant === 'primary' ? 'var(--k-ink)' : '#fff',
+  color: variant === 'primary' ? '#fff' : 'var(--k-ink-2)',
   cursor: 'pointer',
   textAlign: 'left',
 });
@@ -212,7 +212,7 @@ export default function TicketDetailPage() {
   );
 
   if (loading) {
-    return <div style={{ padding: 26, fontSize: 13, color: '#6d7577' }}>Cargando…</div>;
+    return <div style={{ padding: 26, fontSize: 13, color: 'var(--k-muted)' }}>Cargando…</div>;
   }
   if (loadError || !detail) {
     return (
@@ -272,12 +272,12 @@ export default function TicketDetailPage() {
 
   return (
     <div style={{ padding: 26, display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <Link to="/tickets" style={{ fontSize: 12, color: '#6d7577', textDecoration: 'none' }}>
+      <Link to="/tickets" style={{ fontSize: 12, color: 'var(--k-muted)', textDecoration: 'none' }}>
         ← Volver a tickets
       </Link>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: '#6d7577' }}>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: 'var(--k-muted)' }}>
           {ticket.code ?? `#${ticket.id}`}
         </span>
         <span style={{ fontSize: 12, fontWeight: 600, padding: '3px 9px', borderRadius: 4, background: st.bg, color: st.fg }}>
@@ -286,7 +286,7 @@ export default function TicketDetailPage() {
         <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, fontWeight: 600, padding: '3px 8px', borderRadius: 4, background: pr.bg, color: pr.fg }}>
           {ticket.priority}
         </span>
-        <span style={{ fontSize: 12, color: '#6d7577', marginLeft: 'auto' }}>
+        <span style={{ fontSize: 12, color: 'var(--k-muted)', marginLeft: 'auto' }}>
           Creado el {fmt(ticket.createdAt)}
         </span>
       </div>
@@ -305,9 +305,9 @@ export default function TicketDetailPage() {
                 fontFamily: 'inherit',
                 fontSize: 13,
                 lineHeight: 1.6,
-                color: '#3a4041',
-                background: '#fafbfb',
-                border: '1px solid #eceeef',
+                color: 'var(--k-ink-2)',
+                background: 'var(--k-surface-2)',
+                border: '1px solid var(--k-border-soft)',
                 borderRadius: 8,
                 padding: 12,
               }}
@@ -322,7 +322,7 @@ export default function TicketDetailPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {ticket.resolutionMd && (
                   <div>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: '#6d7577', marginBottom: 3 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--k-muted)', marginBottom: 3 }}>
                       Solución aplicada
                     </div>
                     <div style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{ticket.resolutionMd}</div>
@@ -330,7 +330,7 @@ export default function TicketDetailPage() {
                 )}
                 {ticket.rootCause && (
                   <div>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: '#6d7577', marginBottom: 3 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--k-muted)', marginBottom: 3 }}>
                       Causa raíz
                     </div>
                     <div style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{ticket.rootCause}</div>
@@ -338,7 +338,7 @@ export default function TicketDetailPage() {
                 )}
                 {ticket.correctiveAction && (
                   <div>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: '#6d7577', marginBottom: 3 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--k-muted)', marginBottom: 3 }}>
                       Acción correctiva / preventiva
                     </div>
                     <div style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{ticket.correctiveAction}</div>
@@ -451,7 +451,7 @@ export default function TicketDetailPage() {
                 </button>
               )}
               {!hasActions && (
-                <span style={{ fontSize: 12, color: '#6d7577' }}>
+                <span style={{ fontSize: 12, color: 'var(--k-muted)' }}>
                   No hay acciones disponibles en este estado.
                 </span>
               )}
@@ -462,15 +462,15 @@ export default function TicketDetailPage() {
             <h2 style={{ margin: '0 0 12px', fontSize: 13, fontWeight: 600 }}>Ficha</h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
-                <span style={{ color: '#6d7577' }}>Cliente</span>
-                <span style={{ color: '#3a4041', textAlign: 'right' }}>
+                <span style={{ color: 'var(--k-muted)' }}>Cliente</span>
+                <span style={{ color: 'var(--k-ink-2)', textAlign: 'right' }}>
                   {clientId ? clientName ?? String(clientId) : '—'}
                   {isAdmin && (
                     <button
                       type="button"
                       disabled={busy}
                       onClick={() => setClientOpen(true)}
-                      style={{ marginLeft: 8, fontSize: 11, padding: '2px 8px', borderRadius: 5, border: '1px solid #d8dcdd', background: '#fff', cursor: 'pointer' }}
+                      style={{ marginLeft: 8, fontSize: 11, padding: '2px 8px', borderRadius: 5, border: '1px solid var(--k-border-strong)', background: '#fff', cursor: 'pointer' }}
                     >
                       Cambiar
                     </button>
@@ -513,7 +513,7 @@ export default function TicketDetailPage() {
               <Field label="Cerrado" value={fmt(ticket.closedAt)} />
               {ticket.jiraIssueKey && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                  <span style={{ color: '#6d7577' }}>Jira</span>
+                  <span style={{ color: 'var(--k-muted)' }}>Jira</span>
                   <a
                     href={ticket.jiraIssueUrl ?? '#'}
                     target="_blank"
@@ -586,8 +586,8 @@ export default function TicketDetailPage() {
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-      <span style={{ color: '#6d7577' }}>{label}</span>
-      <span style={{ color: '#3a4041', textAlign: 'right' }}>{value}</span>
+      <span style={{ color: 'var(--k-muted)' }}>{label}</span>
+      <span style={{ color: 'var(--k-ink-2)', textAlign: 'right' }}>{value}</span>
     </div>
   );
 }

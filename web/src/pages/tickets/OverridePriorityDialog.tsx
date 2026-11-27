@@ -72,7 +72,7 @@ export default function OverridePriorityDialog({
     }
   };
 
-  const selectStyle: React.CSSProperties = { fontSize: 13, padding: '8px 10px', border: '1px solid #dfe3e4', borderRadius: 6, width: '100%', boxSizing: 'border-box' };
+  const selectStyle: React.CSSProperties = { fontSize: 13, padding: '8px 10px', border: '1px solid var(--k-border)', borderRadius: 6, width: '100%', boxSizing: 'border-box' };
 
   return (
     <div
@@ -90,7 +90,7 @@ export default function OverridePriorityDialog({
           Ajustar prioridad
         </h2>
 
-        <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid #eceeef' }}>
+        <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--k-border-soft)' }}>
           {(['matrix', 'manual'] as Mode[]).map((m) => (
             <button
               key={m}
@@ -102,9 +102,9 @@ export default function OverridePriorityDialog({
                 fontWeight: 500,
                 padding: '8px 10px',
                 border: 'none',
-                borderBottom: mode === m ? '2px solid #15191a' : '2px solid transparent',
+                borderBottom: mode === m ? '2px solid var(--k-ink)' : '2px solid transparent',
                 background: 'transparent',
-                color: mode === m ? '#15191a' : '#6d7577',
+                color: mode === m ? 'var(--k-ink)' : 'var(--k-muted)',
                 cursor: 'pointer',
                 marginBottom: -1,
               }}
@@ -144,7 +144,7 @@ export default function OverridePriorityDialog({
           </label>
         )}
 
-        <span style={{ fontSize: 12, color: '#4a5052' }}>
+        <span style={{ fontSize: 12, color: 'var(--k-ink-2)' }}>
           Prioridad resultante: <strong>{resultingPriority}</strong>
         </span>
 
@@ -155,18 +155,18 @@ export default function OverridePriorityDialog({
             value={reason}
             rows={3}
             onChange={(e) => setReason(e.target.value)}
-            style={{ fontSize: 13, padding: 9, border: '1px solid #dfe3e4', borderRadius: 6, resize: 'vertical', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }}
+            style={{ fontSize: 13, padding: 9, border: '1px solid var(--k-border)', borderRadius: 6, resize: 'vertical', fontFamily: 'inherit', width: '100%', boxSizing: 'border-box' }}
           />
         </label>
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button onClick={onCancel} style={{ fontSize: 13, padding: '9px 14px', borderRadius: 7, background: '#fff', border: '1px solid #d8dcdd', cursor: 'pointer' }}>
+          <button onClick={onCancel} style={{ fontSize: 13, padding: '9px 14px', borderRadius: 7, background: '#fff', border: '1px solid var(--k-border-strong)', cursor: 'pointer' }}>
             Cancelar
           </button>
           <button
             disabled={!ready}
             onClick={submit}
-            style={{ fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: ready ? '#15191a' : '#c9cdce', color: '#fff', border: 'none', cursor: ready ? 'pointer' : 'not-allowed' }}
+            style={{ fontSize: 13, fontWeight: 600, padding: '9px 14px', borderRadius: 7, background: ready ? 'var(--k-ink)' : 'var(--k-disabled)', color: '#fff', border: 'none', cursor: ready ? 'pointer' : 'not-allowed' }}
           >
             Guardar
           </button>

@@ -80,7 +80,7 @@ export default function ThreadAttachment({ attachment }: { attachment: TicketAtt
           type="button"
           disabled={downloading}
           onClick={download}
-          className="rounded px-2 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+          className="rounded px-2 py-1 text-xs font-medium text-cyan-700 hover:bg-cyan-50 disabled:opacity-50"
         >
           {downloading ? 'Descargando…' : 'Descargar'}
         </button>

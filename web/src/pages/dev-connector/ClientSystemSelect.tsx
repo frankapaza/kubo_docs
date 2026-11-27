@@ -31,7 +31,7 @@ export default function ClientSystemSelect({ id, clientId, value, onChange, disa
         disabled={disabled || !clientId}
         onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
         title="Claude solo ve los requerimientos que tienen sistema."
-        style={{ fontSize: 13, padding: '8px 10px', border: '1px solid #dfe3e4', borderRadius: 6, width: '100%', boxSizing: 'border-box' }}
+        style={{ fontSize: 13, padding: '8px 10px', border: '1px solid var(--k-border)', borderRadius: 6, width: '100%', boxSizing: 'border-box' }}
       >
         <option value="">{clientId ? 'Sin sistema' : 'Elige primero el cliente'}</option>
         {options.map((s) => (
