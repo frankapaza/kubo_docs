@@ -6,7 +6,7 @@ import { saveAttachmentToDisk } from './ticket-messages.api';
 export type CombinedStatus = 'OK' | 'VERIFYING' | 'DEGRADED' | 'DOWN' | 'ROUTE' | 'NO_DATA';
 export type TrackerState = 'OK' | 'VERIFYING' | 'FAILED' | 'DEGRADED';
 export type Criticality = 'HIGH' | 'MEDIUM' | 'LOW';
-export type Protocol = 'TCP' | 'HTTPS' | 'ICMP';
+export type Protocol = 'TCP' | 'HTTPS' | 'HTTP' | 'ICMP';
 export type EntityStatus = 'ACTIVE' | 'PAUSED' | 'ARCHIVED';
 export type IncidentKind = 'DOWN' | 'ROUTE' | 'DEGRADED';
 
@@ -161,7 +161,7 @@ export interface ServiceBody {
   name?: string;
   protocol?: Protocol;
   target?: string;
-  port?: number;
+  port?: number | null;
   latencyThresholdMs?: number;
   criticality?: Criticality;
   status?: EntityStatus;

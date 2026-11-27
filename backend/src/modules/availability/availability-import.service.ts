@@ -17,7 +17,7 @@ export interface ImportRowData {
   server: { name: string; host: string; role: string | null; provider: string | null; region: string | null };
   service: {
     name: string;
-    protocol: 'TCP' | 'HTTPS' | 'ICMP';
+    protocol: 'TCP' | 'HTTPS' | 'HTTP' | 'ICMP';
     target: string;
     port: number | null;
     latencyThresholdMs: number;
@@ -168,10 +168,12 @@ export class AvailabilityImportService {
       const critRaw = cell('criticidad');
       const criticality = critRaw ? CRITICALITY[critRaw.toUpperCase()] : undefined;
       if (critRaw && !criticality) fail('Criticidad inválida (ALTA, MEDIA o BAJA)');
-      if (protocol && !['TCP', 'HTTPS', 'ICMP'].includes(protocol)) fail('Protocolo inválido');
+      if (protocol && !['TCP', 'HTTPS', 'HTTP', 'ICMP'].includes(protocol)) fail('Protocolo inválido');
       else if (protocol && cell('destino')) {
         const shape = serviceShapeError(protocol, cell('destino'), portOk ? port : null);
         if (shape === 'HTTPS_URL') fail('HTTPS requiere una URL https://');
+        if (shape === 'HTTP_URL') fail('HTTP requiere una URL http://');
+        if (shape === 'ICMP_HOST') fail('ICMP (ping) requiere un host o una IP, no una URL');
         if (shape === 'TCP_PORT') fail('Puerto fuera de rango');
       }
 
@@ -217,7 +219,7 @@ export class AvailabilityImportService {
         clientId,
         server: { name: cell('servidor'), host: cell('host'), role: cell('rol') || null, provider: cell('proveedor') || null, region: cell('region') || null },
         service: {
-          name: cell('servicio'), protocol: protocol as 'TCP' | 'HTTPS' | 'ICMP', target: cell('destino'), port,
+          name: cell('servicio'), protocol: protocol as 'TCP' | 'HTTPS' | 'HTTP' | 'ICMP', target: cell('destino'), port,
           latencyThresholdMs: latency ?? 1500, criticality: criticality ?? 'MEDIUM', systemId,
         },
       };

@@ -28,7 +28,7 @@ export const INCIDENT_KIND_LABELS: Record<IncidentKind, string> = {
 };
 
 export const CRITICALITY_LABELS: Record<Criticality, string> = { HIGH: 'Alta', MEDIUM: 'Media', LOW: 'Baja' };
-export const PROTOCOL_OPTIONS: Protocol[] = ['TCP', 'HTTPS', 'ICMP'];
+export const PROTOCOL_OPTIONS: Protocol[] = ['HTTPS', 'HTTP', 'TCP', 'ICMP'];
 
 export const EVENT_LABELS: Record<string, string> = {
   OPENED: 'Incidente abierto',

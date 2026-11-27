@@ -17,8 +17,8 @@ export class MonitorService {
   @Column({ type: 'varchar', length: 150 })
   name!: string;
 
-  @Column({ type: 'enum', enum: ['TCP', 'HTTPS', 'ICMP'] })
-  protocol!: 'TCP' | 'HTTPS' | 'ICMP';
+  @Column({ type: 'enum', enum: ['TCP', 'HTTPS', 'HTTP', 'ICMP'] })
+  protocol!: 'TCP' | 'HTTPS' | 'HTTP' | 'ICMP';
 
   @Column({ type: 'varchar', length: 255 })
   target!: string;

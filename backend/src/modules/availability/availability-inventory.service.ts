@@ -233,6 +233,8 @@ export class AvailabilityInventoryService {
   private validateShape(protocol: string, target: string, port: number | null): void {
     const err = serviceShapeError(protocol, target, port);
     if (err === 'HTTPS_URL') throw badInput('Un servicio HTTPS exige un target que empiece por https://');
+    if (err === 'HTTP_URL') throw badInput('Un servicio HTTP exige un target que empiece por http://');
+    if (err === 'ICMP_HOST') throw badInput('Un servicio ICMP (ping) exige un host o una IP, no una URL');
     if (err === 'TCP_PORT') throw badInput('Un servicio TCP exige un puerto entre 1 y 65535');
   }
 

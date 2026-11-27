@@ -1,4 +1,5 @@
 import * as net from 'node:net';
+import * as http from 'node:http';
 import * as https from 'node:https';
 import { execFileSync } from 'node:child_process';
 import type { AddressInfo } from 'node:net';
@@ -15,6 +16,8 @@ let tcpServer: net.Server;
 let tcpPort: number;
 let httpsServer: https.Server;
 let httpsPort: number;
+let httpServer: http.Server;
+let httpPort: number;
 let ca: string;
 
 beforeAll(async () => {
@@ -34,12 +37,41 @@ beforeAll(async () => {
   });
   await new Promise<void>((r) => httpsServer.listen(0, '127.0.0.1', r));
   httpsPort = (httpsServer.address() as AddressInfo).port;
+
+  httpServer = http.createServer((req, res) => {
+    if (req.url === '/503') { res.statusCode = 503; res.end(); }
+    else { res.statusCode = 200; res.end('ok'); }
+  });
+  await new Promise<void>((r) => httpServer.listen(0, '127.0.0.1', r));
+  httpPort = (httpServer.address() as AddressInfo).port;
 });
 
 afterAll(async () => {
   await new Promise((r) => tcpServer.close(r));
   httpsServer.closeAllConnections?.();
   await new Promise((r) => httpsServer.close(r));
+  httpServer.closeAllConnections?.();
+  await new Promise((r) => httpServer.close(r));
+});
+
+describe('HTTP', () => {
+  const httpUrl = (p: string) => `http://127.0.0.1:${httpPort}${p}`;
+  it('200 -> ok con httpStatus', async () => {
+    const r = await runCheck(svc({ protocol: 'HTTP', target: httpUrl('/financobro/login.aspx') }), 'REGULAR', cycleAt);
+    expect(r).toMatchObject({ ok: true, errorCode: null, httpStatus: 200 });
+  });
+  it('503 -> HTTP_STATUS', async () => {
+    const r = await runCheck(svc({ protocol: 'HTTP', target: httpUrl('/503') }), 'REGULAR', cycleAt);
+    expect(r).toMatchObject({ ok: false, errorCode: 'HTTP_STATUS', httpStatus: 503 });
+  });
+  it('una URL https:// con protocolo HTTP -> NETWORK (no se mezcla)', async () => {
+    const r = await runCheck(svc({ protocol: 'HTTP', target: url('/ok') }), 'REGULAR', cycleAt);
+    expect(r).toMatchObject({ ok: false, errorCode: 'NETWORK' });
+  });
+  it('una URL http:// con protocolo HTTPS -> NETWORK', async () => {
+    const r = await runCheck(svc({ protocol: 'HTTPS', target: httpUrl('/') }), 'REGULAR', cycleAt);
+    expect(r).toMatchObject({ ok: false, errorCode: 'NETWORK' });
+  });
 });
 
 const url = (p: string) => `https://localhost:${httpsPort}${p}`;
@@ -150,6 +182,6 @@ describe('resultado', () => {
     expect(b.orderId).toBeNull();
   });
   it('DEFAULT_TIMEOUTS_MS', () => {
-    expect(DEFAULT_TIMEOUTS_MS).toEqual({ TCP: 5000, HTTPS: 10000, ICMP: 5000 });
+    expect(DEFAULT_TIMEOUTS_MS).toEqual({ TCP: 5000, HTTPS: 10000, HTTP: 10000, ICMP: 5000 });
   });
 });

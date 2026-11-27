@@ -2,6 +2,7 @@
 // Regenerar con: node scripts/sync-monitoring-core.mjs
 
 import * as net from 'node:net';
+import * as http from 'node:http';
 import * as https from 'node:https';
 import * as tls from 'node:tls';
 import { promises as dns } from 'node:dns';
@@ -9,7 +10,7 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { CheckErrorCode, CheckKind, CheckResult, Protocol, ServiceTarget } from './types';
 
-export const DEFAULT_TIMEOUTS_MS: Record<Protocol, number> = { TCP: 5000, HTTPS: 10000, ICMP: 5000 };
+export const DEFAULT_TIMEOUTS_MS: Record<Protocol, number> = { TCP: 5000, HTTPS: 10000, HTTP: 10000, ICMP: 5000 };
 
 export interface RunCheckOptions {
   timeoutsMs?: Partial<Record<Protocol, number>>;
@@ -54,7 +55,12 @@ function tcpCheck(host: string, port: number | null, timeoutMs: number): Promise
   });
 }
 
-function httpsCheck(target: string, timeoutMs: number, ca?: string): Promise<Outcome> {
+/**
+ * GET a una URL web sin seguir redirecciones: 2xx/3xx = ok. `secure` exige
+ * https:// (con validación TLS normal); si no, exige http:// (sin cifrar, para
+ * aplicaciones internas que solo publican HTTP).
+ */
+function webCheck(target: string, timeoutMs: number, secure: boolean, ca?: string): Promise<Outcome> {
   return new Promise((resolve) => {
     let url: URL;
     try {
@@ -62,7 +68,7 @@ function httpsCheck(target: string, timeoutMs: number, ca?: string): Promise<Out
     } catch {
       return resolve({ ok: false, errorCode: 'NETWORK' });
     }
-    if (url.protocol !== 'https:') return resolve({ ok: false, errorCode: 'NETWORK' });
+    if (url.protocol !== (secure ? 'https:' : 'http:')) return resolve({ ok: false, errorCode: 'NETWORK' });
     let done = false;
     const finish = (o: Outcome) => {
       if (done) return;
@@ -71,10 +77,10 @@ function httpsCheck(target: string, timeoutMs: number, ca?: string): Promise<Out
       req.destroy();
       resolve(o);
     };
-    // GET sin seguir redirecciones (node:https no las sigue).
-    const req = https.request(
+    // GET sin seguir redirecciones (node:http/https no las siguen).
+    const req = (secure ? https : http).request(
       url,
-      { method: 'GET', ...(ca ? { ca: [...tls.rootCertificates, ca] } : {}) },
+      { method: 'GET', ...(secure && ca ? { ca: [...tls.rootCertificates, ca] } : {}) },
       (res) => {
         const status = res.statusCode ?? 0;
         res.resume();
@@ -155,7 +161,8 @@ export async function runCheck(
   let outcome: Outcome;
   try {
     if (target.protocol === 'TCP') outcome = await tcpCheck(target.target, target.port, timeoutMs);
-    else if (target.protocol === 'HTTPS') outcome = await httpsCheck(target.target, timeoutMs, opts.ca);
+    else if (target.protocol === 'HTTPS') outcome = await webCheck(target.target, timeoutMs, true, opts.ca);
+    else if (target.protocol === 'HTTP') outcome = await webCheck(target.target, timeoutMs, false);
     else if (target.protocol === 'ICMP') outcome = await icmpCheck(target.target, timeoutMs, opts.lookup ?? ((h) => dns.lookup(h)));
     else outcome = { ok: false, errorCode: 'NETWORK' };
   } catch {
