@@ -18,7 +18,7 @@
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, win32 } from 'node:path';
 import { CONFIG_FILE, DEFAULT_LOCAL_PORT, DEFAULT_SYNC_INTERVAL_MS, LOGS_DIR, monitorHome, saveProbeToken, SECRET_FILE } from '../config';
 
 export const SERVICE_ID = 'KuboMonitorEngine';
@@ -78,7 +78,7 @@ export function buildServiceXml(o: { nodePath: string; mainJs: string; home: str
     `  <env name="KUBO_MONITOR_HOME" value="${e(o.home)}"/>`,
     '  <env name="NODE_ENV" value="production"/>',
     `  <workingdirectory>${e(o.workDir)}</workingdirectory>`,
-    `  <logpath>${e(join(o.home, LOGS_DIR))}</logpath>`,
+    `  <logpath>${e(win32.join(o.home, LOGS_DIR))}</logpath>`,
     '  <logmode>roll</logmode>',
     '  <startmode>Automatic</startmode>',
     '  <onfailure action="restart" delay="5 sec"/>',
@@ -111,7 +111,7 @@ export function buildAclCommands(home: string, user: string): Command[] {
       'icacls.exe',
       [home, '/inheritance:r', '/grant:r', `${SID_SYSTEM}:(OI)(CI)F`, `${SID_ADMINS}:(OI)(CI)F`, `${SID_LOCAL_SERVICE}:(OI)(CI)M`, `${user}:(RX)`],
     ],
-    ['icacls.exe', [join(home, SECRET_FILE), '/grant:r', `${user}:(R)`]],
+    ['icacls.exe', [win32.join(home, SECRET_FILE), '/grant:r', `${user}:(R)`]],
   ];
 }
 
