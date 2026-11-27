@@ -192,6 +192,21 @@ export interface AgentDiskView {
   daysToFull: number | null;
 }
 
+export type HistoryRange = 'day' | 'month' | 'year';
+
+/** Un tramo del historial del servidor. Sin muestras: samples 0 y métricas null. */
+export interface HistoryPoint {
+  /** 'YYYY-MM-DDTHH:mm' (Lima) en day, 'YYYY-MM-DD' en month, 'YYYY-MM' en year. */
+  key: string;
+  from: string;
+  samples: number;
+  cpuAvg: number | null;
+  cpuMax: number | null;
+  ramAvg: number | null;
+  ramMax: number | null;
+  errors: number;
+}
+
 export interface AgentView {
   lastSampleAt: string | null;
   agentVersion: string | null;
@@ -405,6 +420,8 @@ export const availabilityApi = {
     api.delete<void>(`/availability/probes/${id}/token`).then(() => undefined),
 
   // ---- Agente de servidor ----
+  serverHistory: (serverId: number, range: HistoryRange) =>
+    api.get<{ range: HistoryRange; points: HistoryPoint[] }>(`/availability/servers/${serverId}/history`, { params: { range } }).then((r) => r.data),
   agentView: (serverId: number) => api.get<AgentView>(`/availability/servers/${serverId}/agent`).then((r) => r.data),
   /** El token y el script salen una sola vez: no se guardan en la caché de react-query. */
   issueAgentToken: (serverId: number) =>

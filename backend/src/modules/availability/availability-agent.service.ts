@@ -1,6 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { MoreThanOrEqual, Repository } from 'typeorm';
+import { Between, MoreThanOrEqual, Repository } from 'typeorm';
+import { dayHistory, HISTORY_RANGES, HistoryPoint, HistoryRange, monthHistory, yearHistory, yearStartDate } from './domain/agent-history';
+import { limaDateOf, limaDayBounds } from './domain/expected-slots';
+import { MonitorAgentDailyRollup } from './entities/monitor-agent-daily-rollup.entity';
 import { estimateDaysToFull } from './domain/disk-trend';
 import { AgentSampleDto, AgentSampleResponse } from './dto/agent.dto';
 import { AgentDisk, AgentIisPool, AgentServiceStatus, MonitorAgentSample } from './entities/monitor-agent-sample.entity';
@@ -41,6 +44,7 @@ export class AvailabilityAgentService {
   constructor(
     @InjectRepository(MonitorServer) private readonly servers: Repository<MonitorServer>,
     @InjectRepository(MonitorAgentSample) private readonly samples: Repository<MonitorAgentSample>,
+    @Optional() @InjectRepository(MonitorAgentDailyRollup) private readonly rollups?: Repository<MonitorAgentDailyRollup>,
   ) {}
 
   /**
@@ -119,5 +123,53 @@ export class AvailabilityAgentService {
       series24h: day.map((s) => ({ at: new Date(s.at), cpuPct: Number(s.cpuPct), ramPct: Number(s.ramPct) })),
     };
   }
-}
 
+  /**
+   * Historial del servidor para la vista de detalle: `day` (24 h en tramos de
+   * 15 min) y `month` (30 días) desde las muestras, que se guardan 30 días;
+   * `year` (12 meses) desde los resúmenes diarios más las muestras de hoy.
+   */
+  async history(serverId: number, range: string, now: Date): Promise<{ range: HistoryRange; points: HistoryPoint[] }> {
+    if (!HISTORY_RANGES.includes(range as HistoryRange)) {
+      throw new BadRequestException({ code: 'BAD_INPUT', message: 'Rango inválido: day, month o year' });
+    }
+    const server = await this.servers.findOne({ where: { id: serverId } });
+    if (!server) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Servidor no encontrado' });
+    const r = range as HistoryRange;
+    const load = async (from: Date) =>
+      (
+        await this.samples.find({
+          where: { serverId, at: Between(from, now) },
+          order: { at: 'ASC' },
+          select: { id: true, at: true, cpuPct: true, ramPct: true, eventErrors: true },
+        })
+      ).map((x) => ({ at: new Date(x.at), cpuPct: Number(x.cpuPct), ramPct: Number(x.ramPct), eventErrors: Number(x.eventErrors ?? 0) }));
+
+    if (r === 'day') return { range: r, points: dayHistory(await load(new Date(now.getTime() - DAY_MS)), now) };
+    if (r === 'month') return { range: r, points: monthHistory(await load(new Date(now.getTime() - 31 * DAY_MS)), now) };
+
+    const today = limaDateOf(now);
+    const rows = this.rollups
+      ? await this.rollups.find({ where: { serverId, date: Between(yearStartDate(now), today) }, order: { date: 'ASC' } })
+      : [];
+    const todaySamples = await load(limaDayBounds(today).from);
+    return {
+      range: r,
+      points: yearHistory(
+        rows.map((x) => ({
+          date: String(x.date).slice(0, 10),
+          samples: Number(x.samples),
+          cpuHist: x.cpuHist ?? [],
+          ramHist: x.ramHist ?? [],
+          cpuAvg: x.cpuAvg ?? null,
+          cpuMax: x.cpuMax ?? null,
+          ramAvg: x.ramAvg ?? null,
+          ramMax: x.ramMax ?? null,
+          eventErrors: Number(x.eventErrors ?? 0),
+        })),
+        todaySamples,
+        now,
+      ),
+    };
+  }
+}

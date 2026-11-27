@@ -5,6 +5,7 @@ import { addDays, expectedSlots, limaDateOf, limaDayBounds } from './domain/expe
 import { incidentIntervals } from './domain/incident-intervals';
 import { histogramOf, PERCENT_BUCKETS, percentileFromHistogram } from './domain/latency-histogram';
 import { probeGaps, subtractIntervals } from './domain/probe-gaps';
+import { summarizeSamples } from './domain/agent-history';
 import { MonitorAgentDailyRollup } from './entities/monitor-agent-daily-rollup.entity';
 import { MonitorAgentSample } from './entities/monitor-agent-sample.entity';
 import { MonitorCheck } from './entities/monitor-check.entity';
@@ -33,6 +34,11 @@ type AgentRollupRow = Omit<MonitorAgentDailyRollup, 'id'>;
 type ServiceMinutes = { down: number; route: number };
 type Interval = [Date, Date];
 
+/** Columnas de la 038: media y máximo de CPU/RAM y errores del día. */
+const summaryColumns = (rows: MonitorAgentSample[]) => {
+  const sum = summarizeSamples(rows.map((r) => ({ at: new Date(r.at), cpuPct: Number(r.cpuPct), ramPct: Number(r.ramPct), eventErrors: Number(r.eventErrors ?? 0) })));
+  return { cpuAvg: sum.cpuAvg, cpuMax: sum.cpuMax, ramAvg: sum.ramAvg, ramMax: sum.ramMax, eventErrors: sum.eventErrors };
+};
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const overlapMin = (a: Date, b: Date, from: Date, to: Date) =>
   Math.max(0, Math.min(b.getTime(), to.getTime()) - Math.max(a.getTime(), from.getTime())) / MIN_MS;
@@ -238,7 +244,7 @@ export class AvailabilityRollupService implements OnApplicationBootstrap {
     const samples = await this.ds.getRepository(MonitorAgentSample).find({
       where: { at: And(MoreThanOrEqual(from), LessThan(to)) },
       order: { serverId: 'ASC', at: 'ASC' },
-      select: { id: true, serverId: true, at: true, cpuPct: true, ramPct: true, disks: true },
+      select: { id: true, serverId: true, at: true, cpuPct: true, ramPct: true, disks: true, eventErrors: true },
     });
     const byServer = new Map<number, MonitorAgentSample[]>();
     for (const s of samples) {
@@ -255,6 +261,7 @@ export class AvailabilityRollupService implements OnApplicationBootstrap {
         cpuHist: histogramOf(rows.map((s) => Number(s.cpuPct)), PERCENT_BUCKETS),
         ramHist: histogramOf(rows.map((s) => Number(s.ramPct)), PERCENT_BUCKETS),
         disksClose: last.disks ?? [],
+        ...summaryColumns(rows),
       });
     }
     return out;

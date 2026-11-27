@@ -43,6 +43,12 @@ export class AvailabilityInventoryController {
     return this.agent.agentView(id, new Date());
   }
 
+  /** Historial de CPU, RAM y errores: `range` = day | month | year. */
+  @Get('servers/:id/history')
+  history(@Param('id', ParseIntPipe) id: number, @Query('range') range = 'day') {
+    return this.agent.history(id, range, new Date());
+  }
+
   /** Devuelve `{ token, installScript }`: el token se muestra una sola vez. */
   @Roles('ADMIN')
   @Post('servers/:id/agent-token')
