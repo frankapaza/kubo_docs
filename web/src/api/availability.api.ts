@@ -190,6 +190,8 @@ export interface AgentDiskView {
   freeBytes: number;
   freePct: number | null;
   daysToFull: number | null;
+  /** Días de historia del disco (la estimación pide 3). */
+  trendDays: number;
 }
 
 export type HistoryRange = 'day' | 'month' | 'year';

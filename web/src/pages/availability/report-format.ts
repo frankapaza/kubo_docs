@@ -57,6 +57,25 @@ export function agentStatus(hasToken: boolean, lastSampleAt: string | null, now:
 }
 
 export const DISK_LOW_FREE_PCT = 10;
+/** Por debajo de este % libre el espacio usado se pinta en ámbar (aviso previo al rojo). */
+export const DISK_WARN_FREE_PCT = 20;
+/** Días de historia que pide la estimación de llenado (igual que el backend). */
+export const DISK_TREND_MIN_SPAN_DAYS = 3;
+
+/** Nivel del disco según el % libre: rojo < 10 %, ámbar < 20 %, normal el resto. */
+export function diskLevel(freePct: number | null): 'critical' | 'warning' | 'ok' {
+  if (freePct === null) return 'ok';
+  if (freePct < DISK_LOW_FREE_PCT) return 'critical';
+  if (freePct < DISK_WARN_FREE_PCT) return 'warning';
+  return 'ok';
+}
+
+/** Bytes en GB (base 1024, como Windows), sin decimales desde 100 GB. */
+export function fmtGB(bytes: number): string {
+  const gb = bytes / 1024 ** 3;
+  if (gb >= 1024) return `${(gb / 1024).toFixed(1)} TB`;
+  return `${gb >= 100 ? Math.round(gb) : gb.toFixed(1)} GB`;
+}
 export const isDiskLow = (freePct: number | null): boolean => freePct !== null && freePct < DISK_LOW_FREE_PCT;
 
 /** Puntos «x,y» de una polilínea 0-100 % dentro de `w`×`h`. */
