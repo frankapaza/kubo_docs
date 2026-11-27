@@ -14,7 +14,7 @@ import { DOCX_MIME, docxText } from '../work-items/domain/work-item-docs';
 import { WorkItemDocumentsService } from '../work-items/work-item-documents.service';
 import { DevConnectorRepository, OpenItemRow } from './dev-connector.repository';
 import { DevPrincipal } from './dev-keys.service';
-import { ItemKind, agentTargets, canAgentTransition, normalizeCode, priorityRank } from './domain/dev-rules';
+import { ItemKind, agentTargets, canAgentTransition, matchStaff, normalizeCode, priorityRank, transitionNeedsReason } from './domain/dev-rules';
 import { DevLinkKind } from './entities/dev-link.entity';
 
 export const MAX_PENDIENTES = 50;
@@ -497,7 +497,7 @@ export class DevApiService {
   }
 
   /** Solo la lista blanca y solo sobre lo asignado al dueño de la clave (spec §4.1). */
-  async estado(p: DevPrincipal, rawCode: string, rawTarget: string): Promise<{ codigo: string; estado: string }> {
+  async estado(p: DevPrincipal, rawCode: string, rawTarget: string, motivo?: string): Promise<{ codigo: string; estado: string }> {
     const r = await this.resolve(p, rawCode);
     const target = String(rawTarget ?? '').trim().toUpperCase();
     const kind: ItemKind = r.kind;
@@ -517,11 +517,17 @@ export class DevApiService {
       });
     }
 
+    const reason = String(motivo ?? '').trim();
+    if (transitionNeedsReason(target) && !reason) {
+      throw new BadRequestException({ code: 'BAD_INPUT', message: `Pasar a ${target} exige un motivo.` });
+    }
+
     if (r.kind === 'KB') {
       const t = await this.transitions.transition({
         ticketId: Number(r.ticket.id),
         actorUserId: p.userId,
         toStatus: target as TicketStatus,
+        ...(reason ? { reason } : {}),
       });
       return { codigo: r.ticket.code!, estado: t.status };
     }
@@ -532,6 +538,54 @@ export class DevApiService {
       toIndex: 0,
     });
     return { codigo: r.item.code!, estado: w.status };
+  }
+
+  /**
+   * Asignar un ticket del sistema de la clave a otra persona del equipo. En el
+   * MCP lo confirma la persona antes de llamar aquí (spec 2026-11-27).
+   */
+  async asignar(p: DevPrincipal, rawCode: string, persona: string): Promise<{ codigo: string; estado: string; asignadoA: string }> {
+    const t = await this.ticketOnly(p, rawCode, 'asignar');
+    if (t.status === 'RESUELTO' || t.status === 'CERRADO') {
+      throw new ConflictException({ code: 'CONFLICT', message: `Un ticket ${t.status} no se reasigna.` });
+    }
+    const staff = await this.data.listActiveStaff();
+    const m = matchStaff(staff, persona);
+    if (!m.ok) {
+      const lista = m.candidatos.map((u) => `${u.fullName} <${u.email}>`).join('; ');
+      throw new BadRequestException({
+        code: 'BAD_INPUT',
+        message: m.reason === 'AMBIGUO'
+          ? `«${persona}» coincide con varias personas: ${lista}. Usa el correo.`
+          : `No hay nadie activo del equipo que sea «${persona}». Personas válidas: ${lista}.`,
+      });
+    }
+    const out = await this.assignment.assign({
+      ticketId: Number(t.id),
+      actorUserId: p.userId,
+      assigneeUserId: m.user.id,
+      reason: `Asignado vía Claude (${p.repoFullName})`,
+    });
+    return { codigo: t.code!, estado: out.status, asignadoA: m.user.fullName };
+  }
+
+  /**
+   * Respuesta pública al cliente, como el dueño de la clave: el mismo camino que
+   * responder desde DevDocs (correo o portal y avisos). En el MCP la persona la
+   * confirma antes de enviarla (spec 2026-11-27). Solo sobre tickets propios.
+   */
+  async responder(p: DevPrincipal, rawCode: string, texto: string): Promise<{ ok: true; codigo: string }> {
+    const body = String(texto ?? '').trim();
+    if (!body) throw new BadRequestException({ code: 'BAD_INPUT', message: 'La respuesta está vacía.' });
+    const t = await this.ticketOnly(p, rawCode, 'responder al cliente');
+    if (!isMine(t.assigneeUserId, p.userId)) {
+      throw new ConflictException({ code: 'CONFLICT', message: 'Este ticket no está asignado a ti: tómalo antes de responder al cliente.' });
+    }
+    if (t.status === 'CERRADO') {
+      throw new ConflictException({ code: 'CONFLICT', message: 'El ticket está cerrado: su hilo no admite mensajes.' });
+    }
+    await this.messages.post({ kind: 'STAFF', userId: p.userId }, t.id, { bodyMd: body, visibility: 'PUBLICA' });
+    return { ok: true, codigo: t.code! };
   }
 
   async vincular(

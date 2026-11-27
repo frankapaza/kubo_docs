@@ -23,6 +23,9 @@ const ALLOWED: Record<ItemKind, ReadonlyArray<readonly [string, string]>> = {
   KB: [
     ['ASIGNADO', 'EN_ATENCION'],
     ['ESPERA_CLIENTE', 'EN_ATENCION'],
+    // Con confirmación de la persona en el MCP (spec 2026-11-27-mcp-acciones-confirmadas).
+    ['EN_ATENCION', 'ESPERA_CLIENTE'],
+    ['EN_ATENCION', 'DERIVADO'],
   ],
   RQ: [
     ['PENDIENTE', 'EN_PROCESO'],
@@ -46,4 +49,36 @@ const RANK: Record<string, number> = { P1: 1, ALTA: 2, P2: 2, P3: 3, MEDIA: 3, P
 
 export function priorityRank(priority: string): number {
   return RANK[priority] ?? 5;
+}
+
+/** Pasar a Espera del cliente o Derivado exige un motivo: queda en el historial. */
+export function transitionNeedsReason(to: string): boolean {
+  return to === 'ESPERA_CLIENTE' || to === 'DERIVADO';
+}
+
+export interface StaffRef {
+  id: number;
+  email: string;
+  fullName: string;
+}
+
+export type StaffMatch =
+  | { ok: true; user: StaffRef }
+  | { ok: false; reason: 'AMBIGUO' | 'NO_EXISTE'; candidatos: StaffRef[] };
+
+const fold = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
+/**
+ * La persona a quien asignar, entre el personal activo: por correo exacto o
+ * por nombre (sin tildes ni mayúsculas) si solo hay una coincidencia.
+ */
+export function matchStaff(staff: StaffRef[], persona: string): StaffMatch {
+  const q = fold(String(persona ?? ''));
+  if (!q) return { ok: false, reason: 'NO_EXISTE', candidatos: staff };
+  const byEmail = staff.filter((u) => fold(u.email) === q);
+  if (byEmail.length === 1) return { ok: true, user: byEmail[0] };
+  const byName = staff.filter((u) => fold(u.fullName).includes(q));
+  if (byName.length === 1) return { ok: true, user: byName[0] };
+  if (byName.length > 1) return { ok: false, reason: 'AMBIGUO', candidatos: byName };
+  return { ok: false, reason: 'NO_EXISTE', candidatos: staff };
 }

@@ -37,6 +37,10 @@ function build(
     listOpenItems: jest.fn().mockResolvedValue(over.open ?? []),
     listLinks: jest.fn().mockResolvedValue([]),
     upsertLink: jest.fn().mockResolvedValue(undefined),
+    listActiveStaff: jest.fn().mockResolvedValue([
+      { id: 9, email: 'ana@kubo.pe', fullName: 'Ana Dev' },
+      { id: 12, email: 'luis@kubo.pe', fullName: 'Luis Gómez' },
+    ]),
   };
   const messages = {
     post: jest.fn().mockResolvedValue({ message: { id: 1 } }),
@@ -445,5 +449,48 @@ describe('entregar un requerimiento', () => {
   it('un ticket no se entrega: 400 (se resuelve)', async () => {
     const { service } = build();
     await expect(service.entregar(P, 'KB-0210', E)).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+
+describe('DevApiService: acciones confirmadas (estado, asignar, responder)', () => {
+  const MIO_EN_ATENCION = { ...TICKET, status: 'EN_ATENCION', assigneeUserId: 9 };
+
+  it('pasar a Espera del cliente exige motivo y lo envía a la transición', async () => {
+    const { service, transitions } = build({ ticket: MIO_EN_ATENCION });
+    await expect(service.estado(P, 'KB-0210', 'ESPERA_CLIENTE')).rejects.toBeInstanceOf(BadRequestException);
+    await service.estado(P, 'KB-0210', 'ESPERA_CLIENTE', 'Falta el archivo de prueba');
+    expect(transitions.transition).toHaveBeenCalledWith(expect.objectContaining({ toStatus: 'ESPERA_CLIENTE', reason: 'Falta el archivo de prueba', actorUserId: 9 }));
+  });
+
+  it('asignar a otra persona por correo pasa por el servicio de asignación', async () => {
+    const { service, assignment } = build({ ticket: { ...TICKET, status: 'NUEVO', assigneeUserId: null } });
+    const r = await service.asignar(P, 'KB-0210', 'luis@kubo.pe');
+    expect(assignment.assign).toHaveBeenCalledWith(expect.objectContaining({ ticketId: 100, actorUserId: 9, assigneeUserId: 12 }));
+    expect(r).toMatchObject({ codigo: 'KB-0210', asignadoA: 'Luis Gómez' });
+  });
+
+  it('asignar a alguien que no existe -> 400 con la lista de válidos; un ticket cerrado -> 409', async () => {
+    const a = build({ ticket: { ...TICKET, status: 'NUEVO' } });
+    await expect(a.service.asignar(P, 'KB-0210', 'pedro')).rejects.toMatchObject({ response: expect.objectContaining({ code: 'BAD_INPUT', message: expect.stringContaining('luis@kubo.pe') }) });
+    const b = build({ ticket: { ...TICKET, status: 'CERRADO' } });
+    await expect(b.service.asignar(P, 'KB-0210', 'luis@kubo.pe')).rejects.toBeInstanceOf(ConflictException);
+    expect(b.assignment.assign).not.toHaveBeenCalled();
+  });
+
+  it('responder: mensaje PÚBLICO del dueño de la clave, solo en tickets propios', async () => {
+    const { service, messages } = build({ ticket: MIO_EN_ATENCION });
+    await service.responder(P, 'KB-0210', 'Ya quedó corregido.');
+    expect(messages.post).toHaveBeenCalledWith({ kind: 'STAFF', userId: 9 }, 100, { bodyMd: 'Ya quedó corregido.', visibility: 'PUBLICA' });
+  });
+
+  it('responder sobre un ticket ajeno -> 409 sin enviar nada; vacío -> 400; cerrado -> 409', async () => {
+    const ajeno = build({ ticket: { ...MIO_EN_ATENCION, assigneeUserId: 33 } });
+    await expect(ajeno.service.responder(P, 'KB-0210', 'hola')).rejects.toBeInstanceOf(ConflictException);
+    expect(ajeno.messages.post).not.toHaveBeenCalled();
+    const vacio = build({ ticket: MIO_EN_ATENCION });
+    await expect(vacio.service.responder(P, 'KB-0210', '   ')).rejects.toBeInstanceOf(BadRequestException);
+    const cerrado = build({ ticket: { ...MIO_EN_ATENCION, status: 'CERRADO' } });
+    await expect(cerrado.service.responder(P, 'KB-0210', 'hola')).rejects.toBeInstanceOf(ConflictException);
   });
 });
