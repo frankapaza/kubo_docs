@@ -54,6 +54,13 @@ export default function TicketsListPage() {
   // El cliente va en la URL (?cliente=9) para poder compartir o guardar la bandeja filtrada.
   const [searchParams, setSearchParams] = useSearchParams();
   const clientFilter = Number(searchParams.get('cliente')) || null;
+  // ?sinSistema=1 lo pone la franja «tickets sin sistema» del panel.
+  const onlyNoSystem = searchParams.get('sinSistema') === '1';
+  const clearNoSystem = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete('sinSistema');
+    setSearchParams(next, { replace: true });
+  };
   const [clients, setClients] = useState<Client[]>([]);
   const clientsById = useMemo(() => new Map(clients.map((c) => [c.id, c.razonSocial])), [clients]);
   const setClientFilter = (id: number | null) => {
@@ -125,6 +132,7 @@ export default function TicketsListPage() {
         archived: filter === 'Archivados' ? true : undefined,
         q: q || undefined,
         clientId: clientFilter ?? undefined,
+        sinSistema: onlyNoSystem || undefined,
       })
       .then((data) => {
         if (!cancelled) setTickets(data);
@@ -138,7 +146,7 @@ export default function TicketsListPage() {
     return () => {
       cancelled = true;
     };
-  }, [filter, q, clientFilter, reloadTick]);
+  }, [filter, q, clientFilter, onlyNoSystem, reloadTick]);
 
   const count = useMemo(() => tickets.length, [tickets]);
 
@@ -146,7 +154,7 @@ export default function TicketsListPage() {
   // búsqueda o cliente se descarta, para no mover tickets que ya no están a la vista.
   useEffect(() => {
     setSelected(new Set());
-  }, [filter, q, clientFilter]);
+  }, [filter, q, clientFilter, onlyNoSystem]);
 
   const visibleSelected = tickets.filter((t) => selected.has(t.id));
   const allSelected = tickets.length > 0 && visibleSelected.length === tickets.length;
@@ -269,6 +277,16 @@ export default function TicketsListPage() {
               {chipLabel(c)}
             </button>
           ))}
+          {onlyNoSystem && (
+            <button
+              type="button"
+              onClick={clearNoSystem}
+              title="Quitar el filtro"
+              style={{ fontSize: 12, fontWeight: 600, padding: '5px 10px', borderRadius: 999, border: '1px solid #f0d9a8', background: '#fff4e0', color: '#7a4a00', cursor: 'pointer' }}
+            >
+              Solo sin sistema ✕
+            </button>
+          )}
           <select
             value={clientFilter ?? ''}
             onChange={(e) => setClientFilter(e.target.value ? Number(e.target.value) : null)}

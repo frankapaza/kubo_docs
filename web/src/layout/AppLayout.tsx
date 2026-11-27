@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import MissingSystemsBanner from './MissingSystemsBanner';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../auth/AuthContext';
 import { useIdleLogout } from '../auth/useIdleLogout';
@@ -349,6 +350,7 @@ export default function AppLayout() {
          */}
         <div className="px-8 py-8">
           <NotificationPermissionBanner />
+          <MissingSystemsBanner />
           <Outlet />
         </div>
       </main>
