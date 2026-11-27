@@ -30,7 +30,7 @@ function fakeKeys() {
   };
 }
 
-function make(clientStatus: Record<number, string> = { 1: 'CLIENT', 2: 'CLIENT', 3: 'FORMER_CLIENT' }) {
+function make(clientStatus: Record<number, string> = { 1: 'CLIENT', 2: 'CLIENT', 3: 'FORMER_CLIENT', 4: 'PROSPECT' }) {
   const keys = fakeKeys();
   const clients = {
     findOne: async ({ where }: any) => (clientStatus[where.id] ? { id: where.id, status: clientStatus[where.id] } : null),
@@ -71,6 +71,12 @@ describe('ApiKeysService', () => {
     const { svc } = make();
     const { secret } = await svc.issue(3, 'a', { userId: 1 });
     await expect(svc.resolve(fingerprintApiKey(secret))).resolves.toBeNull();
+  });
+
+  it('un prospecto (estado por defecto del alta) sí puede usar la API', async () => {
+    const { svc } = make();
+    const { key, secret } = await svc.issue(4, 'a', { userId: 1 });
+    await expect(svc.resolve(fingerprintApiKey(secret))).resolves.toEqual({ keyId: key.id, clientId: 4 });
   });
 
   it('marca el último uso si pasó 1 minuto, no si pasaron 30 s', async () => {

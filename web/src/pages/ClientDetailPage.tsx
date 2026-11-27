@@ -31,19 +31,21 @@ import {
 } from '../components/ui/Icon';
 import { toast } from '../ui/Toast';
 import ClientSystemsTab from './tickets/ClientSystemsTab';
+import ApiKeysManager from '../components/ApiKeysManager';
+import { staffApiKeys } from '../api/integration-keys.api';
 import { clientSystemsApi } from '../api/tickets.api';
 import { useAuth } from '../auth/AuthContext';
 import { canManageClientSystems } from '../auth/permissions';
 import { SIN_SISTEMAS_PANEL, SIN_SISTEMAS_PANEL_ENLACE, SIN_SISTEMAS_PANEL_SIN_PERMISO } from './tickets/system-field';
 
-type Tab = 'summary' | 'projects' | 'documents' | 'systems';
+type Tab = 'summary' | 'projects' | 'documents' | 'systems' | 'api';
 
 /**
  * Las pestañas que se pueden pedir por `?tab=`. La lista blanca no es
  * defensiva: sin ella, un `?tab=` cualquiera dejaría la ficha sin ninguna
  * pestaña pintada, porque `tab === t.key` sería falso para las cuatro.
  */
-const LINKABLE_TABS: readonly Tab[] = ['projects', 'documents', 'systems'];
+const LINKABLE_TABS: readonly Tab[] = ['projects', 'documents', 'systems', 'api'];
 
 function initialTab(param: string | null): Tab {
   return (LINKABLE_TABS as readonly string[]).includes(param ?? '') ? (param as Tab) : 'summary';
@@ -147,6 +149,8 @@ export default function ClientDetailPage() {
               { key: 'projects', label: `Proyectos${projects.length ? ` (${projects.length})` : ''}` },
               { key: 'documents', label: `Documentos${documentsList.length ? ` (${documentsList.length})` : ''}` },
               { key: 'systems', label: 'Sistemas' },
+              // Las claves de la API solo las gestiona el ADMIN (el backend lo exige igual).
+              ...(user?.role === 'ADMIN' ? [{ key: 'api', label: 'API de integración' }] : []),
             ] as { key: Tab; label: string }[]
           ).map((t) => (
             <button
@@ -202,6 +206,18 @@ export default function ClientDetailPage() {
           onNewDevReport={() => navigate(`/clients/${id}/dev-report/new`)}
           onMonthlyReport={() => navigate(`/clients/${id}/monthly-report`)}
         />
+      )}
+      {tab === 'api' && user?.role === 'ADMIN' && (
+        <Card>
+          <CardHeader
+            icon={<SettingsIcon size={18} />}
+            title="API de integración"
+            subtitle="Claves de solo lectura con las que el cliente consulta sus tickets y requerimientos desde sus sistemas. El administrador del cliente también las gestiona desde el portal (Integraciones)."
+          />
+          <CardBody>
+            <ApiKeysManager backend={staffApiKeys(id)} queryKey={['clients', id, 'api-keys']} />
+          </CardBody>
+        </Card>
       )}
       {tab === 'systems' && (
         <Card>

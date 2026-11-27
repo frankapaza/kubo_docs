@@ -9,8 +9,12 @@ import { ClientApiKey } from './entities/client-api-key.entity';
 export const MAX_ACTIVE_KEYS = 10;
 /** Marcar «último uso» en cada petición sería una escritura por llamada: basta una por minuto. */
 const TOUCH_EVERY_MS = 60_000;
-/** Solo un cliente vigente usa la API: prospectos y ex clientes no. */
-const ACTIVE_CLIENT_STATUS = 'CLIENT';
+/**
+ * Un ex cliente deja de usar la API. Los prospectos sí la usan: el alta de
+ * clientes deja el estado en PROSPECT por defecto y muchos clientes reales
+ * siguen así.
+ */
+const BLOCKED_CLIENT_STATUS = 'FORMER_CLIENT';
 
 export interface ApiKeyView {
   id: number;
@@ -115,7 +119,7 @@ export class ApiKeysService {
     const key = await this.keys.findOne({ where: { keyHash: fingerprint, revokedAt: IsNull() } });
     if (!key) return null;
     const client = await this.clients.findOne({ where: { id: key.clientId }, select: { id: true, status: true } });
-    if (!client || client.status !== ACTIVE_CLIENT_STATUS) return null;
+    if (!client || client.status === BLOCKED_CLIENT_STATUS) return null;
     if (!key.lastUsedAt || now.getTime() - new Date(key.lastUsedAt).getTime() >= TOUCH_EVERY_MS) {
       await this.keys.update(key.id, { lastUsedAt: now });
     }
