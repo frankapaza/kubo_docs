@@ -17,6 +17,9 @@ import { AssignWorkItemDto } from './dto/assign-work-item.dto';
 import { ChangePriorityDto } from './dto/change-priority.dto';
 import { AcceptWorkItemDto } from './dto/accept-work-item.dto';
 import { RejectWorkItemDto } from './dto/reject-work-item.dto';
+import { ChangeWorkItemClientDto } from './dto/change-work-item-client.dto';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { RolesGuard } from '../../common/guards/roles.guard';
 import { DueFilter } from './work-items.repository';
 import { WorkItemStatus, WorkItemPriority } from './domain/work-item-board';
 
@@ -62,6 +65,18 @@ export class WorkItemsController {
   @Patch(':id')
   update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateWorkItemDto) {
     return this.service.update(id, dto);
+  }
+
+  /** Pasa el requerimiento a otro cliente (solo ADMIN): sistema, usuario del cliente y proyecto incluidos. */
+  @Post(':id/client')
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  changeClient(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ChangeWorkItemClientDto,
+  ): Promise<WorkItem> {
+    return this.service.changeClient(id, user.id, dto);
   }
 
   @Delete(':id')

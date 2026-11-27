@@ -54,6 +54,9 @@ export const workItemsApi = {
     api.post<WorkItem>(`/work-items/${id}/accept`, body).then((r) => r.data),
 
   /** Rechazar exige motivo, igual que el resto de estados fuera de flujo. */
+  /** Solo ADMIN: pasa el requerimiento a otro cliente con su sistema y usuario. */
+  changeClient: (id: number, body: { clientId: number; clientSystemId: number | null; clientUserId: number | null }) =>
+    api.post<WorkItem>(`/work-items/${id}/client`, body).then((r) => r.data),
   reject: (id: number, body: { reason: string }) =>
     api.post<WorkItem>(`/work-items/${id}/reject`, body).then((r) => r.data),
 
