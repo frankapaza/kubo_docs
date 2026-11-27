@@ -192,7 +192,8 @@ jobs:
                      036_disponibilidad_escritorio \
                      037_disponibilidad_informe \
                      038_disponibilidad_historial_agente \
-                     039_disponibilidad_protocolo_http; do
+                     039_disponibilidad_protocolo_http \
+                     040_api_integracion_clientes; do
               echo "--- $m"
               sql_file "backend/sql/migrations/$m.sql"
             done

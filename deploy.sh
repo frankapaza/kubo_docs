@@ -34,6 +34,8 @@ set -e
 # del resumen diario del agente para el historial; aplicarla igual, a mano.
 # Migracion 039 (039_disponibilidad_protocolo_http): protocolo HTTP en
 # monitor_services; aplicarla igual, a mano.
+# Migracion 040 (040_api_integracion_clientes): tabla client_api_keys de la
+# API de integracion de clientes; aplicarla igual, a mano.
 cd /home/kubo/kubo
 git pull
 docker compose build backend monitor-worker web
