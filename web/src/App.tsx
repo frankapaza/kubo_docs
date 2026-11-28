@@ -18,6 +18,7 @@ import NotificationTemplatesPage from './pages/NotificationTemplatesPage';
 import DocumentEditorPage from './pages/DocumentEditorPage';
 import WorkspaceSettingsPage from './pages/WorkspaceSettingsPage';
 import InboundEmailPage from './pages/InboundEmailPage';
+import MonitoringAlertsPage from './pages/MonitoringAlertsPage';
 import JiraReportPage from './pages/JiraReportPage';
 import DevReportBuilderPage from './pages/DevReportBuilderPage';
 import BrowserRecorderPage from './pages/BrowserRecorderPage';
@@ -183,6 +184,7 @@ export default function App() {
             correspondería exponerla en el portal.
           */}
           <Route path="/admin/correo-entrante" element={<InboundEmailPage />} />
+          <Route path="/admin/alertas-monitoreo" element={<MonitoringAlertsPage />} />
           <Route path="/documents/:documentId" element={<DocumentEditorPage />} />
           {/* Manual del equipo interno; se enlaza desde el menú lateral. */}
           <Route path="/help" element={<HelpPage />} />

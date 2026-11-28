@@ -3,7 +3,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { availabilityApi, ProbeInfo } from '../../api/availability.api';
 import { useAuth } from '../../auth/AuthContext';
-import LatencyAlertSettingsCard from './LatencyAlertSettingsCard';
 import { askConfirm } from '../../ui/ConfirmDialog';
 import { toast } from '../../ui/Toast';
 import AgentsPanel from './AgentsPanel';
@@ -117,8 +116,6 @@ export default function AvailabilityProbesPage() {
           </table>
         </div>
       )}
-
-      <LatencyAlertSettingsCard isAdmin={isAdmin} />
 
       <ProbeTokenDialog issued={issued} onClose={() => setIssued(null)} />
 

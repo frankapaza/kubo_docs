@@ -317,6 +317,13 @@ export default function AppLayout() {
                   Notificaciones por correo
                 </button>
                 <button
+                  onClick={() => go('/admin/alertas-monitoreo')}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition text-left"
+                >
+                  <BellIcon size={15} className="text-slate-500" />
+                  Alertas de monitoreo
+                </button>
+                <button
                   onClick={() => go('/admin/workspace')}
                   className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition text-left"
                 >
