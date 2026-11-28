@@ -23,6 +23,10 @@ export interface StateRow {
   serviceName: string;
   serverName: string;
   criticality: Criticality;
+  /** Protocolo, destino y umbral: Estado separa los pings de red (ICMP). */
+  protocol: Protocol;
+  target: string;
+  latencyThresholdMs: number;
   office: ProbeSide | null;
   datacenter: ProbeSide | null;
   status: CombinedStatus;

@@ -15,6 +15,10 @@ export interface CombinedStateRow {
   serviceName: string;
   serverName: string;
   criticality: Criticality;
+  /** Protocolo, destino y umbral: la pantalla de Estado separa los pings de red (ICMP). */
+  protocol: string;
+  target: string;
+  latencyThresholdMs: number;
   office: ProbeView | null;
   datacenter: ProbeView | null;
   status: CombinedStatus;
