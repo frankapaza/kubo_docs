@@ -99,20 +99,23 @@ describe('Envío de prueba de plantilla — limitación de frecuencia (integraci
   });
 
   /**
-   * El destinatario sale del token y de ningún otro sitio. Los tests unitarios
-   * no pueden probarlo: llaman al método en TypeScript, donde forjar un `to`
-   * ni siquiera es expresable porque el parámetro no existe. Solo una petición
-   * HTTP de verdad, con el cuerpo puesto a mano, comprueba que Nest no lo liga
-   * y que el correo no acaba donde diga el atacante.
+   * Un ADMIN puede mandar la prueba a otro buzón (decisión del 2026-11-28 para
+   * ver el diseño en Gmail/Outlook). Por HTTP de verdad: sin `to` va al token,
+   * con `to` válido a esa dirección, y lo que no es un correo se rechaza.
    */
-  it('ignora un destinatario falsificado en el cuerpo y usa el del token', async () => {
-    const res = await app.post('/notification-templates/1/test', {
-      body: { to: 'atacante@ejemplo-malicioso.com' },
-    });
+  it('sin destinatario va al correo del token; con uno válido, a esa dirección', async () => {
+    expect((await app.post('/notification-templates/1/test')).status).toBe(201);
+    expect(sendTest).toHaveBeenLastCalledWith(1, ADMIN_EMAIL);
 
+    const res = await app.post('/notification-templates/1/test', { body: { to: 'revision@gmail.com' } });
     expect(res.status).toBe(201);
-    expect(sendTest).toHaveBeenCalledWith(1, ADMIN_EMAIL);
-    expect(sendTest).not.toHaveBeenCalledWith(expect.anything(), 'atacante@ejemplo-malicioso.com');
+    expect(sendTest).toHaveBeenLastCalledWith(1, 'revision@gmail.com');
+  });
+
+  it('un destinatario que no es un correo (o son varios) se rechaza con 400 y no se envía nada', async () => {
+    const res = await app.post('/notification-templates/1/test', { body: { to: 'a@x.com, b@y.com' } });
+    expect(res.status).toBe(400);
+    expect(sendTest).not.toHaveBeenCalled();
   });
 
   it('la previsualización no se limita: no envía nada, y acotarla sería molestar sin motivo', async () => {

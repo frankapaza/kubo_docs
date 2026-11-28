@@ -68,8 +68,11 @@ export const notificationTemplatesApi = {
    * minuto: un 429 trae en `message` el texto en español para mostrar tal
    * cual, ver `THROTTLED_MESSAGE` en el backend.
    */
-  sendTest: (id: number) =>
-    api.post<{ to: string }>(`/notification-templates/${id}/test`).then((r) => r.data),
+  /** Sin `to` va a tu propio correo; con `to`, a esa única dirección. */
+  sendTest: (id: number, to?: string) =>
+    api
+      .post<{ to: string }>(`/notification-templates/${id}/test`, to ? { to } : {})
+      .then((r) => r.data),
 };
 
 /**

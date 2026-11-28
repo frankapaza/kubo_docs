@@ -40,6 +40,8 @@ export default function EditNotificationTemplateDialog({ open, template, onCance
   const [bodyMd, setBodyMd] = useState('');
   const [isActive, setIsActive] = useState(true);
   const [errors, setErrors] = useState<string[]>([]);
+  // Vacío = a tu propio correo. Se conserva entre plantillas para probar varias seguidas.
+  const [testTo, setTestTo] = useState('');
   const [activeField, setActiveField] = useState<ActiveField>('body');
 
   const subjectRef = useRef<HTMLInputElement>(null);
@@ -81,7 +83,7 @@ export default function EditNotificationTemplateDialog({ open, template, onCance
   const sendTest = useMutation({
     mutationFn: () => {
       if (!template) throw new Error('Sin plantilla seleccionada');
-      return notificationTemplatesApi.sendTest(template.id);
+      return notificationTemplatesApi.sendTest(template.id, testTo.trim() || undefined);
     },
     onSuccess: (data) => toast.success(`Correo de prueba enviado a ${data.to}`),
     // El 429 del límite (3 por minuto) trae el mensaje en español ya armado
@@ -294,8 +296,17 @@ export default function EditNotificationTemplateDialog({ open, template, onCance
               onClick={() => sendTest.mutate()}
               loading={sendTest.isPending}
             >
-              Enviarme una prueba
+              {testTo.trim() ? 'Enviar prueba' : 'Enviarme una prueba'}
             </Button>
+            <input
+              type="email"
+              aria-label="Enviar la prueba a"
+              className="input"
+              style={{ maxWidth: 240, fontSize: 13, padding: '5px 8px' }}
+              placeholder="a otro correo (opcional)"
+              value={testTo}
+              onChange={(e) => setTestTo(e.target.value)}
+            />
             <span className="text-xs text-slate-400">
               Usan la última versión guardada, no lo que esté sin guardar aquí arriba. El envío de
               prueba está limitado a 3 por minuto.
