@@ -51,7 +51,7 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-const ACCEPT = '.pdf,.docx,.xlsx,.pptx,.mpp,.png,.jpg,.jpeg,.webp';
+const ACCEPT = '.pdf,.docx,.xlsx,.pptx,.mpp,.png,.jpg,.jpeg,.webp,.gif';
 
 export default function ExpedientePage() {
   const projectId = Number(useParams().projectId);

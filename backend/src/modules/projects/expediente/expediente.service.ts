@@ -1,6 +1,8 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   InternalServerErrorException,
@@ -38,7 +40,7 @@ import {
   requirementFor,
   versionLabel,
 } from './deliverable-catalog';
-import { assertDeliverableFile } from './deliverable-files';
+import { assertDeliverableFile, deliverableExtension } from './deliverable-files';
 import { ProjectDeliverable } from './entities/project-deliverable.entity';
 import { DeliverableHistoryAction, ProjectDeliverableVersion } from './entities/project-deliverable-version.entity';
 
@@ -113,7 +115,7 @@ const CHANGED = {
 const NO_SE_PUDO_GUARDAR = { code: 'STORAGE_ERROR', message: 'No se pudo guardar el archivo. Inténtalo de nuevo.' } as const;
 
 /** Tope del .zip del expediente, para no armar en memoria algo desmedido. */
-export const MAX_ZIP_BYTES = 300 * 1024 * 1024;
+export const MAX_ZIP_BYTES = 150 * 1024 * 1024;
 
 export interface UploadInput {
   buffer: Buffer;
@@ -131,6 +133,7 @@ export interface UploadInput {
 @Injectable()
 export class ExpedienteService {
   private readonly logger = new Logger(ExpedienteService.name);
+  private zipping = false;
 
   constructor(
     @InjectRepository(ProjectDeliverable) private readonly deliverables: Repository<ProjectDeliverable>,
@@ -174,7 +177,7 @@ export class ExpedienteService {
       await m.getRepository(Project).findOne({ where: { id: project.id }, lock: { mode: 'pessimistic_write' } });
       await m.getRepository(Project).update({ id: project.id }, { workType });
       const repo = m.getRepository(ProjectDeliverable);
-      const existing = await repo.find({ where: { projectId: project.id } });
+      const existing = await repo.find({ where: { projectId: project.id }, lock: { mode: 'pessimistic_write' } });
 
       if (existing.length === 0) {
         let n = 0;
@@ -212,7 +215,11 @@ export class ExpedienteService {
         } else if (row.autoNa && row.status === 'NO_APLICA') {
           patch.naReason = autoNaReason(workType);
         }
-        await repo.update({ id: row.id }, patch);
+        // Condicional: si alguien subió una versión entre la lectura y aquí, esa fila no se toca.
+        await repo.update(
+          { id: row.id, status: row.status, versionMajor: row.versionMajor, versionMinor: row.versionMinor },
+          patch,
+        );
       }
     });
     this.logger.log(`Proyecto ${project.id}: tipo de trabajo ${workType} (usuario ${actorUserId}).`);
@@ -268,7 +275,9 @@ export class ExpedienteService {
     if (history > 0) {
       throw new ConflictException({ code: 'INVALID_STATE', message: 'Ese entregable ya tiene historial; no se puede borrar.' });
     }
-    await this.deliverables.delete({ id: row.id });
+    // Condicional: si recibió una versión entre la comprobación y aquí, no se borra su historial.
+    const res = await this.deliverables.delete({ id: row.id, status: 'PENDIENTE', versionMajor: 0, versionMinor: 0 });
+    if (!res.affected) throw new ConflictException(CHANGED);
   }
 
   async history(project: Project, deliverableId: number): Promise<HistoryView[]> {
@@ -356,6 +365,22 @@ export class ExpedienteService {
    * nombre de nomenclatura, en una carpeta por fase, más `indice.csv`.
    */
   async zip(project: Project): Promise<{ buffer: Buffer; filename: string; headerFilename: string }> {
+    // Un .zip se arma en memoria: uno a la vez por proceso, para que varios clics no la agoten.
+    if (this.zipping) {
+      throw new HttpException(
+        { code: 'TOO_MANY_REQUESTS', message: 'Ya se está preparando un expediente. Inténtalo en un momento.' },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    this.zipping = true;
+    try {
+      return await this.buildExpedienteZip(project);
+    } finally {
+      this.zipping = false;
+    }
+  }
+
+  private async buildExpedienteZip(project: Project): Promise<{ buffer: Buffer; filename: string; headerFilename: string }> {
     const view = await this.get(project);
     const withFile = view.deliverables.filter((d) => d.lastFile);
     const total = withFile.reduce((n, d) => n + (d.lastFile?.sizeBytes ?? 0), 0);
@@ -377,11 +402,12 @@ export class ExpedienteService {
       const f = d.lastFile!;
       const key = keyOf.get(f.versionId);
       if (!key) continue;
-      const ext = (f.filename.match(/\.([A-Za-z0-9]{1,5})$/)?.[1] ?? 'bin').toLowerCase();
+      const ext = deliverableExtension(f.mimeType);
       const folder = `${PHASES.indexOf(d.phase) + 1}. ${PHASE_LABELS[d.phase]}`;
       const path = `${folder}/${d.nomenclature}.${ext}`;
       try {
-        entries.push({ name: path, data: await this.readAll(key) });
+        // PDF, Office e imágenes ya vienen comprimidos: se guardan tal cual (deflate no ahorra y bloquea).
+        entries.push({ name: path, data: await this.readAll(key), compress: f.mimeType === 'application/vnd.ms-project' });
         paths.set(d.id, path);
       } catch (cause) {
         this.logger.error(`No se pudo leer «${key}» para el expediente.`, cause as Error);

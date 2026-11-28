@@ -14,6 +14,8 @@ export interface ZipEntry {
   name: string;
   data: Buffer;
   date?: Date;
+  /** false = guardar sin comprimir (lo que ya viene comprimido: PDF, Office, imágenes). */
+  compress?: boolean;
 }
 
 const CRC_TABLE = (() => {
@@ -70,9 +72,9 @@ export function buildZip(entries: ZipEntry[]): Buffer {
 
     const nameBuf = Buffer.from(name, 'utf8');
     const crc = crc32(e.data);
-    const deflated = deflateRawSync(e.data);
-    const stored = deflated.length >= e.data.length;
-    const body = stored ? e.data : deflated;
+    const deflated = e.compress === false ? null : deflateRawSync(e.data);
+    const stored = !deflated || deflated.length >= e.data.length;
+    const body = stored || !deflated ? e.data : deflated;
     const method = stored ? 0 : 8;
     const { time, date } = dosDateTime(e.date ?? new Date());
     const flags = 0x0800; // nombres en UTF-8

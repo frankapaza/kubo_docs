@@ -45,7 +45,9 @@ function fakeRepo(rows: any[], defaults: () => Record<string, unknown> = () => (
       return { affected: hit.length };
     }),
     delete: jest.fn(async (w: any) => {
-      for (const r of where(w)) rows.splice(rows.indexOf(r), 1);
+      const hit = where(w);
+      for (const r of hit) rows.splice(rows.indexOf(r), 1);
+      return { affected: hit.length };
     }),
   };
 }
@@ -208,6 +210,40 @@ describe('ExpedienteService · ciclo de un entregable', () => {
   });
 });
 
+describe('ExpedienteService · cambios a la vez (revisión)', () => {
+  it('cambiar el tipo de trabajo no pisa una versión subida mientras tanto', async () => {
+    const t = await started('AGIL');
+    const live = t.byType('ACT-INI');
+    const stale = t.deliverables.rows.map((r) => ({ ...r }));
+    live.status = 'BORRADOR'; // otra persona subió V0.1 después de que se leyera la lista
+    live.versionMinor = 1;
+    t.deliverables.find.mockImplementationOnce(async () => stale);
+    await t.svc.setWorkType(t.project, 'CORRECTIVO', 9);
+    expect(t.byType('ACT-INI')).toMatchObject({ status: 'BORRADOR', autoNa: 0 });
+  });
+
+  it('quitar un agregado que recibió una versión a la vez falla en vez de borrar su historial', async () => {
+    const t = await started();
+    const d = await t.svc.add(t.project, 'ACT-REU', null);
+    t.versions.count.mockImplementationOnce(async () => {
+      const row = t.deliverables.rows.find((r) => r.id === d.id)!;
+      row.status = 'BORRADOR';
+      row.versionMinor = 1;
+      return 0;
+    });
+    await expect(t.svc.remove(t.project, d.id)).rejects.toMatchObject({ status: 409 });
+    expect(t.deliverables.rows.some((r) => r.id === d.id)).toBe(true);
+  });
+
+  it('no arma dos .zip del mismo proceso a la vez', async () => {
+    const t = await started();
+    const [a, b] = await Promise.allSettled([t.svc.zip(t.project), t.svc.zip(t.project)]);
+    expect(a.status).toBe('fulfilled');
+    expect(b).toMatchObject({ status: 'rejected', reason: { status: 429 } });
+    await expect(t.svc.zip(t.project)).resolves.toBeDefined();
+  });
+});
+
 describe('ExpedienteService · agregados a mano', () => {
   it('otra acta de reunión toma el siguiente correlativo y se puede borrar mientras no tenga historial', async () => {
     const t = await started();
@@ -267,6 +303,14 @@ describe('ExpedienteService · descarga del expediente', () => {
     expect(csv.startsWith('﻿Correlativo;Código;Entregable')).toBe(true);
     expect(csv).toContain('0001;ACT-INI;Acta de inicio;Inicio;Obligatorio;Aprobado;1.0;KUBO-COB-0001-ACT-INI V1.0;1. Inicio/KUBO-COB-0001-ACT-INI V1.0.pdf;');
     expect(csv.split('\r\n').filter(Boolean)).toHaveLength(21);
+  });
+
+  it('el archivo lleva la extensión de su tipo real, no la del nombre subido', async () => {
+    const t = await started();
+    const png = Buffer.concat([Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex'), Buffer.alloc(64)]);
+    await t.svc.upload(t.project, t.byType('ARQ-TIC').id, { buffer: png, filename: 'diagrama.docx' }, 9);
+    const names = Object.keys(entries((await t.svc.zip(t.project)).buffer));
+    expect(names).toContain('2. Planificación/KUBO-COB-0006-ARQ-TIC V0.1.png');
   });
 });
 
