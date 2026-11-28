@@ -128,6 +128,12 @@ describe('TicketsRepository', () => {
       expect(condiciones()).toContain('t.archived_at IS NULL');
     });
 
+    it('excludeClosed oculta resueltos y cerrados (la bandeja «Todos»)', async () => {
+      const { repo, condiciones } = makeListRepo();
+      await repo.list({ excludeClosed: true });
+      expect(condiciones()).toContain("t.status NOT IN ('RESUELTO', 'CERRADO')");
+    });
+
     it('`archived: true` muestra solo los archivados', async () => {
       const { repo, condiciones } = makeListRepo();
       await repo.list({ archived: true });

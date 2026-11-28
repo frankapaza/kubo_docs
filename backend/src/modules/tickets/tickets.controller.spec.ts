@@ -32,6 +32,12 @@ describe('TicketsController.list: archivados', () => {
     expect(service.list).toHaveBeenCalledWith(expect.objectContaining({ archived: false }));
   });
 
+  it('archived=any (al buscar) no filtra archivados: salen también', async () => {
+    const { controller, service } = make();
+    await listar(controller, 'any');
+    expect(service.list).toHaveBeenCalledWith(expect.objectContaining({ archived: undefined }));
+  });
+
   it('archived=true pide solo los archivados', async () => {
     const { controller, service } = make();
     await listar(controller, 'true');
