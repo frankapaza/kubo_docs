@@ -1,4 +1,5 @@
 import { BadGatewayException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { formatOrganizerNotes } from './organizer-notes';
 import { AIProvidersRepository } from './ai-providers.repository';
 import { AIProvider, AIProviderKind } from './entities/ai-provider.entity';
 import { decryptSecret } from '../../common/crypto/aes-gcm.util';
@@ -320,6 +321,7 @@ export class LLMService {
       ctx.transcription || '(sin transcripción)',
       '"""',
       '',
+      ...(ctx.notes?.length ? [...formatOrganizerNotes(ctx.notes), ''] : []),
       'Genera el acta en el formato JSON indicado.',
     ]
       .filter((l) => l !== null)

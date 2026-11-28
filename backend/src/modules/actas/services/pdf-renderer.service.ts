@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import PDFDocument from 'pdfkit';
 import { Acta } from '../entities/acta.entity';
 import { ActaSignature } from '../entities/acta-signature.entity';
+import { ActaAnnex } from '../entities/acta-annex.entity';
 import { WorkspaceSetting } from '../../workspace/entities/workspace-setting.entity';
 
 export interface PdfRenderContext {
@@ -9,12 +10,14 @@ export interface PdfRenderContext {
   meetingTitle?: string | null;
   projectName?: string | null;
   signatures?: ActaSignature[];
+  /** Evidencias (foto y/o texto): «Anexos» al final, solo si hay alguna. */
+  annexes?: ActaAnnex[];
   emisor?: WorkspaceSetting | null;
   emisorLogoBuffer?: Buffer | null;
 }
 
 const COLORS = {
-  primary: '#4F46E5',
+  primary: '#053777',
   ink: '#0F172A',
   muted: '#475569',
   border: '#E2E8F0',
@@ -28,6 +31,19 @@ const STATUS_LABEL: Record<string, string> = {
   APPROVED: 'Aprobada',
   EXPORTED: 'Exportada',
 };
+
+const fmt = (d: Date) => new Date(d).toLocaleString('es-PE', { timeZone: 'America/Lima' });
+
+/** Cómo firmó cada persona y, si falta, qué le falta (spec 2026-11-28: dibujo, correo o ambos). */
+export function signatureStatusLine(s: Pick<ActaSignature, 'method' | 'signedAt' | 'confirmEmail' | 'emailConfirmedAt'>): string {
+  const mail = s.confirmEmail ? ` (${s.confirmEmail})` : '';
+  const confirmed = s.emailConfirmedAt ? `Confirmado por correo${mail} ${fmt(s.emailConfirmedAt)}` : null;
+  if (s.method === 'EMAIL') return confirmed ?? `Pendiente: confirmar por correo${mail}`;
+  if (s.method === 'BOTH') return `Firmado en pantalla · ${confirmed ? confirmed.charAt(0).toLowerCase() + confirmed.slice(1) : `pendiente: confirmar por correo${mail}`}`;
+  if (s.method === 'REMOTE') return s.emailConfirmedAt ? `Firmado a distancia${mail} ${fmt(s.emailConfirmedAt)}` : `Pendiente: firmar desde el enlace${mail}`;
+  if (s.method === 'IN_PERSON') return `Firmado en pantalla ${fmt(s.signedAt)}`;
+  return `Firmado: ${fmt(s.signedAt)}`;
+}
 
 @Injectable()
 export class PdfRendererService {
@@ -58,6 +74,9 @@ export class PdfRendererService {
       if (ctx.signatures && ctx.signatures.length > 0) {
         this.drawSignatures(doc, ctx.signatures);
       }
+      // En un acta no hay secciones: toda evidencia va a «Anexos», con la misma numeración que en pantalla.
+      const anexos = ctx.annexes ?? [];
+      if (anexos.length > 0) this.drawAnnexes(doc, anexos);
       this.drawFooters(doc, ctx);
 
       doc.end();
@@ -371,6 +390,33 @@ export class PdfRendererService {
     doc.x = doc.page.margins.left;
   }
 
+  /** «Anexos» al final: cada evidencia con su foto (si tiene) y su texto, numeradas. */
+  private drawAnnexes(doc: PDFKit.PDFDocument, annexes: ActaAnnex[]) {
+    const cw = this.contentWidth(doc);
+    doc.addPage();
+    doc.fillColor(COLORS.ink).font('Helvetica-Bold').fontSize(14).text('Anexos', doc.page.margins.left, doc.y, { width: cw });
+    doc.moveDown(0.6);
+    annexes.forEach((a, i) => {
+      const imgH = a.image ? 260 : 0;
+      this.ensureSpace(doc, imgH + 60);
+      doc.fillColor(COLORS.ink).font('Helvetica-Bold').fontSize(10.5).text(`Anexo ${i + 1}`, doc.page.margins.left, doc.y, { width: cw });
+      doc.moveDown(0.3);
+      if (a.image) {
+        const top = doc.y;
+        try {
+          doc.image(a.image, doc.page.margins.left, top, { fit: [cw, imgH], align: 'center' });
+          doc.y = top + imgH + 6;
+        } catch {
+          doc.font('Helvetica-Oblique').fontSize(9).fillColor(COLORS.muted).text('[La imagen no se pudo incluir]', { width: cw });
+        }
+      }
+      if (a.caption) {
+        doc.font('Helvetica').fontSize(10).fillColor(COLORS.ink).text(a.caption, doc.page.margins.left, doc.y, { width: cw });
+      }
+      doc.moveDown(1);
+    });
+  }
+
   private drawSignatures(doc: PDFKit.PDFDocument, sigs: ActaSignature[]) {
     const cw = this.contentWidth(doc);
     this.ensureSpace(doc, 140);
@@ -383,7 +429,7 @@ export class PdfRendererService {
     doc.moveDown(0.4);
 
     const cellW = (cw - 16) / 2;
-    const cellH = 96;
+    const cellH = 112;
     let x = doc.page.margins.left;
     let y = doc.y;
 
@@ -407,7 +453,14 @@ export class PdfRendererService {
           lineBreak: false,
         });
 
-      const sigLineY = y + cellH - 38;
+      const sigLineY = y + cellH - 50;
+      if (s.signaturePng) {
+        try {
+          doc.image(s.signaturePng, x + 14, y + 18, { fit: [cellW - 28, sigLineY - (y + 18) - 4], align: 'center', valign: 'bottom' });
+        } catch {
+          // Un trazo ilegible no impide emitir el acta: queda la línea y los datos.
+        }
+      }
       doc
         .strokeColor(COLORS.ink)
         .lineWidth(0.6)
@@ -420,17 +473,18 @@ export class PdfRendererService {
         .fontSize(9.5)
         .text(s.signerName, x + 10, sigLineY + 4, { width: cellW - 20, lineBreak: false });
 
-      const meta = [
-        s.signerDocument ? `DNI: ${s.signerDocument}` : null,
-        `Firmado: ${new Date(s.signedAt).toLocaleString('es-PE')}`,
-      ]
-        .filter(Boolean)
-        .join('  ·  ');
+      // DNI y estado en líneas propias: el estado de las firmas por correo es largo.
+      const meta = s.signerDocument ? `DNI: ${s.signerDocument}` : '';
       doc
         .font('Helvetica')
         .fontSize(7.5)
         .fillColor(COLORS.muted)
         .text(meta, x + 10, sigLineY + 18, { width: cellW - 20, lineBreak: false });
+      doc
+        .font('Helvetica')
+        .fontSize(7.5)
+        .fillColor(COLORS.muted)
+        .text(signatureStatusLine(s), x + 10, sigLineY + 28, { width: cellW - 20, lineBreak: false, ellipsis: true });
       doc
         .font('Courier')
         .fontSize(6.5)
@@ -438,7 +492,7 @@ export class PdfRendererService {
         .text(
           `hash ${s.signatureHash.slice(0, 16)}…${s.signatureHash.slice(-8)}`,
           x + 10,
-          sigLineY + 28,
+          sigLineY + 38,
           { width: cellW - 20, lineBreak: false },
         );
 

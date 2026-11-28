@@ -38,6 +38,8 @@ set -e
 # API de integracion de clientes; aplicarla igual, a mano.
 # Migracion 041 (041_disponibilidad_latencia_horaria): latencia por hora y
 # alerta de lentitud de los pings; aplicarla igual, a mano.
+# Migracion 042 (042_reunion_ipad): firma en pantalla, notas de reunion y
+# anexos del acta; aplicarla igual, a mano.
 cd /home/kubo/kubo
 git pull
 docker compose build backend monitor-worker web

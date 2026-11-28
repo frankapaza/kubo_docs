@@ -3,8 +3,14 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Acta } from './entities/acta.entity';
 import { ActaSignature } from './entities/acta-signature.entity';
 import { Participant } from '../participants/entities/participant.entity';
+import { Meeting } from '../meetings/entities/meeting.entity';
+import { EmailModule } from '../email/email.module';
 import { ActasService } from './actas.service';
 import { ActasController } from './actas.controller';
+import { ActaSignPublicController } from './acta-sign-public.controller';
+import { ActaAnnexesController } from './acta-annexes.controller';
+import { ActaAnnex } from './entities/acta-annex.entity';
+import { ActaAnnexesService } from './services/acta-annexes.service';
 import { ActaTemplateService } from './services/acta-template.service';
 import { PdfRendererService } from './services/pdf-renderer.service';
 import { ActaSignaturesService } from './services/acta-signatures.service';
@@ -20,7 +26,7 @@ import { WorkspaceModule } from '../workspace/workspace.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Acta, ActaSignature, Participant]),
+    TypeOrmModule.forFeature([Acta, ActaSignature, ActaAnnex, Participant, Meeting]),
     MeetingsModule,
     ParticipantsModule,
     AgendaModule,
@@ -30,9 +36,10 @@ import { WorkspaceModule } from '../workspace/workspace.module';
     AIModule,
     IntegrationsModule,
     WorkspaceModule,
+    EmailModule,
   ],
-  providers: [ActasService, ActaTemplateService, PdfRendererService, ActaSignaturesService],
-  controllers: [ActasController],
+  providers: [ActasService, ActaTemplateService, PdfRendererService, ActaSignaturesService, ActaAnnexesService],
+  controllers: [ActasController, ActaSignPublicController, ActaAnnexesController],
   exports: [ActasService],
 })
 export class ActasModule {}

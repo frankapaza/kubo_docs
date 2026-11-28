@@ -17,12 +17,23 @@ import { ActasService } from './actas.service';
 import { ActaSignaturesService } from './services/acta-signatures.service';
 import { UpdateActaDto } from './dto/update-acta.dto';
 import { SignActaDto } from './dto/sign-acta.dto';
+import { SignByEmailDto, SignInPersonDto } from './dto/sign-in-person.dto';
 import { ExportToJiraDto } from '../integrations/dto/export-jira.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
+
+function clientIp(req: Request): string | null {
+  return (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() ?? req.socket?.remoteAddress ?? null;
+}
+
+/** La respuesta nunca lleva el trazo binario ni la huella del enlace de correo. */
+function withoutSecrets<T extends { signaturePng?: unknown; confirmTokenHash?: unknown }>(s: T) {
+  const { signaturePng: _png, confirmTokenHash: _tok, ...rest } = s;
+  return rest;
+}
 
 @Controller()
 @UseGuards(JwtAuthGuard, StaffOnlyGuard, RolesGuard)
@@ -97,6 +108,44 @@ export class ActasController {
   @Get('actas/:id/signatures')
   listSignatures(@Param('id', ParseIntPipe) id: number) {
     return this.signatures.listByActa(id);
+  }
+
+  /** Firma en el iPad (trazo con dedo o Apple Pencil), recogida por el usuario con sesión. */
+  @Post('actas/:id/signatures/in-person')
+  @HttpCode(201)
+  signInPerson(@Param('id', ParseIntPipe) id: number, @Body() dto: SignInPersonDto, @CurrentUser() user: AuthUser, @Req() req: Request) {
+    return this.signatures.signInPerson(id, dto, user, clientIp(req)).then(withoutSecrets);
+  }
+
+  /** Firma por confirmación de correo (EMAIL) o trazo + correo (BOTH). */
+  @Post('actas/:id/signatures/email')
+  @HttpCode(201)
+  signByEmail(@Param('id', ParseIntPipe) id: number, @Body() dto: SignByEmailDto, @CurrentUser() user: AuthUser, @Req() req: Request) {
+    return this.signatures.requestByEmail(id, dto, user, clientIp(req)).then(withoutSecrets);
+  }
+
+  /** Reunión por Meet: enlace de firma a distancia a cada asistente con correo que no firmó. */
+  @Post('actas/:id/signatures/remote-all')
+  @HttpCode(200)
+  signRemoteAll(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser, @Req() req: Request) {
+    return this.signatures.requestRemoteForAll(id, user, clientIp(req));
+  }
+
+  /** Trazo de una firma (PNG). */
+  @Get('actas/:id/signatures/:sigId/image')
+  async signatureImage(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('sigId', ParseIntPipe) sigId: number,
+    @Res() res: Response,
+  ) {
+    const sig = (await this.signatures.signaturesWithImages(id)).find((s) => Number(s.id) === sigId);
+    if (!sig?.signaturePng) {
+      res.status(404).json({ code: 'NOT_FOUND', message: 'Esta firma no tiene trazo' });
+      return;
+    }
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(sig.signaturePng);
   }
 
   @Post('actas/:id/signatures')

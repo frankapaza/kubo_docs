@@ -12,6 +12,7 @@ import { registerImportJsonLimit } from './modules/availability/import-json-limi
 import { registerProbeIngestJsonLimit } from './modules/availability/probe-ingest-json-limit';
 import { CorsIoAdapter } from './common/realtime/cors-io.adapter';
 import { registerGithubWebhookBody } from './modules/dev-connector/github-webhook-body';
+import { registerSignatureJsonLimit } from './modules/actas/signature-json-limit';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
@@ -22,6 +23,8 @@ async function bootstrap(): Promise<void> {
   // Antes de `listen()`, que es quien llama a `init()` y monta el analizador de
   // cuerpos de Nest: por detrás no serviría de nada. Ver el fichero.
   registerBulkSendJsonLimit(app);
+  // Firmas en PNG (base64): hasta 1 MB en sus rutas.
+  registerSignatureJsonLimit(app);
   // Ídem para la ingesta de logs: 2 MB descomprimidos (el appender manda gzip).
   registerIngestJsonLimit(app);
   // Y la ingesta de la sonda (1 MB, token kmp_) y la del agente (64 KB, token kma_).

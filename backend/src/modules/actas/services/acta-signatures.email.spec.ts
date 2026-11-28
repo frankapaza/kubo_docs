@@ -1,0 +1,185 @@
+import { createHash } from 'crypto';
+
+import { ActaSignaturesService, isSignatureComplete } from './acta-signatures.service';
+
+const PNG_1X1 =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+const OPERADOR = { id: 9, email: 'frank@kuboti.com', role: 'ADMIN' } as any;
+
+function make(acta: any = { id: 3, meetingId: 1, version: 2, status: 'IN_REVIEW', contentMarkdown: '# Acta' }) {
+  const participants: any[] = [
+    { id: 5, meetingId: 1, fullName: 'Ana Pérez', documentNumber: '45678912', email: 'ana@cliente.pe', role: 'Área usuaria', attended: 1, userId: null },
+    { id: 6, meetingId: 1, fullName: 'Luis Soto', documentNumber: '41111111', email: null, role: null, attended: 1, userId: null },
+  ];
+  const sigs: any[] = [];
+  const sent: any[] = [];
+  const sigRepo = {
+    findOne: jest.fn(async ({ where }: any) =>
+      sigs.find((s) => Object.entries(where).every(([k, v]) => s[k] === v)) ?? null),
+    create: jest.fn((x: any) => x),
+    save: jest.fn(async (x: any) => { if (!x.id) { x.id = sigs.length + 1; sigs.push(x); } return x; }),
+    delete: jest.fn(async ({ id }: any) => { const i = sigs.findIndex((s) => s.id === id); if (i >= 0) sigs.splice(i, 1); }),
+    update: jest.fn(async (crit: any, patch: any) => {
+      const s = sigs.find((x) => x.id === crit.id && x.confirmTokenHash === crit.confirmTokenHash);
+      if (!s) return { affected: 0 };
+      Object.assign(s, patch);
+      return { affected: 1 };
+    }),
+  };
+  const svc = new ActaSignaturesService(
+    sigRepo as any,
+    { findOne: jest.fn(async () => acta) } as any,
+    {
+      findOne: jest.fn(async ({ where }: any) => participants.find((p) => p.id === where.id) ?? null),
+      find: jest.fn(async ({ where }: any) => participants.filter((p) => p.meetingId === where.meetingId && (where.attended === undefined || p.attended === where.attended))),
+      create: jest.fn((x: any) => x),
+      save: jest.fn(async (x: any) => { x.id = 100 + participants.length; participants.push(x); return x; }),
+      delete: jest.fn(async ({ id }: any) => { const i = participants.findIndex((p) => p.id === id); if (i >= 0) participants.splice(i, 1); }),
+    } as any,
+    { findOne: jest.fn(async () => ({ id: 1, title: 'Reunión de avance COB', scheduledAt: new Date('2026-11-28T15:00:00Z') })) } as any,
+    { send: jest.fn(async (m: any) => { sent.push(m); return {}; }) } as any,
+    { get: jest.fn(() => 'https://docs.kuboti.com') } as any,
+  );
+  return { svc, sigs, sent, participants, acta, failMail: () => { (svc as any).email.send = jest.fn(async () => { throw Object.assign(new Error('smtp'), { status: 502 }); }); } };
+}
+
+const tokenFrom = (html: string) => /firmar-acta\/([A-Za-z0-9_-]+)/.exec(html)![1];
+
+describe('Firma por confirmación de correo', () => {
+  it('EMAIL: crea la firma pendiente y envía un enlace; al confirmar queda completa', async () => {
+    const t = make();
+    const sig = await t.svc.requestByEmail(3, { participantId: 5, mode: 'EMAIL' }, OPERADOR, null);
+    expect(sig).toMatchObject({ method: 'EMAIL', confirmEmail: 'ana@cliente.pe', emailConfirmedAt: null });
+    expect(isSignatureComplete(sig)).toBe(false);
+    expect(t.sent[0].to).toBe('ana@cliente.pe');
+    expect(t.sent[0].subject).toContain('Reunión de avance COB');
+    const token = tokenFrom(t.sent[0].html);
+    expect(sig.confirmTokenHash).toBe(createHash('sha256').update(token).digest('hex'));
+    expect(JSON.stringify(sig)).not.toContain(token);
+
+    expect(await t.svc.previewByToken(token)).toMatchObject({ signerName: 'Ana Pérez', meetingTitle: 'Reunión de avance COB', status: 'PENDIENTE' });
+    const done = await t.svc.confirmByToken(token, '10.0.0.9');
+    expect(done.emailConfirmedAt).toBeInstanceOf(Date);
+    expect(done.confirmTokenHash).toBeNull();
+    expect(isSignatureComplete(done)).toBe(true);
+  });
+
+  it('BOTH: exige el trazo; completa solo cuando también confirma por correo', async () => {
+    const t = make();
+    await expect(t.svc.requestByEmail(3, { participantId: 5, mode: 'BOTH' }, OPERADOR, null)).rejects.toMatchObject({ status: 400 });
+    const sig = await t.svc.requestByEmail(3, { participantId: 5, mode: 'BOTH', signaturePng: PNG_1X1 }, OPERADOR, null);
+    expect(sig.method).toBe('BOTH');
+    expect(Buffer.isBuffer(sig.signaturePng)).toBe(true);
+    expect(isSignatureComplete(sig)).toBe(false);
+    const done = await t.svc.confirmByToken(tokenFrom(t.sent[0].html), null);
+    expect(isSignatureComplete(done)).toBe(true);
+  });
+
+  it('sin correo del participante, se puede indicar en el momento; sin ninguno, 400', async () => {
+    const t = make();
+    await expect(t.svc.requestByEmail(3, { participantId: 6, mode: 'EMAIL' }, OPERADOR, null)).rejects.toMatchObject({ status: 400 });
+    const sig = await t.svc.requestByEmail(3, { participantId: 6, mode: 'EMAIL', signerEmail: 'luis@cliente.pe' }, OPERADOR, null);
+    expect(sig.confirmEmail).toBe('luis@cliente.pe');
+  });
+
+  it('un enlace usado, vencido o inventado no confirma', async () => {
+    const t = make();
+    await t.svc.requestByEmail(3, { participantId: 5, mode: 'EMAIL' }, OPERADOR, null);
+    const token = tokenFrom(t.sent[0].html);
+    await t.svc.confirmByToken(token, null);
+    await expect(t.svc.confirmByToken(token, null)).rejects.toMatchObject({ status: 404 });
+    await expect(t.svc.confirmByToken('x'.repeat(43), null)).rejects.toMatchObject({ status: 404 });
+
+    const t2 = make();
+    const s2 = await t2.svc.requestByEmail(3, { participantId: 5, mode: 'EMAIL' }, OPERADOR, null);
+    s2.confirmExpiresAt = new Date(Date.now() - 1000);
+    await expect(t2.svc.confirmByToken(tokenFrom(t2.sent[0].html), null)).rejects.toMatchObject({ status: 410 });
+  });
+
+  it('si el correo no sale, la firma no queda pendiente sin enlace', async () => {
+    const t = make();
+    t.failMail();
+    await expect(t.svc.requestByEmail(3, { participantId: 5, mode: 'EMAIL' }, OPERADOR, null)).rejects.toMatchObject({ status: 502 });
+    expect(t.sigs).toEqual([]);
+  });
+
+  it('las firmas de antes (con usuario) y las dibujadas cuentan como completas', () => {
+    expect(isSignatureComplete({ method: 'USER' } as any)).toBe(true);
+    expect(isSignatureComplete({ method: 'IN_PERSON' } as any)).toBe(true);
+  });
+});
+
+describe('Firma a distancia (reunión por Meet): enlace para dibujar y confirmar', () => {
+  it('REMOTE: el enlace pide dibujar; sin trazo no confirma; con trazo queda completa', async () => {
+    const t = make();
+    const sig = await t.svc.requestByEmail(3, { participantId: 5, mode: 'REMOTE' }, OPERADOR, null);
+    expect(sig.method).toBe('REMOTE');
+    expect(t.sent[0].html).toContain('firmar');
+    const token = tokenFrom(t.sent[0].html);
+    expect(await t.svc.previewByToken(token)).toMatchObject({ needsDrawing: true });
+    await expect(t.svc.confirmByToken(token, null)).rejects.toMatchObject({ status: 400 });
+    const done = await t.svc.confirmByToken(token, null, PNG_1X1);
+    expect(Buffer.isBuffer(done.signaturePng)).toBe(true);
+    expect(isSignatureComplete(done)).toBe(true);
+  });
+
+  it('enviar a todos: a cada asistente con correo y sin firma; informa a quién no se pudo', async () => {
+    const t = make();
+    const r = await t.svc.requestRemoteForAll(3, OPERADOR, null);
+    expect(r).toEqual({ sent: ['Ana Pérez'], skipped: [{ name: 'Luis Soto', reason: 'sin correo' }] });
+    expect(t.sent.map((m) => m.to)).toEqual(['ana@cliente.pe']);
+    const again = await t.svc.requestRemoteForAll(3, OPERADOR, null);
+    expect(again.sent).toEqual([]);
+  });
+});
+
+describe('Firma por correo: revisión final', () => {
+  it('si el acta cambió desde el envío del enlace, no se confirma (409)', async () => {
+    const t = make();
+    await t.svc.requestByEmail(3, { participantId: 5, mode: 'EMAIL' }, OPERADOR, null);
+    t.acta.version = 3;
+    await expect(t.svc.confirmByToken(tokenFrom(t.sent[0].html), null)).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('si el acta ya no está en revisión o aprobada, no se confirma', async () => {
+    const t = make();
+    await t.svc.requestByEmail(3, { participantId: 5, mode: 'EMAIL' }, OPERADOR, null);
+    t.acta.status = 'DRAFT';
+    await expect(t.svc.confirmByToken(tokenFrom(t.sent[0].html), null)).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('la huella de la confirmación cubre el trazo dibujado a distancia', async () => {
+    const OTRO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==';
+    const a = make();
+    await a.svc.requestByEmail(3, { participantId: 5, mode: 'REMOTE' }, OPERADOR, null);
+    const b = make();
+    await b.svc.requestByEmail(3, { participantId: 5, mode: 'REMOTE' }, OPERADOR, null);
+    b.sigs[0].signatureHash = a.sigs[0].signatureHash;
+    const ha = (await a.svc.confirmByToken(tokenFrom(a.sent[0].html), null, PNG_1X1)).signatureHash;
+    const hb = (await b.svc.confirmByToken(tokenFrom(b.sent[0].html), null, OTRO)).signatureHash;
+    expect(ha).not.toBe(hb);
+  });
+
+  it('el enlace de un participante con correo no se puede desviar a otro correo', async () => {
+    const t = make();
+    await expect(t.svc.requestByEmail(3, { participantId: 5, mode: 'EMAIL', signerEmail: 'otro@x.pe' }, OPERADOR, null)).rejects.toMatchObject({ status: 400 });
+    const ok = await t.svc.requestByEmail(3, { participantId: 5, mode: 'EMAIL', signerEmail: 'ANA@cliente.pe' }, OPERADOR, null);
+    expect(ok.confirmEmail).toBe('ana@cliente.pe');
+  });
+
+  it('si el correo falla, tampoco queda el asistente nuevo que se creó', async () => {
+    const t = make();
+    t.failMail();
+    const antes = t.participants.length;
+    await expect(t.svc.requestByEmail(3, { signerName: 'Nuevo', signerDocument: '40000000', signerEmail: 'n@x.pe', mode: 'EMAIL' }, OPERADOR, null)).rejects.toBeTruthy();
+    expect(t.participants.length).toBe(antes);
+  });
+
+  it('dos confirmaciones del mismo enlace: solo la primera vale', async () => {
+    const t = make();
+    await t.svc.requestByEmail(3, { participantId: 5, mode: 'EMAIL' }, OPERADOR, null);
+    const token = tokenFrom(t.sent[0].html);
+    const [r1, r2] = await Promise.allSettled([t.svc.confirmByToken(token, null), t.svc.confirmByToken(token, null)]);
+    expect([r1.status, r2.status].sort()).toEqual(['fulfilled', 'rejected']);
+  });
+});

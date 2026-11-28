@@ -19,6 +19,8 @@ export type LLMMeetingType =
   | 'POSTMORTEM'
   | 'DISCOVERY';
 
+import type { OrganizerNote } from './organizer-notes';
+
 export interface LLMContext {
   projectName: string;
   meetingTitle: string;
@@ -28,6 +30,8 @@ export interface LLMContext {
   participants: Array<{ fullName: string; role: string | null; attended: boolean }>;
   agenda: Array<{ title: string; description: string | null }>;
   transcription: string;
+  /** Notas del organizador durante la grabación (nota, acuerdo o tarea, con su minuto). */
+  notes?: OrganizerNote[];
 }
 
 export interface LLMCallConfig {

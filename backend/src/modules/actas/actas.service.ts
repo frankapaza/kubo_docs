@@ -13,6 +13,8 @@ import { ActaSignature } from './entities/acta-signature.entity';
 import { UpdateActaDto } from './dto/update-acta.dto';
 import { ActaTemplateService } from './services/acta-template.service';
 import { PdfRendererService } from './services/pdf-renderer.service';
+import { ActaAnnexesService } from './services/acta-annexes.service';
+import { MeetingNotesService } from '../meetings/meeting-notes.service';
 import { MeetingsService } from '../meetings/meetings.service';
 import { ParticipantsService } from '../participants/participants.service';
 import { AgendaService } from '../agenda/agenda.service';
@@ -46,6 +48,8 @@ export class ActasService {
     private readonly workspace: WorkspaceService,
     private readonly audioRetention: AudioRetentionService,
     @Inject(STORAGE_SERVICE) private readonly storage: IStorageService,
+    private readonly annexes: ActaAnnexesService,
+    private readonly meetingNotes: MeetingNotesService,
   ) {}
 
   async findByIdOrFail(id: number): Promise<Acta> {
@@ -92,6 +96,7 @@ export class ActasService {
         })),
         agenda: agenda.map((a) => ({ title: a.title, description: a.description ?? null })),
         transcription: transcription.contentText,
+        notes: (await this.meetingNotes.list(meetingId)).map((n) => ({ offsetSec: n.offsetSec, kind: n.kind, text: n.text })),
       });
       body = this.template.renderFromAI({ meeting, participants, draft });
       contentJson = draft as unknown as Record<string, unknown>;
@@ -156,6 +161,7 @@ export class ActasService {
       })),
       agenda: agenda.map((a) => ({ title: a.title, description: a.description ?? null })),
       transcription: transcription.contentText,
+      notes: (await this.meetingNotes.list(Number(acta.meetingId))).map((n) => ({ offsetSec: n.offsetSec, kind: n.kind, text: n.text })),
     });
     acta.contentMarkdown = this.template.renderFromAI({ meeting, participants, draft });
     acta.contentJson = draft as unknown as Record<string, unknown>;
@@ -331,10 +337,13 @@ export class ActasService {
     const meeting = await this.meetings.findByIdOrFail(Number(acta.meetingId));
     const [project, sigs, emisor, emisorLogoBuffer] = await Promise.all([
       this.projects.findById(Number(meeting.projectId)).catch(() => null),
-      this.signatures.find({
-        where: { actaId: acta.id },
-        order: { signedAt: 'ASC' },
-      }),
+      // Con el trazo (columna fuera de los listados) para dibujarlo en el PDF.
+      this.signatures
+        .createQueryBuilder('s')
+        .addSelect('s.signaturePng')
+        .where('s.acta_id = :id', { id: acta.id })
+        .orderBy('s.signed_at', 'ASC')
+        .getMany(),
       this.workspace.get().catch(() => null),
       this.workspace.getLogoBuffer().catch(() => null),
     ]);
@@ -343,6 +352,7 @@ export class ActasService {
       meetingTitle: meeting.title,
       projectName: project?.name ?? null,
       signatures: sigs,
+      annexes: await this.annexes.withImages(Number(acta.id)),
       emisor,
       emisorLogoBuffer,
     });
