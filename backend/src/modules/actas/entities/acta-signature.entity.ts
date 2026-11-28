@@ -33,6 +33,14 @@ export class ActaSignature {
   @Column({ name: 'signature_hash', type: 'varchar', length: 128 })
   signatureHash!: string;
 
+  /** USER = firmó con su usuario; IN_PERSON = en el iPad, con nombre/DNI y trazo (migración 042). */
+  @Column({ type: 'varchar', length: 12, default: 'USER' })
+  method!: 'USER' | 'IN_PERSON';
+
+  /** Trazo manuscrito (PNG). Fuera de los listados: se lee para el PDF y la imagen. */
+  @Column({ name: 'signature_png', type: 'mediumblob', nullable: true, select: false })
+  signaturePng?: Buffer | null;
+
   @CreateDateColumn({ name: 'signed_at' })
   signedAt!: Date;
 
