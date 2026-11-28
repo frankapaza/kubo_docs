@@ -318,6 +318,13 @@ export default function AppLayout() {
                   Plantillas de documentos
                 </button>
                 <button
+                  onClick={() => go('/admin/plantillas-entregables')}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition text-left"
+                >
+                  <FileTextIcon size={15} className="text-slate-500" />
+                  Plantillas de entregables
+                </button>
+                <button
                   onClick={() => go('/admin/notifications')}
                   className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition text-left"
                 >

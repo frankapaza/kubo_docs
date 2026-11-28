@@ -36,6 +36,10 @@ export class ProjectDeliverableVersion {
   @Column({ name: 'size_bytes', type: 'int', unsigned: true, nullable: true })
   sizeBytes!: number | null;
 
+  /** Documento en línea de esta versión (JSON de secciones), migración 044. No se lee en los listados. */
+  @Column({ name: 'content_json', type: 'mediumtext', nullable: true, select: false })
+  contentJson!: string | null;
+
   @Column({ name: 'actor_user_id', type: 'bigint', unsigned: true, nullable: true })
   actorUserId!: number | null;
 

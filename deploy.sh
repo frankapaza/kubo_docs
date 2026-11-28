@@ -42,6 +42,8 @@ set -e
 # anexos del acta; aplicarla igual, a mano.
 # Migracion 043 (043_expediente_proyecto): tipo de trabajo del proyecto y
 # entregables del expediente con sus versiones; aplicarla igual, a mano.
+# Migracion 044 (044_editor_entregables): documento en linea, plantillas e
+# imagenes por seccion de los entregables; aplicarla igual, a mano.
 cd /home/kubo/kubo
 git pull
 docker compose build backend monitor-worker web

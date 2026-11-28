@@ -47,6 +47,10 @@ export interface Deliverable {
   version: string | null;
   nomenclature: string;
   lastFile: DeliverableFile | null;
+  /** Versión del historial con el último documento redactado en la plataforma. */
+  documentVersionId: number | null;
+  /** Lo vigente: el último archivo subido o el documento en línea. */
+  current: 'FILE' | 'DOCUMENT' | null;
   updatedAt: string;
 }
 
