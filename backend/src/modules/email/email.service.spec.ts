@@ -121,3 +121,49 @@ describe('EmailService: el respaldo por variables de entorno', () => {
     expect(transporte().host).toBe('mail.kuboti.com');
   });
 });
+
+describe('EmailService: todo correo sale con el marco Kubo y el logo incrustado', () => {
+  beforeEach(() => {
+    createTransport.mockReset();
+    createTransport.mockReturnValue({
+      sendMail: jest.fn().mockResolvedValue({ messageId: '<1@kuboti.com>', accepted: ['c@e.com'], rejected: [] }),
+    });
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  const ENV = { SMTP_HOST: 'mail.kuboti.com', SMTP_USER: 'no-reply@kuboti.com', SMTP_PASS: 'x', SMTP_PORT: '587' };
+
+  it('envuelve el html y adjunta el logo inline, conservando los adjuntos del llamador', async () => {
+    const service = montar(ENV);
+    const pdf = { filename: 'doc.pdf', content: Buffer.from('x'), contentType: 'application/pdf' };
+    await service.send({ ...UN_CORREO, attachments: [pdf] });
+    const m = correo();
+    expect(m.html).toContain('<!--kubo-layout-->');
+    expect(m.html).toContain('<p>hola</p>');
+    expect(m.html).toContain('src="cid:kubo-logo@kuboti.com"');
+    expect(m.attachments).toEqual([
+      pdf,
+      expect.objectContaining({ cid: 'kubo-logo@kuboti.com', contentType: 'image/png', filename: 'kubo.png' }),
+    ]);
+    expect(m.attachments[1].content.subarray(0, 4).toString('hex')).toBe('89504e47');
+  });
+});
+
+describe('EmailService.testConnection: la prueba SMTP también sale con el marco', () => {
+  beforeEach(() => {
+    createTransport.mockReset();
+    createTransport.mockReturnValue({
+      verify: jest.fn().mockResolvedValue(true),
+      sendMail: jest.fn().mockResolvedValue({ messageId: '<1@kuboti.com>', accepted: ['x'], rejected: [] }),
+    });
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  it('envuelve y adjunta el logo', async () => {
+    const service = montar({ SMTP_HOST: 'mail.kuboti.com', SMTP_USER: 'no-reply@kuboti.com', SMTP_PASS: 'x', SMTP_PORT: '587' });
+    await service.testConnection();
+    const m = correo();
+    expect(m.html).toContain('<!--kubo-layout-->');
+    expect(m.attachments).toEqual([expect.objectContaining({ cid: 'kubo-logo@kuboti.com' })]);
+  });
+});

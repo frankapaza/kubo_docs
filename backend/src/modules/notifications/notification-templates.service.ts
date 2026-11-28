@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 
 import { EmailService } from '../email/email.service';
 
+import { kuboLogoDataUri, wrapEmailLayout } from '../email/email-layout';
 import { ComposedEmail, composeEmail } from './domain/email-compose';
 import { NotificationAudience, sampleValuesFor, validateTemplate } from './domain/template-renderer';
 import { UpdateNotificationTemplateDto } from './dto/update-notification-template.dto';
@@ -76,7 +77,10 @@ export class NotificationTemplatesService {
    */
   async preview(id: number): Promise<ComposedEmail> {
     const template = await this.findByIdOrFail(id);
-    return composeEmail(template, template.audience, sampleValuesFor(template.audience));
+    const composed = composeEmail(template, template.audience, sampleValuesFor(template.audience));
+    // El envío real lo enmarca EmailService con el logo inline (cid:); el iframe de
+    // la vista previa no resuelve cid:, así que aquí va como data: URI.
+    return { ...composed, html: wrapEmailLayout(composed.html, { logoSrc: kuboLogoDataUri() }) };
   }
 
   /**

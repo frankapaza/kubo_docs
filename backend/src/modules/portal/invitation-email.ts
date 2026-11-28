@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 
 import { PERU_TIME_ZONE } from '../../common/time-zone';
+import { emailButton } from '../email/email-layout';
 import { escapeHtml } from '../notifications/domain/template-renderer';
 
 /** URL base del frontend cuando no hay `FRONTEND_URL`. La misma que el envío de firmas. */
@@ -107,9 +108,9 @@ export function buildInvitationEmail(input: InvitationEmailInput): {
     <p>Hola ${escapeHtml(input.fullName)}:</p>
     <p>Te damos acceso al portal de clientes${deLaEmpresaHtml}. Para entrar, primero
        elige tu contraseña:</p>
-    <p><a href="${input.acceptUrl}">Elegir mi contraseña</a></p>
-    <p>Si el enlace no funciona, copia esta dirección en tu navegador:<br>
-       ${input.acceptUrl}</p>
+    ${emailButton(input.acceptUrl, 'Elegir mi contraseña')}
+    <p style="font-size:12px;color:#7a8794">Si el botón no funciona, copia esta dirección en tu navegador:<br>
+       ${escapeHtml(input.acceptUrl)}</p>
     <p>El enlace sirve hasta el ${caduca} y solo se puede usar una vez.</p>
     <p>Si no esperabas este mensaje, puedes ignorarlo.</p>
   `.trim();

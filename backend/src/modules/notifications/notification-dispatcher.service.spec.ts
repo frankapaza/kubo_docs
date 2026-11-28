@@ -783,9 +783,10 @@ describe('cómo se compone el correo', () => {
     // La columna se llama body_md y las plantillas sembradas usan este marcado:
     // si no se convierte, el cliente lee los asteriscos y los guiones.
     expect(correo.html).toContain('<strong>TKT-0013</strong>');
-    expect(correo.html).toContain('<li><strong>Asunto:</strong>');
+    // «- **Asunto:** …» sale como ficha de datos y el enlace del portal como botón.
+    expect(correo.html).toContain('>Asunto</td>');
     expect(correo.html).toContain(
-      `<a href="https://docs.kuboti.com/portal/tickets/${TICKET_ID}">`,
+      `<a href="https://docs.kuboti.com/portal/tickets/${TICKET_ID}" target="_blank"`,
     );
     expect(correo.html).not.toContain('**');
   });
