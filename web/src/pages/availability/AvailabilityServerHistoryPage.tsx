@@ -5,6 +5,7 @@ import { Link, useParams } from 'react-router-dom';
 import { availabilityApi, HistoryPoint, HistoryRange } from '../../api/availability.api';
 import { clientsApi } from '../../api/clients.api';
 import { tableWrap, td, th } from './availability-ui';
+import LatencyPanel from './LatencyPanel';
 import { agentStatus, fmtLima } from './report-format';
 
 const MONTHS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'set', 'oct', 'nov', 'dic'];
@@ -133,6 +134,8 @@ export default function AvailabilityServerHistoryPage() {
           {view.data?.lastSampleAt && <div style={{ fontSize: 12, color: MUTED }}>Última muestra: {fmtLima(view.data.lastSampleAt)}</div>}
         </>
       )}
+
+      <LatencyPanel serverId={serverId} />
     </div>
   );
 }

@@ -144,6 +144,21 @@ export interface MonitorService {
   status: EntityStatus;
 }
 
+export interface LatencyHourRow {
+  hourStart: string;
+  total: number;
+  slow: number;
+  avgMs: number | null;
+  p95Ms: number | null;
+  maxMs: number | null;
+  isSlow: boolean;
+}
+
+export interface ServerLatency {
+  service: { id: number; name: string; target: string; latencyThresholdMs: number } | null;
+  hours: LatencyHourRow[];
+}
+
 export interface ServerBody {
   clientId?: number;
   name?: string;
@@ -426,6 +441,11 @@ export const availabilityApi = {
   // ---- Agente de servidor ----
   serverHistory: (serverId: number, range: HistoryRange) =>
     api.get<{ range: HistoryRange; points: HistoryPoint[] }>(`/availability/servers/${serverId}/history`, { params: { range } }).then((r) => r.data),
+  serverLatency: (serverId: number, days = 7) =>
+    api.get<ServerLatency>(`/availability/servers/${serverId}/latency`, { params: { days } }).then((r) => r.data),
+  latencyAlertSettings: () => api.get<{ emails: string[] }>('/availability/latency-alert-settings').then((r) => r.data),
+  saveLatencyAlertSettings: (emails: string[]) =>
+    api.put<{ emails: string[] }>('/availability/latency-alert-settings', { emails }).then((r) => r.data),
   agentView: (serverId: number) => api.get<AgentView>(`/availability/servers/${serverId}/agent`).then((r) => r.data),
   /** El token y el script salen una sola vez: no se guardan en la caché de react-query. */
   issueAgentToken: (serverId: number) =>
