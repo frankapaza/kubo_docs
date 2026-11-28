@@ -12,6 +12,7 @@ import { StaffOnlyGuard } from '../../common/guards/staff-only.guard';
 
 import { ComposedEmail } from './domain/email-compose';
 import { NotificationAudience, variablesFor } from './domain/template-renderer';
+import { SendTestDto } from './dto/send-test.dto';
 import { UpdateNotificationTemplateDto } from './dto/update-notification-template.dto';
 import { NotificationTemplate } from './entities/notification-template.entity';
 import { NotificationTemplatesService } from './notification-templates.service';
@@ -123,12 +124,11 @@ export class NotificationTemplatesController {
   }
 
   /**
-   * El destinatario es SIEMPRE `user.email`, sacado del token -- nunca del
-   * cuerpo de la petición. No se declara ningún `@Body()` en este método a
-   * propósito: así, aunque alguien mande un `to` en el cuerpo (desde el
-   * frontend o con curl), ese campo ni siquiera se lee. Un endpoint
-   * autenticado que mandara correo a donde le digan sería un relé de spam con
-   * credenciales.
+   * Por defecto la prueba va a `user.email` (del token). Un ADMIN puede
+   * indicar otra dirección en `to` para ver el correo en otro buzón (Gmail,
+   * Outlook). Acotado para no ser un relé: solo ADMIN, una única dirección
+   * validada por `SendTestDto`, contenido fijo (la plantilla guardada con datos
+   * de ejemplo) y 3 envíos por minuto.
    */
   @Post(':id/test')
   @Roles('ADMIN')
@@ -137,7 +137,9 @@ export class NotificationTemplatesController {
   sendTest(
     @Param('id', ParseIntPipe) id: number,
     @CurrentUser() user: AuthUser,
+    @Body() body: SendTestDto,
   ): Promise<{ to: string }> {
-    return this.service.sendTest(id, user.email);
+    const to = body?.to?.trim();
+    return this.service.sendTest(id, to || user.email);
   }
 }

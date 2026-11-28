@@ -25,27 +25,18 @@ const PLANTILLA_BASE = {
 };
 
 describe('NotificationTemplatesController.sendTest', () => {
-  it('el destinatario es el correo del usuario del token: no hay ningún `@Body()` que pueda torcerlo', async () => {
+  it('sin destinatario en el cuerpo, la prueba va al correo del usuario del token', async () => {
     const { controller, service } = makeController();
     service.sendTest.mockResolvedValue({ to: 'admin@kubo.pe' });
-
-    // El método solo recibe el id y el usuario -- ni siquiera hay un
-    // parámetro de cuerpo al que un frontend (o un curl) le pudiera colar un
-    // `to` distinto. Este test fija esa forma: si algún día alguien añade un
-    // `@Body()` a `sendTest` sin querer, esta llamada deja de compilar.
-    await controller.sendTest(6, { id: 9, email: 'admin@kubo.pe', role: 'ADMIN' });
-
+    await controller.sendTest(6, { id: 9, email: 'admin@kubo.pe', role: 'ADMIN' }, {});
     expect(service.sendTest).toHaveBeenCalledWith(6, 'admin@kubo.pe');
   });
 
-  it('cada usuario recibe la prueba en su propio correo -- nunca el de otro', async () => {
+  it('un ADMIN puede elegir otra dirección para la prueba (una sola, ya validada por el DTO)', async () => {
     const { controller, service } = makeController();
-    service.sendTest.mockResolvedValue({ to: 'otro.admin@kubo.pe' });
-
-    await controller.sendTest(6, { id: 3, email: 'otro.admin@kubo.pe', role: 'ADMIN' });
-
-    expect(service.sendTest).toHaveBeenCalledWith(6, 'otro.admin@kubo.pe');
-    expect(service.sendTest).not.toHaveBeenCalledWith(6, 'admin@kubo.pe');
+    service.sendTest.mockResolvedValue({ to: 'yo@gmail.com' });
+    await controller.sendTest(6, { id: 9, email: 'admin@kubo.pe', role: 'ADMIN' }, { to: '  yo@gmail.com ' });
+    expect(service.sendTest).toHaveBeenCalledWith(6, 'yo@gmail.com');
   });
 });
 
@@ -123,4 +114,17 @@ describe('los permisos del controlador', () => {
       expect(rolesDe(metodo)).toEqual(['ADMIN']);
     },
   );
+});
+
+describe('SendTestDto', () => {
+  it('acepta vacío o un correo; rechaza lo que no es un correo o trae varios', async () => {
+    const { validate } = await import('class-validator');
+    const { plainToInstance } = await import('class-transformer');
+    const { SendTestDto } = await import('./dto/send-test.dto');
+    const errs = async (o: object) => (await validate(plainToInstance(SendTestDto, o))).length;
+    expect(await errs({})).toBe(0);
+    expect(await errs({ to: 'yo@gmail.com' })).toBe(0);
+    expect(await errs({ to: 'no-es-correo' })).toBeGreaterThan(0);
+    expect(await errs({ to: 'a@x.com,b@y.com' })).toBeGreaterThan(0);
+  });
 });
