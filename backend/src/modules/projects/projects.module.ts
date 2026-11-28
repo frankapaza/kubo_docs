@@ -15,9 +15,25 @@ import { ProjectDeliverable } from './expediente/entities/project-deliverable.en
 import { ProjectDeliverableVersion } from './expediente/entities/project-deliverable-version.entity';
 import { ExpedienteService } from './expediente/expediente.service';
 import { ExpedienteController } from './expediente/expediente.controller';
+import { Client } from '../clients/entities/client.entity';
+import { AIModule } from '../ai/ai.module';
+import { DeliverableTemplate } from './expediente/entities/deliverable-template.entity';
+import { DeliverableAttachment } from './expediente/entities/deliverable-attachment.entity';
+import { DeliverableDocumentService } from './expediente/deliverable-document.service';
+import {
+  DeliverableDocumentController,
+  DeliverableTemplatesController,
+} from './expediente/deliverable-document.controller';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Project, ProjectMember, ProjectDeliverable, ProjectDeliverableVersion, User]),
+  imports: [TypeOrmModule.forFeature([Project, ProjectMember, ProjectDeliverable,
+      ProjectDeliverableVersion,
+      User,
+      Client,
+      DeliverableTemplate,
+      DeliverableAttachment,
+    ]),
+    AIModule,
     UsersModule,
     StorageModule,
   ],
@@ -27,8 +43,12 @@ import { ExpedienteController } from './expediente/expediente.controller';
     ProjectMembersService,
     ProjectMembersRepository,
     ExpedienteService,
+    DeliverableDocumentService,
   ],
-  controllers: [ProjectsController, ProjectMembersController, ExpedienteController],
+  controllers: [ProjectsController, ProjectMembersController, ExpedienteController,
+    DeliverableDocumentController,
+    DeliverableTemplatesController,
+  ],
   exports: [ProjectsService, ProjectMembersService],
 })
 export class ProjectsModule {}

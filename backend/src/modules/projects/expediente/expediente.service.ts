@@ -17,6 +17,7 @@ import { EntityManager, In, IsNull, Not, Repository } from 'typeorm';
 import { buildZip, ZipEntry } from '../../../common/zip/zip-writer';
 import { IStorageService, STORAGE_SERVICE } from '../../audio/interfaces/storage.interface';
 import { sanitizeFilename, toHeaderFilename } from '../../ticket-messages/ticket-attachments.service';
+import { Client } from '../../clients/entities/client.entity';
 import { User } from '../../users/entities/user.entity';
 import { Project } from '../entities/project.entity';
 import {
@@ -40,7 +41,10 @@ import {
   requirementFor,
   versionLabel,
 } from './deliverable-catalog';
+import { DocSection, parseStoredSections, validateSections } from './deliverable-document';
 import { assertDeliverableFile, deliverableExtension } from './deliverable-files';
+import { DeliverablePdfRenderer } from './deliverable-pdf.renderer';
+import { DeliverableAttachment } from './entities/deliverable-attachment.entity';
 import { ProjectDeliverable } from './entities/project-deliverable.entity';
 import { DeliverableHistoryAction, ProjectDeliverableVersion } from './entities/project-deliverable-version.entity';
 
@@ -67,7 +71,18 @@ export interface DeliverableView {
   version: string | null;
   nomenclature: string;
   lastFile: DeliverableFileView | null;
+  /** Versión del historial con el último documento en línea, si se redactó en la plataforma. */
+  documentVersionId: number | null;
+  /** Qué es lo vigente: el último archivo subido o el documento en línea (el más reciente de los dos). */
+  current: 'FILE' | 'DOCUMENT' | null;
   updatedAt: string;
+}
+
+export interface LoadedDocument {
+  deliverable: DeliverableView;
+  /** null si todavía no se redactó en la plataforma. */
+  sections: DocSection[] | null;
+  versionId: number | null;
 }
 
 export interface ExpedienteSummary {
@@ -141,15 +156,21 @@ export class ExpedienteService {
     @InjectRepository(Project) private readonly projects: Repository<Project>,
     @InjectRepository(User) private readonly users: Repository<User>,
     @Inject(STORAGE_SERVICE) private readonly storage: IStorageService,
+    @InjectRepository(DeliverableAttachment) private readonly attachments: Repository<DeliverableAttachment>,
+    @InjectRepository(Client) private readonly clients: Repository<Client>,
   ) {}
+
+  private readonly pdf = new DeliverablePdfRenderer();
 
   async get(project: Project): Promise<ExpedienteView> {
     const rows = await this.deliverables.find({
       where: { projectId: project.id },
       order: { correlative: 'ASC' },
     });
-    const files = await this.lastFiles(rows.map((r) => Number(r.id)));
-    const views = rows.map((r) => this.toView(project, r, files.get(Number(r.id)) ?? null));
+    const ids = rows.map((r) => Number(r.id));
+    const files = await this.lastFiles(ids);
+    const docs = await this.lastDocuments(ids);
+    const views = rows.map((r) => this.toView(project, r, files.get(Number(r.id)) ?? null, docs.get(Number(r.id)) ?? null));
     const workType = (project.workType ?? null) as WorkType | null;
     return {
       project: {
@@ -360,6 +381,72 @@ export class ExpedienteService {
     };
   }
 
+  /** El entregable dentro del proyecto (o 404), para el editor. */
+  async deliverableOf(project: Project, deliverableId: number): Promise<ProjectDeliverable> {
+    return this.findOrFail(project, deliverableId);
+  }
+
+  /** El último documento en línea del entregable, si lo hay. */
+  async loadDocument(project: Project, deliverableId: number): Promise<LoadedDocument> {
+    const deliverable = await this.view(project, deliverableId);
+    if (deliverable.documentVersionId == null) return { deliverable, sections: null, versionId: null };
+    const v = await this.versions.findOne({
+      where: { id: deliverable.documentVersionId },
+      select: { id: true, contentJson: true },
+    });
+    return { deliverable, sections: parseStoredSections(v?.contentJson ?? null), versionId: deliverable.documentVersionId };
+  }
+
+  /**
+   * Guarda el documento en línea como una versión de trabajo nueva (E, +0.1).
+   * `baseVersion` es la versión sobre la que se editó («0.2», o null si era la
+   * primera): si otra persona guardó entre medio, 409 y no se pisa.
+   */
+  async saveDocument(
+    project: Project,
+    deliverableId: number,
+    sections: unknown,
+    baseVersion: string | null,
+    note: string | null,
+    actorUserId: number,
+  ): Promise<DeliverableView> {
+    const content = validateSections(sections);
+    const m = /^(\d+)\.(\d+)$/.exec(baseVersion ?? '');
+    const expected = m ? { major: Number(m[1]), minor: Number(m[2]) } : { major: 0, minor: 0 };
+    return this.act(project, deliverableId, 'UPLOAD', actorUserId, { note, content, expected });
+  }
+
+  /** El PDF del documento en línea (carátula, historial, índice, secciones, figuras y anexos). */
+  async renderDocumentPdf(project: Project, deliverableId: number): Promise<{ buffer: Buffer; filename: string }> {
+    const doc = await this.loadDocument(project, deliverableId);
+    if (!doc.sections) {
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Este entregable todavía no tiene un documento redactado.' });
+    }
+    const d = doc.deliverable;
+    const [history, images, client] = await Promise.all([
+      this.history(project, deliverableId),
+      this.attachments.find({
+        where: { deliverableId: d.id },
+        select: { id: true, sectionKey: true, place: true, caption: true, image: true, position: true },
+        order: { position: 'ASC', id: 'ASC' },
+      }),
+      project.clientId ? this.clients.findOne({ where: { id: project.clientId } }) : Promise.resolve(null),
+    ]);
+    const buffer = await this.pdf.render({
+      title: d.name,
+      nomenclature: d.nomenclature,
+      version: d.version,
+      statusLabel: d.statusLabel,
+      projectName: project.name,
+      projectCode: project.code,
+      clientName: client?.razonSocial ?? null,
+      sections: doc.sections,
+      history: history.filter((h) => ['E', 'R', 'A', 'F'].includes(h.action)),
+      attachments: images.map((a) => ({ sectionKey: a.sectionKey, place: a.place, caption: a.caption, image: a.image })),
+    });
+    return { buffer, filename: `${d.nomenclature}.pdf` };
+  }
+
   /**
    * El expediente en un .zip: el último archivo de cada entregable, con su
    * nombre de nomenclatura, en una carpeta por fase, más `indice.csv`.
@@ -382,7 +469,8 @@ export class ExpedienteService {
 
   private async buildExpedienteZip(project: Project): Promise<{ buffer: Buffer; filename: string; headerFilename: string }> {
     const view = await this.get(project);
-    const withFile = view.deliverables.filter((d) => d.lastFile);
+    const withFile = view.deliverables.filter((d) => d.lastFile && d.current === 'FILE');
+    const withDocument = view.deliverables.filter((d) => d.current === 'DOCUMENT');
     const total = withFile.reduce((n, d) => n + (d.lastFile?.sizeBytes ?? 0), 0);
     if (total > MAX_ZIP_BYTES) {
       throw new PayloadTooLargeException({
@@ -413,6 +501,16 @@ export class ExpedienteService {
         this.logger.error(`No se pudo leer «${key}» para el expediente.`, cause as Error);
       }
     }
+    for (const d of withDocument) {
+      const folder = `${PHASES.indexOf(d.phase) + 1}. ${PHASE_LABELS[d.phase]}`;
+      const path = `${folder}/${d.nomenclature}.pdf`;
+      try {
+        entries.push({ name: path, data: (await this.renderDocumentPdf(project, d.id)).buffer, compress: false });
+        paths.set(d.id, path);
+      } catch (cause) {
+        this.logger.error(`No se pudo armar el PDF del entregable ${d.id} para el expediente.`, cause as Error);
+      }
+    }
     entries.push({ name: 'indice.csv', data: indexCsv(view, paths) });
 
     const date = new Date().toISOString().slice(0, 10);
@@ -427,11 +525,17 @@ export class ExpedienteService {
     deliverableId: number,
     action: DeliverableAction,
     actorUserId: number,
-    input: { file?: UploadInput | null; note: string | null },
+    input: { file?: UploadInput | null; note: string | null; content?: DocSection[] | null; expected?: Version | null },
   ): Promise<DeliverableView> {
     const row = await this.findOrFail(project, deliverableId);
     assertTransition(row.status, action);
     const current: Version = { major: row.versionMajor, minor: row.versionMinor };
+    if (input.expected && (input.expected.major !== current.major || input.expected.minor !== current.minor)) {
+      throw new ConflictException({
+        code: 'CONFLICT',
+        message: `Otra persona guardó la versión ${versionLabel(current) ?? ''} mientras editabas. Recarga para ver sus cambios; tu texto sigue en pantalla.`,
+      });
+    }
     if (action === 'SUBMIT' && current.major === 0 && current.minor === 0) {
       throw new ConflictException({ code: 'INVALID_STATE', message: 'Sube primero una versión del documento.' });
     }
@@ -495,7 +599,7 @@ export class ExpedienteService {
         mimeType,
         size: input.file.buffer.length,
       };
-    } else if (action === 'UPLOAD') {
+    } else if (action === 'UPLOAD' && !input.content) {
       throw new BadRequestException({ code: 'BAD_INPUT', message: 'Falta el archivo en el campo «file».' });
     }
 
@@ -517,6 +621,7 @@ export class ExpedienteService {
           filename: stored?.filename ?? null,
           mimeType: stored?.mimeType ?? null,
           sizeBytes: stored?.size ?? null,
+          contentJson: input.content ? JSON.stringify({ sections: input.content }) : null,
           actorUserId,
         });
       });
@@ -534,7 +639,21 @@ export class ExpedienteService {
   private async view(project: Project, id: number): Promise<DeliverableView> {
     const row = await this.findOrFail(project, id);
     const files = await this.lastFiles([Number(row.id)]);
-    return this.toView(project, row, files.get(Number(row.id)) ?? null);
+    const docs = await this.lastDocuments([Number(row.id)]);
+    return this.toView(project, row, files.get(Number(row.id)) ?? null, docs.get(Number(row.id)) ?? null);
+  }
+
+  /** El último documento en línea de cada entregable (solo el id de la versión). */
+  private async lastDocuments(ids: number[]): Promise<Map<number, number>> {
+    const out = new Map<number, number>();
+    if (!ids.length) return out;
+    const rows = await this.versions.find({
+      where: { deliverableId: In(ids), contentJson: Not(IsNull()) },
+      select: { id: true, deliverableId: true },
+      order: { id: 'DESC' },
+    });
+    for (const r of rows) if (!out.has(Number(r.deliverableId))) out.set(Number(r.deliverableId), Number(r.id));
+    return out;
   }
 
   private async findOrFail(project: Project, deliverableId: number): Promise<ProjectDeliverable> {
@@ -565,7 +684,12 @@ export class ExpedienteService {
     return out;
   }
 
-  private toView(project: Project, r: ProjectDeliverable, lastFile: DeliverableFileView | null): DeliverableView {
+  private toView(
+    project: Project,
+    r: ProjectDeliverable,
+    lastFile: DeliverableFileView | null,
+    documentVersionId: number | null = null,
+  ): DeliverableView {
     const v = { major: Number(r.versionMajor), minor: Number(r.versionMinor) };
     return {
       id: Number(r.id),
@@ -583,6 +707,13 @@ export class ExpedienteService {
       version: versionLabel(v),
       nomenclature: nomenclature(project.code, Number(r.correlative), r.type, v),
       lastFile,
+      documentVersionId,
+      current:
+        documentVersionId != null && (!lastFile || documentVersionId > lastFile.versionId)
+          ? 'DOCUMENT'
+          : lastFile
+            ? 'FILE'
+            : null,
       updatedAt: new Date(r.updatedAt).toISOString(),
     };
   }

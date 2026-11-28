@@ -58,6 +58,8 @@ function make() {
   const versions = fakeRepo([]);
   const projects = fakeRepo([project]);
   const users = fakeRepo([{ id: 9, fullName: 'Ana Pérez' }]);
+  const attachments = fakeRepo([]);
+  const clients = fakeRepo([{ id: 3, razonSocial: 'Cliente Demo SAC' }]);
   const files = new Map<string, Buffer>();
   const storage = {
     save: jest.fn(async (b: Buffer, key: string) => {
@@ -80,8 +82,16 @@ function make() {
     transaction: jest.fn(async (cb: any) => cb({ getRepository: (e: unknown) => byEntity.get(e) })),
   };
   for (const r of [deliverables, versions, projects, users]) (r as any).manager = manager;
-  const svc = new ExpedienteService(deliverables as any, versions as any, projects as any, users as any, storage as any);
-  return { svc, project, deliverables, versions, storage, files };
+  const svc = new ExpedienteService(
+    deliverables as any,
+    versions as any,
+    projects as any,
+    users as any,
+    storage as any,
+    attachments as any,
+    clients as any,
+  );
+  return { svc, project, deliverables, versions, storage, files, attachments };
 }
 
 async function started(type: 'TRADICIONAL' | 'AGIL' | 'CORRECTIVO' = 'AGIL') {
@@ -333,3 +343,66 @@ describe('índice y resumen', () => {
     expect(s.phases.find((p) => p.phase === 'INICIO')).toMatchObject({ total: 1, done: 1 });
   });
 });
+
+describe('ExpedienteService · documento en línea', () => {
+  const SECTIONS = [
+    { key: 'sec-1', num: '1.1', title: 'Objetivo', body: 'Implementar el sistema de cobranza.' },
+    { key: 'sec-2', num: '1.2', title: 'Alcance', body: '**Módulos:** cartera y gestiones.\n\n- Reportes' },
+  ];
+
+  it('guardar crea una versión de trabajo con el contenido y lo vuelve lo vigente', async () => {
+    const t = await started();
+    const id = t.byType('DOC-ANA').id;
+    let d = await t.svc.saveDocument(t.project, id, SECTIONS, null, 'Primer borrador', 9);
+    expect(d).toMatchObject({ status: 'BORRADOR', version: '0.1', current: 'DOCUMENT' });
+    const loaded = await t.svc.loadDocument(t.project, id);
+    expect(loaded.sections).toEqual(SECTIONS);
+    d = await t.svc.saveDocument(t.project, id, [{ ...SECTIONS[0], body: 'Otro' }], '0.1', null, 9);
+    expect(d.version).toBe('0.2');
+    // Un archivo subido después pasa a ser lo vigente.
+    d = await t.svc.upload(t.project, id, { buffer: PDF, filename: 'a.pdf' }, 9);
+    expect(d.current).toBe('FILE');
+  });
+
+  it('si otra persona guardó mientras se editaba, 409 y no se pisa', async () => {
+    const t = await started();
+    const id = t.byType('DOC-ANA').id;
+    await t.svc.saveDocument(t.project, id, SECTIONS, null, null, 9);
+    await expect(t.svc.saveDocument(t.project, id, SECTIONS, null, null, 9)).rejects.toMatchObject({ status: 409 });
+    await expect(t.svc.saveDocument(t.project, id, SECTIONS, '0.1', null, 9)).resolves.toMatchObject({ version: '0.2' });
+  });
+
+  it('rechaza un documento inválido y uno «no aplica»', async () => {
+    const t = await started();
+    await expect(t.svc.saveDocument(t.project, t.byType('DOC-ANA').id, [], null, null, 9)).rejects.toMatchObject({ status: 400 });
+    await expect(t.svc.saveDocument(t.project, t.byType('CRO-PRO').id, SECTIONS, null, null, 9)).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('el PDF lleva carátula, historial, secciones, figuras y anexos; el .zip lo incluye', async () => {
+    const t = await started();
+    const id = t.byType('DOC-ANA').id;
+    await t.svc.saveDocument(t.project, id, SECTIONS, null, null, 9);
+    const pdf = await t.svc.renderDocumentPdf(t.project, id);
+    expect(pdf.buffer.subarray(0, 5).toString()).toBe('%PDF-');
+    expect(pdf.filename).toBe('KUBO-COB-0003-DOC-ANA V0.1.pdf');
+    const names = Object.keys(entries((await t.svc.zip(t.project)).buffer));
+    expect(names).toContain('2. Planificación/KUBO-COB-0003-DOC-ANA V0.1.pdf');
+    await expect(t.svc.renderDocumentPdf(t.project, t.byType('ACT-INI').id)).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+function entries(zip: Buffer): Record<string, Buffer> {
+  const eocd = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+  let p = zip.readUInt32LE(eocd + 16);
+  const out: Record<string, Buffer> = {};
+  for (let i = 0; i < zip.readUInt16LE(eocd + 10); i++) {
+    const size = zip.readUInt32LE(p + 20);
+    const nameLen = zip.readUInt16LE(p + 28);
+    const local = zip.readUInt32LE(p + 42);
+    const name = zip.toString('utf8', p + 46, p + 46 + nameLen);
+    const start = local + 30 + zip.readUInt16LE(local + 26) + zip.readUInt16LE(local + 28);
+    out[name] = zip.subarray(start, start + size);
+    p += 46 + nameLen;
+  }
+  return out;
+}

@@ -87,3 +87,15 @@ Prototipo aprobado: «Expediente del proyecto» (canvas Main.dc.html).
 - **Fuera de esta entrega:** borradores con IA y editor (entrega 4); vínculo automático de actas y documentos de RQ (después, ya que la entrega 4 los genera).
 
 **Decisiones de construcción:** también se aceptan .xlsx, .pptx y .mpp (un OLE solo si se llama .mpp), 20 MB por archivo; aprobar, observar, firmar, «no aplica» y elegir el tipo de trabajo son de ADMIN, PRODUCT_OWNER o SCRUM_MASTER; se pueden agregar más entregables del catálogo (otra acta de reunión, otra solicitud de cambio) y borrar solo esos mientras no tengan historial; el .zip tiene un tope de 150 MB, se arma uno a la vez por proceso y no recomprime PDF, Office ni imágenes y el índice usa «;» y BOM para Excel.
+
+## Entrega 4 — Editor con ajuste IA y plantillas (diseño)
+
+Prototipo aprobado: «Editor del documento con ajuste IA» (canvas Editor.dc.html).
+
+- **Documento en línea de un entregable:** además de subir un archivo, un entregable del expediente se puede redactar en la plataforma. El documento es una lista de secciones (número, título, cuerpo en Markdown). Guardar crea una versión de trabajo (E, +0.1) con el contenido en el historial; aprobar y firmar siguen el ciclo de la entrega 3. Si el documento en línea es más reciente que el último archivo subido, el .zip lleva su PDF.
+- **Plantillas por tipo de entregable:** estructura Kubo por defecto en el código (secciones con guía); se puede editar la de Kubo y crear una por cliente (p. ej. PRODUCE). Al empezar un documento vacío se usa la del cliente del proyecto, si existe; si no, la de Kubo. Página de administración «Plantillas de entregables».
+- **Editor (web):** índice con estado por sección (completa, editada en esta versión, pendiente — vacía o con «[Completar]»), «Estás en», barra de formato que inserta Markdown (negrita, cursiva, títulos, lista, tabla), vista previa, imágenes por sección.
+- **Imágenes por sección:** foto con leyenda, en la sección («Figura n.») o movida a «Anexos» al final («Anexo n (de 1.2)»), numeradas solas. Mismo criterio que los anexos del acta (JPEG/PNG reales, 5 MB, dimensiones razonables). Solo editables mientras el entregable no esté aprobado ni firmado.
+- **Ajuste con IA:** alcance «esta sección» o «todo el documento»; pedidos rápidos (más formal, más breve, completar lo pendiente, ajustar al formato del cliente, corregir ortografía) o texto libre. La IA devuelve solo las secciones del alcance; el servidor calcula el antes y después por palabras. Nada se guarda sin aceptar: aceptar todo o elegir sección por sección y luego guardar crea la versión nueva. La IA no inventa datos: lo que falta queda como «[Completar]».
+- **PDF del documento:** carátula con logo Kubo, nomenclatura y versión; historial de revisiones (E/R/A/F); índice; secciones; figuras; anexos.
+- **Concurrencia:** guardar envía la versión sobre la que se editó; si otra persona guardó antes, 409 y no se pisa.
