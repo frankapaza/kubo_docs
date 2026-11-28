@@ -26,6 +26,7 @@ plantillas; para el resto, la misma estructura con marca Kubo.
   - Ticket: registro del incidente (automático); informe de solución con causa raíz y acción
     correctiva; evidencia de la corrección; conformidad del cliente.
   - Ticket P1, además: informe del incidente (línea de tiempo, impacto, acciones).
+- **Evidencias como anexos:** cualquier documento (acta, informe, entregable) admite varias evidencias, cada una foto y/o texto; se agregan al final como «Anexos» numerados solo si existen.
 - **IA siempre en borrador:** todo documento generado queda como borrador; una persona revisa,
   aprueba (nueva versión) y firma.
 
@@ -58,6 +59,7 @@ plantillas; para el resto, la misma estructura con marca Kubo.
    puesto en el PDF del acta. Migración 042.
 2. **Notas durante la grabación:** minuto, tipo (nota/acuerdo/tarea), texto; se guardan con la
    reunión y la generación del acta las recibe como insumo (acuerdos y tareas entran tal cual).
-3. **Pantalla de reunión para iPad** según el prototipo: grabar → acta → firmas → enviado.
-4. **Transcripción por tramos** (cada ~30 s) para verla mientras se graba: después de 1–3, si el
+3. **Evidencias del acta:** varias fotos con texto; en el PDF, «Anexos» al final solo si hay alguna.
+4. **Pantalla de reunión para iPad** según el prototipo: grabar → acta → firmas → enviado.
+5. **Transcripción por tramos** (cada ~30 s) para verla mientras se graba: después de 1–3, si el
    proveedor de transcripción lo soporta sin costo desproporcionado.
