@@ -56,7 +56,7 @@ export default function RegisterPage() {
       <div className="w-full max-w-md">
         <div className="flex flex-col items-center mb-8">
           <KuboLogo size={48} />
-          <h1 className="text-2xl font-bold text-slate-900 mt-4">Kubo DevDocs</h1>
+          <h1 className="text-2xl font-bold text-slate-900 mt-4">Kubo Platform</h1>
           <p className="text-sm text-slate-500 mt-1">Crea tu cuenta</p>
         </div>
 
@@ -150,7 +150,7 @@ export default function RegisterPage() {
         </form>
 
         <p className="text-xs text-slate-400 text-center mt-6">
-          © {new Date().getFullYear()} Kubo DevDocs · Todos los derechos reservados
+          © {new Date().getFullYear()} Kubo Platform · Todos los derechos reservados
         </p>
       </div>
     </div>

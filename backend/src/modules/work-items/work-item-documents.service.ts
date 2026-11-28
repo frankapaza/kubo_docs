@@ -250,7 +250,7 @@ export class WorkItemDocumentsService {
       const doc = new PDFDocument({
         size: 'A4',
         margins: { top: 60, bottom: 60, left: 56, right: 56 },
-        info: { Title: title, Author: 'Kubo DevDocs', Subject: subtitle },
+        info: { Title: title, Author: 'Kubo Platform', Subject: subtitle },
       });
       const chunks: Buffer[] = [];
       doc.on('data', (c: Buffer) => chunks.push(c));
@@ -259,7 +259,7 @@ export class WorkItemDocumentsService {
 
       doc.font('Helvetica-Bold').fontSize(16).fillColor(PDF_COLORS.ink).text(title);
       doc.moveDown(0.3);
-      doc.font('Helvetica').fontSize(9).fillColor(PDF_COLORS.muted).text(`${subtitle} · Kubo DevDocs`);
+      doc.font('Helvetica').fontSize(9).fillColor(PDF_COLORS.muted).text(`${subtitle} · Kubo Platform`);
       doc.moveDown(1);
       this.md.drawBody(doc, markdown);
       doc.end();

@@ -66,7 +66,7 @@ export class DocumentsService {
 
     const subject =
       params.subject?.trim() ||
-      `${this.typeLabel(doc.type)} — ${emisor?.razonSocial ?? 'Kubo DevDocs'}`;
+      `${this.typeLabel(doc.type)} — ${emisor?.razonSocial ?? 'Kubo Platform'}`;
 
     const html = this.buildEmailHtml({
       doc,
@@ -127,7 +127,7 @@ export class DocumentsService {
     personalMessage?: string;
   }): string {
     const { doc, client, emisor, personalMessage } = args;
-    const brand = emisor?.razonSocial ?? 'Kubo DevDocs';
+    const brand = emisor?.razonSocial ?? 'Kubo Platform';
     const typeLabel = this.typeLabel(doc.type);
     const msgBlock = personalMessage?.trim()
       ? `<div style="padding:16px 20px;background:#eef3fb;border-left:4px solid #053777;border-radius:6px;margin:20px 0;white-space:pre-wrap;font-size:14px;line-height:1.6;color:#33414d">${this.escape(personalMessage)}</div>`

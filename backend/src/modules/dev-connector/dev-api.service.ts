@@ -116,7 +116,7 @@ export class DevApiService {
     if (this.options.sensitiveActionsEnabled) return;
     throw new ForbiddenException({
       code: 'ACCION_DESHABILITADA',
-      message: `Desde Claude todavía no se puede ${accion}: hazlo en DevDocs.`,
+      message: `Desde Claude todavía no se puede ${accion}: hazlo en Kubo Platform.`,
     });
   }
 
@@ -140,7 +140,7 @@ export class DevApiService {
     if (assignee != null && !isMine(assignee, p.userId)) {
       throw new ConflictException({
         code: 'CONFLICT',
-        message: 'Este ticket ya está asignado a otra persona: pide que te lo reasignen en DevDocs.',
+        message: 'Este ticket ya está asignado a otra persona: pide que te lo reasignen en Kubo Platform.',
       });
     }
     if (!TOMABLES.includes(t.status)) {
@@ -231,13 +231,13 @@ export class DevApiService {
     if (w.assigneeUserId != null && !isMine(w.assigneeUserId, p.userId)) {
       throw new ConflictException({
         code: 'CONFLICT',
-        message: 'Este requerimiento ya está asignado a otra persona: pide que te lo reasignen en DevDocs.',
+        message: 'Este requerimiento ya está asignado a otra persona: pide que te lo reasignen en Kubo Platform.',
       });
     }
     if (w.status === 'SOLICITADO' || w.status === 'FALTA_INFO') {
       throw new ConflictException({
         code: 'CONFLICT',
-        message: 'El requerimiento aún no fue aceptado: acéptalo en DevDocs (fija la fecha comprometida) y luego tómalo.',
+        message: 'El requerimiento aún no fue aceptado: acéptalo en Kubo Platform (fija la fecha comprometida) y luego tómalo.',
       });
     }
     if (w.status !== 'PENDIENTE' && w.status !== 'EN_PROCESO') {
@@ -471,7 +471,7 @@ export class DevApiService {
     if (meta.size > MAX_ADJUNTO_BYTES) {
       throw new BadRequestException({
         code: 'BAD_INPUT',
-        message: `El adjunto pasa de ${MAX_ADJUNTO_BYTES / (1024 * 1024)} MB: descárgalo desde DevDocs.`,
+        message: `El adjunto pasa de ${MAX_ADJUNTO_BYTES / (1024 * 1024)} MB: descárgalo desde Kubo Platform.`,
       });
     }
     const d = await this.attachments.download(staff, meta.id);
@@ -491,7 +491,7 @@ export class DevApiService {
     if (meta.sizeBytes > MAX_ADJUNTO_BYTES) {
       throw new BadRequestException({
         code: 'BAD_INPUT',
-        message: `El documento pasa de ${MAX_ADJUNTO_BYTES / (1024 * 1024)} MB: descárgalo desde DevDocs.`,
+        message: `El documento pasa de ${MAX_ADJUNTO_BYTES / (1024 * 1024)} MB: descárgalo desde Kubo Platform.`,
       });
     }
     const { buffer } = await this.docs.readBuffer(Number(w.id), meta.id);
@@ -539,13 +539,13 @@ export class DevApiService {
     if (!isMine(assignee, p.userId)) {
       throw new ConflictException({
         code: 'CONFLICT',
-        message: 'Este ítem no está asignado a ti: tómalo o pide que te lo asignen en DevDocs.',
+        message: 'Este ítem no está asignado a ti: tómalo o pide que te lo asignen en Kubo Platform.',
       });
     }
     if (!canAgentTransition(kind, from, target)) {
       throw new ConflictException({
         code: 'CONFLICT',
-        message: `Desde Claude no se puede pasar de ${from} a ${target}. Permitido: ${agentTargets(kind).join(', ')} (según el estado actual). Para resolver un ticket usa resolver_ticket; para entregar un RQ a Pruebas, entregar_requerimiento. Cerrar se hace en DevDocs.`,
+        message: `Desde Claude no se puede pasar de ${from} a ${target}. Permitido: ${agentTargets(kind).join(', ')} (según el estado actual). Para resolver un ticket usa resolver_ticket; para entregar un RQ a Pruebas, entregar_requerimiento. Cerrar se hace en Kubo Platform.`,
       });
     }
 

@@ -53,7 +53,7 @@ const STEPS = [
     n: 2,
     title: 'Genera un API Token',
     description:
-      'Security → API Tokens → "Create API token". Ponle un nombre (ej. "Kubo DevDocs") y copia el token completo. Solo se muestra una vez.',
+      'Security → API Tokens → "Create API token". Ponle un nombre (ej. "Kubo Platform") y copia el token completo. Solo se muestra una vez.',
     link: {
       href: 'https://id.atlassian.com/manage-profile/security/api-tokens',
       label: 'Crear API Token →',

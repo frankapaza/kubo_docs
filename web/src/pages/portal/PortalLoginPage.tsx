@@ -101,7 +101,7 @@ export default function PortalLoginPage() {
         </form>
 
         <p className="text-xs text-slate-400 text-center mt-6">
-          © {new Date().getFullYear()} Kubo DevDocs · Todos los derechos reservados
+          © {new Date().getFullYear()} Kubo Platform · Todos los derechos reservados
         </p>
       </div>
     </div>

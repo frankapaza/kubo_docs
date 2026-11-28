@@ -151,7 +151,7 @@ export default function WorkItemConformityPanel({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12 }}>
       <div style={{ color: 'var(--k-muted)' }}>
-        DevDocs arma el acta con los criterios de aceptación, el código entregado y los documentos vigentes, y se la envía
+        Kubo Platform arma el acta con los criterios de aceptación, el código entregado y los documentos vigentes, y se la envía
         al cliente para firmar por enlace. Al firmar, el requerimiento pasa a <strong>Cerrado</strong>.
       </div>
       {activos.length > 0 && (
