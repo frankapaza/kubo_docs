@@ -39,7 +39,7 @@ export default function ClientsListPage() {
   const { data: withoutSystems = [] } = useQuery({ queryKey: ['clients', 'sin-sistemas'], queryFn: clientsApi.withoutSystems, retry: false });
   const withoutSystemsIds = new Set(withoutSystems.map((c) => c.id));
 
-  const { data = [], isLoading } = useQuery({
+  const { data: rows = [], isLoading } = useQuery({
     queryKey: ['clients', statusFilter, q],
     queryFn: () =>
       clientsApi.list({
@@ -47,6 +47,8 @@ export default function ClientsListPage() {
         q: q.trim() || undefined,
       }),
   });
+  // «Vigentes» (por defecto): activos y prospectos. Los ex clientes solo con su filtro.
+  const data = statusFilter === 'ALL' ? rows.filter((c) => c.status !== 'FORMER_CLIENT') : rows;
 
   const create = useMutation({
     mutationFn: () => {
@@ -211,7 +213,7 @@ export default function ClientsListPage() {
                   : 'text-slate-500 hover:text-slate-800'
               }`}
             >
-              {s === 'ALL' ? 'Todos' : CLIENT_STATUS_LABELS[s]}
+              {s === 'ALL' ? 'Vigentes' : CLIENT_STATUS_LABELS[s]}
             </button>
           ))}
         </div>
