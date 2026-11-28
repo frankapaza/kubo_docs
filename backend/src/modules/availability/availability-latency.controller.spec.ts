@@ -17,6 +17,11 @@ describe('AvailabilityLatencyController', () => {
     expect(workspace.setLatencyAlertEmails).toHaveBeenCalledWith(['a@x.pe']);
   });
 
+  it('una lista que no cabe en la columna (1000 caracteres) es 400, no 500', async () => {
+    const largos = Array.from({ length: 20 }, (_, i) => `${'x'.repeat(60)}${i}@kuboti.com`);
+    await expect(c.putSettings({ emails: largos })).rejects.toMatchObject({ status: 400 });
+  });
+
   it('latencia por hora del ping del servidor', async () => {
     const out = await c.serverLatency(2, 7);
     expect(out.service).toMatchObject({ id: 3, target: '147.93.146.92', latencyThresholdMs: 250 });

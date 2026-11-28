@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Put, Query, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, ParseIntPipe, Put, Query, UseGuards } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, Repository } from 'typeorm';
 
@@ -32,6 +32,10 @@ export class AvailabilityLatencyController {
   @Put('latency-alert-settings')
   @Roles('ADMIN')
   async putSettings(@Body() dto: LatencyAlertSettingsDto): Promise<{ emails: string[] }> {
+    // La columna guarda la lista unida (VARCHAR(1000)); mejor 400 aquí que 500 en MySQL.
+    if (dto.emails.map((e) => e.trim()).join(', ').length > 1000) {
+      throw new BadRequestException({ code: 'BAD_INPUT', message: 'La lista de destinatarios es demasiado larga (máximo 1000 caracteres).' });
+    }
     return { emails: await this.workspace.setLatencyAlertEmails(dto.emails) };
   }
 

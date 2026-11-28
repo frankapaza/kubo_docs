@@ -177,3 +177,22 @@ describe('ServiceProbeTracker', () => {
     });
   });
 });
+
+describe('ServiceProbeTracker: servicios con intervalo propio (pings cada minuto)', () => {
+  it('no abren degradación por pings lentos: eso lo juzga la revisión por hora', () => {
+    const t = new ServiceProbeTracker({ ...svc, intervalMin: 1 });
+    const out = [1, 2, 3, 4, 5].flatMap((i) => t.onResult(res('REGULAR', true, T0 + i * 60_000, 500)));
+    expect(types(out)).not.toContain('DEGRADED');
+    expect(t.state()).toBe('OK');
+  });
+
+  it('si ya estaba degradado y pasa a intervalo propio, la próxima prueba la cierra', () => {
+    const target = { ...svc };
+    const t = new ServiceProbeTracker(target);
+    [1, 2, 3, 4, 5].forEach((i) => t.onResult(res('REGULAR', true, T0 + i * 60_000, 500)));
+    expect(t.state()).toBe('DEGRADED');
+    Object.assign(target, { intervalMin: 1 });
+    expect(types(t.onResult(res('REGULAR', true, T0 + 10 * 60_000, 500)))).toEqual(['DEGRADATION_CLEARED']);
+    expect(t.state()).toBe('OK');
+  });
+});

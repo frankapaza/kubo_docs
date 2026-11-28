@@ -480,3 +480,17 @@ describe('ProbeRunner: intervalo propio por servicio (pings cada minuto)', () =>
     expect(h.delivered.length - before).toBeGreaterThanOrEqual(15);
   });
 });
+
+describe('ProbeRunner: quitar el intervalo propio en caliente', () => {
+  it('un ping editado a TCP (sin intervalMin) vuelve al horario global', async () => {
+    const h = setup({ start: LIMA_21H, services: [{ ...svc(1), intervalMin: 1 }] });
+    h.runner.start();
+    await h.clock.advance(5 * MIN);
+    h.runner.updateServices([svc(1)]);
+    await h.clock.advance(6 * MIN); // deja correr la franja ya encolada
+    const before = h.delivered.length;
+    await h.clock.advance(20 * MIN);
+    h.runner.stop();
+    expect(h.delivered.length - before).toBeLessThanOrEqual(5);
+  });
+});

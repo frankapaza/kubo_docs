@@ -55,8 +55,19 @@ export default function LatencyPanel({ serverId }: { serverId: number }) {
   );
 }
 
-function xOf(i: number, n: number): number {
-  return PAD.l + (n <= 1 ? 0 : (i / (n - 1)) * (W - PAD.l - PAD.r));
+const HOUR_MS = 3_600_000;
+
+/** Ancho de una hora en el gráfico (el eje es de tiempo real: las horas sin datos quedan como hueco). */
+function slotW(hours: LatencyHourRow[]): number {
+  const t0 = Date.parse(hours[0].hourStart);
+  const t1 = Date.parse(hours[hours.length - 1].hourStart);
+  return (W - PAD.l - PAD.r) / ((t1 - t0) / HOUR_MS + 1);
+}
+
+/** Centro de la hora i, dentro del área del gráfico. */
+function xAt(hours: LatencyHourRow[], i: number): number {
+  const t0 = Date.parse(hours[0].hourStart);
+  return PAD.l + slotW(hours) * ((Date.parse(hours[i].hourStart) - t0) / HOUR_MS + 0.5);
 }
 
 function dayTicks(hours: LatencyHourRow[]): Array<{ i: number; label: string }> {
@@ -73,7 +84,6 @@ function dayTicks(hours: LatencyHourRow[]): Array<{ i: number; label: string }> 
 }
 
 function Axis({ hours, max, unit }: { hours: LatencyHourRow[]; max: number; unit: string }) {
-  const n = hours.length;
   const y = (v: number) => PAD.t + (1 - v / max) * (H - PAD.t - PAD.b);
   return (
     <>
@@ -84,20 +94,22 @@ function Axis({ hours, max, unit }: { hours: LatencyHourRow[]; max: number; unit
         </g>
       ))}
       {dayTicks(hours).map((t) => (
-        <text key={t.i} x={xOf(t.i, n)} y={H - 6} fontSize="12" fill={MUTED} textAnchor={xOf(t.i, n) > W - 60 ? 'end' : 'start'}>{t.label}</text>
+        <text key={t.i} x={xAt(hours, t.i)} y={H - 6} fontSize="12" fill={MUTED} textAnchor={xAt(hours, t.i) > W - 60 ? 'end' : 'start'}>{t.label}</text>
       ))}
     </>
   );
 }
 
 function AvgChart({ hours, threshold }: { hours: LatencyHourRow[]; threshold: number }) {
-  const n = hours.length;
   const max = Math.max(threshold * 1.4, ...hours.map((h) => h.avgMs ?? 0)) || 1;
   const y = (v: number) => PAD.t + (1 - v / max) * (H - PAD.t - PAD.b);
-  const d = hours
-    .map((h, i) => (h.avgMs === null ? null : `${xOf(i, n).toFixed(1)},${y(h.avgMs).toFixed(1)}`))
-    .filter(Boolean)
-    .join(' ');
+  const segments: string[][] = [];
+  hours.forEach((h, i) => {
+    const gap = i > 0 && Date.parse(h.hourStart) - Date.parse(hours[i - 1].hourStart) > HOUR_MS;
+    if (h.avgMs === null) return void segments.push([]);
+    if (segments.length === 0 || gap) segments.push([]);
+    segments[segments.length - 1].push(`${xAt(hours, i).toFixed(1)},${y(h.avgMs).toFixed(1)}`);
+  });
   return (
     <figure style={{ margin: 0 }}>
       <figcaption style={{ fontSize: 12, color: MUTED, marginBottom: 2 }}>
@@ -106,9 +118,11 @@ function AvgChart({ hours, threshold }: { hours: LatencyHourRow[]; threshold: nu
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Ping promedio por hora">
         <Axis hours={hours} max={max} unit="" />
         <line x1={PAD.l} x2={W - PAD.r} y1={y(threshold)} y2={y(threshold)} stroke={LIMIT} strokeDasharray="5 4" strokeWidth={1.5} />
-        <polyline points={d} fill="none" stroke={LINE} strokeWidth={2} strokeLinejoin="round" />
+        {segments.filter((p) => p.length > 0).map((p, k) => (
+          <polyline key={k} points={p.join(' ')} fill="none" stroke={LINE} strokeWidth={2} strokeLinejoin="round" />
+        ))}
         {hours.map((h, i) => (
-          <rect key={i} x={xOf(i, n) - 3} y={PAD.t} width={6} height={H - PAD.t - PAD.b} fill="transparent">
+          <rect key={i} x={xAt(hours, i) - 3} y={PAD.t} width={6} height={H - PAD.t - PAD.b} fill="transparent">
             <title>{`${fmtHour(h.hourStart)} · promedio ${h.avgMs ?? '—'} ms · p95 ${h.p95Ms ?? '—'} ms · máx ${h.maxMs ?? '—'} ms`}</title>
           </rect>
         ))}
@@ -118,10 +132,9 @@ function AvgChart({ hours, threshold }: { hours: LatencyHourRow[]; threshold: nu
 }
 
 function SlowBars({ hours }: { hours: LatencyHourRow[] }) {
-  const n = hours.length;
   const max = Math.max(10, ...hours.map((h) => h.slow));
   const y = (v: number) => PAD.t + (1 - v / max) * (H - PAD.t - PAD.b);
-  const bw = Math.max(1, (W - PAD.l - PAD.r) / Math.max(n, 1) - 1);
+  const bw = Math.max(1, slotW(hours) - 1);
   return (
     <figure style={{ margin: 0 }}>
       <figcaption style={{ fontSize: 12, color: MUTED, marginBottom: 2 }}>
@@ -130,7 +143,7 @@ function SlowBars({ hours }: { hours: LatencyHourRow[] }) {
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Pings lentos por hora">
         <Axis hours={hours} max={max} unit="" />
         {hours.map((h, i) => (
-          <rect key={i} x={xOf(i, n) - bw / 2} y={y(h.slow)} width={bw} height={Math.max(0, H - PAD.b - y(h.slow))} rx={1} fill={h.isSlow ? BAR_SLOW : BAR_OK}>
+          <rect key={i} x={xAt(hours, i) - bw / 2} y={y(h.slow)} width={bw} height={Math.max(0, H - PAD.b - y(h.slow))} rx={1} fill={h.isSlow ? BAR_SLOW : BAR_OK}>
             <title>{`${fmtHour(h.hourStart)} · ${h.slow} de ${h.total} pings (${h.total ? Math.round((h.slow / h.total) * 100) : 0} %) sobre el umbral`}</title>
           </rect>
         ))}

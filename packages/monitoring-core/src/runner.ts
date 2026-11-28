@@ -237,6 +237,8 @@ export class ProbeRunner {
     for (const s of services) {
       const existing = this.services.get(s.id);
       if (existing) {
+        // Sin borrar antes, un servicio que deja de tener intervalo propio lo conservaría.
+        delete existing.target.intervalMin;
         Object.assign(existing.target, s);
         continue;
       }

@@ -33,11 +33,15 @@ function make(o: { checks?: any[]; emails?: string[]; services?: any[]; episodes
     { find: jest.fn(async () => services) } as any,
     { find: jest.fn(async () => servers) } as any,
     { find: jest.fn(async () => [{ id: 1, code: 'oficina-01', kind: 'OFFICE' }]) } as any,
-    { find: jest.fn(async ({ where }: any) => checks.filter((c) => c.serviceId === where.serviceId)) } as any,
+    { find: jest.fn(async ({ where }: any) => checks.filter((c) => c.serviceId === where.serviceId && (!where.startedAt || (c.startedAt >= where.startedAt.value[0] && c.startedAt <= where.startedAt.value[1])))) } as any,
     {
       findOne: jest.fn(async ({ where }: any) => hours.find((h) => h.serviceId === where.serviceId && h.hourStart.getTime() === where.hourStart.getTime()) ?? null),
       find: jest.fn(async ({ where }: any) => hours.filter((h) => h.serviceId === where.serviceId)),
-      save: jest.fn(async (r: any) => { hours.push(r); return r; }),
+      save: jest.fn(async (r: any) => {
+        const i = hours.findIndex((h) => h.serviceId === r.serviceId && h.hourStart.getTime() === r.hourStart.getTime());
+        if (i >= 0) hours[i] = r; else hours.push(r);
+        return r;
+      }),
       create: jest.fn((r: any) => r),
     } as any,
     {
@@ -128,5 +132,48 @@ describe('LatencyAlertService.evaluateHour', () => {
 describe('previousHourStart', () => {
   it('a las 14:05 evalúa la hora de las 13:00', () => {
     expect(previousHourStart(new Date('2026-11-28T19:05:12Z')).toISOString()).toBe('2026-11-28T18:00:00.000Z');
+  });
+});
+
+describe('LatencyAlertService: horas perdidas, datos tardíos y cierre', () => {
+  it('una hora con pocos datos se vuelve a calcular cuando llegan los que faltaban, y entonces avisa', async () => {
+    const checks = [...pingsFor(3, 3, 5), ...pingsFor(5, 0)];
+    const t = make({ checks });
+    await t.svc.evaluateHour(H);
+    expect(t.sent).toEqual([]);
+    checks.push(...pingsFor(3, 18).slice(5)); // el motor sube el resto con retraso
+    await t.svc.evaluateHour(H);
+    expect(t.hours.find((h) => h.serviceId === 3)).toMatchObject({ total: 60 });
+    expect(t.sent).toHaveLength(1);
+    await t.svc.evaluateHour(H);
+    expect(t.sent).toHaveLength(1);
+  });
+
+  it('run() revisa las últimas 6 horas en orden: una hora perdida a los :05 se recupera', async () => {
+    const t = make({ checks: [...pingsFor(3, 18), ...pingsFor(5, 0)] });
+    jest.useFakeTimers({ now: new Date(H.getTime() + 3 * 3600_000 + 5 * 60_000) });
+    try {
+      await t.svc.run();
+    } finally {
+      jest.useRealTimers();
+    }
+    expect(t.hours.filter((h) => h.serviceId === 3).map((h) => h.hourStart.getTime()).sort()).toEqual(
+      [-3, -2, -1, 0, 1, 2].map((k) => H.getTime() + k * 3600_000),
+    );
+    expect(t.sent).toHaveLength(1);
+  });
+
+  it('el resumen de cierre cuenta solo horas lentas medidas, no las horas sin datos', async () => {
+    const start = new Date(H.getTime() - 60 * 3600_000);
+    const episodes = [{ id: 1, serviceId: 3, startedHour: start, endedHour: null, officeWide: false, closedReason: null }];
+    const hours = [
+      { serviceId: 3, hourStart: start, total: 60, slow: 30, avgMs: 300, p95Ms: 450, maxMs: 612, thresholdMs: 250, isSlow: true },
+      { serviceId: 3, hourStart: new Date(start.getTime() + 3600_000), total: 0, slow: 0, avgMs: null, p95Ms: null, maxMs: null, thresholdMs: 250, isSlow: false },
+    ];
+    const t = make({ checks: [...pingsFor(3, 1), ...pingsFor(5, 0)], episodes, hours });
+    await t.svc.evaluateHour(H);
+    expect(t.sent[0].html).toContain('1 hora lenta');
+    expect(t.sent[0].html).not.toContain('60 h');
+    expect((t.sent[0].html.match(/\d+ %<\/td>/g) ?? []).length).toBe(1); // una sola fila de datos: la hora sin datos no entra
   });
 });
