@@ -12,6 +12,8 @@ export interface ServiceTarget {
   target: string;
   port: number | null;
   latencyThresholdMs: number;
+  /** Intervalo propio en minutos (los pings van cada minuto); sin él, el horario global. */
+  intervalMin?: number;
 }
 
 export interface CheckResult {

@@ -456,3 +456,27 @@ describe('ProbeRunner', () => {
     expect(delivered.length).toBe(starts.length - 1);
   });
 });
+
+describe('ProbeRunner: intervalo propio por servicio (pings cada minuto)', () => {
+  it('con intervalMin 1, de día mide cada minuto; el resto sigue cada 5', async () => {
+    const ping: ServiceTarget = { ...svc(1), protocol: 'ICMP', port: null, intervalMin: 1 };
+    const h = setup({ start: LIMA_21H, services: [ping, svc(2)] });
+    h.runner.start();
+    await h.clock.advance(30 * MIN);
+    h.runner.stop();
+    const regular = (id: number) => h.delivered.filter((d) => d.result.serviceId === id && d.result.kind === 'REGULAR').length;
+    expect(regular(1)).toBeGreaterThanOrEqual(29);
+    expect(regular(2)).toBeLessThanOrEqual(6);
+  });
+
+  it('cambiar el intervalo en caliente (updateServices) se aplica desde la franja siguiente', async () => {
+    const h = setup({ start: LIMA_21H, services: [svc(1)] });
+    h.runner.start();
+    await h.clock.advance(10 * MIN);
+    h.runner.updateServices([{ ...svc(1), intervalMin: 1 }]);
+    const before = h.delivered.length;
+    await h.clock.advance(20 * MIN);
+    h.runner.stop();
+    expect(h.delivered.length - before).toBeGreaterThanOrEqual(15);
+  });
+});

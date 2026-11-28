@@ -9,6 +9,11 @@ export interface ServiceTarget {
   target: string;
   port: number | null;
   latencyThresholdMs: number;
+  /**
+   * Intervalo propio en minutos (de día y de noche); debe dividir 1440. Sin él, el
+   * horario global. Lo usan los pings de red, que se miden cada minuto.
+   */
+  intervalMin?: number;
 }
 
 export interface CheckResult {
