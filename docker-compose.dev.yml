@@ -81,6 +81,7 @@ services:
       - ./backend/sql/migrations/042_reunion_ipad.sql:/docker-entrypoint-initdb.d/044f_mig_042.sql:ro
       - ./backend/sql/migrations/043_expediente_proyecto.sql:/docker-entrypoint-initdb.d/044g_mig_043.sql:ro
       - ./backend/sql/migrations/044_editor_entregables.sql:/docker-entrypoint-initdb.d/044h_mig_044.sql:ro
+      - ./backend/sql/migrations/045_participantes_telefono.sql:/docker-entrypoint-initdb.d/044i_mig_045.sql:ro
       # Seeds — van detrás de todas las migraciones, así que el seed se
       # renumera cada vez que entra una migración nueva.
       - ./backend/sql/seed_document_templates.sql:/docker-entrypoint-initdb.d/045_seed_templates.sql:ro

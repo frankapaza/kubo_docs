@@ -242,3 +242,44 @@ describe('revisión de la entrega 4', () => {
     await expect(t.svc.addAttachment(t.project, 7, { sectionKey: 'sec-1' }, { buffer: makePng() }, 9)).rejects.toMatchObject({ status: 400 });
   });
 });
+
+describe('participantes, roles y cronograma', () => {
+  it('el acta de inicio arranca con tablas de participantes, cronograma y roles', async () => {
+    const { sectionsFromTemplate, DEFAULT_TEMPLATES } = await import('./deliverable-document');
+    const s = sectionsFromTemplate(DEFAULT_TEMPLATES['ACT-INI']);
+    expect(s.find((x) => x.title === 'Participantes')!.body).toMatch(/^\| Nombre \| Cargo \| Correo \| Teléfono \| Asistencia \|/);
+    expect(s.find((x) => x.title === 'Roles y responsables')!.body).toMatch(/^\| Rol \| Responsable \| Correo \|/);
+    expect(s.find((x) => x.title === 'Cronograma de alto nivel')!.body).toMatch(/^\| Actividad \| Responsable \| Inicio \| Fin \|/);
+  });
+
+  it('importa un cronograma desde CSV y devuelve la tabla, sin guardar', async () => {
+    const t = make();
+    const r = await t.svc.importSchedule(t.project, 7, Buffer.from('Tarea;Inicio;Fin\nAnálisis;01/12/2026;10/12/2026'));
+    expect(r.rows).toEqual([{ activity: 'Análisis', owner: '', start: '2026-12-01', end: '2026-12-10' }]);
+    expect(r.markdown).toContain('| Análisis | — | 2026-12-01 | 2026-12-10 |');
+    await expect(t.svc.importSchedule(t.project, 8, Buffer.from('x'))).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('el PDF dibuja el cronograma (también uno largo, con salto de página)', async () => {
+    const { scheduleTable } = await import('./schedule');
+    const rows = Array.from({ length: 70 }, (_, i) => ({
+      activity: `Actividad ${i + 1}`,
+      owner: '',
+      start: `2026-${String((i % 12) + 1).padStart(2, '0')}-01`,
+      end: `2026-${String((i % 12) + 1).padStart(2, '0')}-20`,
+    }));
+    const buf = await new DeliverablePdfRenderer().render({
+      title: 'Cronograma',
+      nomenclature: 'KUBO-COB-0002-CRO-PRO V0.1',
+      version: '0.1',
+      statusLabel: 'Borrador',
+      projectName: 'Cobranza',
+      projectCode: 'COB',
+      clientName: null,
+      sections: [{ key: 'sec-1', num: '1', title: 'Fases', body: scheduleTable(rows) }],
+      history: [],
+      attachments: [],
+    });
+    expect(buf.subarray(0, 5).toString()).toBe('%PDF-');
+  });
+});

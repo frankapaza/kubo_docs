@@ -197,7 +197,8 @@ jobs:
                      041_disponibilidad_latencia_horaria \
                      042_reunion_ipad \
                      043_expediente_proyecto \
-                     044_editor_entregables; do
+                     044_editor_entregables \
+                     045_participantes_telefono; do
               echo "--- $m"
               sql_file "backend/sql/migrations/$m.sql"
             done

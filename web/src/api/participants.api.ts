@@ -6,6 +6,7 @@ export interface CreateParticipantBody {
   fullName: string;
   documentNumber?: string;
   email?: string;
+  phone?: string;
   role?: string;
   attended?: boolean;
 }

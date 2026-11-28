@@ -27,6 +27,10 @@ export class Participant {
   @Column({ type: 'varchar', length: 180, nullable: true })
   email!: string | null;
 
+  /** Opcional (migración 045). */
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  phone!: string | null;
+
   @Column({ type: 'varchar', length: 80, nullable: true })
   role!: string | null;
 

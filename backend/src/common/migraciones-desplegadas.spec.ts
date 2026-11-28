@@ -69,6 +69,7 @@ describe('las migraciones de disponibilidad están en las tres listas de desplie
     '042_reunion_ipad',
     '043_expediente_proyecto',
     '044_editor_entregables',
+    '045_participantes_telefono',
   ];
   it.each(LISTAS_DE_DESPLIEGUE)('%s las nombra', (lista) => {
     const texto = readFileSync(lista, 'utf8');
@@ -205,5 +206,9 @@ describe('el bucle de migraciones de deploy.yml', () => {
 
   it('incluye la 044', () => {
     expect(palabras()).toContain('044_editor_entregables');
+  });
+
+  it('incluye la 045', () => {
+    expect(palabras()).toContain('045_participantes_telefono');
   });
 });

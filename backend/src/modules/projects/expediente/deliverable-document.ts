@@ -20,7 +20,23 @@ export interface TemplateSection {
   title: string;
   /** Qué va en la sección: se muestra como «[Completar] …» en un documento nuevo. */
   guide?: string;
+  /** Contenido inicial (p. ej. una tabla vacía); si está, reemplaza a la guía. */
+  starter?: string;
 }
+
+/** Tabla de participantes, igual que en las actas de reunión. */
+export const PARTICIPANTS_STARTER =
+  '| Nombre | Cargo | Correo | Teléfono | Asistencia |\n| --- | --- | --- | --- | --- |\n| [Completar] | | | | |';
+
+/** Roles: se completa desde la tabla de participantes en el editor. */
+export const ROLES_STARTER =
+  '| Rol | Responsable | Correo |\n| --- | --- | --- |\n| Jefe de proyecto (Kubo) | [Completar] | |\n| Responsable del cliente | [Completar] | |';
+
+/** Cronograma: el editor lo muestra como Gantt y el PDF lo dibuja. */
+export const SCHEDULE_STARTER =
+  '| Actividad | Responsable | Inicio | Fin |\n| --- | --- | --- | --- |\n| [Completar] fase o iteración | — | | |';
+
+const p = (num: string, title: string, starter: string): TemplateSection => ({ num, title, starter });
 
 export type SectionStatus = 'COMPLETA' | 'PENDIENTE';
 
@@ -38,16 +54,16 @@ const t = (num: string, title: string, guide?: string): TemplateSection => ({ nu
 export const DEFAULT_TEMPLATES: Record<string, TemplateSection[]> = {
   'ACT-INI': [
     t('1', 'Datos de la reunión', 'fecha, lugar o enlace, duración'),
-    t('2', 'Participantes', 'nombre, cargo y empresa de cada asistente'),
+    p('2', 'Participantes', PARTICIPANTS_STARTER),
     t('3', 'Objetivo del proyecto'),
     t('4', 'Alcance', 'qué incluye y qué no incluye'),
-    t('5', 'Cronograma de alto nivel', 'fases o iteraciones con fechas estimadas'),
-    t('6', 'Roles y responsables'),
+    p('5', 'Cronograma de alto nivel', SCHEDULE_STARTER),
+    p('6', 'Roles y responsables', ROLES_STARTER),
     t('7', 'Acuerdos'),
   ],
   'CRO-PRO': [
     t('1', 'Introducción'),
-    t('2', 'Fases e hitos'),
+    p('2', 'Fases e hitos', SCHEDULE_STARTER),
     t('3', 'Actividades y responsables'),
     t('4', 'Fechas clave'),
     t('5', 'Supuestos y dependencias'),
@@ -140,7 +156,7 @@ export const DEFAULT_TEMPLATES: Record<string, TemplateSection[]> = {
   ],
   'ACT-REU': [
     t('1', 'Datos de la reunión'),
-    t('2', 'Participantes'),
+    p('2', 'Participantes', PARTICIPANTS_STARTER),
     t('3', 'Temas tratados'),
     t('4', 'Acuerdos'),
     t('5', 'Compromisos', 'responsable y fecha'),
@@ -166,7 +182,7 @@ export const DEFAULT_TEMPLATES: Record<string, TemplateSection[]> = {
   ],
   'ACT-CAP': [
     t('1', 'Datos de la capacitación'),
-    t('2', 'Participantes'),
+    p('2', 'Participantes', PARTICIPANTS_STARTER),
     t('3', 'Temas'),
     t('4', 'Evaluación'),
   ],
@@ -188,7 +204,7 @@ export function sectionsFromTemplate(tpl: TemplateSection[]): DocSection[] {
     key: `sec-${i + 1}`,
     num: s.num,
     title: s.title,
-    body: s.guide ? `${PENDING_MARK} ${s.guide}.` : PENDING_MARK,
+    body: s.starter ?? (s.guide ? `${PENDING_MARK} ${s.guide}.` : PENDING_MARK),
   }));
 }
 
@@ -235,7 +251,14 @@ export function validateTemplate(input: unknown): TemplateSection[] {
     if (!title || title.length > 200) bad(`La sección ${i + 1} de la plantilla necesita un título (hasta 200 caracteres).`);
     const guide = String(s.guide ?? '').trim();
     if (guide.length > 300) bad(`La guía de la sección ${i + 1} es demasiado larga.`);
-    return { num: String(s.num ?? '').trim().slice(0, 10), title, ...(guide ? { guide } : {}) };
+    const starter = String(s.starter ?? '');
+    if (starter.length > 4000) bad(`El contenido inicial de la sección ${i + 1} es demasiado largo.`);
+    return {
+      num: String(s.num ?? '').trim().slice(0, 10),
+      title,
+      ...(guide ? { guide } : {}),
+      ...(starter.trim() ? { starter } : {}),
+    };
   });
 }
 

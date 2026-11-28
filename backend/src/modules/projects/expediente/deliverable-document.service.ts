@@ -26,6 +26,7 @@ import { AttachmentPlace, DeliverableAttachment } from './entities/deliverable-a
 import { DeliverableTemplate } from './entities/deliverable-template.entity';
 import { DeliverableView, ExpedienteService } from './expediente.service';
 import { assertDecodablePng } from './image-check';
+import { ScheduleRow, csvRows, scheduleFromSheet, scheduleTable, xlsxRows } from './schedule';
 
 export type TemplateSource = 'CLIENTE' | 'KUBO_EDITADA' | 'KUBO';
 
@@ -234,6 +235,18 @@ export class DeliverableDocumentService {
       changes.push({ key: s.key, num: s.num, title: s.title, before: s.body, after, diff: wordDiff(s.body, after) });
     }
     return { changes, unchanged };
+  }
+
+  /**
+   * Lee un cronograma de un Excel (.xlsx, p. ej. exportado de MS Project) o de
+   * un CSV y lo devuelve como filas y como la tabla que va en la sección. No guarda.
+   */
+  async importSchedule(project: Project, deliverableId: number, buffer: Buffer): Promise<{ rows: ScheduleRow[]; markdown: string }> {
+    await this.expediente.deliverableOf(project, deliverableId);
+    if (!buffer?.length) throw new BadRequestException({ code: 'BAD_INPUT', message: 'El archivo está vacío.' });
+    const isZip = buffer.length > 4 && buffer.readUInt32LE(0) === 0x04034b50;
+    const rows = scheduleFromSheet(isZip ? xlsxRows(buffer) : csvRows(buffer.toString('utf8')));
+    return { rows, markdown: scheduleTable(rows) };
   }
 
   // ------------------------------------------------------------ imágenes

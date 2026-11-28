@@ -26,17 +26,7 @@ export class ActaTemplateService {
     lines.push('');
 
     lines.push('## Participantes');
-    if (participants.length === 0) {
-      lines.push('_Sin participantes registrados._');
-    } else {
-      participants.forEach((p) => {
-        const mark = p.attended ? 'Asistió' : 'Ausente';
-        const extras = [p.role, p.documentNumber ? `DNI: ${p.documentNumber}` : null]
-          .filter(Boolean)
-          .join(' · ');
-        lines.push(`- **${p.fullName}** — ${mark}${extras ? ` (${extras})` : ''}`);
-      });
-    }
+    lines.push(...participantsTable(participants));
     lines.push('');
 
     lines.push('## Agenda tratada');
@@ -86,14 +76,7 @@ export class ActaTemplateService {
     lines.push('');
 
     lines.push('## Participantes');
-    if (participants.length === 0) {
-      lines.push('_Sin participantes registrados._');
-    } else {
-      participants.forEach((p) => {
-        const mark = p.attended ? '✔' : '·';
-        lines.push(`- ${mark} ${p.fullName}${p.role ? ` — ${p.role}` : ''}`);
-      });
-    }
+    lines.push(...participantsTable(participants));
     lines.push('');
 
     lines.push('## Agenda');
@@ -119,4 +102,25 @@ export class ActaTemplateService {
 
     return lines.join('\n');
   }
+}
+
+/** Una celda de tabla Markdown: sin «|» ni saltos de línea que rompan la fila. */
+function cell(v: string | null | undefined): string {
+  const s = (v ?? '').replace(/[|\r\n]+/g, ' ').trim();
+  return s || '—';
+}
+
+/**
+ * Los participantes como tabla (nombre, cargo, correo, teléfono, asistencia):
+ * el formato de las actas de la metodología. El DNI no va aquí: solo en la firma.
+ */
+export function participantsTable(participants: Participant[]): string[] {
+  if (participants.length === 0) return ['_Sin participantes registrados._'];
+  return [
+    '| Nombre | Cargo | Correo | Teléfono | Asistencia |',
+    '| --- | --- | --- | --- | --- |',
+    ...participants.map(
+      (p) => `| ${cell(p.fullName)} | ${cell(p.role)} | ${cell(p.email)} | ${cell(p.phone)} | ${p.attended ? 'Asistió' : 'No asistió'} |`,
+    ),
+  ];
 }

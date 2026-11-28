@@ -4,6 +4,7 @@ import { MarkdownPdf } from '../../../common/pdf/markdown-pdf.helper';
 import { KUBO_LOGO_PNG_BASE64 } from '../../email/kubo-logo';
 import type { DocSection } from './deliverable-document';
 import { isDecodablePng } from './image-check';
+import { ScheduleRow, drawableRows, parseScheduleTable } from './schedule';
 
 export interface PdfHistoryRow {
   version: string | null;
@@ -169,7 +170,61 @@ export class DeliverablePdfRenderer {
     doc.moveDown(0.3);
     doc.font('Helvetica').fontSize(10.5).fillColor(INK);
     if (s.body.trim()) this.md.drawBody(doc, s.body);
+    const schedule = drawableRows(parseScheduleTable(s.body) ?? []);
+    if (schedule.length) this.gantt(doc, schedule);
     for (const f of figures) this.image(doc, f.image, `Figura ${f.figure}. ${f.caption ?? ''}`.trim());
+  }
+
+  /** El cronograma como Gantt: una barra por actividad sobre una escala de meses. */
+  private gantt(doc: PDFKit.PDFDocument, rows: ScheduleRow[]) {
+    const cw = this.cw(doc);
+    const left = doc.page.margins.left;
+    const labelW = Math.min(170, cw * 0.32);
+    const chartX = left + labelW + 6;
+    const chartW = cw - labelW - 6;
+    const day = (s: string) => Date.parse(`${s}T00:00:00Z`) / 86400000;
+    const min = Math.min(...rows.map((r) => day(r.start)));
+    const max = Math.max(...rows.map((r) => day(r.end))) + 1;
+    const span = Math.max(1, max - min);
+    const x = (d: number) => chartX + ((d - min) / span) * chartW;
+    const rowH = 16;
+
+    const header = () => {
+      this.md.ensureSpace(doc, 40);
+      const y = doc.y + 6;
+      doc.font('Helvetica-Bold').fontSize(8).fillColor(MUTED);
+      const first = new Date(min * 86400000);
+      const cursor = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), 1));
+      const months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'set', 'oct', 'nov', 'dic'];
+      while (cursor.getTime() / 86400000 < max) {
+        const d = cursor.getTime() / 86400000;
+        const xx = Math.max(chartX, x(d));
+        doc.moveTo(xx, y + 10).lineTo(xx, y + 14).lineWidth(0.5).strokeColor(BORDER).stroke();
+        if (x(d) >= chartX - 1 && xx < chartX + chartW - 20) {
+          doc.text(`${months[cursor.getUTCMonth()]} ${String(cursor.getUTCFullYear()).slice(2)}`, xx + 2, y, { lineBreak: false });
+        }
+        cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+      }
+      doc.y = y + 16;
+    };
+
+    header();
+    for (const r of rows) {
+      if (doc.y + rowH > doc.page.height - doc.page.margins.bottom) {
+        doc.addPage();
+        header();
+      }
+      const y = doc.y;
+      doc.font('Helvetica').fontSize(8).fillColor(INK).text(r.activity, left, y + 3, { width: labelW, height: rowH, ellipsis: true, lineBreak: false });
+      doc.rect(chartX, y, chartW, rowH).fillColor('#F8FAFC').fill();
+      const x0 = x(day(r.start));
+      const w = Math.max(3, x(day(r.end) + 1) - x0);
+      doc.roundedRect(x0, y + 3, w, rowH - 6, 2).fillColor(BLUE).fill();
+      doc.y = y + rowH;
+    }
+    doc.x = left;
+    doc.moveDown(0.6);
+    doc.font('Helvetica').fontSize(10.5).fillColor(INK);
   }
 
   private image(doc: PDFKit.PDFDocument, image: Buffer, caption: string) {
