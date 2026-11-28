@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import MeetingNotesPanel from './meetings/MeetingNotesPanel';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { meetingsApi } from '../api/meetings.api';
@@ -371,6 +372,10 @@ export default function BrowserRecorderPage() {
           onResume={resumeRecording}
           onStop={stopRecording}
         />
+      )}
+
+      {phase !== 'idle' && (
+        <MeetingNotesPanel meetingId={mid} elapsed={elapsed} canAdd={phase === 'recording' || phase === 'paused'} />
       )}
 
       {(phase === 'stopped' || phase === 'uploading') && blob && (

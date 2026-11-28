@@ -4,7 +4,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { actasApi, meetingsApi } from '../api/meetings.api';
 import { participantsApi } from '../api/participants.api';
 import { projectsApi } from '../api/projects.api';
-import { signaturesApi, ActaSignature } from '../api/signatures.api';
+import { signaturesApi, ActaSignature, isComplete } from '../api/signatures.api';
+import SignDialog, { SignDialogParticipant } from './acta/SignDialog';
+import ActaAnnexesCard from './acta/ActaAnnexesCard';
+import { useAuthedImage } from '../lib/useAuthedImage';
 import type { BacklogEpic, BacklogResult } from '../api/types';
 import { integrationsApi, type Integration, type JiraProject } from '../api/integrations.api';
 import { useAuth } from '../auth/AuthContext';
@@ -43,6 +46,19 @@ function formatDate(iso: string) {
   }
 }
 
+function SignatureTrace({ actaId, sig }: { actaId: number; sig: ActaSignature }) {
+  const url = useAuthedImage(sig.method === 'IN_PERSON' || sig.method === 'BOTH' ? signaturesApi.imagePath(actaId, sig.id) : null);
+  return url ? <img src={url} alt={`Firma de ${sig.signerName}`} className="h-16 max-w-full object-contain" /> : <div className="h-8 border-b border-slate-400" />;
+}
+
+function signatureLine(sig: ActaSignature): string {
+  const mail = sig.confirmEmail ? ` (${sig.confirmEmail})` : '';
+  if (sig.method === 'EMAIL') return sig.emailConfirmedAt ? `Confirmado por correo${mail}` : `Pendiente: confirmar por correo${mail}`;
+  if (sig.method === 'BOTH') return sig.emailConfirmedAt ? `Firmado en pantalla y confirmado por correo${mail}` : `Firmado en pantalla · pendiente: confirmar por correo${mail}`;
+  if (sig.method === 'IN_PERSON') return 'Firmado en pantalla';
+  return 'Firmado con su usuario';
+}
+
 export default function ActaEditorPage() {
   const { actaId } = useParams();
   const aid = Number(actaId);
@@ -69,6 +85,7 @@ export default function ActaEditorPage() {
     enabled: !!meetingId,
   });
 
+  const [signFor, setSignFor] = useState<SignDialogParticipant | null | undefined>(undefined);
   const { data: signatures } = useQuery({
     queryKey: ['acta-signatures', aid],
     queryFn: () => signaturesApi.list(aid),
@@ -368,7 +385,11 @@ export default function ActaEditorPage() {
                           {p.documentNumber ? ` · DNI: ${p.documentNumber}` : ''}
                         </p>
                       </div>
-                      {sig ? (
+                      {sig && !isComplete(sig) ? (
+                        <Badge tone="warning" dot>
+                          Pendiente de correo
+                        </Badge>
+                      ) : sig ? (
                         <Badge tone="success" dot>
                           Firmado
                         </Badge>
@@ -386,10 +407,10 @@ export default function ActaEditorPage() {
                           </code>
                         </div>
                         <div className="text-xs text-slate-600">
-                          Firmado el {formatDate(sig.signedAt)}
+                          {signatureLine(sig)} · {formatDate(sig.signedAt)}
                         </div>
                         <div className="pt-2 border-t border-dashed border-slate-200 mt-2">
-                          <div className="h-8 border-b border-slate-400" />
+                          <SignatureTrace actaId={aid} sig={sig} />
                           <p className="text-[10px] text-slate-500 mt-1 font-mono">
                             {sig.signerName}
                             {sig.signerDocument ? ` — ${sig.signerDocument}` : ''}
@@ -424,7 +445,19 @@ export default function ActaEditorPage() {
                             Espacio para firma
                           </p>
                         </div>
-                        {canSignThis && (
+                        {canSignNow && !sig && (
+                          <div className="no-print">
+                            <Button
+                              size="sm"
+                              variant={isMe ? 'ghost' : 'primary'}
+                              icon={<PenIcon size={14} />}
+                              onClick={() => setSignFor({ id: p.id, fullName: p.fullName, email: p.email ?? null, documentNumber: p.documentNumber ?? null })}
+                            >
+                              Firmar en pantalla o por correo
+                            </Button>
+                          </div>
+                        )}
+                        {canSignThis && isMe && (
                           <div className="no-print">
                             <Button
                               size="sm"
@@ -457,6 +490,26 @@ export default function ActaEditorPage() {
             </div>
           )}
 
+          {canSignNow && (
+            <div className="no-print mt-4">
+              <Button size="sm" variant="ghost" icon={<PenIcon size={14} />} onClick={() => setSignFor(null)}>
+                Agregar asistente y firmar
+              </Button>
+            </div>
+          )}
+          {signFor !== undefined && (
+            <SignDialog
+              actaId={aid}
+              participant={signFor}
+              onClose={() => setSignFor(undefined)}
+              onDone={() => {
+                setSignFor(undefined);
+                qc.invalidateQueries({ queryKey: ['acta-signatures', aid] });
+                qc.invalidateQueries({ queryKey: ['participants', meetingId] });
+              }}
+            />
+          )}
+
           <details className="no-print mt-5 text-xs text-slate-500">
             <summary className="cursor-pointer select-none flex items-center gap-1.5 hover:text-slate-700">
               <RefreshIcon size={12} />
@@ -476,6 +529,10 @@ export default function ActaEditorPage() {
           </details>
         </CardBody>
       </Card>
+
+      <div className="no-print">
+        <ActaAnnexesCard actaId={aid} readOnly={readOnly} />
+      </div>
 
       {backlogOpen && backlog && (
         <BacklogModal

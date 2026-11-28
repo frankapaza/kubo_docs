@@ -27,6 +27,7 @@ import TicketDetailPage from './pages/TicketDetailPage';
 import WorkItemsBoardPage from './pages/WorkItemsBoardPage';
 import MonthlyReportPage from './pages/MonthlyReportPage';
 import SignaturePage from './pages/SignaturePage';
+import ActaSignConfirmPage from './pages/ActaSignConfirmPage';
 import HelpPage from './pages/HelpPage';
 import MonitoringErrorsPage from './pages/monitoring/MonitoringErrorsPage';
 import MonitoringErrorDetailPage from './pages/monitoring/MonitoringErrorDetailPage';
@@ -191,6 +192,7 @@ export default function App() {
         </Route>
       </Route>
       <Route path="/sign/:token" element={<SignaturePage />} />
+      <Route path="/firmar-acta/:token" element={<ActaSignConfirmPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
