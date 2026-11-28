@@ -34,9 +34,18 @@ END //
 DELIMITER ;
 
 CALL kubo_add_column_042('acta_signatures', 'method',
-  "method VARCHAR(12) NOT NULL DEFAULT 'USER' COMMENT 'USER | IN_PERSON' AFTER signature_hash");
+  "method VARCHAR(12) NOT NULL DEFAULT 'USER' COMMENT 'USER | IN_PERSON | EMAIL | BOTH' AFTER signature_hash");
 CALL kubo_add_column_042('acta_signatures', 'signature_png',
   "signature_png MEDIUMBLOB NULL COMMENT 'trazo manuscrito (PNG) firmado en pantalla' AFTER method");
+
+CALL kubo_add_column_042('acta_signatures', 'confirm_email',
+  "confirm_email VARCHAR(180) NULL COMMENT 'correo al que se pidió confirmar (EMAIL o BOTH)' AFTER signature_png");
+CALL kubo_add_column_042('acta_signatures', 'confirm_token_hash',
+  "confirm_token_hash CHAR(64) NULL COMMENT 'SHA-256 del enlace de confirmación; NULL una vez usado' AFTER confirm_email");
+CALL kubo_add_column_042('acta_signatures', 'confirm_expires_at',
+  "confirm_expires_at DATETIME NULL AFTER confirm_token_hash");
+CALL kubo_add_column_042('acta_signatures', 'email_confirmed_at',
+  "email_confirmed_at DATETIME(3) NULL COMMENT 'cuándo confirmó por correo' AFTER confirm_expires_at");
 
 DROP PROCEDURE IF EXISTS kubo_add_column_042;
 

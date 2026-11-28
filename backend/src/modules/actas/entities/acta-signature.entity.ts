@@ -33,13 +33,29 @@ export class ActaSignature {
   @Column({ name: 'signature_hash', type: 'varchar', length: 128 })
   signatureHash!: string;
 
-  /** USER = firmó con su usuario; IN_PERSON = en el iPad, con nombre/DNI y trazo (migración 042). */
+  /**
+   * Cómo firmó (migración 042): USER = con su usuario; IN_PERSON = trazo en el iPad;
+   * EMAIL = confirmó desde el enlace de su correo; BOTH = trazo y confirmación por correo.
+   */
   @Column({ type: 'varchar', length: 12, default: 'USER' })
-  method!: 'USER' | 'IN_PERSON';
+  method!: 'USER' | 'IN_PERSON' | 'EMAIL' | 'BOTH';
 
   /** Trazo manuscrito (PNG). Fuera de los listados: se lee para el PDF y la imagen. */
   @Column({ name: 'signature_png', type: 'mediumblob', nullable: true, select: false })
   signaturePng?: Buffer | null;
+
+  @Column({ name: 'confirm_email', type: 'varchar', length: 180, nullable: true })
+  confirmEmail!: string | null;
+
+  /** SHA-256 del enlace de confirmación; null una vez usado. Nunca el enlace en claro. */
+  @Column({ name: 'confirm_token_hash', type: 'char', length: 64, nullable: true, select: false })
+  confirmTokenHash?: string | null;
+
+  @Column({ name: 'confirm_expires_at', type: 'datetime', nullable: true })
+  confirmExpiresAt!: Date | null;
+
+  @Column({ name: 'email_confirmed_at', type: 'datetime', precision: 3, nullable: true })
+  emailConfirmedAt!: Date | null;
 
   @CreateDateColumn({ name: 'signed_at' })
   signedAt!: Date;

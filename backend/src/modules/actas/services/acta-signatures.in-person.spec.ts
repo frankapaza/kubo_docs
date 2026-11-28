@@ -21,6 +21,9 @@ function make(o: { status?: string; participants?: any[]; signed?: any[] } = {})
       create: jest.fn((x: any) => x),
       save: jest.fn(async (x: any) => { x.id = 100 + participants.length; participants.push(x); return x; }),
     } as any,
+    { findOne: jest.fn(async () => null) } as any,
+    { send: jest.fn() } as any,
+    { get: jest.fn(() => '') } as any,
   );
   return { svc, sigs, participants };
 }
