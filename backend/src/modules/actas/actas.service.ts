@@ -161,6 +161,7 @@ export class ActasService {
       })),
       agenda: agenda.map((a) => ({ title: a.title, description: a.description ?? null })),
       transcription: transcription.contentText,
+      notes: (await this.meetingNotes.list(Number(acta.meetingId))).map((n) => ({ offsetSec: n.offsetSec, kind: n.kind, text: n.text })),
     });
     acta.contentMarkdown = this.template.renderFromAI({ meeting, participants, draft });
     acta.contentJson = draft as unknown as Record<string, unknown>;

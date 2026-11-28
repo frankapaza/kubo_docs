@@ -1,7 +1,7 @@
 import { ActaAnnexesService, MAX_ANNEX_IMAGE_BYTES } from './acta-annexes.service';
 
 const JPG = Buffer.concat([Buffer.from('ffd8ffe0', 'hex'), Buffer.alloc(100)]);
-const PNG = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(100)]);
+const PNG = (() => { const b = Buffer.alloc(120); Buffer.from('89504e470d0a1a0a', 'hex').copy(b, 0); b.writeUInt32BE(13, 8); b.write('IHDR', 12, 'latin1'); b.writeUInt32BE(100, 16); b.writeUInt32BE(100, 20); return b; })();
 const USER = { id: 9, role: 'ADMIN' } as any;
 
 function make() {
@@ -13,8 +13,9 @@ function make() {
     save: jest.fn(async (x: any) => { if (!x.id) { x.id = rows.length + 1; rows.push(x); } return x; }),
     delete: jest.fn(async ({ id }: any) => { const i = rows.findIndex((r) => r.id === id); if (i >= 0) rows.splice(i, 1); }),
   };
-  const actas = { findOne: jest.fn(async ({ where }: any) => (where.id === 3 ? { id: 3 } : null)) };
-  return { svc: new ActaAnnexesService(repo as any, actas as any), rows };
+  const acta: any = { id: 3, status: 'IN_REVIEW' };
+  const actas = { findOne: jest.fn(async ({ where }: any) => (where.id === 3 ? acta : null)) };
+  return { svc: new ActaAnnexesService(repo as any, actas as any), rows, acta };
 }
 
 describe('ActaAnnexesService', () => {
@@ -57,5 +58,16 @@ describe('ActaAnnexesService', () => {
     await t.svc.create(3, { caption: 'tres' }, null, USER);
     await t.svc.remove(a.id);
     expect((await t.svc.list(3)).map((x) => [x.caption, x.position])).toEqual([['dos', 1], ['tres', 2]]);
+  });
+});
+
+describe('ActaAnnexesService: acta aprobada', () => {
+  it('no se agregan, editan ni quitan evidencias de un acta aprobada o exportada', async () => {
+    const t = make();
+    const a = await t.svc.create(3, { caption: 'uno' }, null, USER);
+    t.acta.status = 'APPROVED';
+    await expect(t.svc.create(3, { caption: 'dos' }, null, USER)).rejects.toMatchObject({ status: 409 });
+    await expect(t.svc.update(a.id, { caption: 'x' })).rejects.toMatchObject({ status: 409 });
+    await expect(t.svc.remove(a.id)).rejects.toMatchObject({ status: 409 });
   });
 });

@@ -74,7 +74,8 @@ export class PdfRendererService {
       if (ctx.signatures && ctx.signatures.length > 0) {
         this.drawSignatures(doc, ctx.signatures);
       }
-      const anexos = (ctx.annexes ?? []).filter((a) => a.place !== 'INLINE');
+      // En un acta no hay secciones: toda evidencia va a «Anexos», con la misma numeración que en pantalla.
+      const anexos = ctx.annexes ?? [];
       if (anexos.length > 0) this.drawAnnexes(doc, anexos);
       this.drawFooters(doc, ctx);
 

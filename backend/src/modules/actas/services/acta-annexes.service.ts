@@ -1,10 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { AuthUser } from '../../../common/decorators/current-user.decorator';
 import { ActaAnnex } from '../entities/acta-annex.entity';
 import { Acta } from '../entities/acta.entity';
+import { assertImageDimensions } from './image-guard';
 
 /** Una foto de iPad comprimida en el navegador queda muy por debajo; más es un error. */
 export const MAX_ANNEX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -61,9 +62,7 @@ export class ActaAnnexesService {
     file: { buffer: Buffer; mimetype: string } | null,
     user: AuthUser,
   ): Promise<AnnexView> {
-    if (!(await this.actas.findOne({ where: { id: actaId } }))) {
-      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Acta no encontrada' });
-    }
+    await this.assertEditable(actaId);
     const caption = String(fields.caption ?? '').trim();
     if (file) this.assertImage(file);
     if (!file && !caption) {
@@ -88,6 +87,7 @@ export class ActaAnnexesService {
   async update(id: number, fields: AnnexFields & { position?: number }): Promise<AnnexView> {
     const a = await this.repo.findOne({ where: { id } });
     if (!a) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Evidencia no encontrada' });
+    await this.assertEditable(Number(a.actaId));
     if (fields.caption !== undefined) a.caption = fields.caption.trim() || null;
     if (fields.place) a.place = fields.place === 'INLINE' ? 'INLINE' : 'ANEXO';
     if (fields.section !== undefined) a.section = fields.section.trim().slice(0, 40) || null;
@@ -101,6 +101,7 @@ export class ActaAnnexesService {
   async remove(id: number): Promise<void> {
     const a = await this.repo.findOne({ where: { id } });
     if (!a) return;
+    await this.assertEditable(Number(a.actaId));
     await this.repo.delete({ id });
     const rest = await this.repo.find({ where: { actaId: a.actaId }, order: { position: 'ASC', id: 'ASC' } });
     for (const [i, r] of rest.entries()) {
@@ -118,6 +119,16 @@ export class ActaAnnexesService {
     }
     if (file.buffer.length > MAX_ANNEX_IMAGE_BYTES) {
       throw new BadRequestException({ code: 'BAD_INPUT', message: 'La foto pesa más de 5 MB.' });
+    }
+    assertImageDimensions(file.buffer, 6000);
+  }
+
+  /** Un acta aprobada o exportada ya no cambia: tampoco sus evidencias. */
+  private async assertEditable(actaId: number): Promise<void> {
+    const acta = await this.actas.findOne({ where: { id: actaId } });
+    if (!acta) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Acta no encontrada' });
+    if (acta.status === 'APPROVED' || acta.status === 'EXPORTED') {
+      throw new ConflictException({ code: 'CONFLICT', message: 'El acta está aprobada: sus evidencias ya no se pueden cambiar.' });
     }
   }
 }

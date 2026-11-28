@@ -45,6 +45,10 @@ export class ActaSignature {
   @Column({ name: 'signature_png', type: 'mediumblob', nullable: true, select: false })
   signaturePng?: Buffer | null;
 
+  /** Versión del acta cuando se pidió la firma por enlace; si el acta cambia, el enlace ya no confirma. */
+  @Column({ name: 'acta_version', type: 'int', unsigned: true, nullable: true })
+  actaVersion!: number | null;
+
   @Column({ name: 'confirm_email', type: 'varchar', length: 180, nullable: true })
   confirmEmail!: string | null;
 

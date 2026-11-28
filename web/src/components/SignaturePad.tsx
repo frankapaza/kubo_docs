@@ -16,6 +16,8 @@ const SignaturePad = forwardRef<SignaturePadHandle, { height?: number; onChange?
   function SignaturePad({ height = 180, onChange }, ref) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const drawing = useRef(false);
+    /** Solo el primer dedo o lápiz dibuja: un segundo dedo no hace zigzag. */
+    const activePointer = useRef<number | null>(null);
     const last = useRef<{ x: number; y: number } | null>(null);
     const [empty, setEmpty] = useState(true);
 
@@ -51,12 +53,14 @@ const SignaturePad = forwardRef<SignaturePadHandle, { height?: number; onChange?
 
     const down = (e: React.PointerEvent<HTMLCanvasElement>) => {
       e.preventDefault();
+      if (activePointer.current !== null) return;
+      activePointer.current = e.pointerId;
       e.currentTarget.setPointerCapture(e.pointerId);
       drawing.current = true;
       last.current = point(e);
     };
     const move = (e: React.PointerEvent<HTMLCanvasElement>) => {
-      if (!drawing.current || !last.current) return;
+      if (!drawing.current || !last.current || e.pointerId !== activePointer.current) return;
       const g = ctx();
       if (!g) return;
       const p = point(e);
@@ -72,7 +76,9 @@ const SignaturePad = forwardRef<SignaturePadHandle, { height?: number; onChange?
         onChange?.(false);
       }
     };
-    const up = () => {
+    const up = (e?: React.PointerEvent<HTMLCanvasElement>) => {
+      if (e && activePointer.current !== null && e.pointerId !== activePointer.current) return;
+      activePointer.current = null;
       drawing.current = false;
       last.current = null;
     };

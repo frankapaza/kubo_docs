@@ -6,7 +6,7 @@ const PNG_1X1 =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 const OPERADOR = { id: 9, email: 'frank@kuboti.com', role: 'ADMIN' } as any;
 
-function make() {
+function make(acta: any = { id: 3, meetingId: 1, version: 2, status: 'IN_REVIEW', contentMarkdown: '# Acta' }) {
   const participants: any[] = [
     { id: 5, meetingId: 1, fullName: 'Ana Pérez', documentNumber: '45678912', email: 'ana@cliente.pe', role: 'Área usuaria', attended: 1, userId: null },
     { id: 6, meetingId: 1, fullName: 'Luis Soto', documentNumber: '41111111', email: null, role: null, attended: 1, userId: null },
@@ -19,21 +19,28 @@ function make() {
     create: jest.fn((x: any) => x),
     save: jest.fn(async (x: any) => { if (!x.id) { x.id = sigs.length + 1; sigs.push(x); } return x; }),
     delete: jest.fn(async ({ id }: any) => { const i = sigs.findIndex((s) => s.id === id); if (i >= 0) sigs.splice(i, 1); }),
+    update: jest.fn(async (crit: any, patch: any) => {
+      const s = sigs.find((x) => x.id === crit.id && x.confirmTokenHash === crit.confirmTokenHash);
+      if (!s) return { affected: 0 };
+      Object.assign(s, patch);
+      return { affected: 1 };
+    }),
   };
   const svc = new ActaSignaturesService(
     sigRepo as any,
-    { findOne: jest.fn(async () => ({ id: 3, meetingId: 1, version: 2, status: 'IN_REVIEW', contentMarkdown: '# Acta' })) } as any,
+    { findOne: jest.fn(async () => acta) } as any,
     {
       findOne: jest.fn(async ({ where }: any) => participants.find((p) => p.id === where.id) ?? null),
       find: jest.fn(async ({ where }: any) => participants.filter((p) => p.meetingId === where.meetingId && (where.attended === undefined || p.attended === where.attended))),
       create: jest.fn((x: any) => x),
       save: jest.fn(async (x: any) => { x.id = 100 + participants.length; participants.push(x); return x; }),
+      delete: jest.fn(async ({ id }: any) => { const i = participants.findIndex((p) => p.id === id); if (i >= 0) participants.splice(i, 1); }),
     } as any,
     { findOne: jest.fn(async () => ({ id: 1, title: 'Reunión de avance COB', scheduledAt: new Date('2026-11-28T15:00:00Z') })) } as any,
     { send: jest.fn(async (m: any) => { sent.push(m); return {}; }) } as any,
     { get: jest.fn(() => 'https://docs.kuboti.com') } as any,
   );
-  return { svc, sigs, sent, participants, failMail: () => { (svc as any).email.send = jest.fn(async () => { throw Object.assign(new Error('smtp'), { status: 502 }); }); } };
+  return { svc, sigs, sent, participants, acta, failMail: () => { (svc as any).email.send = jest.fn(async () => { throw Object.assign(new Error('smtp'), { status: 502 }); }); } };
 }
 
 const tokenFrom = (html: string) => /firmar-acta\/([A-Za-z0-9_-]+)/.exec(html)![1];
@@ -123,5 +130,56 @@ describe('Firma a distancia (reunión por Meet): enlace para dibujar y confirmar
     expect(t.sent.map((m) => m.to)).toEqual(['ana@cliente.pe']);
     const again = await t.svc.requestRemoteForAll(3, OPERADOR, null);
     expect(again.sent).toEqual([]);
+  });
+});
+
+describe('Firma por correo: revisión final', () => {
+  it('si el acta cambió desde el envío del enlace, no se confirma (409)', async () => {
+    const t = make();
+    await t.svc.requestByEmail(3, { participantId: 5, mode: 'EMAIL' }, OPERADOR, null);
+    t.acta.version = 3;
+    await expect(t.svc.confirmByToken(tokenFrom(t.sent[0].html), null)).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('si el acta ya no está en revisión o aprobada, no se confirma', async () => {
+    const t = make();
+    await t.svc.requestByEmail(3, { participantId: 5, mode: 'EMAIL' }, OPERADOR, null);
+    t.acta.status = 'DRAFT';
+    await expect(t.svc.confirmByToken(tokenFrom(t.sent[0].html), null)).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('la huella de la confirmación cubre el trazo dibujado a distancia', async () => {
+    const OTRO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==';
+    const a = make();
+    await a.svc.requestByEmail(3, { participantId: 5, mode: 'REMOTE' }, OPERADOR, null);
+    const b = make();
+    await b.svc.requestByEmail(3, { participantId: 5, mode: 'REMOTE' }, OPERADOR, null);
+    b.sigs[0].signatureHash = a.sigs[0].signatureHash;
+    const ha = (await a.svc.confirmByToken(tokenFrom(a.sent[0].html), null, PNG_1X1)).signatureHash;
+    const hb = (await b.svc.confirmByToken(tokenFrom(b.sent[0].html), null, OTRO)).signatureHash;
+    expect(ha).not.toBe(hb);
+  });
+
+  it('el enlace de un participante con correo no se puede desviar a otro correo', async () => {
+    const t = make();
+    await expect(t.svc.requestByEmail(3, { participantId: 5, mode: 'EMAIL', signerEmail: 'otro@x.pe' }, OPERADOR, null)).rejects.toMatchObject({ status: 400 });
+    const ok = await t.svc.requestByEmail(3, { participantId: 5, mode: 'EMAIL', signerEmail: 'ANA@cliente.pe' }, OPERADOR, null);
+    expect(ok.confirmEmail).toBe('ana@cliente.pe');
+  });
+
+  it('si el correo falla, tampoco queda el asistente nuevo que se creó', async () => {
+    const t = make();
+    t.failMail();
+    const antes = t.participants.length;
+    await expect(t.svc.requestByEmail(3, { signerName: 'Nuevo', signerDocument: '40000000', signerEmail: 'n@x.pe', mode: 'EMAIL' }, OPERADOR, null)).rejects.toBeTruthy();
+    expect(t.participants.length).toBe(antes);
+  });
+
+  it('dos confirmaciones del mismo enlace: solo la primera vale', async () => {
+    const t = make();
+    await t.svc.requestByEmail(3, { participantId: 5, mode: 'EMAIL' }, OPERADOR, null);
+    const token = tokenFrom(t.sent[0].html);
+    const [r1, r2] = await Promise.allSettled([t.svc.confirmByToken(token, null), t.svc.confirmByToken(token, null)]);
+    expect([r1.status, r2.status].sort()).toEqual(['fulfilled', 'rejected']);
   });
 });

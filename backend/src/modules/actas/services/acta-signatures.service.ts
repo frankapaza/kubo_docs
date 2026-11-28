@@ -1,4 +1,5 @@
-import { BadRequestException, GoneException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, GoneException, Injectable, NotFoundException } from '@nestjs/common';
+import { assertImageDimensions } from './image-guard';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -65,6 +66,7 @@ function decodeSignaturePng(dataUrl: string): Buffer {
       message: 'El trazo de la firma es demasiado grande.',
     });
   }
+  assertImageDimensions(buf, 3000);
   return buf;
 }
 
@@ -93,10 +95,18 @@ export class ActaSignaturesService {
   ): Promise<ActaSignature> {
     const png = input.mode === 'BOTH' ? decodeSignaturePng(input.signaturePng ?? '') : null;
     const remote = input.mode === 'REMOTE';
-    const { acta, participant } = await this.resolveSigner(actaId, input);
-    const to = String(input.signerEmail ?? participant.email ?? '')
-      .trim()
-      .toLowerCase();
+    const { acta, participant, created } = await this.resolveSigner(actaId, input);
+    // El enlace de un participante con correo va a su correo: no se puede desviar a otro.
+    const own = participant.email?.trim().toLowerCase() || null;
+    const asked = input.signerEmail?.trim().toLowerCase() || null;
+    if (own && asked && asked !== own) {
+      if (created) await this.participants.delete({ id: Number(participant.id) });
+      throw new BadRequestException({
+        code: 'BAD_INPUT',
+        message: `El enlace solo se puede enviar al correo registrado del participante (${own}). Corrige el participante si cambió.`,
+      });
+    }
+    const to = String(own ?? asked ?? '').trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
       throw new BadRequestException({
         code: 'BAD_INPUT',
@@ -142,6 +152,7 @@ export class ActaSignaturesService {
         confirmEmail: to,
         confirmTokenHash: sha256(token),
         confirmExpiresAt: new Date(Date.now() + CONFIRM_DAYS * 24 * 3600_000),
+        actaVersion: Number(acta.version),
         emailConfirmedAt: null,
         ipAddress,
       }),
@@ -173,6 +184,8 @@ export class ActaSignaturesService {
       });
     } catch (e) {
       await this.repo.delete({ id: sig.id });
+      // Tampoco queda el asistente que se agregó solo para esta firma.
+      if (created) await this.participants.delete({ id: Number(participant.id) });
       throw e;
     }
     sig.confirmTokenHash = sha256(token);
@@ -234,14 +247,29 @@ export class ActaSignaturesService {
 
   async confirmByToken(token: string, ipAddress: string | null, signaturePng?: string): Promise<ActaSignature> {
     const sig = await this.byToken(token);
+    // Lo que se confirma es el acta tal como estaba al enviar el enlace.
+    const acta = await this.actas.findOne({ where: { id: Number(sig.actaId) } });
+    if (!acta || !['APPROVED', 'EXPORTED', 'IN_REVIEW'].includes(acta.status)) {
+      throw new ConflictException({ code: 'CONFLICT', message: 'El acta ya no está disponible para firmar.' });
+    }
+    if (sig.actaVersion != null && Number(acta.version) !== Number(sig.actaVersion)) {
+      throw new ConflictException({ code: 'ACTA_CHANGED', message: 'El acta cambió desde que se envió el enlace. Pide un enlace nuevo.' });
+    }
     // A distancia, la firma es el trazo que la persona dibuja en la página del enlace.
-    if (sig.method === 'REMOTE') sig.signaturePng = decodeSignaturePng(signaturePng ?? '');
-    sig.emailConfirmedAt = new Date();
-    sig.confirmTokenHash = null;
-    sig.signatureHash = sha256(
-      `${sig.signatureHash}|confirmado|${sig.emailConfirmedAt.toISOString()}|${ipAddress ?? ''}`,
+    const png = sig.method === 'REMOTE' ? decodeSignaturePng(signaturePng ?? '') : null;
+    const confirmedAt = new Date();
+    const signatureHash = sha256(
+      [sig.signatureHash, 'confirmado', confirmedAt.toISOString(), ipAddress ?? '',
+        png ? sha256(png) : '', sha256(acta.contentMarkdown ?? '')].join('|'),
     );
-    return this.repo.save(sig);
+    const patch: Partial<ActaSignature> = { emailConfirmedAt: confirmedAt, confirmTokenHash: null, signatureHash };
+    if (png) patch.signaturePng = png;
+    // Condicional: dos clics simultáneos no confirman dos veces el mismo enlace.
+    const res = await this.repo.update({ id: sig.id, confirmTokenHash: sha256(String(token)) }, patch);
+    if (!res.affected) {
+      throw new NotFoundException({ code: 'NOT_FOUND', message: 'El enlace no es válido o ya se usó.' });
+    }
+    return Object.assign(sig, patch);
   }
 
   private async byToken(token: string): Promise<ActaSignature> {
@@ -267,7 +295,7 @@ export class ActaSignaturesService {
   private async resolveSigner(
     actaId: number,
     input: Partial<InPersonSignatureInput>,
-  ): Promise<{ acta: Acta; participant: Participant }> {
+  ): Promise<{ acta: Acta; participant: Participant; created: boolean }> {
     const acta = await this.actas.findOne({ where: { id: actaId } });
     if (!acta)
       throw new NotFoundException({
@@ -290,7 +318,7 @@ export class ActaSignaturesService {
           message: 'El participante no pertenece a esta reunión',
         });
       }
-      return { acta, participant: p };
+      return { acta, participant: p, created: false };
     }
     const name = String(input.signerName ?? '').trim();
     const doc = String(input.signerDocument ?? '').trim();
@@ -310,7 +338,7 @@ export class ActaSignaturesService {
         attended: 1,
       } as Partial<Participant>),
     );
-    return { acta, participant };
+    return { acta, participant, created: true };
   }
 
   listByActa(actaId: number): Promise<ActaSignature[]> {
