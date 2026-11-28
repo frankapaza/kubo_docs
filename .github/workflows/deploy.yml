@@ -195,7 +195,8 @@ jobs:
                      039_disponibilidad_protocolo_http \
                      040_api_integracion_clientes \
                      041_disponibilidad_latencia_horaria \
-                     042_reunion_ipad; do
+                     042_reunion_ipad \
+                     043_expediente_proyecto; do
               echo "--- $m"
               sql_file "backend/sql/migrations/$m.sql"
             done

@@ -104,6 +104,8 @@ services:
       - ./backend/sql/migrations/041_disponibilidad_latencia_horaria.sql:/docker-entrypoint-initdb.d/041_disponibilidad_latencia_horaria.sql:ro
       # La 042: firma en pantalla, notas de reunión y anexos del acta (reunión en iPad).
       - ./backend/sql/migrations/042_reunion_ipad.sql:/docker-entrypoint-initdb.d/042_reunion_ipad.sql:ro
+      # La 043: expediente del proyecto (tipo de trabajo, entregables y sus versiones).
+      - ./backend/sql/migrations/043_expediente_proyecto.sql:/docker-entrypoint-initdb.d/043_expediente_proyecto.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s

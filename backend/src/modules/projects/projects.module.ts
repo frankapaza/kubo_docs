@@ -9,16 +9,26 @@ import { ProjectMembersService } from './project-members.service';
 import { ProjectMembersRepository } from './project-members.repository';
 import { ProjectMembersController } from './project-members.controller';
 import { UsersModule } from '../users/users.module';
+import { User } from '../users/entities/user.entity';
+import { StorageModule } from '../../common/storage/storage.module';
+import { ProjectDeliverable } from './expediente/entities/project-deliverable.entity';
+import { ProjectDeliverableVersion } from './expediente/entities/project-deliverable-version.entity';
+import { ExpedienteService } from './expediente/expediente.service';
+import { ExpedienteController } from './expediente/expediente.controller';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Project, ProjectMember]), UsersModule],
+  imports: [TypeOrmModule.forFeature([Project, ProjectMember, ProjectDeliverable, ProjectDeliverableVersion, User]),
+    UsersModule,
+    StorageModule,
+  ],
   providers: [
     ProjectsService,
     ProjectsRepository,
     ProjectMembersService,
     ProjectMembersRepository,
+    ExpedienteService,
   ],
-  controllers: [ProjectsController, ProjectMembersController],
+  controllers: [ProjectsController, ProjectMembersController, ExpedienteController],
   exports: [ProjectsService, ProjectMembersService],
 })
 export class ProjectsModule {}

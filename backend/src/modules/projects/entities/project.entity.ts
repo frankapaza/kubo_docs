@@ -31,6 +31,10 @@ export class Project {
   @Column({ type: 'enum', enum: ['ACTIVE', 'ARCHIVED'], default: 'ACTIVE' })
   status!: ProjectStatus;
 
+  /** TRADICIONAL | AGIL | CORRECTIVO; null = el expediente aún no se inició (migración 043). */
+  @Column({ name: 'work_type', type: 'varchar', length: 12, nullable: true })
+  workType!: 'TRADICIONAL' | 'AGIL' | 'CORRECTIVO' | null;
+
   @Column({ name: 'jira_integration_id', type: 'bigint', unsigned: true, nullable: true })
   jiraIntegrationId!: number | null;
 
