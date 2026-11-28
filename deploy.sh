@@ -44,6 +44,8 @@ set -e
 # entregables del expediente con sus versiones; aplicarla igual, a mano.
 # Migracion 044 (044_editor_entregables): documento en linea, plantillas e
 # imagenes por seccion de los entregables; aplicarla igual, a mano.
+# Migracion 045 (045_participantes_telefono): telefono opcional de los
+# participantes; aplicarla igual, a mano.
 cd /home/kubo/kubo
 git pull
 docker compose build backend monitor-worker web

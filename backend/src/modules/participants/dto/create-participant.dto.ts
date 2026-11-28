@@ -1,4 +1,4 @@
-import { IsBoolean, IsEmail, IsInt, IsOptional, IsString, Length, Min } from 'class-validator';
+import { IsBoolean, IsEmail, IsInt, IsOptional, IsString, Length, Matches, Min } from 'class-validator';
 
 export class CreateParticipantDto {
   @IsOptional()
@@ -18,6 +18,11 @@ export class CreateParticipantDto {
   @IsOptional()
   @IsEmail()
   email?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^[+0-9 ()-]{6,30}$/, { message: 'El teléfono solo admite números, espacios, +, guiones y paréntesis (6 a 30).' })
+  phone?: string;
 
   @IsOptional()
   @IsString()

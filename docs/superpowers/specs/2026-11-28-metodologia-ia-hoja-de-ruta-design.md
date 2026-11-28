@@ -99,3 +99,9 @@ Prototipo aprobado: «Editor del documento con ajuste IA» (canvas Editor.dc.htm
 - **Ajuste con IA:** alcance «esta sección» o «todo el documento»; pedidos rápidos (más formal, más breve, completar lo pendiente, ajustar al formato del cliente, corregir ortografía) o texto libre. La IA devuelve solo las secciones del alcance; el servidor calcula el antes y después por palabras. Nada se guarda sin aceptar: aceptar todo o elegir sección por sección y luego guardar crea la versión nueva. La IA no inventa datos: lo que falta queda como «[Completar]».
 - **PDF del documento:** carátula con logo Kubo, nomenclatura y versión; historial de revisiones (E/R/A/F); índice; secciones; figuras; anexos.
 - **Concurrencia:** guardar envía la versión sobre la que se editó; si otra persona guardó antes, 409 y no se pisa.
+
+## Ajustes tras usar el editor (usuario, 2026-11-28)
+
+- **Participantes** como en las actas: tabla nombre, cargo, correo, teléfono (opcional, migración 045) y asistencia; en el editor, «Traer de una reunión» del proyecto. Las actas de reunión también usan esa tabla.
+- **Roles y responsables** salen de los participantes («Completar desde Participantes»: el cargo pasa como rol).
+- **Cronograma** visual: filas actividad/responsable/inicio/fin con Gantt, e «Importar desde Excel» (o CSV) genérico como el que exporta MS Project (detecta «Tarea/Actividad», «Comienzo/Inicio», «Fin», «Recursos/Responsable»; fechas de Excel, dd/mm/aaaa o «lun 01/12/26»). El PDF dibuja el Gantt debajo de la tabla.

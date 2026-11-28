@@ -93,6 +93,13 @@ export const deliverableDocumentApi = {
     api.patch<DocAttachment>(`${base(projectId, id)}/attachments/${attachmentId}`, patch).then((r) => r.data),
   removeAttachment: (projectId: number, id: number, attachmentId: number) =>
     api.delete(`${base(projectId, id)}/attachments/${attachmentId}`).then(() => undefined),
+  importSchedule: (projectId: number, id: number, file: File) => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    return api
+      .post<{ rows: { activity: string; owner: string; start: string; end: string }[]; markdown: string }>(`${base(projectId, id)}/schedule-import`, form)
+      .then((r) => r.data);
+  },
   imagePath: (projectId: number, id: number, attachmentId: number) => `${base(projectId, id)}/attachments/${attachmentId}/image`,
 };
 

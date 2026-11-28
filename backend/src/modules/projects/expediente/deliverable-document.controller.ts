@@ -145,6 +145,18 @@ export class DeliverableDocumentController {
     res.end(buffer);
   }
 
+  @Post('schedule-import')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
+  async importSchedule(
+    @CurrentUser() user: AuthUser,
+    @Param('projectId', ParseIntPipe) projectId: number,
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: Express.Multer.File | undefined,
+  ) {
+    if (!file) throw new BadRequestException({ code: 'BAD_INPUT', message: 'Falta el archivo en el campo «file».' });
+    return this.docs.importSchedule(await this.projects.findByIdForUser(projectId, user), id, file.buffer);
+  }
+
   @Get('attachments')
   async attachments(@CurrentUser() user: AuthUser, @Param('projectId', ParseIntPipe) projectId: number, @Param('id', ParseIntPipe) id: number) {
     return this.docs.listAttachments(await this.projects.findByIdForUser(projectId, user), id);

@@ -175,7 +175,7 @@ export function zipEntryNames(buf: Buffer): string[] | null {
   }
 }
 
-function readZipEntry(buf: Buffer, name: string): Buffer | null {
+export function readZipEntry(buf: Buffer, name: string): Buffer | null {
   try {
     const e = zipEntries(buf)?.find((x) => x.name === name);
     if (!e) return null;

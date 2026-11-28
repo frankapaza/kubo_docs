@@ -26,6 +26,7 @@ export function MeetingParticipantsCard({
     fullName: '',
     documentNumber: '',
     email: '',
+    phone: '',
     role: '',
   });
 
@@ -51,7 +52,7 @@ export function MeetingParticipantsCard({
   }, [membersQ.data, participantsQ.data]);
 
   const reset = () => {
-    setForm({ userId: '', fullName: '', documentNumber: '', email: '', role: '' });
+    setForm({ userId: '', fullName: '', documentNumber: '', email: '', phone: '', role: '' });
     setMode('internal');
     setShowForm(false);
   };
@@ -88,6 +89,7 @@ export function MeetingParticipantsCard({
         userId: member.userId,
         fullName: member.fullName,
         email: member.email,
+        phone: form.phone.trim() || undefined,
         role: form.role || undefined,
       });
     } else {
@@ -96,6 +98,7 @@ export function MeetingParticipantsCard({
         fullName: form.fullName.trim(),
         documentNumber: form.documentNumber.trim() || undefined,
         email: form.email.trim() || undefined,
+        phone: form.phone.trim() || undefined,
         role: form.role.trim() || undefined,
       });
     }
@@ -220,6 +223,17 @@ export function MeetingParticipantsCard({
                     maxLength={180}
                   />
                 </div>
+                <div>
+                  <label className="label">Teléfono (opcional)</label>
+                  <input
+                    className="input"
+                    type="tel"
+                    value={form.phone}
+                    onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                    maxLength={30}
+                    placeholder="+51 999 999 999"
+                  />
+                </div>
                 <div className="md:col-span-2 flex justify-end">
                   <Button type="submit" loading={add.isPending}>
                     Agregar invitado
@@ -244,6 +258,7 @@ export function MeetingParticipantsCard({
                   <th className="px-3 py-2">N° doc</th>
                   <th className="px-3 py-2">Cargo</th>
                   <th className="px-3 py-2">Email</th>
+                  <th className="px-3 py-2">Teléfono</th>
                   <th className="px-3 py-2">Asistió</th>
                   <th className="px-3 py-2"></th>
                 </tr>
@@ -266,6 +281,7 @@ export function MeetingParticipantsCard({
                       </td>
                       <td className="px-3 py-2 text-slate-600">{p.role ?? '—'}</td>
                       <td className="px-3 py-2 text-slate-600">{p.email ?? '—'}</td>
+                      <td className="px-3 py-2 text-slate-600">{p.phone ?? '—'}</td>
                       <td className="px-3 py-2">
                         <label className="inline-flex items-center gap-2 cursor-pointer">
                           <input

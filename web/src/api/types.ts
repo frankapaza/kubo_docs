@@ -344,6 +344,7 @@ export interface Participant {
   fullName: string;
   documentNumber: string | null;
   email: string | null;
+  phone: string | null;
   role: string | null;
   attended: number;
   createdAt: string;

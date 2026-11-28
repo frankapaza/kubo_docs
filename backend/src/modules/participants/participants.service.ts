@@ -23,6 +23,7 @@ export class ParticipantsService {
         fullName: dto.fullName,
         documentNumber: dto.documentNumber ?? null,
         email: dto.email ?? null,
+        phone: dto.phone?.trim() || null,
         role: dto.role ?? null,
         attended: dto.attended ? 1 : 0,
       }),

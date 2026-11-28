@@ -19,7 +19,9 @@ import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Card } from '../../components/ui/Card';
 import { ArrowLeftIcon, DownloadIcon, PlusIcon, SaveIcon, SparklesIcon, TrashIcon } from '../../components/ui/Icon';
+import { parseSchedule } from '../../lib/doc-tables';
 import { useAuthedImage } from '../../lib/useAuthedImage';
+import { ParticipantsTools, RolesTools, ScheduleTools, sectionKind } from './SectionHelpers';
 import { askConfirm } from '../../ui/ConfirmDialog';
 import { toast } from '../../ui/Toast';
 
@@ -214,7 +216,14 @@ export default function DeliverableEditorPage() {
           </Link>
           <h1 className="text-2xl font-semibold text-slate-900">{d.name}</h1>
           <div className="text-xs text-slate-500 break-all">
-            {d.nomenclature} · {dirty ? <span className="text-amber-700">cambios sin guardar</span> : 'guardado'}
+            {d.nomenclature} ·{' '}
+            {dirty ? (
+              <span className="text-amber-700">cambios sin guardar</span>
+            ) : data.saved ? (
+              'guardado'
+            ) : (
+              <span className="text-slate-500">todavía sin guardar: completa y pulsa «Guardar versión»</span>
+            )}
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
             <Badge>{d.statusLabel}</Badge>
@@ -511,6 +520,9 @@ function SectionEditor(props: {
 }) {
   const { section: s, state } = props;
   const ref = useRef<HTMLTextAreaElement>(null);
+  const kind = sectionKind(s.title, s.body);
+  const [asText, setAsText] = useState(false);
+  const participantsBody = props.allSections.find((x) => sectionKind(x.title, x.body) === 'PARTICIPANTS')?.body ?? null;
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const mine = props.attachments.filter((a) => a.sectionKey === s.key);
@@ -558,7 +570,28 @@ function SectionEditor(props: {
         )}
       </div>
 
-      <div className="mt-2">
+      {kind === 'SCHEDULE' && (
+        <ScheduleTools
+          rows={parseSchedule(s.body) ?? []}
+          body={s.body}
+          readOnly={props.readOnly || props.preview}
+          projectId={props.projectId}
+          deliverableId={props.deliverableId}
+          onBody={(body) => props.onChange({ body })}
+        />
+      )}
+      {kind === 'PARTICIPANTS' && <ParticipantsTools projectId={props.projectId} readOnly={props.readOnly || props.preview} body={s.body} onBody={(body) => props.onChange({ body })} />}
+      {kind === 'ROLES' && (
+        <RolesTools participantsBody={participantsBody} readOnly={props.readOnly || props.preview} body={s.body} onBody={(body) => props.onChange({ body })} />
+      )}
+
+      {kind === 'SCHEDULE' && !props.preview && (
+        <button type="button" className="mt-2 text-[11px] text-slate-500 hover:underline" onClick={() => setAsText((v) => !v)}>
+          {asText ? 'Ocultar el texto del cronograma' : 'Editar como texto (notas antes o después de la tabla)'}
+        </button>
+      )}
+
+      <div className={`mt-2 ${kind === 'SCHEDULE' && !asText && !props.preview ? 'hidden' : ''}`}>
         {props.preview ? (
           <div className="prose-sm text-slate-800">
             <MarkdownPreview source={s.body} />
