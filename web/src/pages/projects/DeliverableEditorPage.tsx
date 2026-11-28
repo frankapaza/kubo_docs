@@ -38,12 +38,24 @@ function errorText(e: unknown, fallback: string): string {
   return Array.isArray(m) ? m.join(' ') : m ?? fallback;
 }
 
-function stateOf(s: DocSection, saved: Map<string, DocSection>): SectionState {
-  const b = s.body.trim();
-  if (!b || b.includes(PENDING)) return 'PENDIENTE';
+/** Distinto de lo último guardado (o de la plantilla, si aún no se guardó). */
+function isChanged(s: DocSection, saved: Map<string, DocSection>): boolean {
   const before = saved.get(s.key);
-  if (!before || before.body !== s.body || before.title !== s.title || before.num !== s.num) return 'EDITADA';
-  return 'COMPLETA';
+  return !before || before.body !== s.body || before.title !== s.title || before.num !== s.num;
+}
+
+/** Para el índice: lo editado en esta versión manda; si no, completa o pendiente. */
+function stateOf(s: DocSection, saved: Map<string, DocSection>): SectionState {
+  if (isChanged(s, saved)) return 'EDITADA';
+  const b = s.body.trim();
+  return !b || b.includes(PENDING) ? 'PENDIENTE' : 'COMPLETA';
+}
+
+/** El número que sigue al de la última sección: 2.4 → 2.5, 3 → 4. */
+function nextNum(list: DocSection[]): string {
+  const last = list[list.length - 1]?.num ?? '';
+  const m = /^(.*?)(\d+)$/.exec(last.trim());
+  return m ? `${m[1]}${Number(m[2]) + 1}` : String(list.length + 1);
 }
 
 function newKey(): string {
@@ -64,7 +76,12 @@ export default function DeliverableEditorPage() {
   const lead = canLeadProject(user);
   const qc = useQueryClient();
   const key = ['deliverable-document', projectId, deliverableId];
-  const { data, isLoading, error } = useQuery({ queryKey: key, queryFn: () => deliverableDocumentApi.get(projectId, deliverableId) });
+  // Sin recarga al volver a la pestaña: el texto en pantalla no se reemplaza solo.
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: key,
+    queryFn: () => deliverableDocumentApi.get(projectId, deliverableId),
+    refetchOnWindowFocus: false,
+  });
 
   const [sections, setSections] = useState<DocSection[]>([]);
   const [saved, setSaved] = useState<Map<string, DocSection>>(new Map());
@@ -73,19 +90,29 @@ export default function DeliverableEditorPage() {
   const [preview, setPreview] = useState(false);
   const [note, setNote] = useState('');
   const [proposal, setProposal] = useState<{ changes: AiChange[]; picked: Set<string>; instruction: string; scopeLabel: string } | null>(null);
+  const [aiRunning, setAiRunning] = useState(false);
+  /** Hay una versión más nueva en el servidor y no se cargó porque hay cambios sin guardar. */
+  const [newer, setNewer] = useState<DeliverableDocument | null>(null);
   const loadedFor = useRef<string | null>(null);
+  const dirtyRef = useRef(false);
 
   // Carga inicial (y tras guardar): el texto del servidor pasa a ser la base.
   const adopt = (doc: DeliverableDocument) => {
     const clean = doc.sections.map(({ key: k, num, title, body }) => ({ key: k, num, title, body }));
     setSections(clean);
-    setSaved(doc.saved ? new Map(clean.map((s) => [s.key, s])) : new Map());
+    setSaved(new Map(clean.map((s) => [s.key, s])));
+    setNewer(null);
     setBaseVersion(doc.baseVersion);
     setCurrent((c) => (c && clean.some((s) => s.key === c) ? c : clean[0]?.key ?? null));
   };
   useEffect(() => {
     const tag = data ? `${data.deliverable.id}:${data.baseVersion}:${data.saved}` : null;
     if (data && loadedFor.current !== tag) {
+      // Con cambios sin guardar no se pisa el texto: se avisa que hay una versión más nueva.
+      if (loadedFor.current !== null && dirtyRef.current) {
+        setNewer(data);
+        return;
+      }
       loadedFor.current = tag;
       adopt(data);
     }
@@ -93,10 +120,10 @@ export default function DeliverableEditorPage() {
 
   const dirty = useMemo(() => {
     if (!data) return false;
-    if (!data.saved) return true;
-    if (sections.length !== saved.size) return true;
-    return sections.some((s) => stateOf(s, saved) === 'EDITADA');
+    if (sections.length !== saved.size || sections.some((s) => !saved.has(s.key))) return true;
+    return sections.some((s) => isChanged(s, saved));
   }, [sections, saved, data]);
+  dirtyRef.current = dirty;
 
   useEffect(() => {
     if (!dirty) return;
@@ -112,6 +139,7 @@ export default function DeliverableEditorPage() {
     mutationFn: (opts: { sections: DocSection[]; note?: string }) =>
       deliverableDocumentApi.save(projectId, deliverableId, { sections: opts.sections, baseVersion, note: opts.note }),
     onSuccess: (doc) => {
+      dirtyRef.current = false;
       loadedFor.current = `${doc.deliverable.id}:${doc.baseVersion}:${doc.saved}`;
       qc.setQueryData(key, doc);
       qc.invalidateQueries({ queryKey: ['expediente', projectId] });
@@ -119,7 +147,11 @@ export default function DeliverableEditorPage() {
       setNote('');
       toast.success(`Guardado como V${doc.deliverable.version}.`);
     },
-    onError: (e) => toast.error(errorText(e, 'No se pudo guardar el documento.')),
+    onError: (e) => {
+      toast.error(errorText(e, 'No se pudo guardar el documento.'));
+      // 409: otra persona guardó antes; se trae su versión para ofrecer cargarla (sin pisar lo escrito).
+      if ((e as { response?: { status?: number } }).response?.status === 409) void refetch();
+    },
   });
 
   const submit = useMutation({
@@ -137,21 +169,40 @@ export default function DeliverableEditorPage() {
 
   const d = data.deliverable;
   const readOnly = d.status === 'NO_APLICA';
+  /** Mientras se guarda o responde la IA no se escribe: lo escrito se perdería o quedaría pisado. */
+  const locked = save.isPending || aiRunning;
   const cur = sections.find((s) => s.key === current) ?? sections[0];
-  const changed = sections.filter((s) => stateOf(s, saved) === 'EDITADA');
+  const changed = sections.filter((s) => isChanged(s, saved));
 
   const update = (k: string, patch: Partial<DocSection>) => setSections((list) => list.map((s) => (s.key === k ? { ...s, ...patch } : s)));
 
   const acceptProposal = () => {
     if (!proposal) return;
+    const skipped: string[] = [];
+    const applied = new Set<string>();
     const next = sections.map((s) => {
       const c = proposal.changes.find((x) => x.key === s.key);
-      return c && proposal.picked.has(s.key) ? { ...s, body: c.after } : s;
+      if (!c || !proposal.picked.has(s.key)) return s;
+      // Si la sección cambió después de pedir el ajuste, no se pisa.
+      if (c.before !== s.body) {
+        skipped.push(`${s.num} ${s.title}`);
+        return s;
+      }
+      applied.add(s.key);
+      return { ...s, body: c.after };
     });
     setSections(next);
-    const n = proposal.picked.size;
     setProposal(null);
-    if (n > 0) save.mutate({ sections: next, note: `Ajuste con IA: «${proposal.instruction}» (${n} ${n === 1 ? 'sección' : 'secciones'})` });
+    if (skipped.length) toast.warning(`No se aplicó a ${skipped.join(', ')}: la cambiaste mientras la IA respondía.`);
+    if (!applied.size) return;
+    // Con otros cambios sin guardar, se aplica y se deja guardar a mano: la nota no los describiría.
+    const others = next.some((s) => !applied.has(s.key) && isChanged(s, saved)) || next.length !== saved.size;
+    if (others) {
+      toast.info('Ajuste aplicado. Guarda la versión para registrarlo junto con tus otros cambios.');
+      return;
+    }
+    const n = applied.size;
+    save.mutate({ sections: next, note: `Ajuste con IA: «${proposal.instruction}» (${n} ${n === 1 ? 'sección' : 'secciones'})` });
   };
 
   return (
@@ -191,7 +242,12 @@ export default function DeliverableEditorPage() {
             PDF
           </Button>
           {!readOnly && (
-            <Button icon={<SaveIcon size={16} />} loading={save.isPending} disabled={!dirty} onClick={() => save.mutate({ sections, note: note.trim() || undefined })}>
+            <Button
+              icon={<SaveIcon size={16} />}
+              loading={save.isPending}
+              disabled={(!dirty && data.saved) || aiRunning}
+              onClick={() => save.mutate({ sections, note: note.trim() || undefined })}
+            >
               Guardar versión
             </Button>
           )}
@@ -204,9 +260,33 @@ export default function DeliverableEditorPage() {
       </div>
 
       {readOnly && <Card><div className="p-4 text-sm text-slate-600">Este entregable está marcado como «no aplica»: el documento es de solo lectura.</div></Card>}
+      {newer && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex flex-wrap items-center gap-3">
+          <span>Otra persona guardó la versión V{newer.deliverable.version}. Tus cambios siguen en pantalla y no se guardaron.</span>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={async () => {
+              const ok = await askConfirm({ message: 'Cargar la versión nueva descarta tus cambios sin guardar. ¿Continuar?', tone: 'warning', confirmText: 'Cargar' });
+              if (!ok) return;
+              loadedFor.current = `${newer.deliverable.id}:${newer.baseVersion}:${newer.saved}`;
+              adopt(newer);
+            }}
+          >
+            Cargar la versión nueva
+          </Button>
+        </div>
+      )}
+      {data.saved && d.current === 'FILE' && (
+        <div className="rounded-lg border border-sky-300 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+          El último archivo subido (V{d.version}) es más reciente que este documento (V{data.documentVersion}). Si guardas aquí, el documento
+          pasa a ser lo vigente del entregable y el .zip llevará su PDF en lugar del archivo.
+        </div>
+      )}
 
-      <div className="grid gap-4 xl:grid-cols-[210px_minmax(0,1fr)_320px] items-start">
-        {/* Índice */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[210px_minmax(0,1fr)_320px] items-start">
+        {/* Índice: a la izquierda en pantallas anchas; a la derecha, sobre la IA, en iPad horizontal */}
+        <div className="order-1 lg:col-start-2 lg:row-start-1 xl:col-start-1">
         <Card>
           <nav className="p-3 xl:sticky xl:top-4" aria-label="Índice del documento">
             <div className="text-[11px] font-semibold tracking-wide text-slate-400 mb-2">ÍNDICE</div>
@@ -246,9 +326,10 @@ export default function DeliverableEditorPage() {
             </div>
           </nav>
         </Card>
+        </div>
 
         {/* Documento o comparación */}
-        <div className="flex flex-col gap-3 min-w-0">
+        <div className="order-3 flex flex-col gap-3 min-w-0 lg:col-start-1 lg:row-start-1 lg:row-span-2 xl:col-start-2 xl:row-span-1">
           {proposal ? (
             <ProposalView
               proposal={proposal}
@@ -288,7 +369,7 @@ export default function DeliverableEditorPage() {
                   state={stateOf(s, saved)}
                   selected={s.key === cur?.key}
                   preview={preview || readOnly}
-                  readOnly={readOnly}
+                  readOnly={readOnly || locked}
                   canRemove={sections.length > 1}
                   onFocus={() => setCurrent(s.key)}
                   onChange={(p) => update(s.key, p)}
@@ -312,7 +393,7 @@ export default function DeliverableEditorPage() {
                     icon={<PlusIcon size={14} />}
                     onClick={() => {
                       const k = newKey();
-                      setSections((list) => [...list, { key: k, num: String(list.length + 1), title: 'Nueva sección', body: PENDING }]);
+                      setSections((list) => [...list, { key: k, num: nextNum(list), title: 'Nueva sección', body: PENDING }]);
                       setCurrent(k);
                     }}
                   >
@@ -339,6 +420,7 @@ export default function DeliverableEditorPage() {
 
         {/* Ajustar con IA */}
         {!readOnly && (
+          <div className="order-2 lg:col-start-2 lg:row-start-2 xl:col-start-3 xl:row-start-1">
           <AiPanel
             current={cur}
             busyDisabled={!!proposal}
@@ -362,7 +444,9 @@ export default function DeliverableEditorPage() {
             }}
             projectId={projectId}
             deliverableId={deliverableId}
+            onRunningChange={setAiRunning}
           />
+          </div>
         )}
       </div>
     </div>
@@ -481,13 +565,14 @@ function SectionEditor(props: {
           </div>
         ) : (
           <>
-            <Toolbar target={() => ref.current} onChange={(v) => props.onChange({ body: v })} />
+            {!props.readOnly && <Toolbar target={() => ref.current} onChange={(v) => props.onChange({ body: v })} />}
             <textarea
               ref={ref}
               aria-label={`Contenido de ${s.num} ${s.title}`}
               className={`mt-1.5 w-full border border-slate-200 rounded-md px-3 py-2 text-sm leading-relaxed font-[inherit] ${state === 'PENDIENTE' ? 'text-amber-800' : 'text-slate-800'}`}
               value={s.body}
               maxLength={50000}
+              readOnly={props.readOnly}
               onChange={(e) => props.onChange({ body: e.target.value })}
             />
           </>
@@ -680,12 +765,14 @@ function AiPanel({
   onRun,
   projectId,
   deliverableId,
+  onRunningChange,
 }: {
   current: DocSection | undefined;
   busyDisabled: boolean;
   onRun: (scope: 'SECTION' | 'DOCUMENT', instruction: string) => Promise<void>;
   projectId: number;
   deliverableId: number;
+  onRunningChange: (running: boolean) => void;
 }) {
   const [scope, setScope] = useState<'SECTION' | 'DOCUMENT'>('SECTION');
   const [instruction, setInstruction] = useState(AI_PRESETS[0]);
@@ -697,12 +784,14 @@ function AiPanel({
   const run = async () => {
     if (!instruction.trim()) return;
     setRunning(true);
+    onRunningChange(true);
     try {
       await onRun(scope, instruction.trim());
     } catch (e) {
       toast.error(errorText(e, 'La IA no respondió. Revisa el proveedor de IA activo e inténtalo de nuevo.'));
     } finally {
       setRunning(false);
+      onRunningChange(false);
     }
   };
   const versions = (history.data ?? []).filter((h) => h.action === 'E' || h.action === 'A').slice(-6).reverse();

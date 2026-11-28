@@ -30,6 +30,9 @@ export class DeliverableAttachment {
   @Column({ name: 'image_mime', type: 'varchar', length: 20 })
   imageMime!: string;
 
+  @Column({ name: 'size_bytes', type: 'int', unsigned: true, default: 0 })
+  sizeBytes!: number;
+
   @Column({ name: 'created_by_user_id', type: 'bigint', unsigned: true, nullable: true })
   createdByUserId!: number | null;
 

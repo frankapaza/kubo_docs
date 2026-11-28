@@ -226,3 +226,19 @@ describe('límite de JSON del documento', () => {
     expect(re.test('/api/v1/projects/5/expediente')).toBe(false);
   });
 });
+
+describe('revisión de la entrega 4', () => {
+  it('rechaza al subir un PNG RGBA con datos dañados', async () => {
+    const t = make();
+    const good = makePng(4, 3);
+    const bad = Buffer.from(good);
+    bad[good.indexOf('IDAT') + 6] ^= 0xff; // daña el flujo comprimido
+    await expect(t.svc.addAttachment(t.project, 7, { sectionKey: 'sec-1' }, { buffer: bad }, 9)).rejects.toMatchObject({ status: 400 });
+  });
+
+  it('un documento no pasa de 40 MB de imágenes', async () => {
+    const t = make();
+    t.atts.push(...Array.from({ length: 9 }, (_, i) => ({ id: 100 + i, deliverableId: 7, position: i + 1, sizeBytes: 4.5 * 1024 * 1024 })));
+    await expect(t.svc.addAttachment(t.project, 7, { sectionKey: 'sec-1' }, { buffer: makePng() }, 9)).rejects.toMatchObject({ status: 400 });
+  });
+});

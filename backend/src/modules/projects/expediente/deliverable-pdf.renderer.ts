@@ -3,6 +3,7 @@ import PDFDocument from 'pdfkit';
 import { MarkdownPdf } from '../../../common/pdf/markdown-pdf.helper';
 import { KUBO_LOGO_PNG_BASE64 } from '../../email/kubo-logo';
 import type { DocSection } from './deliverable-document';
+import { isDecodablePng } from './image-check';
 
 export interface PdfHistoryRow {
   version: string | null;
@@ -177,6 +178,8 @@ export class DeliverablePdfRenderer {
     this.md.ensureSpace(doc, maxH + 30);
     const top = doc.y + 6;
     try {
+      // png-js lanza fuera de cualquier try/catch si el PNG está dañado: se comprueba antes.
+      if (image.subarray(0, 4).toString('hex') === '89504e47' && !isDecodablePng(image)) throw new Error('PNG dañado');
       doc.image(image, doc.page.margins.left, top, { fit: [cw, maxH], align: 'center' });
       doc.y = top + maxH + 4;
     } catch {

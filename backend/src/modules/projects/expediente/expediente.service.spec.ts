@@ -12,7 +12,7 @@ const NOT_A_DOC = Buffer.from('MZ\x90\x00 ejecutable');
 
 function matches(value: unknown, cond: unknown): boolean {
   if (cond instanceof FindOperator) {
-    if (cond.type === 'in') return (cond.value as unknown[]).map(Number).includes(Number(value));
+    if (cond.type === 'in') return (cond.value as unknown[]).some((x) => matches(value, x));
     if (cond.type === 'not') return !matches(value, cond.child ?? cond.value);
     if (cond.type === 'isNull') return value == null;
     throw new Error('operador no simulado: ' + cond.type);
@@ -406,3 +406,29 @@ function entries(zip: Buffer): Record<string, Buffer> {
   }
   return out;
 }
+
+describe('revisión de la entrega 4 · expediente', () => {
+  const SECTIONS = [
+    { key: 'sec-1', num: '1', title: 'Uno', body: 'a' },
+    { key: 'sec-2', num: '2', title: 'Dos', body: 'b' },
+  ];
+
+  it('al guardar sin una sección, se borran sus imágenes', async () => {
+    const t = await started();
+    const id = t.byType('DOC-ANA').id;
+    await t.svc.saveDocument(t.project, id, SECTIONS, null, null, 9);
+    t.attachments.rows.push({ id: 1, deliverableId: id, sectionKey: 'sec-2', position: 1 }, { id: 2, deliverableId: id, sectionKey: 'sec-1', position: 2 });
+    await t.svc.saveDocument(t.project, id, [SECTIONS[0]], '0.1', null, 9);
+    expect(t.attachments.rows.map((a) => a.sectionKey)).toEqual(['sec-1']);
+  });
+
+  it('el documento informa su propia versión aunque haya un archivo más nuevo', async () => {
+    const t = await started();
+    const id = t.byType('DOC-ANA').id;
+    await t.svc.saveDocument(t.project, id, SECTIONS, null, null, 9);
+    await t.svc.upload(t.project, id, { buffer: PDF, filename: 'a.pdf' }, 9);
+    const doc = await t.svc.loadDocument(t.project, id);
+    expect(doc.documentVersion).toBe('0.1');
+    expect(doc.deliverable).toMatchObject({ version: '0.2', current: 'FILE' });
+  });
+});

@@ -83,6 +83,8 @@ export interface LoadedDocument {
   /** null si todavía no se redactó en la plataforma. */
   sections: DocSection[] | null;
   versionId: number | null;
+  /** Versión en que se guardó este contenido. */
+  documentVersion: string | null;
 }
 
 export interface ExpedienteSummary {
@@ -389,12 +391,17 @@ export class ExpedienteService {
   /** El último documento en línea del entregable, si lo hay. */
   async loadDocument(project: Project, deliverableId: number): Promise<LoadedDocument> {
     const deliverable = await this.view(project, deliverableId);
-    if (deliverable.documentVersionId == null) return { deliverable, sections: null, versionId: null };
+    if (deliverable.documentVersionId == null) return { deliverable, sections: null, versionId: null, documentVersion: null };
     const v = await this.versions.findOne({
       where: { id: deliverable.documentVersionId },
-      select: { id: true, contentJson: true },
+      select: { id: true, contentJson: true, versionMajor: true, versionMinor: true },
     });
-    return { deliverable, sections: parseStoredSections(v?.contentJson ?? null), versionId: deliverable.documentVersionId };
+    return {
+      deliverable,
+      sections: parseStoredSections(v?.contentJson ?? null),
+      versionId: deliverable.documentVersionId,
+      documentVersion: v ? versionLabel({ major: Number(v.versionMajor), minor: Number(v.versionMinor) }) : null,
+    };
   }
 
   /**
@@ -413,7 +420,10 @@ export class ExpedienteService {
     const content = validateSections(sections);
     const m = /^(\d+)\.(\d+)$/.exec(baseVersion ?? '');
     const expected = m ? { major: Number(m[1]), minor: Number(m[2]) } : { major: 0, minor: 0 };
-    return this.act(project, deliverableId, 'UPLOAD', actorUserId, { note, content, expected });
+    const view = await this.act(project, deliverableId, 'UPLOAD', actorUserId, { note, content, expected });
+    // Las imágenes de una sección que ya no está no aparecerían en ningún lado: se borran.
+    await this.attachments.delete({ deliverableId: view.id, sectionKey: Not(In(content.map((s) => s.key))) });
+    return view;
   }
 
   /** El PDF del documento en línea (carátula, historial, índice, secciones, figuras y anexos). */
@@ -435,7 +445,7 @@ export class ExpedienteService {
     const buffer = await this.pdf.render({
       title: d.name,
       nomenclature: d.nomenclature,
-      version: d.version,
+      version: doc.documentVersion,
       statusLabel: d.statusLabel,
       projectName: project.name,
       projectCode: project.code,
@@ -444,7 +454,8 @@ export class ExpedienteService {
       history: history.filter((h) => ['E', 'R', 'A', 'F'].includes(h.action)),
       attachments: images.map((a) => ({ sectionKey: a.sectionKey, place: a.place, caption: a.caption, image: a.image })),
     });
-    return { buffer, filename: `${d.nomenclature}.pdf` };
+    const label = nomenclature(project.code, d.correlative, d.type, versionOf(doc.documentVersion));
+    return { buffer, filename: `${label}.pdf` };
   }
 
   /**
@@ -471,7 +482,16 @@ export class ExpedienteService {
     const view = await this.get(project);
     const withFile = view.deliverables.filter((d) => d.lastFile && d.current === 'FILE');
     const withDocument = view.deliverables.filter((d) => d.current === 'DOCUMENT');
-    const total = withFile.reduce((n, d) => n + (d.lastFile?.sizeBytes ?? 0), 0);
+    // Los PDF de los documentos cargan sus imágenes en memoria: cuentan para el tope.
+    const imageBytes = withDocument.length
+      ? (
+          await this.attachments.find({
+            where: { deliverableId: In(withDocument.map((d) => d.id)) },
+            select: { id: true, sizeBytes: true },
+          })
+        ).reduce((n, a) => n + Number(a.sizeBytes ?? 0), 0)
+      : 0;
+    const total = withFile.reduce((n, d) => n + (d.lastFile?.sizeBytes ?? 0), 0) + imageBytes;
     if (total > MAX_ZIP_BYTES) {
       throw new PayloadTooLargeException({
         code: 'PAYLOAD_TOO_LARGE',
@@ -768,6 +788,11 @@ export function indexCsv(view: ExpedienteView, paths: Map<number, string>): Buff
     ]),
   ];
   return Buffer.from('﻿' + lines.map((l) => l.map(cell).join(';')).join('\r\n') + '\r\n', 'utf8');
+}
+
+function versionOf(label: string | null): Version {
+  const m = /^(\d+)\.(\d+)$/.exec(label ?? '');
+  return m ? { major: Number(m[1]), minor: Number(m[2]) } : { major: 0, minor: 0 };
 }
 
 function numeric(v: number | string): string {

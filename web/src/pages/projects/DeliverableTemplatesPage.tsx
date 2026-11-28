@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { clientsApi } from '../../api/clients.api';
@@ -61,14 +61,16 @@ export default function DeliverableTemplatesPage() {
 
   const [name, setName] = useState('');
   const [sections, setSections] = useState<TemplateSection[]>([]);
+  const clientsRef = useRef(clients.data);
+  clientsRef.current = clients.data;
   useEffect(() => {
     if (tpl.data) {
       const forThis = clientId ? tpl.data.source === 'CLIENTE' : tpl.data.source !== 'CLIENTE';
-      const clientName = clients.data?.find((c) => c.id === clientId)?.razonSocial;
+      const clientName = clientsRef.current?.find((c) => c.id === clientId)?.razonSocial;
       setName(forThis ? tpl.data.name : `Formato ${clientName ?? 'del cliente'} · ${CATALOG_TYPES.find((t) => t.type === type)?.name}`);
       setSections(tpl.data.sections.map((s) => ({ ...s })));
     }
-  }, [tpl.data, clientId, type, clients.data]);
+  }, [tpl.data, clientId, type]);
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['deliverable-template', type, clientId] });

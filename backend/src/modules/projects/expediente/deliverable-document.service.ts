@@ -2,7 +2,6 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
-import { assertImageDimensions } from '../../actas/services/image-guard';
 import { LLMService } from '../../ai/llm.service';
 import { Client } from '../../clients/entities/client.entity';
 import { Project } from '../entities/project.entity';
@@ -26,6 +25,7 @@ import {
 import { AttachmentPlace, DeliverableAttachment } from './entities/deliverable-attachment.entity';
 import { DeliverableTemplate } from './entities/deliverable-template.entity';
 import { DeliverableView, ExpedienteService } from './expediente.service';
+import { assertDecodablePng } from './image-check';
 
 export type TemplateSource = 'CLIENTE' | 'KUBO_EDITADA' | 'KUBO';
 
@@ -52,6 +52,8 @@ export interface DocumentView {
   saved: boolean;
   /** La versión sobre la que se edita: se devuelve al guardar para no pisar a otro. */
   baseVersion: string | null;
+  /** La versión en que se guardó este contenido (puede ser anterior a un archivo subido después). */
+  documentVersion: string | null;
   template: { source: TemplateSource; name: string };
   sections: (DocSection & { status: SectionStatus })[];
   attachments: AttachmentView[];
@@ -69,6 +71,8 @@ export interface AiChange {
 }
 
 export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+/** Tope de imágenes por documento: el PDF las carga todas en memoria. */
+export const MAX_DOCUMENT_IMAGE_BYTES = 40 * 1024 * 1024;
 const KEY_RE = /^[a-z0-9-]{1,40}$/;
 const EDITABLE_ATTACHMENTS = ['PENDIENTE', 'BORRADOR', 'EN_REVISION'];
 
@@ -165,6 +169,7 @@ export class DeliverableDocumentService {
       deliverable: d,
       saved: loaded.sections != null,
       baseVersion: d.version,
+      documentVersion: loaded.documentVersion,
       template: { source: template.source, name: template.name },
       sections: sections.map((s) => ({ ...s, status: sectionStatus(s.body) })),
       attachments: await this.listAttachments(project, deliverableId),
@@ -251,8 +256,16 @@ export class DeliverableDocumentService {
     const sectionKey = String(input.sectionKey ?? '');
     if (!KEY_RE.test(sectionKey)) throw new BadRequestException({ code: 'BAD_INPUT', message: 'Sección inválida.' });
     const imageMime = imageMimeOf(file.buffer);
-    const count = await this.attachments.count({ where: { deliverableId: row.id } });
+    const existing = await this.attachments.find({ where: { deliverableId: row.id }, select: { id: true, sizeBytes: true } });
+    const count = existing.length;
     if (count >= 60) throw new BadRequestException({ code: 'BAD_INPUT', message: 'Este documento ya tiene 60 imágenes.' });
+    const used = existing.reduce((n, a) => n + Number(a.sizeBytes ?? 0), 0);
+    if (used + file.buffer.length > MAX_DOCUMENT_IMAGE_BYTES) {
+      throw new BadRequestException({
+        code: 'BAD_INPUT',
+        message: `Las imágenes de este documento superarían los ${MAX_DOCUMENT_IMAGE_BYTES / (1024 * 1024)} MB. Usa fotos más livianas o quita alguna.`,
+      });
+    }
     const saved = await this.attachments.save(
       this.attachments.create({
         deliverableId: row.id,
@@ -262,6 +275,7 @@ export class DeliverableDocumentService {
         position: count + 1,
         image: file.buffer,
         imageMime,
+        sizeBytes: file.buffer.length,
         createdByUserId: actorUserId,
       }),
     );
@@ -364,7 +378,7 @@ function imageMimeOf(buf: Buffer): string {
   if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) mime = 'image/jpeg';
   if (buf.length > 8 && buf.subarray(0, 8).toString('hex') === '89504e470d0a1a0a') mime = 'image/png';
   if (!mime) throw new BadRequestException({ code: 'BAD_INPUT', message: 'Solo se admiten imágenes JPEG o PNG.' });
-  assertImageDimensions(buf, 6000);
+  if (mime === 'image/png') assertDecodablePng(buf);
   return mime;
 }
 

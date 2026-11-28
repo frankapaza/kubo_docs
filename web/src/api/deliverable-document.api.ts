@@ -29,6 +29,7 @@ export interface DeliverableDocument {
   deliverable: Deliverable;
   saved: boolean;
   baseVersion: string | null;
+  documentVersion: string | null;
   template: { source: TemplateSource; name: string };
   sections: (DocSection & { status: 'COMPLETA' | 'PENDIENTE' })[];
   attachments: DocAttachment[];

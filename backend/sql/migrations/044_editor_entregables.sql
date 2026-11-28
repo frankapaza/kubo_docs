@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS deliverable_attachments (
   position            INT UNSIGNED    NOT NULL,
   image               MEDIUMBLOB      NOT NULL,
   image_mime          VARCHAR(20)     NOT NULL,
+  size_bytes          INT UNSIGNED    NOT NULL DEFAULT 0,
   created_by_user_id  BIGINT UNSIGNED NULL,
   created_at          DATETIME(3)     NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   KEY ix_deliverable_attachments_deliverable (deliverable_id, position),
