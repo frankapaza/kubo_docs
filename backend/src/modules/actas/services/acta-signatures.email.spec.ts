@@ -18,6 +18,7 @@ function make() {
       sigs.find((s) => Object.entries(where).every(([k, v]) => s[k] === v)) ?? null),
     create: jest.fn((x: any) => x),
     save: jest.fn(async (x: any) => { if (!x.id) { x.id = sigs.length + 1; sigs.push(x); } return x; }),
+    delete: jest.fn(async ({ id }: any) => { const i = sigs.findIndex((s) => s.id === id); if (i >= 0) sigs.splice(i, 1); }),
   };
   const svc = new ActaSignaturesService(
     sigRepo as any,
@@ -31,7 +32,7 @@ function make() {
     { send: jest.fn(async (m: any) => { sent.push(m); return {}; }) } as any,
     { get: jest.fn(() => 'https://docs.kuboti.com') } as any,
   );
-  return { svc, sigs, sent, participants };
+  return { svc, sigs, sent, participants, failMail: () => { (svc as any).email.send = jest.fn(async () => { throw Object.assign(new Error('smtp'), { status: 502 }); }); } };
 }
 
 const tokenFrom = (html: string) => /firmar-acta\/([A-Za-z0-9_-]+)/.exec(html)![1];
@@ -85,6 +86,13 @@ describe('Firma por confirmación de correo', () => {
     const s2 = await t2.svc.requestByEmail(3, { participantId: 5, mode: 'EMAIL' }, OPERADOR, null);
     s2.confirmExpiresAt = new Date(Date.now() - 1000);
     await expect(t2.svc.confirmByToken(tokenFrom(t2.sent[0].html), null)).rejects.toMatchObject({ status: 410 });
+  });
+
+  it('si el correo no sale, la firma no queda pendiente sin enlace', async () => {
+    const t = make();
+    t.failMail();
+    await expect(t.svc.requestByEmail(3, { participantId: 5, mode: 'EMAIL' }, OPERADOR, null)).rejects.toMatchObject({ status: 502 });
+    expect(t.sigs).toEqual([]);
   });
 
   it('las firmas de antes (con usuario) y las dibujadas cuentan como completas', () => {

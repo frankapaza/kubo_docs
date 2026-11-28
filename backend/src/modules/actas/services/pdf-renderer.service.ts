@@ -17,7 +17,7 @@ export interface PdfRenderContext {
 }
 
 const COLORS = {
-  primary: '#4F46E5',
+  primary: '#053777',
   ink: '#0F172A',
   muted: '#475569',
   border: '#E2E8F0',
@@ -427,7 +427,7 @@ export class PdfRendererService {
     doc.moveDown(0.4);
 
     const cellW = (cw - 16) / 2;
-    const cellH = 96;
+    const cellH = 112;
     let x = doc.page.margins.left;
     let y = doc.y;
 
@@ -451,7 +451,7 @@ export class PdfRendererService {
           lineBreak: false,
         });
 
-      const sigLineY = y + cellH - 38;
+      const sigLineY = y + cellH - 50;
       if (s.signaturePng) {
         try {
           doc.image(s.signaturePng, x + 14, y + 18, { fit: [cellW - 28, sigLineY - (y + 18) - 4], align: 'center', valign: 'bottom' });
@@ -471,17 +471,18 @@ export class PdfRendererService {
         .fontSize(9.5)
         .text(s.signerName, x + 10, sigLineY + 4, { width: cellW - 20, lineBreak: false });
 
-      const meta = [
-        s.signerDocument ? `DNI: ${s.signerDocument}` : null,
-        signatureStatusLine(s),
-      ]
-        .filter(Boolean)
-        .join('  ·  ');
+      // DNI y estado en líneas propias: el estado de las firmas por correo es largo.
+      const meta = s.signerDocument ? `DNI: ${s.signerDocument}` : '';
       doc
         .font('Helvetica')
         .fontSize(7.5)
         .fillColor(COLORS.muted)
         .text(meta, x + 10, sigLineY + 18, { width: cellW - 20, lineBreak: false });
+      doc
+        .font('Helvetica')
+        .fontSize(7.5)
+        .fillColor(COLORS.muted)
+        .text(signatureStatusLine(s), x + 10, sigLineY + 28, { width: cellW - 20, lineBreak: false, ellipsis: true });
       doc
         .font('Courier')
         .fontSize(6.5)
@@ -489,7 +490,7 @@ export class PdfRendererService {
         .text(
           `hash ${s.signatureHash.slice(0, 16)}…${s.signatureHash.slice(-8)}`,
           x + 10,
-          sigLineY + 28,
+          sigLineY + 38,
           { width: cellW - 20, lineBreak: false },
         );
 
