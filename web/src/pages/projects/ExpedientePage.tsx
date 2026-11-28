@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 
+import { deliverableDocumentApi } from '../../api/deliverable-document.api';
 import {
   DELIVERABLE_TYPES,
   Deliverable,
@@ -334,6 +335,7 @@ function DeliverablePanel({
   onRemoved: () => void;
 }) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [note, setNote] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const signRef = useRef<HTMLInputElement>(null);
@@ -381,7 +383,25 @@ function DeliverablePanel({
           {d.naReason && s === 'NO_APLICA' && <p className="mt-2 text-sm text-slate-600">Motivo: {d.naReason}</p>}
         </div>
 
-        {d.lastFile && (
+        {s !== 'NO_APLICA' && (
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" onClick={() => navigate(`/projects/${projectId}/expediente/${d.id}/editor`)}>
+              {d.documentVersionId ? 'Abrir en el editor' : 'Redactar en el editor'}
+            </Button>
+            {d.documentVersionId && (
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<DownloadIcon size={14} />}
+                onClick={() => deliverableDocumentApi.pdf(projectId, d.id, `${d.nomenclature}.pdf`).catch(() => toast.error('No se pudo generar el PDF.'))}
+              >
+                PDF del documento
+              </Button>
+            )}
+          </div>
+        )}
+
+        {d.lastFile && d.current !== 'DOCUMENT' && (
           <button
             type="button"
             className="flex items-center gap-2 text-sm text-kubo-primary hover:underline text-left"

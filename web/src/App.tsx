@@ -6,6 +6,8 @@ import ClientDetailPage from './pages/ClientDetailPage';
 import ProjectsPage from './pages/ProjectsPage';
 import ProjectMembersPage from './pages/ProjectMembersPage';
 import ExpedientePage from './pages/projects/ExpedientePage';
+import DeliverableEditorPage from './pages/projects/DeliverableEditorPage';
+import DeliverableTemplatesPage from './pages/projects/DeliverableTemplatesPage';
 import MeetingsListPage from './pages/MeetingsListPage';
 import MeetingDetailPage from './pages/MeetingDetailPage';
 import ActaEditorPage from './pages/ActaEditorPage';
@@ -145,6 +147,8 @@ export default function App() {
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/projects/:projectId/members" element={<ProjectMembersPage />} />
           <Route path="/projects/:projectId/expediente" element={<ExpedientePage />} />
+          <Route path="/projects/:projectId/expediente/:deliverableId/editor" element={<DeliverableEditorPage />} />
+          <Route path="/admin/plantillas-entregables" element={<DeliverableTemplatesPage />} />
           <Route path="/projects/:projectId/meetings" element={<MeetingsListPage />} />
           <Route path="/projects/:projectId/jira-report" element={<JiraReportPage />} />
           <Route path="/meetings/:meetingId" element={<MeetingDetailPage />} />
