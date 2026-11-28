@@ -194,7 +194,8 @@ jobs:
                      038_disponibilidad_historial_agente \
                      039_disponibilidad_protocolo_http \
                      040_api_integracion_clientes \
-                     041_disponibilidad_latencia_horaria; do
+                     041_disponibilidad_latencia_horaria \
+                     042_reunion_ipad; do
               echo "--- $m"
               sql_file "backend/sql/migrations/$m.sql"
             done

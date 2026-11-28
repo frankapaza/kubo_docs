@@ -78,6 +78,7 @@ services:
       - ./backend/sql/migrations/039_disponibilidad_protocolo_http.sql:/docker-entrypoint-initdb.d/044c_mig_039.sql:ro
       - ./backend/sql/migrations/040_api_integracion_clientes.sql:/docker-entrypoint-initdb.d/044d_mig_040.sql:ro
       - ./backend/sql/migrations/041_disponibilidad_latencia_horaria.sql:/docker-entrypoint-initdb.d/044e_mig_041.sql:ro
+      - ./backend/sql/migrations/042_reunion_ipad.sql:/docker-entrypoint-initdb.d/044f_mig_042.sql:ro
       # Seeds — van detrás de todas las migraciones, así que el seed se
       # renumera cada vez que entra una migración nueva.
       - ./backend/sql/seed_document_templates.sql:/docker-entrypoint-initdb.d/045_seed_templates.sql:ro
