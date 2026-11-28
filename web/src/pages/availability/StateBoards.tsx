@@ -33,6 +33,17 @@ function Latency({ p, threshold, big = false }: { p: ProbeSide | null; threshold
   );
 }
 
+/** Bandera del Perú (rojo-blanco-rojo). SVG y no emoji: en Windows el emoji se ve como «PE». */
+function PeFlag() {
+  return (
+    <svg width="15" height="10" viewBox="0 0 3 2" role="img" aria-label="Perú" style={{ borderRadius: 2, boxShadow: '0 0 0 1px #e3e8ef', flex: 'none' }}>
+      <rect width="1" height="2" x="0" fill="#D91023" />
+      <rect width="1" height="2" x="1" fill="#ffffff" />
+      <rect width="1" height="2" x="2" fill="#D91023" />
+    </svg>
+  );
+}
+
 function StatusPill({ r }: { r: StateRow }) {
   const c = STATUS_COLORS[r.status];
   return (
@@ -120,7 +131,7 @@ export default function StateBoards({ rows, clientName, cooling, onCheck }: Stat
                   </div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 11, color: MUTED }}>Desde Perú</div>
+                  <div style={{ fontSize: 11, color: MUTED, display: 'flex', alignItems: 'center', gap: 5 }}><PeFlag />Desde Perú</div>
                   <Latency p={r.office} threshold={r.latencyThresholdMs} />
                 </div>
                 <div>
@@ -159,7 +170,7 @@ export default function StateBoards({ rows, clientName, cooling, onCheck }: Stat
                 </div>
                 <div style={{ display: 'flex', gap: 18, alignItems: 'flex-end' }}>
                   <div>
-                    <div style={{ fontSize: 11, color: MUTED }}>Desde Perú</div>
+                    <div style={{ fontSize: 11, color: MUTED, display: 'flex', alignItems: 'center', gap: 5 }}><PeFlag />Desde Perú</div>
                     <Latency p={r.office} threshold={r.latencyThresholdMs} big />
                   </div>
                   <div>
