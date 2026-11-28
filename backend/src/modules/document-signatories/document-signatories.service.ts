@@ -115,7 +115,7 @@ export class DocumentSignatoriesService {
       (this.config.get<string>('FRONTEND_URL') || '').trim() || 'http://localhost:5173';
     const signUrl = `${frontendUrl}/sign/${token}`;
     const emisor = await this.workspace.get().catch(() => null);
-    const brand = emisor?.razonSocial ?? 'Kubo DevDocs';
+    const brand = emisor?.razonSocial ?? 'Kubo Platform';
 
     await this.email.send({
       to: sig.email,

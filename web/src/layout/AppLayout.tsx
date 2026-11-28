@@ -94,8 +94,8 @@ export default function AppLayout() {
           <Link to="/" className="flex items-center gap-3">
             <KuboLogo size={32} />
             <div>
-              <p className="font-semibold text-white leading-none">Kubo DevDocs</p>
-              <p className="text-xs text-kubo-nav-muted mt-1">CRM de reuniones</p>
+              <p className="font-semibold text-white leading-none">Kubo Platform</p>
+              <p className="text-xs text-kubo-nav-muted mt-1">Soporte, proyectos y monitoreo</p>
             </div>
           </Link>
         </div>

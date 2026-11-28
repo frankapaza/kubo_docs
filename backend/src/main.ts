@@ -54,7 +54,7 @@ async function bootstrap(): Promise<void> {
   );
 
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('Kubo DevDocs API')
+    .setTitle('Kubo Platform API')
     .setDescription('API REST del CRM de actas de reunión')
     .setVersion('0.1.0')
     .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'access-token')
@@ -66,7 +66,7 @@ async function bootstrap(): Promise<void> {
 
   const port = parseInt(config.get<string>('PORT', '3000'), 10);
   await app.listen(port, '0.0.0.0');
-  Logger.log(`Kubo DevDocs API listening on 0.0.0.0:${port}/${apiPrefix}`, 'Bootstrap');
+  Logger.log(`Kubo Platform API listening on 0.0.0.0:${port}/${apiPrefix}`, 'Bootstrap');
   Logger.log(`Swagger UI available at http://localhost:${port}/docs`, 'Bootstrap');
 }
 

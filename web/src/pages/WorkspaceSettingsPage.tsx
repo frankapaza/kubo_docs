@@ -361,7 +361,7 @@ export default function WorkspaceSettingsPage() {
               <label className="label">"From" (nombre que ven los destinatarios)</label>
               <input
                 className="input"
-                placeholder='Kubo DevDocs <no-reply@kuboti.com>'
+                placeholder='Kubo Platform <no-reply@kuboti.com>'
                 value={form.smtpFrom ?? ''}
                 onChange={(e) => setForm({ ...form, smtpFrom: e.target.value })}
               />

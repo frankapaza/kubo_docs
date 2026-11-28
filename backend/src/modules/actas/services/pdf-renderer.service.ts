@@ -44,7 +44,7 @@ export class PdfRendererService {
         bufferPages: true,
         info: {
           Title: `Acta #${ctx.acta.id}`,
-          Author: ctx.emisor?.razonSocial ?? 'Kubo DevDocs',
+          Author: ctx.emisor?.razonSocial ?? 'Kubo Platform',
           Subject: ctx.meetingTitle ?? 'Acta de reunión',
         },
       });
@@ -461,7 +461,7 @@ export class PdfRendererService {
   private drawFooters(doc: PDFKit.PDFDocument, ctx: PdfRenderContext) {
     const range = doc.bufferedPageRange();
     const e = ctx.emisor;
-    const brand = e?.razonSocial ?? 'Kubo DevDocs';
+    const brand = e?.razonSocial ?? 'Kubo Platform';
 
     // Construir 2 líneas de membrete
     const line1Parts: string[] = [];

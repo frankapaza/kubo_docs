@@ -43,7 +43,7 @@ export class DocumentPdfService {
         bufferPages: true,
         info: {
           Title: ctx.doc.title,
-          Author: ctx.emisor?.razonSocial ?? 'Kubo DevDocs',
+          Author: ctx.emisor?.razonSocial ?? 'Kubo Platform',
           Subject: DOCUMENT_TYPE_LABEL[ctx.doc.type] ?? 'Documento',
         },
       });
@@ -211,7 +211,7 @@ export class DocumentPdfService {
   private drawFooters(doc: PDFKit.PDFDocument, ctx: DocumentPdfContext) {
     const range = doc.bufferedPageRange();
     const e = ctx.emisor;
-    const brand = e?.razonSocial ?? 'Kubo DevDocs';
+    const brand = e?.razonSocial ?? 'Kubo Platform';
 
     const line1Parts: string[] = [];
     if (e?.ruc) line1Parts.push(`RUC ${e.ruc}`);

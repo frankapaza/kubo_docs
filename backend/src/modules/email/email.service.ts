@@ -184,9 +184,9 @@ export class EmailService {
       await transporter.sendMail({
         from: effectiveFrom,
         to: userEmail,
-        subject: 'Kubo DevDocs — Prueba de SMTP',
+        subject: 'Kubo Platform — Prueba de SMTP',
         text: 'Conexión SMTP configurada correctamente.',
-        html: wrapEmailLayout('<p>Conexión SMTP configurada correctamente desde Kubo DevDocs.</p>', { logoSrc: `cid:${KUBO_LOGO_CID}` }),
+        html: wrapEmailLayout('<p>Conexión SMTP configurada correctamente desde Kubo Platform.</p>', { logoSrc: `cid:${KUBO_LOGO_CID}` }),
         attachments: [kuboLogoAttachment()],
       });
       return { ok: true, sentTo: userEmail };
