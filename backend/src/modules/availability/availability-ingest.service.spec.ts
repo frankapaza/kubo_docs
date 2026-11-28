@@ -241,6 +241,14 @@ describe('AvailabilityIngestService.sync', () => {
     expect(edited.configVersion).not.toBe(first.configVersion);
   });
 
+  it('los pings (ICMP) van con intervalMin 1 y cuentan en la versión; el resto sin intervalo propio', async () => {
+    const base = { serverId: 10, name: 'a', port: null, latencyThresholdMs: 250, criticality: 'LOW', status: 'ACTIVE' };
+    const { svc, probe } = makeSvc({ services: [{ ...base, id: 1, protocol: 'ICMP', target: '10.0.0.1' }, { ...base, id: 2, protocol: 'HTTPS', target: 'https://x.test' }] });
+    const cfg = (await svc.sync(probe, null)).config!;
+    expect(cfg.services[0]).toEqual({ id: 1, protocol: 'ICMP', target: '10.0.0.1', port: null, latencyThresholdMs: 250, intervalMin: 1 });
+    expect(cfg.services[1]).not.toHaveProperty('intervalMin');
+  });
+
   it('servicios pausados no entran en la config ni en la versión', async () => {
     const base = { serverId: 10, name: 'a', protocol: 'TCP', target: 'h', port: 1, latencyThresholdMs: 1, criticality: 'LOW' };
     const a = makeSvc({ services: [{ ...base, id: 1, status: 'ACTIVE' }] });

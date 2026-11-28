@@ -74,6 +74,15 @@ export class ServiceProbeTracker {
     this.opts = { ...DEFAULT_TRACKER, ...opts };
   }
 
+  /**
+   * Los servicios con intervalo propio (pings cada minuto) no abren degradación por
+   * pruebas lentas seguidas: con 1 min serían 3 min, no ~15. Su lentitud la juzga la
+   * revisión por hora de la central (alerta de latencia).
+   */
+  private tracksDegradation(): boolean {
+    return this.opts.trackDegradation && this.service.intervalMin === undefined;
+  }
+
   state(): TrackerState {
     return this.st;
   }
@@ -93,7 +102,7 @@ export class ServiceProbeTracker {
       return out;
     }
     if (this.st !== 'OK' || r.kind !== 'REGULAR') return out;
-    const slow = this.opts.trackDegradation && r.durationMs > this.service.latencyThresholdMs;
+    const slow = this.tracksDegradation() && r.durationMs > this.service.latencyThresholdMs;
     this.syncOkStreak = r.ok && !slow ? this.syncOkStreak + 1 : 0;
     if (this.syncOkStreak < this.opts.recoveryOkCount) return out;
     this.synced = true;
@@ -153,7 +162,15 @@ export class ServiceProbeTracker {
         ? [sig('DEGRADATION_CLEARED'), sig('VERIFYING', this.firstFailureAt)]
         : [sig('VERIFYING', this.firstFailureAt)];
     }
-    if (!this.opts.trackDegradation || r.kind !== 'REGULAR') return [];
+    if (r.kind !== 'REGULAR') return [];
+    if (!this.tracksDegradation()) {
+      // Dejó de juzgar lentitud (p. ej. ahora es un ping con intervalo propio): no quedar degradado.
+      if (this.st !== 'DEGRADED') return [];
+      this.st = 'OK';
+      this.slowStreak = 0;
+      this.fastStreak = 0;
+      return [sig('DEGRADATION_CLEARED')];
+    }
     const slow = r.durationMs > this.service.latencyThresholdMs;
     if (this.st === 'OK') {
       this.slowStreak = slow ? this.slowStreak + 1 : 0;

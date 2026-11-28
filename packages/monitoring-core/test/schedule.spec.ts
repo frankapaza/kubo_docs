@@ -1,4 +1,4 @@
-import { DEFAULT_SCHEDULE, intervalMsAt, nextCycleAt, assertValidSchedule } from '../src/schedule';
+import { DEFAULT_SCHEDULE, intervalMsAt, nextCycleAt, assertValidSchedule, scheduleFor } from '../src/schedule';
 
 const lima = (s: string) => new Date(`${s}-05:00`);
 
@@ -34,4 +34,17 @@ describe('assertValidSchedule', () => {
     ['hora negativa', { ...ok, dayStartHour: -1 }],
     ['frontera no multiplo de ambos intervalos', { ...ok, dayIntervalMin: 45 }],
   ])('%s lanza', (_n, cfg) => expect(() => assertValidSchedule(cfg)).toThrow(/Configuración/));
+});
+
+describe('scheduleFor', () => {
+  it('sin intervalo propio devuelve el horario global; con él, ese intervalo de día y de noche', () => {
+    expect(scheduleFor(DEFAULT_SCHEDULE, undefined)).toBe(DEFAULT_SCHEDULE);
+    expect(scheduleFor(DEFAULT_SCHEDULE, 1)).toEqual({ ...DEFAULT_SCHEDULE, dayIntervalMin: 1, nightIntervalMin: 1 });
+  });
+
+  it('un intervalo que no divide 1440 o no es entero se ignora (horario global)', () => {
+    expect(scheduleFor(DEFAULT_SCHEDULE, 7)).toBe(DEFAULT_SCHEDULE);
+    expect(scheduleFor(DEFAULT_SCHEDULE, 0)).toBe(DEFAULT_SCHEDULE);
+    expect(scheduleFor(DEFAULT_SCHEDULE, 1.5)).toBe(DEFAULT_SCHEDULE);
+  });
 });

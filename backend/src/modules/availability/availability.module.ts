@@ -10,6 +10,9 @@ import { TicketsModule } from '../tickets/tickets.module';
 import { UsersModule } from '../users/users.module';
 import { AgentRateLimiter } from './agent-rate-limiter';
 import { AgentSilenceWatch } from './agent-silence.watch';
+import { AvailabilityLatencyController } from './availability-latency.controller';
+import { LatencyAlertService } from './latency-alert.service';
+import { WorkspaceModule } from '../workspace/workspace.module';
 import { AgentTokenGuard } from './agent-token.guard';
 import { AvailabilityAgentController } from './availability-agent.controller';
 import { AvailabilityAgentService } from './availability-agent.service';
@@ -30,6 +33,8 @@ import { AvailabilityPurgeService } from './availability-purge.service';
 import { AvailabilityRollupService } from './availability-rollup.service';
 import { AvailabilityReportController } from './availability-report.controller';
 import { AvailabilityReportService } from './availability-report.service';
+import { MonitorLatencyEpisode } from './entities/monitor-latency-episode.entity';
+import { MonitorLatencyHour } from './entities/monitor-latency-hour.entity';
 import { MonitorAgentDailyRollup } from './entities/monitor-agent-daily-rollup.entity';
 import { MonitorAgentSample } from './entities/monitor-agent-sample.entity';
 import { MonitorDailyRollup } from './entities/monitor-daily-rollup.entity';
@@ -67,6 +72,8 @@ import { ProbeTokenGuard } from './probe-token.guard';
       MonitorIncidentEvent,
       MonitorOfficeOutage,
       MonitorAgentDailyRollup,
+      MonitorLatencyHour,
+      MonitorLatencyEpisode,
       MonitorAgentSample,
       MonitorDailyRollup,
       MonitorEvidence,
@@ -80,6 +87,7 @@ import { ProbeTokenGuard } from './probe-token.guard';
     TicketsModule,
     UsersModule,
     EmailModule,
+    WorkspaceModule,
     StorageModule,
   ],
   controllers: [
@@ -90,6 +98,7 @@ import { ProbeTokenGuard } from './probe-token.guard';
     AvailabilityMaintenanceController,
     AvailabilityEvidenceController,
     AvailabilityReportController,
+    AvailabilityLatencyController,
   ],
   providers: [
     AvailabilityInventoryService,
@@ -119,6 +128,7 @@ import { ProbeTokenGuard } from './probe-token.guard';
     ProbeSilenceWatch,
     // Ídem cuando el agente de un servidor calla 10 min.
     AgentSilenceWatch,
+    LatencyAlertService,
   ],
   exports: [
     AvailabilityInventoryService,

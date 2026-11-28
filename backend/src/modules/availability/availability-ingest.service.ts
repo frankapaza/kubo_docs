@@ -50,10 +50,14 @@ const toTarget = (s: MonitorService): ServiceTarget => ({
   target: s.target,
   port: s.port === null || s.port === undefined ? null : Number(s.port),
   latencyThresholdMs: Number(s.latencyThresholdMs),
+  // Los pings de red se miden cada minuto todo el día (alerta de latencia por hora).
+  ...(s.protocol === 'ICMP' ? { intervalMin: PING_INTERVAL_MIN } : {}),
 });
 
 /** JSON canónico: claves en orden fijo, para que la huella no dependa del orden de las columnas. */
-const canonicalTarget = (t: ServiceTarget) => [t.id, t.protocol, t.target, t.port, t.latencyThresholdMs];
+const canonicalTarget = (t: ServiceTarget) => [t.id, t.protocol, t.target, t.port, t.latencyThresholdMs, t.intervalMin ?? null];
+
+export const PING_INTERVAL_MIN = 1;
 const canonicalSchedule = (s: ScheduleConfig) => [s.dayStartHour, s.nightStartHour, s.dayIntervalMin, s.nightIntervalMin];
 
 /** Recibe lo que mandan las sondas y les entrega configuración, órdenes y estado. */

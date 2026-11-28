@@ -100,6 +100,8 @@ services:
       - ./backend/sql/migrations/039_disponibilidad_protocolo_http.sql:/docker-entrypoint-initdb.d/039_disponibilidad_protocolo_http.sql:ro
       # La 040 crea client_api_keys (claves kci_ de la API de integracion de clientes).
       - ./backend/sql/migrations/040_api_integracion_clientes.sql:/docker-entrypoint-initdb.d/040_api_integracion_clientes.sql:ro
+      # La 041 crea la latencia por hora y los episodios de lentitud (alerta de latencia).
+      - ./backend/sql/migrations/041_disponibilidad_latencia_horaria.sql:/docker-entrypoint-initdb.d/041_disponibilidad_latencia_horaria.sql:ro
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s

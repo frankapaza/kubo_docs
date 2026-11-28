@@ -47,6 +47,12 @@ export function nextCycleAt(serviceId: number, after: Date, cfg: ScheduleConfig)
   return new Date(slotLimaMs - limaShift + offset);
 }
 
+/** Horario de un servicio: el global, o su intervalo propio si es válido (entero que divide 1440). */
+export function scheduleFor(cfg: ScheduleConfig, intervalMin: number | undefined): ScheduleConfig {
+  if (intervalMin === undefined || !Number.isInteger(intervalMin) || intervalMin <= 0 || (24 * 60) % intervalMin !== 0) return cfg;
+  return { ...cfg, dayIntervalMin: intervalMin, nightIntervalMin: intervalMin };
+}
+
 /** Lanza un Error (en español) si la configuración de franjas no es coherente. */
 export function assertValidSchedule(cfg: ScheduleConfig): void {
   const day = 24 * 60;

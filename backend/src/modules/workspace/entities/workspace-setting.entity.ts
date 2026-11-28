@@ -77,6 +77,10 @@ export class WorkspaceSetting {
   @Column({ name: 'team_inbox_email', type: 'varchar', length: 180, nullable: true })
   teamInboxEmail!: string | null;
 
+  /** Correos de la alerta de latencia, separados por coma (migración 041). Vacío ⇒ administradores activos. */
+  @Column({ name: 'latency_alert_emails', type: 'varchar', length: 1000, nullable: true })
+  latencyAlertEmails!: string | null;
+
   // ========== IMAP (correo entrante, Task 8) ==========
   // Migración 023, junto a la de SMTP de arriba: mismo criterio, columnas
   // nulas hasta que alguien configura el buzón, contraseña cifrada con la

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { CheckFn } from './checks';
 import type { Clock } from './clock';
 import { isOfficeOutage } from './office-outage';
-import { assertValidSchedule, nextCycleAt } from './schedule';
+import { assertValidSchedule, nextCycleAt, scheduleFor } from './schedule';
 import { ServiceProbeTracker } from './tracker';
 import type { ProbeSignal, TrackerOptions, TrackerState } from './tracker';
 import type { CheckKind, CheckResult, ScheduleConfig, ServiceTarget } from './types';
@@ -198,7 +198,7 @@ export class ProbeRunner {
     this.epoch++;
     const now = this.clock.now();
     for (const svc of this.services.values()) {
-      this.pushEvent({ type: 'REGULAR', svc, cycleAt: nextCycleAt(svc.target.id, now, this.opts.schedule), at: 0, seq: 0 });
+      this.pushEvent({ type: 'REGULAR', svc, cycleAt: nextCycleAt(svc.target.id, now, scheduleFor(this.opts.schedule, svc.target.intervalMin)), at: 0, seq: 0 });
       this.syncRetry(svc);
     }
     if (this.refs.length > 0) {
@@ -237,13 +237,15 @@ export class ProbeRunner {
     for (const s of services) {
       const existing = this.services.get(s.id);
       if (existing) {
+        // Sin borrar antes, un servicio que deja de tener intervalo propio lo conservaría.
+        delete existing.target.intervalMin;
         Object.assign(existing.target, s);
         continue;
       }
       const svc = this.newService(s);
       this.services.set(s.id, svc);
       if (this.running) {
-        this.pushEvent({ type: 'REGULAR', svc, cycleAt: nextCycleAt(s.id, now, this.opts.schedule), at: 0, seq: 0 });
+        this.pushEvent({ type: 'REGULAR', svc, cycleAt: nextCycleAt(s.id, now, scheduleFor(this.opts.schedule, s.intervalMin)), at: 0, seq: 0 });
       }
     }
     if (!this.running) return;
@@ -335,8 +337,9 @@ export class ProbeRunner {
     }
     // REGULAR: programa la siguiente franja (saltando las perdidas por suspensión).
     const id = svc.target.id;
-    let next = nextCycleAt(id, e.cycleAt, this.opts.schedule);
-    if (next.getTime() < now) next = nextCycleAt(id, new Date(now - 1), this.opts.schedule);
+    const sched = scheduleFor(this.opts.schedule, svc.target.intervalMin);
+    let next = nextCycleAt(id, e.cycleAt, sched);
+    if (next.getTime() < now) next = nextCycleAt(id, new Date(now - 1), sched);
     this.pushEvent({ type: 'REGULAR', svc, cycleAt: next, at: 0, seq: 0 });
 
     if (svc.tracker.pendingRetryAt() !== null) {
