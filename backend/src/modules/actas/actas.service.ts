@@ -14,6 +14,7 @@ import { UpdateActaDto } from './dto/update-acta.dto';
 import { ActaTemplateService } from './services/acta-template.service';
 import { PdfRendererService } from './services/pdf-renderer.service';
 import { ActaAnnexesService } from './services/acta-annexes.service';
+import { MeetingNotesService } from '../meetings/meeting-notes.service';
 import { MeetingsService } from '../meetings/meetings.service';
 import { ParticipantsService } from '../participants/participants.service';
 import { AgendaService } from '../agenda/agenda.service';
@@ -48,6 +49,7 @@ export class ActasService {
     private readonly audioRetention: AudioRetentionService,
     @Inject(STORAGE_SERVICE) private readonly storage: IStorageService,
     private readonly annexes: ActaAnnexesService,
+    private readonly meetingNotes: MeetingNotesService,
   ) {}
 
   async findByIdOrFail(id: number): Promise<Acta> {
@@ -94,6 +96,7 @@ export class ActasService {
         })),
         agenda: agenda.map((a) => ({ title: a.title, description: a.description ?? null })),
         transcription: transcription.contentText,
+        notes: (await this.meetingNotes.list(meetingId)).map((n) => ({ offsetSec: n.offsetSec, kind: n.kind, text: n.text })),
       });
       body = this.template.renderFromAI({ meeting, participants, draft });
       contentJson = draft as unknown as Record<string, unknown>;

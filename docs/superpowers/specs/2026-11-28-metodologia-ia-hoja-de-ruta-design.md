@@ -35,7 +35,7 @@ plantillas; para el resto, la misma estructura con marca Kubo.
 | # | Entrega | Estado |
 |---|---|---|
 | 1 | Base iPad: instalable (manifest, íconos) y menú plegable | Publicada (PR #20) |
-| 2 | Reunión en iPad: firma manuscrita con nombre/DNI, notas durante la grabación (nota/acuerdo/tarea con minuto), acta IA que usa las notas, transcripción por tramos | Siguiente |
+| 2 | **En curso (rama feat/reunion-ipad): backend listo** — firma en pantalla, por correo o ambas; notas en el acta IA; anexos en PDF. Falta web. · Reunión en iPad: firma manuscrita con nombre/DNI, notas durante la grabación (nota/acuerdo/tarea con minuto), acta IA que usa las notas, transcripción por tramos | Siguiente |
 | 3 | Expediente del proyecto: entregables por tipo de trabajo, versiones Vx.y, estados, nomenclatura, .zip | |
 | 4 | Editor con formato + ajuste IA (antes/después, alcance sección/documento) + plantillas por cliente | |
 | 5 | Requerimientos y tickets con documentos mínimos y bloqueo de cierre; capacitación, conformidad y prototipos firmados (iPad y portal) | |
@@ -63,3 +63,7 @@ plantillas; para el resto, la misma estructura con marca Kubo.
 4. **Pantalla de reunión para iPad** según el prototipo: grabar → acta → firmas → enviado.
 5. **Transcripción por tramos** (cada ~30 s) para verla mientras se graba: después de 1–3, si el
    proveedor de transcripción lo soporta sin costo desproporcionado.
+
+## Decisión añadida (usuario, 2026-11-28)
+
+- Cada firmante elige: **dibujar en pantalla**, **confirmar por correo** (enlace de un solo uso, 7 días) o **ambos** (vale al completar los dos).
