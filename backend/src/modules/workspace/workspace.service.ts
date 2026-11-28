@@ -312,6 +312,20 @@ export class WorkspaceService {
    * Recorta el valor: un espacio suelto guardado desde el panel dejaría una
    * dirección de destino inválida que solo se vería en el rebote.
    */
+  /** Destinatarios de la alerta de latencia (migración 041); vacío = administradores activos. */
+  async getLatencyAlertEmails(): Promise<string[]> {
+    const settings = await this.get().catch(() => null);
+    return parseEmailList(settings?.latencyAlertEmails ?? '');
+  }
+
+  async setLatencyAlertEmails(emails: string[]): Promise<string[]> {
+    const current = await this.get();
+    const list = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean))];
+    current.latencyAlertEmails = list.length ? list.join(', ') : null;
+    await this.repo.save(current);
+    return list;
+  }
+
   async getTeamInboxEmail(): Promise<string | null> {
     const settings = await this.get().catch(() => null);
     const inbox = settings?.teamInboxEmail?.trim();
@@ -347,4 +361,8 @@ export class WorkspaceService {
       return null;
     }
   }
+}
+
+export function parseEmailList(raw: string): string[] {
+  return [...new Set(raw.split(/[,;\s]+/).map((e) => e.trim().toLowerCase()).filter(Boolean))];
 }

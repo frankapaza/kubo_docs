@@ -19,6 +19,8 @@ import { MonitorProbeSignal } from './monitor-probe-signal.entity';
 import { MonitorProbeState } from './monitor-probe-state.entity';
 import { MonitorServer } from './monitor-server.entity';
 import { MonitorService } from './monitor-service.entity';
+import { MonitorLatencyEpisode } from './monitor-latency-episode.entity';
+import { MonitorLatencyHour } from './monitor-latency-hour.entity';
 
 // eslint-disable-next-line @typescript-eslint/ban-types
 const NUEVAS: [Function, string][] = [
@@ -30,6 +32,8 @@ const NUEVAS: [Function, string][] = [
   [MonitorAgentSample, 'monitor_agent_samples'],
   [MonitorAgentDailyRollup, 'monitor_agent_daily_rollups'],
   [MonitorMonthlyReport, 'monitor_monthly_reports'],
+  [MonitorLatencyHour, 'monitor_latency_hours'],
+  [MonitorLatencyEpisode, 'monitor_latency_episodes'],
 ];
 
 /**
@@ -61,6 +65,10 @@ function buildMetadata() {
 
 describe('entidades de disponibilidad', () => {
   const ds = buildMetadata();
+
+  it('MonitorLatencyHour tiene clave primaria (serviceId, hourStart)', () => {
+    expect(ds.getMetadata(MonitorLatencyHour).primaryColumns.map((c) => c.propertyName)).toEqual(['serviceId', 'hourStart']);
+  });
 
   it('MonitorCheck tiene clave primaria compuesta (probeId, id)', () => {
     const meta = ds.getMetadata(MonitorCheck);
