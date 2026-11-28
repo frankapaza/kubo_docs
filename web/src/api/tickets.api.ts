@@ -37,7 +37,7 @@ export interface TicketListParams {
   /** Oculta los CERRADO (vista "Todos"). */
   excludeClosed?: boolean;
   /** `true` = solo archivados; si no, los archivados nunca vienen. */
-  archived?: boolean;
+  archived?: boolean | 'any';
   /** Solo los pendientes de clasificar (sin sistema, abiertos, de clientes con sistemas). */
   sinSistema?: boolean;
 }

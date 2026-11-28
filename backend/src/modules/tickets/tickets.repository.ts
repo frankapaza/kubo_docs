@@ -38,7 +38,7 @@ export interface TicketListFilters {
   serviceCategory?: ServiceCategory;
   atRisk?: boolean;
   q?: string;
-  /** Oculta los CERRADO (vista "Todos" de la bandeja). */
+  /** Oculta los RESUELTO y CERRADO (vista "Todos" de la bandeja); salen con su filtro o al buscar. */
   excludeClosed?: boolean;
   /**
    * Tri-estado: `true` = solo archivados, `false` = sin archivados,
@@ -85,7 +85,7 @@ export class TicketsRepository {
       qb.andWhere('t.service_category = :cat', { cat: filters.serviceCategory });
     }
     if (filters.atRisk) qb.andWhere('t.sla_at_risk = 1');
-    if (filters.excludeClosed) qb.andWhere("t.status <> 'CERRADO'");
+    if (filters.excludeClosed) qb.andWhere("t.status NOT IN ('RESUELTO', 'CERRADO')");
     // Archivar es "no lo quiero ver" del equipo: en su bandeja un archivado no
     // sale salvo en su propio filtro. Pero solo se filtra si quien llama lo
     // pide; antes se aplicaba siempre y el portal perdía los tickets que el

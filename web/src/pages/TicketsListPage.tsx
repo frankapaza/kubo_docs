@@ -127,9 +127,10 @@ export default function TicketsListPage() {
         priority: filter === 'P1' ? 'P1' : undefined,
         atRisk: filter === 'SLA en riesgo' ? true : undefined,
         status: (STATUS_CHIPS as string[]).includes(filter) ? (filter as TicketStatus) : undefined,
-        // "Todos" es la bandeja de trabajo: lo cerrado tiene su propio filtro.
-        excludeClosed: filter === 'Todos' ? true : undefined,
-        archived: filter === 'Archivados' ? true : undefined,
+        // "Todos" es la bandeja de trabajo: resueltos, cerrados y archivados tienen su
+        // filtro. Al buscar texto en "Todos" aparecen también, para encontrarlos.
+        excludeClosed: filter === 'Todos' && !q ? true : undefined,
+        archived: filter === 'Archivados' ? true : filter === 'Todos' && q ? 'any' : undefined,
         q: q || undefined,
         clientId: clientFilter ?? undefined,
         sinSistema: onlyNoSystem || undefined,

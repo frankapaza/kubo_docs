@@ -119,7 +119,8 @@ export class TicketsController {
       // Siempre booleano aquí, nunca `undefined`: la bandeja del equipo oculta
       // los archivados por omisión. El repositorio solo filtra si se lo piden
       // (el portal no lo pide), así que esta es la puerta que lo decide.
-      archived: archived === 'true',
+      // 'any' (al buscar texto) no filtra: un archivado también aparece en la búsqueda.
+      archived: archived === 'true' ? true : archived === 'any' ? undefined : false,
       sinSistema: sinSistema === '1' || sinSistema === 'true',
     });
   }
