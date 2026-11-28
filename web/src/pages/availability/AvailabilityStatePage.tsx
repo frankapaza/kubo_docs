@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
 
 import { availabilityApi, CombinedStatus, StateFilter } from '../../api/availability.api';
 import { clientsApi } from '../../api/clients.api';
 import { toast } from '../../ui/Toast';
 import {
-  apiMessage, apiStatus, btn, fmtDateTime, fmtProbeSide, inputStyle, STATUS_COLORS, STATUS_LABELS, STATUS_OPTIONS, tableWrap, td, th,
+  apiMessage, apiStatus, btn, inputStyle, STATUS_LABELS, STATUS_OPTIONS,
 } from './availability-ui';
+import StateBoards from './StateBoards';
 
 /** Pausa del botón «Probar ahora»; el servidor aplica la misma. */
 const CHECK_COOLDOWN_MS = 15_000;
@@ -132,58 +132,7 @@ export default function AvailabilityStatePage() {
         state.data.length === 0 ? (
           <div style={{ fontSize: 13, color: '#6d7577' }}>No hay servicios que coincidan. Los servicios se cargan en «Inventario».</div>
         ) : (
-          <div style={tableWrap}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ textAlign: 'left', background: '#f7f8f8', color: '#6d7577', fontSize: 12 }}>
-                  {['Servicio', 'Servidor', 'Cliente', 'Desde Perú', 'Desde servidor', 'Estado', 'Ticket', ''].map((h, n) => (
-                    <th key={n} style={th}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {state.data.map((r) => {
-                  const c = STATUS_COLORS[r.status];
-                  return (
-                    <tr key={r.serviceId} style={{ borderTop: '1px solid #eef0f1' }}>
-                      <td style={{ ...td, fontWeight: 600 }}>{r.serviceName}</td>
-                      <td style={td}>{r.serverName}</td>
-                      <td style={td}>{clientName.get(r.clientId) ?? '—'}</td>
-                      <td style={td} title={fmtDateTime(r.office?.lastCheckAt)}>{fmtProbeSide(r.office)}</td>
-                      <td style={td} title={fmtDateTime(r.datacenter?.lastCheckAt)}>{fmtProbeSide(r.datacenter)}</td>
-                      <td style={td}>
-                        <span style={{ background: c.bg, color: c.fg, borderRadius: 4, padding: '2px 7px', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                          {STATUS_LABELS[r.status]}
-                        </span>
-                        {r.maintenance && (
-                          <span style={{ marginLeft: 6, background: '#e8efff', color: '#1d4ed8', borderRadius: 4, padding: '2px 7px', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                            En mantenimiento
-                          </span>
-                        )}
-                      </td>
-                      <td style={td}>
-                        {r.incidentId !== null && (
-                          <Link to={`/monitoreo/incidentes/${r.incidentId}`} className="text-blue-700 hover:underline">
-                            {r.ticketCode ?? 'Incidente'}
-                          </Link>
-                        )}
-                      </td>
-                      <td style={{ ...td, whiteSpace: 'nowrap' }}>
-                        <button
-                          type="button"
-                          style={{ ...btn, ...(cooling.has(r.serviceId) ? { opacity: 0.6, cursor: 'not-allowed' } : null) }}
-                          onClick={() => checkNow(r.serviceId)}
-                          disabled={cooling.has(r.serviceId)}
-                        >
-                          Probar ahora
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <StateBoards rows={state.data} clientName={clientName} cooling={cooling} onCheck={checkNow} />
         )
       )}
     </div>

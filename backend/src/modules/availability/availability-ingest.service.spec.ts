@@ -283,6 +283,8 @@ describe('AvailabilityIngestService.sync', () => {
       status: 'DOWN', incidentId: 50, parentIncidentId: 40, ticketCode: null, datacenter: null, maintenance: false,
     });
     expect(res.state[0].office).toMatchObject({ state: 'OK', lastLatencyMs: 10 });
+    // Para separar los pings de red de los servicios en la pantalla de Estado.
+    expect(res.state[0]).toMatchObject({ protocol: 'HTTPS', target: 'https://x.test', latencyThresholdMs: 1500 });
   });
 
   it('state marca maintenance solo para los servicios cubiertos por una ventana activa', async () => {
