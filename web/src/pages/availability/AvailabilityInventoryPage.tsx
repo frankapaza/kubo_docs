@@ -238,6 +238,7 @@ function ServerForm({ server, clients, onCancel, onSaved }: {
   const [provider, setProvider] = useState(server?.provider ?? '');
   const [region, setRegion] = useState(server?.region ?? '');
   const [watch, setWatch] = useState((server?.agentWatchServices ?? []).join(', '));
+  const [addPing, setAddPing] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -261,7 +262,7 @@ function ServerForm({ server, clients, onCancel, onSaved }: {
     if (server) fields.agentWatchServices = watchList.length > 0 ? watchList : null;
     try {
       if (server) await availabilityApi.updateServer(server.id, fields);
-      else await availabilityApi.createServer({ ...fields, clientId: clientId as number });
+      else await availabilityApi.createServer({ ...fields, clientId: clientId as number, addPing });
       toast.success(server ? 'Servidor actualizado.' : 'Servidor creado.');
       onSaved();
     } catch (e) {
@@ -286,6 +287,17 @@ function ServerForm({ server, clients, onCancel, onSaved }: {
       <label><span style={labelStyle}>Rol</span><input value={role} onChange={(e) => setRole(e.target.value)} maxLength={80} style={inputStyle} /></label>
       <label><span style={labelStyle}>Proveedor</span><input value={provider} onChange={(e) => setProvider(e.target.value)} maxLength={80} style={inputStyle} /></label>
       <label><span style={labelStyle}>Región</span><input value={region} onChange={(e) => setRegion(e.target.value)} maxLength={80} style={inputStyle} /></label>
+      {!server && (
+        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13 }}>
+          <input type="checkbox" checked={addPing} onChange={(e) => setAddPing(e.target.checked)} style={{ marginTop: 3 }} />
+          <span>
+            Agregar ping de red
+            <span style={{ display: 'block', fontSize: 11, color: '#6d7577' }}>
+              Crea el servicio «Ping (red)» a este host con umbral de 250 ms. No se duplica si otro servidor con la misma IP ya lo tiene.
+            </span>
+          </span>
+        </label>
+      )}
       {server && (
         <label>
           <span style={labelStyle}>Servicios de Windows que vigila el agente</span>

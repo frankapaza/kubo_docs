@@ -1,4 +1,4 @@
-import { ArrayMaxSize, IsArray, IsEnum, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { Type } from 'class-transformer';
 
 /** Servicios de Windows que puede vigilar el agente de un servidor. */
@@ -25,6 +25,10 @@ export class CreateServerDto {
 
   @IsOptional() @IsString() @MaxLength(80)
   region?: string;
+
+  /** Crear también el servicio «Ping (red)» (ICMP a `host`). Por defecto sí. */
+  @IsOptional() @IsBoolean()
+  addPing?: boolean;
 }
 
 export class UpdateServerDto {

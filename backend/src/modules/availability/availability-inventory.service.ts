@@ -14,6 +14,9 @@ import { MonitorService } from './entities/monitor-service.entity';
 import { IncidentCloser } from './incident-closer';
 import { CreateServerDto, CreateServiceDto, UpdateServerDto, UpdateServiceDto } from './dto/inventory.dto';
 
+export const DEFAULT_PING_NAME = 'Ping (red)';
+export const DEFAULT_PING_THRESHOLD_MS = 250;
+
 export interface ProbeView {
   id: number;
   code: string;
@@ -68,7 +71,33 @@ export class AvailabilityInventoryService {
         region: dto.region ?? null,
       }),
     );
+    if (dto.addPing !== false) await this.addDefaultPing(saved);
     return toServerView(saved);
+  }
+
+  /**
+   * «Ping (red)»: latencia de red pura hacia el servidor, para reclamar al
+   * proveedor si sube (umbral 250 ms; la lentitud la mide la oficina). No se
+   * duplica si otro servidor con la misma IP ya tiene uno activo (p. ej. dos
+   * sistemas en el mismo VPS), y se omite si el host no sirve para ping.
+   */
+  private async addDefaultPing(server: MonitorServer): Promise<void> {
+    const host = String(server.host ?? '').trim();
+    if (!host || serviceShapeError('ICMP', host, null)) return;
+    const existing = await this.services.find({ where: { protocol: 'ICMP', target: host } });
+    if (existing.some((s) => s.status !== 'ARCHIVED')) return;
+    await this.services.save(
+      this.services.create({
+        serverId: server.id,
+        systemId: null,
+        name: DEFAULT_PING_NAME,
+        protocol: 'ICMP',
+        target: host,
+        port: null,
+        latencyThresholdMs: DEFAULT_PING_THRESHOLD_MS,
+        criticality: 'MEDIUM',
+      }),
+    );
   }
 
   async updateServer(id: number, dto: UpdateServerDto, actorUserId: number): Promise<ServerView> {
