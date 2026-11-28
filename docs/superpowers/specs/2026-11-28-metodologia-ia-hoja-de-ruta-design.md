@@ -35,9 +35,9 @@ plantillas; para el resto, la misma estructura con marca Kubo.
 | # | Entrega | Estado |
 |---|---|---|
 | 1 | Base iPad: instalable (manifest, íconos) y menú plegable | Publicada (PR #20) |
-| 2 | **En curso (rama feat/reunion-ipad): backend listo** — firma en pantalla, por correo o ambas; notas en el acta IA; anexos en PDF. Falta web. · Reunión en iPad: firma manuscrita con nombre/DNI, notas durante la grabación (nota/acuerdo/tarea con minuto), acta IA que usa las notas, transcripción por tramos | Siguiente |
-| 3 | Expediente del proyecto: entregables por tipo de trabajo, versiones Vx.y, estados, nomenclatura, .zip | |
-| 4 | Editor con formato + ajuste IA (antes/después, alcance sección/documento) + plantillas por cliente | |
+| 2 | Reunión en iPad: firma en pantalla, por correo, ambas o a distancia; notas durante la grabación que alimentan el acta IA; evidencias como anexos | Publicada (PR #21) |
+| 3 | Expediente del proyecto: entregables por tipo de trabajo, versiones Vx.y, estados, nomenclatura, .zip | Publicada (PR #22) |
+| 4 | Editor con formato + ajuste IA (antes/después, alcance sección/documento) + plantillas por cliente | Esta rama (feat/editor-ajuste-ia) |
 | 5 | Requerimientos y tickets con documentos mínimos y bloqueo de cierre; capacitación, conformidad y prototipos firmados (iPad y portal) | |
 | 6 | Levantamiento en campo: dictado, fotos anotadas, escaneo con OCR, pruebas funcionales en sitio, manual con capturas | |
 | 7 | ISO: procedimientos con versiones y «leído», matriz requisito → evidencia, no conformidades, auditorías | |
