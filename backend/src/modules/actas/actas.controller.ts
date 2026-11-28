@@ -124,6 +124,13 @@ export class ActasController {
     return this.signatures.requestByEmail(id, dto, user, clientIp(req)).then(withoutSecrets);
   }
 
+  /** Reunión por Meet: enlace de firma a distancia a cada asistente con correo que no firmó. */
+  @Post('actas/:id/signatures/remote-all')
+  @HttpCode(200)
+  signRemoteAll(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser, @Req() req: Request) {
+    return this.signatures.requestRemoteForAll(id, user, clientIp(req));
+  }
+
   /** Trazo de una firma (PNG). */
   @Get('actas/:id/signatures/:sigId/image')
   async signatureImage(

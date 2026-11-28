@@ -35,10 +35,11 @@ export class ActaSignature {
 
   /**
    * Cómo firmó (migración 042): USER = con su usuario; IN_PERSON = trazo en el iPad;
-   * EMAIL = confirmó desde el enlace de su correo; BOTH = trazo y confirmación por correo.
+   * EMAIL = confirmó desde el enlace de su correo; BOTH = trazo y confirmación por correo;
+   * REMOTE = dibujó y confirmó desde el enlace en su propio dispositivo (reunión por Meet).
    */
   @Column({ type: 'varchar', length: 12, default: 'USER' })
-  method!: 'USER' | 'IN_PERSON' | 'EMAIL' | 'BOTH';
+  method!: 'USER' | 'IN_PERSON' | 'EMAIL' | 'BOTH' | 'REMOTE';
 
   /** Trazo manuscrito (PNG). Fuera de los listados: se lee para el PDF y la imagen. */
   @Column({ name: 'signature_png', type: 'mediumblob', nullable: true, select: false })

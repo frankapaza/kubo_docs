@@ -21,8 +21,8 @@ export class SignInPersonDto {
 
 /** Firma por correo (EMAIL) o con trazo y correo (BOTH). */
 export class SignByEmailDto {
-  @IsIn(['EMAIL', 'BOTH'])
-  mode!: 'EMAIL' | 'BOTH';
+  @IsIn(['EMAIL', 'BOTH', 'REMOTE'])
+  mode!: 'EMAIL' | 'BOTH' | 'REMOTE';
 
   @IsOptional() @IsInt() @Min(1)
   participantId?: number;

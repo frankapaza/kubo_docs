@@ -25,6 +25,7 @@ function make() {
     { findOne: jest.fn(async () => ({ id: 3, meetingId: 1, version: 2, status: 'IN_REVIEW', contentMarkdown: '# Acta' })) } as any,
     {
       findOne: jest.fn(async ({ where }: any) => participants.find((p) => p.id === where.id) ?? null),
+      find: jest.fn(async ({ where }: any) => participants.filter((p) => p.meetingId === where.meetingId && (where.attended === undefined || p.attended === where.attended))),
       create: jest.fn((x: any) => x),
       save: jest.fn(async (x: any) => { x.id = 100 + participants.length; participants.push(x); return x; }),
     } as any,
@@ -98,5 +99,29 @@ describe('Firma por confirmación de correo', () => {
   it('las firmas de antes (con usuario) y las dibujadas cuentan como completas', () => {
     expect(isSignatureComplete({ method: 'USER' } as any)).toBe(true);
     expect(isSignatureComplete({ method: 'IN_PERSON' } as any)).toBe(true);
+  });
+});
+
+describe('Firma a distancia (reunión por Meet): enlace para dibujar y confirmar', () => {
+  it('REMOTE: el enlace pide dibujar; sin trazo no confirma; con trazo queda completa', async () => {
+    const t = make();
+    const sig = await t.svc.requestByEmail(3, { participantId: 5, mode: 'REMOTE' }, OPERADOR, null);
+    expect(sig.method).toBe('REMOTE');
+    expect(t.sent[0].html).toContain('firmar');
+    const token = tokenFrom(t.sent[0].html);
+    expect(await t.svc.previewByToken(token)).toMatchObject({ needsDrawing: true });
+    await expect(t.svc.confirmByToken(token, null)).rejects.toMatchObject({ status: 400 });
+    const done = await t.svc.confirmByToken(token, null, PNG_1X1);
+    expect(Buffer.isBuffer(done.signaturePng)).toBe(true);
+    expect(isSignatureComplete(done)).toBe(true);
+  });
+
+  it('enviar a todos: a cada asistente con correo y sin firma; informa a quién no se pudo', async () => {
+    const t = make();
+    const r = await t.svc.requestRemoteForAll(3, OPERADOR, null);
+    expect(r).toEqual({ sent: ['Ana Pérez'], skipped: [{ name: 'Luis Soto', reason: 'sin correo' }] });
+    expect(t.sent.map((m) => m.to)).toEqual(['ana@cliente.pe']);
+    const again = await t.svc.requestRemoteForAll(3, OPERADOR, null);
+    expect(again.sent).toEqual([]);
   });
 });

@@ -47,7 +47,8 @@ function formatDate(iso: string) {
 }
 
 function SignatureTrace({ actaId, sig }: { actaId: number; sig: ActaSignature }) {
-  const url = useAuthedImage(sig.method === 'IN_PERSON' || sig.method === 'BOTH' ? signaturesApi.imagePath(actaId, sig.id) : null);
+  const hasTrace = sig.method === 'IN_PERSON' || sig.method === 'BOTH' || (sig.method === 'REMOTE' && !!sig.emailConfirmedAt);
+  const url = useAuthedImage(hasTrace ? signaturesApi.imagePath(actaId, sig.id) : null);
   return url ? <img src={url} alt={`Firma de ${sig.signerName}`} className="h-16 max-w-full object-contain" /> : <div className="h-8 border-b border-slate-400" />;
 }
 
@@ -55,6 +56,7 @@ function signatureLine(sig: ActaSignature): string {
   const mail = sig.confirmEmail ? ` (${sig.confirmEmail})` : '';
   if (sig.method === 'EMAIL') return sig.emailConfirmedAt ? `Confirmado por correo${mail}` : `Pendiente: confirmar por correo${mail}`;
   if (sig.method === 'BOTH') return sig.emailConfirmedAt ? `Firmado en pantalla y confirmado por correo${mail}` : `Firmado en pantalla · pendiente: confirmar por correo${mail}`;
+  if (sig.method === 'REMOTE') return sig.emailConfirmedAt ? `Firmado a distancia${mail}` : `Pendiente: firmar desde el enlace${mail}`;
   if (sig.method === 'IN_PERSON') return 'Firmado en pantalla';
   return 'Firmado con su usuario';
 }
@@ -494,6 +496,23 @@ export default function ActaEditorPage() {
             <div className="no-print mt-4">
               <Button size="sm" variant="ghost" icon={<PenIcon size={14} />} onClick={() => setSignFor(null)}>
                 Agregar asistente y firmar
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<PenIcon size={14} />}
+                onClick={async () => {
+                  try {
+                    const r = await signaturesApi.remoteAll(aid);
+                    const extra = r.skipped.length ? ` No se envió a: ${r.skipped.map((s) => `${s.name} (${s.reason})`).join(', ')}.` : '';
+                    toast.success(r.sent.length ? `Enlace de firma enviado a ${r.sent.length} asistente(s).` + extra : `No había a quién enviar.` + extra);
+                    qc.invalidateQueries({ queryKey: ['acta-signatures', aid] });
+                  } catch {
+                    toast.error('No se pudieron enviar los enlaces.');
+                  }
+                }}
+              >
+                Enviar enlace de firma a todos (reunión por Meet)
               </Button>
             </div>
           )}

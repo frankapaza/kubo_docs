@@ -40,6 +40,7 @@ export function signatureStatusLine(s: Pick<ActaSignature, 'method' | 'signedAt'
   const confirmed = s.emailConfirmedAt ? `Confirmado por correo${mail} ${fmt(s.emailConfirmedAt)}` : null;
   if (s.method === 'EMAIL') return confirmed ?? `Pendiente: confirmar por correo${mail}`;
   if (s.method === 'BOTH') return `Firmado en pantalla · ${confirmed ? confirmed.charAt(0).toLowerCase() + confirmed.slice(1) : `pendiente: confirmar por correo${mail}`}`;
+  if (s.method === 'REMOTE') return s.emailConfirmedAt ? `Firmado a distancia${mail} ${fmt(s.emailConfirmedAt)}` : `Pendiente: firmar desde el enlace${mail}`;
   if (s.method === 'IN_PERSON') return `Firmado en pantalla ${fmt(s.signedAt)}`;
   return `Firmado: ${fmt(s.signedAt)}`;
 }

@@ -4,12 +4,13 @@ import { signaturesApi } from '../../api/signatures.api';
 import SignaturePad, { SignaturePadHandle } from '../../components/SignaturePad';
 import { toast } from '../../ui/Toast';
 
-type Mode = 'DRAW' | 'EMAIL' | 'BOTH';
+type Mode = 'DRAW' | 'EMAIL' | 'BOTH' | 'REMOTE';
 
 const MODES: Array<{ id: Mode; label: string; hint: string }> = [
   { id: 'DRAW', label: 'Dibujar en pantalla', hint: 'Firma con el dedo o el Apple Pencil, aquí mismo.' },
   { id: 'EMAIL', label: 'Confirmar por correo', hint: 'Le llega un enlace; la firma vale cuando confirma.' },
   { id: 'BOTH', label: 'Ambos', hint: 'Dibuja aquí y además confirma por correo.' },
+  { id: 'REMOTE', label: 'Enlace para firmar a distancia', hint: 'Reunión por Meet: dibuja y confirma desde su dispositivo.' },
 ];
 
 export interface SignDialogParticipant {
@@ -42,7 +43,7 @@ export default function SignDialog({
   const [busy, setBusy] = useState(false);
   const pad = useRef<SignaturePadHandle>(null);
 
-  const needsDraw = mode !== 'EMAIL';
+  const needsDraw = mode === 'DRAW' || mode === 'BOTH';
   const needsEmail = mode !== 'DRAW';
 
   const submit = async () => {
@@ -91,7 +92,7 @@ export default function SignDialog({
           <button type="button" onClick={onClose} aria-label="Cerrar" className="h-10 w-10 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">✕</button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2" role="radiogroup" aria-label="Cómo firma">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" role="radiogroup" aria-label="Cómo firma">
           {MODES.map((m) => (
             <button
               key={m.id}
@@ -126,7 +127,7 @@ export default function SignDialog({
         <div className="flex gap-2 justify-end">
           <button type="button" onClick={onClose} className="h-11 px-4 rounded-lg border border-slate-300 bg-white text-sm font-semibold text-slate-700">Cancelar</button>
           <button type="button" onClick={submit} disabled={busy} className="h-11 px-5 rounded-lg bg-[#053777] text-white text-sm font-semibold disabled:opacity-60">
-            {busy ? 'Guardando…' : mode === 'DRAW' ? 'Registrar firma' : mode === 'EMAIL' ? 'Enviar enlace' : 'Registrar y enviar enlace'}
+            {busy ? 'Guardando…' : mode === 'DRAW' ? 'Registrar firma' : mode === 'BOTH' ? 'Registrar y enviar enlace' : 'Enviar enlace'}
           </button>
         </div>
       </div>

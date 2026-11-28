@@ -1,50 +1,44 @@
-import {
-  BadRequestException,
-  GoneException,
-  Injectable,
-  NotFoundException,
-} from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
-import { createHash, randomBytes } from "crypto";
-import { ActaSignature } from "../entities/acta-signature.entity";
-import { Acta } from "../entities/acta.entity";
-import { Participant } from "../../participants/entities/participant.entity";
-import { Meeting } from "../../meetings/entities/meeting.entity";
-import { AuthUser } from "../../../common/decorators/current-user.decorator";
-import { formatPeruDateTime } from "../../../common/peru-date-time";
-import { emailButton, escapeEmailHtml } from "../../email/email-layout";
-import { EmailService } from "../../email/email.service";
+import { BadRequestException, GoneException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { createHash, randomBytes } from 'crypto';
+import { ActaSignature } from '../entities/acta-signature.entity';
+import { Acta } from '../entities/acta.entity';
+import { Participant } from '../../participants/entities/participant.entity';
+import { Meeting } from '../../meetings/entities/meeting.entity';
+import { AuthUser } from '../../../common/decorators/current-user.decorator';
+import { formatPeruDateTime } from '../../../common/peru-date-time';
+import { emailButton, escapeEmailHtml } from '../../email/email-layout';
+import { EmailService } from '../../email/email.service';
 
 /** Días que vale el enlace de confirmación por correo. */
 const CONFIRM_DAYS = 7;
-const sha256 = (s: string | Buffer) =>
-  createHash("sha256").update(s).digest("hex");
+const sha256 = (s: string | Buffer) => createHash('sha256').update(s).digest('hex');
 
 /**
  * Una firma cuenta cuando está completa: con usuario o trazo, sí; por correo, cuando
  * confirmó; con ambos, cuando hay trazo y confirmó.
  */
 export function isSignatureComplete(
-  s: Pick<ActaSignature, "method" | "emailConfirmedAt"> & {
+  s: Pick<ActaSignature, 'method' | 'emailConfirmedAt'> & {
     signaturePng?: Buffer | null;
   },
 ): boolean {
-  if (s.method === "EMAIL") return !!s.emailConfirmedAt;
-  if (s.method === "BOTH") return !!s.emailConfirmedAt;
+  if (s.method === 'EMAIL') return !!s.emailConfirmedAt;
+  if (s.method === 'BOTH' || s.method === 'REMOTE') return !!s.emailConfirmedAt;
   return true;
 }
 
 export interface EmailSignatureInput extends Partial<InPersonSignatureInput> {
-  mode: "EMAIL" | "BOTH";
+  mode: 'EMAIL' | 'BOTH' | 'REMOTE';
   /** Correo al que se envía el enlace; si falta, el del participante. */
   signerEmail?: string;
 }
 
 /** Un trazo de firma comprimido pesa unas decenas de KB; más que esto no es una firma. */
 export const MAX_SIGNATURE_PNG_BYTES = 300 * 1024;
-const PNG_MAGIC = "89504e470d0a1a0a";
+const PNG_MAGIC = '89504e470d0a1a0a';
 
 export interface InPersonSignatureInput {
   /** Participante ya registrado; si falta, se crea con nombre y DNI. */
@@ -57,20 +51,18 @@ export interface InPersonSignatureInput {
 }
 
 function decodeSignaturePng(dataUrl: string): Buffer {
-  const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(
-    String(dataUrl ?? "").trim(),
-  );
-  const buf = m ? Buffer.from(m[1], "base64") : Buffer.alloc(0);
-  if (buf.length === 0 || buf.subarray(0, 8).toString("hex") !== PNG_MAGIC) {
+  const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl ?? '').trim());
+  const buf = m ? Buffer.from(m[1], 'base64') : Buffer.alloc(0);
+  if (buf.length === 0 || buf.subarray(0, 8).toString('hex') !== PNG_MAGIC) {
     throw new BadRequestException({
-      code: "BAD_INPUT",
-      message: "Falta el trazo de la firma (imagen PNG).",
+      code: 'BAD_INPUT',
+      message: 'Falta el trazo de la firma (imagen PNG).',
     });
   }
   if (buf.length > MAX_SIGNATURE_PNG_BYTES) {
     throw new BadRequestException({
-      code: "BAD_INPUT",
-      message: "El trazo de la firma es demasiado grande.",
+      code: 'BAD_INPUT',
+      message: 'El trazo de la firma es demasiado grande.',
     });
   }
   return buf;
@@ -99,18 +91,16 @@ export class ActaSignaturesService {
     operator: AuthUser,
     ipAddress: string | null,
   ): Promise<ActaSignature> {
-    const png =
-      input.mode === "BOTH"
-        ? decodeSignaturePng(input.signaturePng ?? "")
-        : null;
+    const png = input.mode === 'BOTH' ? decodeSignaturePng(input.signaturePng ?? '') : null;
+    const remote = input.mode === 'REMOTE';
     const { acta, participant } = await this.resolveSigner(actaId, input);
-    const to = String(input.signerEmail ?? participant.email ?? "")
+    const to = String(input.signerEmail ?? participant.email ?? '')
       .trim()
       .toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
       throw new BadRequestException({
-        code: "BAD_INPUT",
-        message: "Indica un correo válido para enviar la confirmación.",
+        code: 'BAD_INPUT',
+        message: 'Indica un correo válido para enviar la confirmación.',
       });
     }
     if (
@@ -119,25 +109,25 @@ export class ActaSignaturesService {
       })
     ) {
       throw new BadRequestException({
-        code: "CONFLICT",
-        message: "Este participante ya firmó o tiene una firma pendiente",
+        code: 'CONFLICT',
+        message: 'Este participante ya firmó o tiene una firma pendiente',
       });
     }
 
-    const token = randomBytes(32).toString("base64url");
+    const token = randomBytes(32).toString('base64url');
     const payload = [
       acta.id,
       acta.version,
       participant.id,
       participant.fullName,
-      participant.documentNumber ?? "",
+      participant.documentNumber ?? '',
       input.mode,
       to,
       operator.id,
       new Date().toISOString(),
       acta.contentMarkdown,
-      png ? sha256(png) : "",
-    ].join("|");
+      png ? sha256(png) : '',
+    ].join('|');
     const sig = await this.repo.save(
       this.repo.create({
         actaId,
@@ -161,24 +151,24 @@ export class ActaSignaturesService {
       where: { id: Number(acta.meetingId) },
     });
     const title = meeting?.title ?? `Reunión ${acta.meetingId}`;
-    const base = (
-      (this.config.get<string>("FRONTEND_URL") || "").trim() ||
-      "http://localhost:5173"
-    ).replace(/\/+$/, "");
+    const base = ((this.config.get<string>('FRONTEND_URL') || '').trim() || 'http://localhost:5173').replace(
+      /\/+$/,
+      '',
+    );
     const link = `${base}/firmar-acta/${token}`;
-    const cuando = meeting?.scheduledAt
-      ? formatPeruDateTime(new Date(meeting.scheduledAt))
-      : "";
+    const cuando = meeting?.scheduledAt ? formatPeruDateTime(new Date(meeting.scheduledAt)) : '';
     // Si el correo no sale, la firma no puede quedar pendiente de un enlace que nadie recibió.
     try {
       await this.email.send({
         to,
-        subject: `Confirma tu firma del acta: ${title}`,
-        text: `Hola ${participant.fullName}:\n\nConfirma que estás de acuerdo con el acta de «${title}»${cuando ? ` (${cuando})` : ""}:\n${link}\n\nEl enlace vence en ${CONFIRM_DAYS} días.`,
+        subject: remote ? `Firma el acta: ${title}` : `Confirma tu firma del acta: ${title}`,
+        text: `Hola ${participant.fullName}:\n\n${remote ? 'Revisa y firma' : 'Confirma que estás de acuerdo con'} el acta de «${title}»${cuando ? ` (${cuando})` : ''}:\n${link}\n\nEl enlace vence en ${CONFIRM_DAYS} días.`,
         html:
           `<p style="margin:0 0 12px">Hola <strong>${escapeEmailHtml(participant.fullName)}</strong>:</p>` +
-          `<p style="margin:0 0 6px">Te pedimos confirmar que estás de acuerdo con el acta de <strong>${escapeEmailHtml(title)}</strong>${cuando ? ` (${escapeEmailHtml(cuando)})` : ""}.</p>` +
-          emailButton(link, "Revisar y confirmar el acta") +
+          (remote
+            ? `<p style="margin:0 0 6px">Te pedimos revisar y <strong>firmar</strong> el acta de <strong>${escapeEmailHtml(title)}</strong>${cuando ? ` (${escapeEmailHtml(cuando)})` : ''}. Puedes firmar con el dedo, el mouse o un lápiz desde tu propio dispositivo.</p>`
+            : `<p style="margin:0 0 6px">Te pedimos confirmar que estás de acuerdo con el acta de <strong>${escapeEmailHtml(title)}</strong>${cuando ? ` (${escapeEmailHtml(cuando)})` : ''}.</p>`) +
+          emailButton(link, remote ? 'Revisar y firmar el acta' : 'Revisar y confirmar el acta') +
           `<p style="margin:0;font-size:12px;color:#7a8794">El enlace vence en ${CONFIRM_DAYS} días y solo se puede usar una vez.</p>`,
       });
     } catch (e) {
@@ -190,56 +180,84 @@ export class ActaSignaturesService {
   }
 
   /** Lo que ve la persona al abrir el enlace (sin sesión). */
-  async previewByToken(
-    token: string,
-  ): Promise<{
+  async previewByToken(token: string): Promise<{
     signerName: string;
     meetingTitle: string;
     actaMarkdown: string;
-    status: "PENDIENTE" | "CONFIRMADA";
+    status: 'PENDIENTE' | 'CONFIRMADA';
+    /** Firma a distancia: la persona dibuja su firma en la página del enlace. */
+    needsDrawing: boolean;
   }> {
     const sig = await this.byToken(token);
     const acta = await this.actas.findOne({
       where: { id: Number(sig.actaId) },
     });
-    const meeting = acta
-      ? await this.meetings.findOne({ where: { id: Number(acta.meetingId) } })
-      : null;
+    const meeting = acta ? await this.meetings.findOne({ where: { id: Number(acta.meetingId) } }) : null;
     return {
       signerName: sig.signerName,
-      meetingTitle: meeting?.title ?? "Reunión",
-      actaMarkdown: acta?.contentMarkdown ?? "",
-      status: sig.emailConfirmedAt ? "CONFIRMADA" : "PENDIENTE",
+      meetingTitle: meeting?.title ?? 'Reunión',
+      actaMarkdown: acta?.contentMarkdown ?? '',
+      status: sig.emailConfirmedAt ? 'CONFIRMADA' : 'PENDIENTE',
+      needsDrawing: sig.method === 'REMOTE',
     };
   }
 
-  async confirmByToken(
-    token: string,
+  /**
+   * Envía el enlace de firma a distancia a cada asistente con correo que aún no firmó
+   * (reuniones por Meet). Devuelve a quién se envió y a quién no, con el motivo.
+   */
+  async requestRemoteForAll(
+    actaId: number,
+    operator: AuthUser,
     ipAddress: string | null,
-  ): Promise<ActaSignature> {
+  ): Promise<{ sent: string[]; skipped: Array<{ name: string; reason: string }> }> {
+    const acta = await this.actas.findOne({ where: { id: actaId } });
+    if (!acta) throw new NotFoundException({ code: 'NOT_FOUND', message: 'Acta no encontrada' });
+    const attendees = await this.participants.find({ where: { meetingId: Number(acta.meetingId), attended: 1 } });
+    const sent: string[] = [];
+    const skipped: Array<{ name: string; reason: string }> = [];
+    for (const p of attendees) {
+      if (await this.repo.findOne({ where: { actaId, participantId: Number(p.id) } })) continue;
+      if (!p.email?.trim()) {
+        skipped.push({ name: p.fullName, reason: 'sin correo' });
+        continue;
+      }
+      try {
+        await this.requestByEmail(actaId, { participantId: Number(p.id), mode: 'REMOTE' }, operator, ipAddress);
+        sent.push(p.fullName);
+      } catch (e) {
+        skipped.push({ name: p.fullName, reason: (e as { message?: string }).message ?? 'no se pudo enviar' });
+      }
+    }
+    return { sent, skipped };
+  }
+
+  async confirmByToken(token: string, ipAddress: string | null, signaturePng?: string): Promise<ActaSignature> {
     const sig = await this.byToken(token);
+    // A distancia, la firma es el trazo que la persona dibuja en la página del enlace.
+    if (sig.method === 'REMOTE') sig.signaturePng = decodeSignaturePng(signaturePng ?? '');
     sig.emailConfirmedAt = new Date();
     sig.confirmTokenHash = null;
     sig.signatureHash = sha256(
-      `${sig.signatureHash}|confirmado|${sig.emailConfirmedAt.toISOString()}|${ipAddress ?? ""}`,
+      `${sig.signatureHash}|confirmado|${sig.emailConfirmedAt.toISOString()}|${ipAddress ?? ''}`,
     );
     return this.repo.save(sig);
   }
 
   private async byToken(token: string): Promise<ActaSignature> {
-    const t = String(token ?? "");
+    const t = String(token ?? '');
     const sig = /^[A-Za-z0-9_-]{20,100}$/.test(t)
       ? await this.repo.findOne({ where: { confirmTokenHash: sha256(t) } })
       : null;
     if (!sig)
       throw new NotFoundException({
-        code: "NOT_FOUND",
-        message: "El enlace no es válido o ya se usó.",
+        code: 'NOT_FOUND',
+        message: 'El enlace no es válido o ya se usó.',
       });
     if (sig.confirmExpiresAt && sig.confirmExpiresAt.getTime() < Date.now()) {
       throw new GoneException({
-        code: "EXPIRED",
-        message: "El enlace venció. Pide que te lo envíen de nuevo.",
+        code: 'EXPIRED',
+        message: 'El enlace venció. Pide que te lo envíen de nuevo.',
       });
     }
     return sig;
@@ -253,13 +271,13 @@ export class ActaSignaturesService {
     const acta = await this.actas.findOne({ where: { id: actaId } });
     if (!acta)
       throw new NotFoundException({
-        code: "NOT_FOUND",
-        message: "Acta no encontrada",
+        code: 'NOT_FOUND',
+        message: 'Acta no encontrada',
       });
-    if (!["APPROVED", "EXPORTED", "IN_REVIEW"].includes(acta.status)) {
+    if (!['APPROVED', 'EXPORTED', 'IN_REVIEW'].includes(acta.status)) {
       throw new BadRequestException({
-        code: "CONFLICT",
-        message: "El acta debe estar en revisión o aprobada antes de firmar",
+        code: 'CONFLICT',
+        message: 'El acta debe estar en revisión o aprobada antes de firmar',
       });
     }
     if (input.participantId) {
@@ -268,18 +286,18 @@ export class ActaSignaturesService {
       });
       if (!p || Number(p.meetingId) !== Number(acta.meetingId)) {
         throw new BadRequestException({
-          code: "BAD_REQUEST",
-          message: "El participante no pertenece a esta reunión",
+          code: 'BAD_REQUEST',
+          message: 'El participante no pertenece a esta reunión',
         });
       }
       return { acta, participant: p };
     }
-    const name = String(input.signerName ?? "").trim();
-    const doc = String(input.signerDocument ?? "").trim();
+    const name = String(input.signerName ?? '').trim();
+    const doc = String(input.signerDocument ?? '').trim();
     if (!name || !doc) {
       throw new BadRequestException({
-        code: "BAD_INPUT",
-        message: "Indica el nombre y el DNI de quien firma.",
+        code: 'BAD_INPUT',
+        message: 'Indica el nombre y el DNI de quien firma.',
       });
     }
     const participant = await this.participants.save(
@@ -296,51 +314,43 @@ export class ActaSignaturesService {
   }
 
   listByActa(actaId: number): Promise<ActaSignature[]> {
-    return this.repo.find({ where: { actaId }, order: { signedAt: "ASC" } });
+    return this.repo.find({ where: { actaId }, order: { signedAt: 'ASC' } });
   }
 
-  async sign(
-    actaId: number,
-    participantId: number,
-    user: AuthUser,
-    ipAddress: string | null,
-  ): Promise<ActaSignature> {
+  async sign(actaId: number, participantId: number, user: AuthUser, ipAddress: string | null): Promise<ActaSignature> {
     const acta = await this.actas.findOne({ where: { id: actaId } });
     if (!acta)
       throw new NotFoundException({
-        code: "NOT_FOUND",
-        message: "Acta no encontrada",
+        code: 'NOT_FOUND',
+        message: 'Acta no encontrada',
       });
-    if (!["APPROVED", "EXPORTED", "IN_REVIEW"].includes(acta.status)) {
+    if (!['APPROVED', 'EXPORTED', 'IN_REVIEW'].includes(acta.status)) {
       throw new BadRequestException({
-        code: "CONFLICT",
-        message: "El acta debe estar en revisión o aprobada antes de firmar",
+        code: 'CONFLICT',
+        message: 'El acta debe estar en revisión o aprobada antes de firmar',
       });
     }
 
     const participant = await this.participants.findOne({
       where: { id: participantId },
     });
-    if (
-      !participant ||
-      Number(participant.meetingId) !== Number(acta.meetingId)
-    ) {
+    if (!participant || Number(participant.meetingId) !== Number(acta.meetingId)) {
       throw new BadRequestException({
-        code: "BAD_REQUEST",
-        message: "El participante no pertenece a esta reunión",
+        code: 'BAD_REQUEST',
+        message: 'El participante no pertenece a esta reunión',
       });
     }
     if (!participant.attended) {
       throw new BadRequestException({
-        code: "BAD_REQUEST",
-        message: "Solo pueden firmar los participantes que asistieron",
+        code: 'BAD_REQUEST',
+        message: 'Solo pueden firmar los participantes que asistieron',
       });
     }
 
     if (participant.userId != null && Number(participant.userId) !== user.id) {
       throw new BadRequestException({
-        code: "FORBIDDEN",
-        message: "Solo el propio participante puede firmar por sí mismo",
+        code: 'FORBIDDEN',
+        message: 'Solo el propio participante puede firmar por sí mismo',
       });
     }
 
@@ -349,8 +359,8 @@ export class ActaSignaturesService {
     });
     if (existing) {
       throw new BadRequestException({
-        code: "CONFLICT",
-        message: "Este participante ya firmó el acta",
+        code: 'CONFLICT',
+        message: 'Este participante ya firmó el acta',
       });
     }
 
@@ -359,12 +369,12 @@ export class ActaSignaturesService {
       acta.version,
       participant.id,
       participant.fullName,
-      participant.documentNumber ?? "",
+      participant.documentNumber ?? '',
       user.id,
       new Date().toISOString(),
       acta.contentMarkdown,
-    ].join("|");
-    const signatureHash = createHash("sha256").update(payload).digest("hex");
+    ].join('|');
+    const signatureHash = createHash('sha256').update(payload).digest('hex');
 
     const sig = this.repo.create({
       actaId,
@@ -395,13 +405,13 @@ export class ActaSignaturesService {
     const acta = await this.actas.findOne({ where: { id: actaId } });
     if (!acta)
       throw new NotFoundException({
-        code: "NOT_FOUND",
-        message: "Acta no encontrada",
+        code: 'NOT_FOUND',
+        message: 'Acta no encontrada',
       });
-    if (!["APPROVED", "EXPORTED", "IN_REVIEW"].includes(acta.status)) {
+    if (!['APPROVED', 'EXPORTED', 'IN_REVIEW'].includes(acta.status)) {
       throw new BadRequestException({
-        code: "CONFLICT",
-        message: "El acta debe estar en revisión o aprobada antes de firmar",
+        code: 'CONFLICT',
+        message: 'El acta debe estar en revisión o aprobada antes de firmar',
       });
     }
 
@@ -410,22 +420,19 @@ export class ActaSignaturesService {
       participant = await this.participants.findOne({
         where: { id: input.participantId },
       });
-      if (
-        !participant ||
-        Number(participant.meetingId) !== Number(acta.meetingId)
-      ) {
+      if (!participant || Number(participant.meetingId) !== Number(acta.meetingId)) {
         throw new BadRequestException({
-          code: "BAD_REQUEST",
-          message: "El participante no pertenece a esta reunión",
+          code: 'BAD_REQUEST',
+          message: 'El participante no pertenece a esta reunión',
         });
       }
     } else {
-      const name = String(input.signerName ?? "").trim();
-      const doc = String(input.signerDocument ?? "").trim();
+      const name = String(input.signerName ?? '').trim();
+      const doc = String(input.signerDocument ?? '').trim();
       if (!name || !doc) {
         throw new BadRequestException({
-          code: "BAD_INPUT",
-          message: "Indica el nombre y el DNI de quien firma.",
+          code: 'BAD_INPUT',
+          message: 'Indica el nombre y el DNI de quien firma.',
         });
       }
       participant = await this.participants.save(
@@ -446,8 +453,8 @@ export class ActaSignaturesService {
       })
     ) {
       throw new BadRequestException({
-        code: "CONFLICT",
-        message: "Este participante ya firmó el acta",
+        code: 'CONFLICT',
+        message: 'Este participante ya firmó el acta',
       });
     }
 
@@ -456,13 +463,13 @@ export class ActaSignaturesService {
       acta.version,
       participant.id,
       participant.fullName,
-      participant.documentNumber ?? "",
-      "IN_PERSON",
+      participant.documentNumber ?? '',
+      'IN_PERSON',
       operator.id,
       new Date().toISOString(),
       acta.contentMarkdown,
-      createHash("sha256").update(png).digest("hex"),
-    ].join("|");
+      createHash('sha256').update(png).digest('hex'),
+    ].join('|');
 
     return this.repo.save(
       this.repo.create({
@@ -472,8 +479,8 @@ export class ActaSignaturesService {
         signerName: participant.fullName,
         signerDocument: participant.documentNumber ?? null,
         signerRole: participant.role ?? null,
-        signatureHash: createHash("sha256").update(payload).digest("hex"),
-        method: "IN_PERSON",
+        signatureHash: createHash('sha256').update(payload).digest('hex'),
+        method: 'IN_PERSON',
         signaturePng: png,
         ipAddress,
       }),
@@ -483,10 +490,10 @@ export class ActaSignaturesService {
   /** Trazos de las firmas presenciales (para el PDF y la imagen). */
   async signaturesWithImages(actaId: number): Promise<ActaSignature[]> {
     return this.repo
-      .createQueryBuilder("s")
-      .addSelect("s.signaturePng")
-      .where("s.acta_id = :actaId", { actaId })
-      .orderBy("s.signed_at", "ASC")
+      .createQueryBuilder('s')
+      .addSelect('s.signaturePng')
+      .where('s.acta_id = :actaId', { actaId })
+      .orderBy('s.signed_at', 'ASC')
       .getMany();
   }
 
@@ -494,16 +501,15 @@ export class ActaSignaturesService {
     const sig = await this.repo.findOne({ where: { id } });
     if (!sig)
       throw new NotFoundException({
-        code: "NOT_FOUND",
-        message: "Firma no encontrada",
+        code: 'NOT_FOUND',
+        message: 'Firma no encontrada',
       });
-    const isAdmin = user.role === "ADMIN";
-    const isOwner =
-      sig.signedByUser != null && Number(sig.signedByUser) === user.id;
+    const isAdmin = user.role === 'ADMIN';
+    const isOwner = sig.signedByUser != null && Number(sig.signedByUser) === user.id;
     if (!isAdmin && !isOwner) {
       throw new BadRequestException({
-        code: "FORBIDDEN",
-        message: "No puedes revocar una firma ajena",
+        code: 'FORBIDDEN',
+        message: 'No puedes revocar una firma ajena',
       });
     }
     await this.repo.delete(id);
