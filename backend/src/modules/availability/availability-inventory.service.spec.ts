@@ -214,3 +214,42 @@ describe('AvailabilityInventoryController roles', () => {
 
   it.each(['listServers', 'listServices', 'listProbes', 'agentView'])('%s queda abierto al personal', (h) => expect(roles(h)).toBeUndefined());
 });
+
+describe('crear servidor: ping de red automático', () => {
+  const pings = (services: any[]) => services.filter((s) => s.protocol === 'ICMP');
+
+  it('por defecto crea «Ping (red)» ICMP a la IP del servidor con umbral 250 ms', async () => {
+    const { svc, services } = makeService();
+    const server = await svc.createServer({ clientId: 1, name: 'Nuevo', host: '10.1.2.3' } as any);
+    expect(pings(services)).toEqual([
+      expect.objectContaining({ serverId: server.id, name: 'Ping (red)', protocol: 'ICMP', target: '10.1.2.3', latencyThresholdMs: 250, criticality: 'MEDIUM' }),
+    ]);
+  });
+
+  it('con addPing=false no crea el ping', async () => {
+    const { svc, services } = makeService();
+    await svc.createServer({ clientId: 1, name: 'Nuevo', host: '10.1.2.3', addPing: false } as any);
+    expect(pings(services)).toEqual([]);
+  });
+
+  it('si otro servidor con la misma IP ya tiene ping activo, no lo duplica', async () => {
+    const { svc, services } = makeService();
+    services.push({ id: 150, serverId: 10, protocol: 'ICMP', target: '10.1.2.3', status: 'ACTIVE' });
+    await svc.createServer({ clientId: 1, name: 'Mismo host', host: ' 10.1.2.3 ' } as any);
+    expect(pings(services)).toHaveLength(1);
+  });
+
+  it('un ping archivado de la misma IP no cuenta: se crea uno nuevo', async () => {
+    const { svc, services } = makeService();
+    services.push({ id: 150, serverId: 10, protocol: 'ICMP', target: '10.1.2.3', status: 'ARCHIVED' });
+    await svc.createServer({ clientId: 1, name: 'Otro', host: '10.1.2.3' } as any);
+    expect(pings(services).filter((s) => s.status !== 'ARCHIVED')).toHaveLength(1);
+  });
+
+  it('un host que no sirve para ping (URL, con puerto) no rompe la creación ni crea ping', async () => {
+    const { svc, services } = makeService();
+    const server = await svc.createServer({ clientId: 1, name: 'Web', host: 'https://x.test' } as any);
+    expect(server.id).toBeDefined();
+    expect(pings(services)).toEqual([]);
+  });
+});

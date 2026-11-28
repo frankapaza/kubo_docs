@@ -153,6 +153,8 @@ export interface ServerBody {
   region?: string;
   status?: EntityStatus;
   agentWatchServices?: string[] | null;
+  /** Solo al crear: también el servicio «Ping (red)» (ICMP al host). El backend lo da por sí si falta. */
+  addPing?: boolean;
 }
 
 export interface ServiceBody {
