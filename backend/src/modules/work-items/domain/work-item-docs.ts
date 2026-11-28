@@ -167,7 +167,7 @@ function zipEntries(buf: Buffer): ZipEntry[] | null {
   return entries;
 }
 
-function zipEntryNames(buf: Buffer): string[] | null {
+export function zipEntryNames(buf: Buffer): string[] | null {
   try {
     return zipEntries(buf)?.map((e) => e.name) ?? null;
   } catch {

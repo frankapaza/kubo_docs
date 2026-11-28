@@ -67,3 +67,23 @@ plantillas; para el resto, la misma estructura con marca Kubo.
 ## Decisión añadida (usuario, 2026-11-28)
 
 - Cada firmante elige: **dibujar en pantalla**, **confirmar por correo** (enlace de un solo uso, 7 días) o **ambos** (vale al completar los dos).
+
+## Entrega 3 — Expediente del proyecto (diseño)
+
+Prototipo aprobado: «Expediente del proyecto» (canvas Main.dc.html).
+
+- **Tipo de trabajo por proyecto:** TRADICIONAL | AGIL | CORRECTIVO (columna `projects.work_type`, migración 043). Al elegirlo se crea el expediente con el catálogo.
+- **Catálogo** (de la metodología PRODUCE, obligatoriedad [tradicional, ágil, correctivo]; O=obligatorio, OP=opcional, NA=no aplica):
+  - INICIO: ACT-INI Acta de inicio [O,O,NA]
+  - PLANIFICACIÓN: CRO-PRO Cronograma [O,NA,NA]; DOC-ANA Documento de análisis [O,OP,NA]; HIS-USU Historias de usuario [O,O,NA]; ACT-APRO Acta de aprobación de prototipos [O,OP,NA]; ARQ-TIC Arquitectura de TI [OP,OP,NA]; DOC-SER Documento de servicios [OP,OP,NA]
+  - EJECUCIÓN: EVD-PUN Evidencia de pruebas unitarias [OP,OP,OP]; MAN-USU Manual de usuario [O,O,NA]; PRU-FUN Pruebas funcionales [O,O,OP]; INF-PRU Informe de pruebas [O,O,OP]; ACT-USU Acta de conformidad de usuario [O,O,OP]; MAN-DES Manual de despliegue [O,O,O]; SOL-PAP Solicitud de pase a producción [O,O,O]
+  - MONITOREO Y CONTROL: ACT-REU Acta de reunión [OP,OP,NA]; INF-GES Informe de gestión [OP,OP,NA]; SOL-CAM Solicitud de cambio [OP,OP,NA]
+  - CIERRE: ACT-CIE Acta de cierre [O,O,NA]; ACT-CAP Acta de capacitación [OP,OP,NA]; ACT-TRA Acta de transferencia [OP,OP,NA]
+- **Entregable:** estado PENDIENTE → BORRADOR → EN_REVISION → APROBADO → FIRMADO, o NO_APLICA con motivo. Versión x.y: subir una versión de trabajo suma 0.1; aprobar sube a la siguiente entera (0.3 → 1.0).
+- **Historial de revisiones** por versión: E (elaborado) / R (revisado) / A (aprobado), quién y cuándo, nota; archivo adjunto (docx/pdf/xlsx/mpp) en el almacenamiento existente.
+- **Nomenclatura automática:** `KUBO-{CODIGO_PROYECTO}-{NNNN}-{TIPO} V{x.y}` (NNNN correlativo de 4 dígitos por proyecto).
+- **Descarga del expediente (.zip):** última versión de cada entregable con archivo, con su nombre de nomenclatura, + índice CSV.
+- **Resumen:** totales, aprobados/firmados, en borrador/revisión, pendientes; avance por fase.
+- **Fuera de esta entrega:** borradores con IA y editor (entrega 4); vínculo automático de actas y documentos de RQ (después, ya que la entrega 4 los genera).
+
+**Decisiones de construcción:** también se aceptan .xlsx, .pptx y .mpp (un OLE solo si se llama .mpp), 20 MB por archivo; aprobar, observar, firmar, «no aplica» y elegir el tipo de trabajo son de ADMIN, PRODUCT_OWNER o SCRUM_MASTER; se pueden agregar más entregables del catálogo (otra acta de reunión, otra solicitud de cambio) y borrar solo esos mientras no tengan historial; el .zip tiene un tope de 150 MB, se arma uno a la vez por proceso y no recomprime PDF, Office ni imágenes y el índice usa «;» y BOM para Excel.

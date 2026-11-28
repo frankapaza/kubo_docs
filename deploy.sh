@@ -40,6 +40,8 @@ set -e
 # alerta de lentitud de los pings; aplicarla igual, a mano.
 # Migracion 042 (042_reunion_ipad): firma en pantalla, notas de reunion y
 # anexos del acta; aplicarla igual, a mano.
+# Migracion 043 (043_expediente_proyecto): tipo de trabajo del proyecto y
+# entregables del expediente con sus versiones; aplicarla igual, a mano.
 cd /home/kubo/kubo
 git pull
 docker compose build backend monitor-worker web

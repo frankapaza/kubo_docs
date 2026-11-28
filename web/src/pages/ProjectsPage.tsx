@@ -349,6 +349,13 @@ export default function ProjectsPage() {
                           <Button
                             size="sm"
                             variant="secondary"
+                            onClick={() => navigate(`/projects/${p.id}/expediente`)}
+                          >
+                            Expediente
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
                             trailingIcon={<ArrowRightIcon size={14} />}
                             onClick={() => navigate(`/projects/${p.id}/meetings`)}
                           >

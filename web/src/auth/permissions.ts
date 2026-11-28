@@ -31,6 +31,13 @@ export const canManageLogInstallations = (user: User | null): boolean => user?.r
 export const canUseDevKeys = (user: User | null): boolean =>
   !!user && (['ADMIN', 'DEVELOPER', 'SCRUM_MASTER', 'PRODUCT_OWNER'] as UserRole[]).includes(user.role);
 
+/**
+ * Dirigir el expediente del proyecto: elegir el tipo de trabajo, aprobar,
+ * observar, firmar y marcar «no aplica». Mismo criterio que el backend.
+ */
+export const canLeadProject = (user: User | null): boolean =>
+  !!user && (['ADMIN', 'PRODUCT_OWNER', 'SCRUM_MASTER'] as UserRole[]).includes(user.role);
+
 export const canCreateProject = (user: User | null): boolean =>
   user?.role === 'ADMIN' || user?.role === 'PRODUCT_OWNER';
 
