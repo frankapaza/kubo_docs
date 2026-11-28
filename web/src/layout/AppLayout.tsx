@@ -25,6 +25,9 @@ export default function AppLayout() {
   useNewErrorNotifier();
   const queryClient = useQueryClient();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Menú lateral plegable en pantallas angostas (iPad vertical, < 1024 px).
+  const [navOpen, setNavOpen] = useState(false);
+  useEffect(() => setNavOpen(false), [location.pathname]);
   const settingsRef = useRef<HTMLDivElement>(null);
 
   // Config de sesión desde workspace (admin la edita)
@@ -89,7 +92,12 @@ export default function AppLayout() {
 
   return (
     <div className="min-h-screen flex bg-kubo-surface">
-      <aside className="w-64 bg-kubo-nav flex flex-col">
+      {/* Fondo que cierra el menú desplegado en iPad vertical. */}
+      {navOpen && <div className="fixed inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setNavOpen(false)} aria-hidden="true" />}
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 w-64 bg-kubo-nav flex flex-col overflow-y-auto transition-transform duration-200 lg:static lg:z-auto lg:translate-x-0 lg:overflow-visible ${navOpen ? 'translate-x-0' : '-translate-x-full'}`}
+        style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
         <div className="px-5 py-5 border-b border-white/10">
           <Link to="/" className="flex items-center gap-3">
             <KuboLogo size={32} />
@@ -344,6 +352,19 @@ export default function AppLayout() {
       </aside>
 
       <main className="flex-1 min-w-0">
+        {/* Barra superior solo en pantallas angostas: abre el menú. */}
+        <div className="lg:hidden sticky top-0 z-20 flex items-center gap-3 bg-kubo-nav px-4 py-3 text-white" style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}>
+          <button
+            type="button"
+            onClick={() => setNavOpen(true)}
+            aria-label="Abrir menú"
+            className="flex h-10 w-10 items-center justify-center rounded-lg hover:bg-white/10"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+          </button>
+          <KuboLogo size={26} />
+          <span className="font-semibold">Kubo Platform</span>
+        </div>
         {/*
          * Sin tope de ancho: este panel es de tablas -- la mesa de servicio
          * tiene ocho columnas, y la ficha de cliente, pestanas con listados.
@@ -355,7 +376,7 @@ export default function AppLayout() {
          * ticket -- y una linea de texto demasiado larga se lee peor, porque
          * el ojo pierde el salto de renglon.
          */}
-        <div className="px-8 py-8">
+        <div className="px-4 py-5 sm:px-6 lg:px-8 lg:py-8">
           <NotificationPermissionBanner />
           <MissingSystemsBanner />
           <Outlet />
